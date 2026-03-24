@@ -23,4 +23,4 @@
 ## OpenSpec
 - command: `openspec validate refactor-completion-prepare-lightweight-exact-split --strict --no-interactive`
 - pass: yes
-- log: `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log`
+- log: `/home/egor/code/bsl-gradual-types/backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log`

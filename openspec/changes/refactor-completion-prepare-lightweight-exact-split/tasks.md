@@ -18,5 +18,6 @@
 ## 4. Implementation Closure
 - [x] 4.1 Сузить public lightweight completion boundary до узкого request-scoped payload и убрать `AnalysisV2` как внешний carrier completion first-response API.
 - [x] 4.2 Довести shipped representative gate/evidence path: default workflow, CI, scripts, docs и checked-in reports должны запускать и подтверждать оба обязательных real-module профиля `p37 same-revision warm` и `p38 revision-churn/post-handoff readiness`.
+- [x] 4.3 Усилить `p37` warm representative gate: measured `same-revision warm` samples должны иметь явную route attribution и fail-fast при regressions в `exact_hit`/effectively exact-first success path.
 
 > Зависимость между change: `4.1` можно закрывать параллельно, но `4.2` опирается на producer-side readiness invariants из `refactor-current-revision-readiness-fast-lane`. Финальный shipped gate/evidence для split-prepare нельзя считать завершённым, пока runtime/gate задачи `gy9c.13` и `gy9c.14` не зелёные.

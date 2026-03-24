@@ -18,5 +18,6 @@
 - [x] 3.3 Довести runtime path: completion consumer должен читать current-revision readiness через operation-aware fast lane, а не через background snapshot/readiness path.
 - [x] 3.4 Довести acceptance: shipped representative gate, workflow и docs должны проверять post-handoff readiness budgets/failure conditions на live LSP path.
 - [x] 3.5 Синхронизировать traceability, task state и validation evidence между OpenSpec, Beads и checked-in артефактами.
+- [x] 3.6 Довести checked-in readiness aggregate evidence: default validation workflow должен сохранять и трекать `readiness-gate.{json,md}` под change id, чтобы docs и repo state совпадали с реально shipped script path.
 
 > Этот change является producer-side prerequisite для финального shipped gate/evidence closure в `refactor-completion-prepare-lightweight-exact-split`: не закрывать split-prepare acceptance как завершённый, пока `3.3` и `3.4` здесь не зелёные.

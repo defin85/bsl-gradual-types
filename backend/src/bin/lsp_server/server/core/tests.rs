@@ -13993,6 +13993,125 @@ fn completion_timeline_prepare_detail_str<'a>(
         .and_then(|value| value.as_str())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WarmCompletionRouteCoverage {
+    attributed_samples: usize,
+    head_hit_samples: usize,
+    exact_hit_samples: usize,
+}
+
+fn warm_completion_route_coverage(
+    measured_samples: &[serde_json::Value],
+) -> WarmCompletionRouteCoverage {
+    measured_samples.iter().fold(
+        WarmCompletionRouteCoverage {
+            attributed_samples: 0,
+            head_hit_samples: 0,
+            exact_hit_samples: 0,
+        },
+        |mut coverage, sample| {
+            match sample
+                .get("trace")
+                .and_then(|trace| trace.get("route"))
+                .and_then(|value| value.as_str())
+            {
+                Some("head_hit") => {
+                    coverage.attributed_samples += 1;
+                    coverage.head_hit_samples += 1;
+                }
+                Some("exact_hit") => {
+                    coverage.attributed_samples += 1;
+                    coverage.exact_hit_samples += 1;
+                }
+                Some(_) | None => {}
+            }
+            coverage
+        },
+    )
+}
+
+fn assert_warm_completion_head_first_gate(measured_samples: &[serde_json::Value]) {
+    let coverage = warm_completion_route_coverage(measured_samples);
+
+    assert!(
+        coverage.attributed_samples == measured_samples.len(),
+        "expected every measured warm-cache trace to expose explicit route attribution, attributed_samples={}, measured_samples={measured_samples:?}",
+        coverage.attributed_samples
+    );
+    assert!(
+        coverage.head_hit_samples == measured_samples.len(),
+        "expected measured warm-cache success path to stay on head_hit once current-revision head route is available, head_hit_samples={}, exact_hit_samples={}, measured_samples={measured_samples:?}",
+        coverage.head_hit_samples,
+        coverage.exact_hit_samples
+    );
+    assert!(
+        coverage.exact_hit_samples == 0,
+        "expected warm-cache gate to fail on effectively exact-first completion regressions, exact_hit_samples={}, measured_samples={measured_samples:?}",
+        coverage.exact_hit_samples
+    );
+}
+
+#[test]
+fn warm_completion_route_coverage_counts_missing_and_exact_routes() {
+    let measured_samples = vec![
+        serde_json::json!({
+            "step": "measured_warm_completion_1",
+            "trace": { "route": "head_hit" },
+        }),
+        serde_json::json!({
+            "step": "measured_warm_completion_2",
+            "trace": { "route": "exact_hit" },
+        }),
+        serde_json::json!({
+            "step": "measured_warm_completion_3",
+            "trace": { "route": null },
+        }),
+    ];
+
+    assert_eq!(
+        warm_completion_route_coverage(&measured_samples),
+        WarmCompletionRouteCoverage {
+            attributed_samples: 2,
+            head_hit_samples: 1,
+            exact_hit_samples: 1,
+        }
+    );
+}
+
+#[test]
+fn assert_warm_completion_head_first_gate_rejects_missing_route_and_exact_hit() {
+    let measured_samples = vec![
+        serde_json::json!({
+            "step": "measured_warm_completion_1",
+            "trace": { "route": "head_hit" },
+        }),
+        serde_json::json!({
+            "step": "measured_warm_completion_2",
+            "trace": { "route": "exact_hit" },
+        }),
+        serde_json::json!({
+            "step": "measured_warm_completion_3",
+            "trace": { "route": null },
+        }),
+    ];
+
+    let panic = std::panic::catch_unwind(|| {
+        assert_warm_completion_head_first_gate(&measured_samples);
+    })
+    .expect_err("warm gate must reject missing route attribution and exact-hit regressions");
+    let panic_text = if let Some(text) = panic.downcast_ref::<String>() {
+        text.clone()
+    } else if let Some(text) = panic.downcast_ref::<&'static str>() {
+        (*text).to_string()
+    } else {
+        "<non-string panic>".to_string()
+    };
+    assert!(
+        panic_text.contains("route attribution"),
+        "panic should mention missing route attribution, panic_text={panic_text}"
+    );
+}
+
 fn completion_timeline_server_edge_u64(trace: &serde_json::Value, field: &str) -> Option<u64> {
     trace
         .get("server_edge_details")
@@ -19472,26 +19591,9 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 == Some("ok_non_empty")
         })
         .count();
-    let measured_head_hit_traces = measured_samples
-        .iter()
-        .filter(|sample| {
-            sample
-                .get("trace")
-                .and_then(|trace| trace.get("route"))
-                .and_then(|value| value.as_str())
-                == Some("head_hit")
-        })
-        .count();
-    let measured_exact_hit_traces = measured_samples
-        .iter()
-        .filter(|sample| {
-            sample
-                .get("trace")
-                .and_then(|trace| trace.get("route"))
-                .and_then(|value| value.as_str())
-                == Some("exact_hit")
-        })
-        .count();
+    let measured_route_coverage = warm_completion_route_coverage(&measured_samples);
+    let measured_head_hit_traces = measured_route_coverage.head_hit_samples;
+    let measured_exact_hit_traces = measured_route_coverage.exact_hit_samples;
     let sample_elapsed_histogram = |samples: &[serde_json::Value]| {
         let values = samples
             .iter()
@@ -19574,6 +19676,7 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             "warmup_non_empty_samples": warmup_non_empty_samples,
             "measured_non_empty_samples": measured_non_empty_samples,
             "measured_ok_non_empty_traces": measured_ok_non_empty_traces,
+            "measured_route_attributed_traces": measured_route_coverage.attributed_samples,
             "measured_head_hit_traces": measured_head_hit_traces,
             "measured_exact_hit_traces": measured_exact_hit_traces,
             "warmup_latency_ms": warmup_latency_histogram,
@@ -19665,6 +19768,7 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         "expected nearly all measured warm-cache traces to be ok_non_empty, measured_ok_non_empty_traces={}, measured_samples={measured_samples:?}",
         measured_ok_non_empty_traces
     );
+    assert_warm_completion_head_first_gate(&measured_samples);
     assert!(
         measured_latency_p95_ms <= WARM_HEAD_PATH_P95_BUDGET_MS,
         "warm-cache head-path p95 regression: measured_latency_p95_ms={}ms > {}ms, measured_samples={measured_samples:?}",

@@ -11,6 +11,8 @@
   `deps`, `deps_id`, `index_snapshot`, `settings_id`, `file_content`, `file_path`,
   `head_owner_type_hints`, `head_ready`, `exact_ready`.
 - Completion request path использует этот payload только для head-first first response; exact route по-прежнему отделён и при необходимости берёт свежий runtime snapshot отдельно.
+- `p37` same-revision warm gate теперь fail-fast требует route attribution для каждого measured sample
+  и не допускает `exact_hit` на steady-state профиле, где current-revision head route уже должен быть доступен.
 - Detached immutable snapshot НЕ является prerequisite для closure этого change.
   Текущий delivery закрывает spec за счёт request-scoped immutable DTO на lightweight boundary
   и сохранения `PreparedOperationSnapshot` как canonical heavy exact boundary.

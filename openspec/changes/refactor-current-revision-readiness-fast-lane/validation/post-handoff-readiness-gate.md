@@ -8,6 +8,10 @@
 ## Shipped Paths
 - Workflow: `.github/workflows/ci.yml`
 - Local script: `./scripts/validate-v2-completion-gates.sh`
+- Aggregate report path:
+  `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.json`
+- Aggregate summary:
+  `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.md`
 - Real-module report path:
   `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`
 - Checked-in summary:
@@ -16,6 +20,7 @@
   `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-openspec-validate.log`
 
 ## Verification
+- `./scripts/validate-v2-completion-gates.sh`
 - `openspec validate refactor-current-revision-readiness-fast-lane --strict --no-interactive`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture`
 

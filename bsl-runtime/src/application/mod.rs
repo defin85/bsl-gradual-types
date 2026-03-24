@@ -14,17 +14,17 @@ pub use intellisense_v2::{
     should_query_parse_result, spawn_bounded_blocking, spawn_bounded_blocking_with_class,
     spawn_bounded_blocking_with_class_observed, spawn_bounded_blocking_with_class_observed_origin,
     CancellationPolicy, CompletionCurrentRevisionSnapshot, CompletionFirstResponseReadiness,
-    CompletionMissingIrPolicyDecision, CompletionMode, CompletionPipelineKnobs,
-    CompletionSupportBundle, CpuWorkClass, DeferredHeavyDiagnosticsReason,
+    CompletionFirstResponseSupport, CompletionMissingIrPolicyDecision, CompletionMode,
+    CompletionPipelineKnobs, CompletionSupportBundle, CpuWorkClass, DeferredHeavyDiagnosticsReason,
     DiagnosticsDisposition, DiagnosticsExecutionPlan, DiagnosticsProfile, DiagnosticsTrigger,
     ExecutionContext, ExecutionSettings, IntellisenseV2Facade, ObservabilityMetricKind,
     ObservabilityOrigin, ObservabilityStage, PrepareStatefulProgress,
     PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace, PrepareTimeoutSourceKind,
     PreparedCompletionFirstResponse, PreparedOperationSnapshot, RuntimePerfKnobs,
     ScaleAwareDiagnosticsKnobs, SemanticOperation, SemanticOutcome, SemanticSnapshot,
-    SingleflightQueryError, SnapshotWithDepsRuntimeTrace,
-    SnapshotWithDepsTimeoutResolutionKind, SnapshotWithDepsTimeoutRuntimeTrace,
-    WaitForFileVersionResolutionKind, WaitForFileVersionRuntimeTrace,
+    SingleflightQueryError, SnapshotWithDepsRuntimeTrace, SnapshotWithDepsTimeoutResolutionKind,
+    SnapshotWithDepsTimeoutRuntimeTrace, WaitForFileVersionResolutionKind,
+    WaitForFileVersionRuntimeTrace,
 };
 pub use type_system::get_completion_with_semantic_program;
 pub use type_system::get_completion_with_semantic_program_snapshot;

@@ -439,25 +439,25 @@ fn coalesced_whitespace_append_burst_preserves_earliest_reuse_base() {
 
     let mut pending = None;
     let coalesced = coalesce_interactive_current_revision_apply_command(&rx, first, &mut pending);
-    assert!(pending.is_none(), "burst should coalesce into a single latest command");
+    assert!(
+        pending.is_none(),
+        "burst should coalesce into a single latest command"
+    );
 
     let Command::ApplyChanges { changes, .. } = coalesced else {
         panic!("coalesced command must stay ApplyChanges");
     };
     match changes.as_slice() {
-        [
-            Change::SetFile {
-                file_id: set_file_id,
-                text,
-                version,
-                path: set_file_path,
-            },
-            Change::ReuseCompletionHeadFromPreviousVersion {
-                file_id: reuse_file_id,
-                expected_version,
-                previous_version,
-            },
-        ] => {
+        [Change::SetFile {
+            file_id: set_file_id,
+            text,
+            version,
+            path: set_file_path,
+        }, Change::ReuseCompletionHeadFromPreviousVersion {
+            file_id: reuse_file_id,
+            expected_version,
+            previous_version,
+        }] => {
             assert_eq!(*set_file_id, file_id);
             assert_eq!(text.as_ref(), "v5");
             assert_eq!(*version, 5);
@@ -1534,6 +1534,13 @@ async fn prepare_completion_first_response_reports_not_ready_before_current_revi
              Результат = (Новый Массив()).\n\
              КонецПроцедуры",
     );
+    let completion_line = 1;
+    let completion_column = file_text
+        .lines()
+        .nth(completion_line as usize)
+        .expect("completion line")
+        .chars()
+        .count() as u32;
     let index_snapshot = make_index_snapshot("index_completion_first_response_not_ready");
 
     let mut host = AnalysisHostV2::default();
@@ -1568,7 +1575,7 @@ async fn prepare_completion_first_response_reports_not_ready_before_current_revi
     };
 
     let prepared = runtime
-        .prepare_completion_first_response(&context, None)
+        .prepare_completion_first_response(&context, None, completion_line, completion_column)
         .await
         .expect("prepare_completion_first_response");
 
@@ -1579,25 +1586,21 @@ async fn prepare_completion_first_response_reports_not_ready_before_current_revi
     );
     assert_eq!(prepared.observed_file_version, Some(3));
     assert_eq!(
-        prepared.snapshot.index_snapshot.id.as_str(),
+        prepared.support.index_snapshot.id.as_str(),
         index_snapshot.id.as_str(),
         "lightweight current-revision prepare must carry the representative index snapshot needed by head route"
     );
     assert!(
-        !prepared
-            .snapshot
-            .analysis
-            .current_completion_head_ready(file_id)
-            .expect("head readiness before publish"),
+        !prepared.support.head_ready,
         "current-revision head must stay unavailable before publish"
     );
     assert!(
-        !prepared
-            .snapshot
-            .analysis
-            .current_type_index_serve_only_ready(file_id)
-            .expect("exact readiness before publish"),
+        !prepared.support.exact_ready,
         "exact artifact must stay unavailable before publish"
+    );
+    assert!(
+        prepared.support.head_owner_type_hints.is_empty(),
+        "not-ready lightweight prepare must not fabricate head owner hints"
     );
 
     runtime.shutdown_for_test().await;
@@ -1617,6 +1620,13 @@ async fn prepare_completion_first_response_reports_head_ready_after_current_revi
              Результат = (Новый Массив()).\n\
              КонецПроцедуры",
     );
+    let completion_line = 1;
+    let completion_column = file_text
+        .lines()
+        .nth(completion_line as usize)
+        .expect("completion line")
+        .chars()
+        .count() as u32;
 
     let mut host = AnalysisHostV2::default();
     host.apply_change(Change::SetDepsSnapshot {
@@ -1655,7 +1665,7 @@ async fn prepare_completion_first_response_reports_head_ready_after_current_revi
     };
 
     let prepared = runtime
-        .prepare_completion_first_response(&context, None)
+        .prepare_completion_first_response(&context, None, completion_line, completion_column)
         .await
         .expect("prepare_completion_first_response");
 
@@ -1665,20 +1675,16 @@ async fn prepare_completion_first_response_reports_head_ready_after_current_revi
         "completion first-response prepare must classify current revision as head-ready once the head artifact is published"
     );
     assert!(
-        prepared
-            .snapshot
-            .analysis
-            .current_completion_head_ready(file_id)
-            .expect("head readiness after publish"),
+        prepared.support.head_ready,
         "head readiness must be observable through the lightweight completion prepare boundary"
     );
     assert!(
-        !prepared
-            .snapshot
-            .analysis
-            .current_type_index_serve_only_ready(file_id)
-            .expect("exact readiness after head publish"),
+        !prepared.support.exact_ready,
         "head-ready path must stay logically distinct from exact type-index readiness"
+    );
+    assert!(
+        !prepared.support.head_owner_type_hints.is_empty(),
+        "head-ready lightweight prepare must carry owner hints as immutable DTO payload"
     );
 
     runtime.shutdown_for_test().await;
@@ -1697,6 +1703,13 @@ async fn prepare_completion_first_response_reports_exact_ready_after_exact_preco
              Результат = (Новый Массив()).\n\
              КонецПроцедуры",
     );
+    let completion_line = 1;
+    let completion_column = file_text
+        .lines()
+        .nth(completion_line as usize)
+        .expect("completion line")
+        .chars()
+        .count() as u32;
 
     let mut host = AnalysisHostV2::default();
     host.apply_change(Change::SetDepsSnapshot {
@@ -1743,7 +1756,7 @@ async fn prepare_completion_first_response_reports_exact_ready_after_exact_preco
     };
 
     let prepared = runtime
-        .prepare_completion_first_response(&context, None)
+        .prepare_completion_first_response(&context, None, completion_line, completion_column)
         .await
         .expect("prepare_completion_first_response");
 
@@ -1753,11 +1766,7 @@ async fn prepare_completion_first_response_reports_exact_ready_after_exact_preco
         "completion first-response prepare must classify exact-ready state once the exact artifact is already available"
     );
     assert!(
-        prepared
-            .snapshot
-            .analysis
-            .current_type_index_serve_only_ready(file_id)
-            .expect("exact readiness through prepare boundary"),
+        prepared.support.exact_ready,
         "exact readiness must be observable through the lightweight completion prepare boundary"
     );
 

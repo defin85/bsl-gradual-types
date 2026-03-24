@@ -56,7 +56,7 @@ struct CompletionPreparedSnapshot {
     kind: &'static str,
     context: bsl_runtime::application::ExecutionContext,
     expected_version: i32,
-    snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot,
+    snapshot: Option<bsl_runtime::application::CompletionCurrentRevisionSnapshot>,
     wait_elapsed: Option<std::time::Duration>,
     snapshot_elapsed: std::time::Duration,
     wait_for_file_version_runtime: Option<bsl_runtime::application::WaitForFileVersionRuntimeTrace>,
@@ -67,7 +67,10 @@ struct CompletionPreparedSnapshot {
     file_path_override: Option<Arc<str>>,
     head_owner_type_hints_override: Option<Vec<bsl_shared::domain::types::TypeResolution>>,
     head_ready_override: bool,
+    exact_ready_override: bool,
     deps_override: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
+    deps_id_override: Option<bsl_analysis_v2::DepsSnapshotId>,
+    index_snapshot_override: Option<Arc<bsl_runtime::system::IndexSnapshot>>,
     settings_id_override: Option<bsl_analysis_v2::SettingsId>,
 }
 
@@ -81,19 +84,22 @@ impl CompletionPreparedSnapshot {
             kind: "lightweight_current_revision",
             context,
             expected_version,
-            snapshot: prepared.snapshot,
+            snapshot: None,
             wait_elapsed: prepared.wait_elapsed,
             snapshot_elapsed: prepared.snapshot_elapsed,
             wait_for_file_version_runtime: prepared.wait_for_file_version_runtime,
             snapshot_with_deps_runtime: None,
             timeout_attribution: prepared.timeout_attribution,
             observed_file_version: prepared.observed_file_version,
-            file_content_override: None,
-            file_path_override: None,
-            head_owner_type_hints_override: None,
-            head_ready_override: false,
-            deps_override: None,
-            settings_id_override: None,
+            file_content_override: prepared.support.file_content,
+            file_path_override: prepared.support.file_path,
+            head_owner_type_hints_override: Some(prepared.support.head_owner_type_hints),
+            head_ready_override: prepared.support.head_ready,
+            exact_ready_override: prepared.support.exact_ready,
+            deps_override: prepared.support.deps,
+            deps_id_override: Some(prepared.support.deps_id),
+            index_snapshot_override: Some(prepared.support.index_snapshot),
+            settings_id_override: prepared.support.settings_id,
         }
     }
 
@@ -106,11 +112,13 @@ impl CompletionPreparedSnapshot {
             kind: "exact_stateful",
             context,
             expected_version,
-            snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot {
-                analysis: prepared.snapshot.analysis,
-                deps_id: prepared.snapshot.deps_id,
-                index_snapshot: prepared.index_snapshot,
-            },
+            snapshot: Some(
+                bsl_runtime::application::CompletionCurrentRevisionSnapshot {
+                    analysis: prepared.snapshot.analysis,
+                    deps_id: prepared.snapshot.deps_id,
+                    index_snapshot: prepared.index_snapshot,
+                },
+            ),
             wait_elapsed: prepared.wait_elapsed,
             snapshot_elapsed: prepared.snapshot_elapsed,
             wait_for_file_version_runtime: prepared.wait_for_file_version_runtime,
@@ -121,7 +129,10 @@ impl CompletionPreparedSnapshot {
             file_path_override: None,
             head_owner_type_hints_override: None,
             head_ready_override: false,
+            exact_ready_override: false,
             deps_override: None,
+            deps_id_override: None,
+            index_snapshot_override: None,
             settings_id_override: None,
         }
     }
@@ -135,11 +146,18 @@ impl CompletionPreparedSnapshot {
         head_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
         snapshot_elapsed: std::time::Duration,
     ) -> Self {
+        let deps_override = snapshot.analysis.deps_data().ok();
+        let settings_id_override = snapshot.analysis.settings_id().ok();
+        let exact_ready_override = snapshot
+            .analysis
+            .current_type_index_serve_only_ready(context.file_id)
+            .ok()
+            .unwrap_or(false);
         Self {
             kind: "lightweight_current_revision",
             context,
             expected_version,
-            snapshot,
+            snapshot: None,
             wait_elapsed: None,
             snapshot_elapsed,
             wait_for_file_version_runtime: None,
@@ -150,8 +168,11 @@ impl CompletionPreparedSnapshot {
             file_path_override: Some(file_path),
             head_owner_type_hints_override: Some(head_owner_type_hints),
             head_ready_override: true,
-            deps_override: None,
-            settings_id_override: None,
+            exact_ready_override,
+            deps_override,
+            deps_id_override: Some(snapshot.deps_id),
+            index_snapshot_override: Some(snapshot.index_snapshot),
+            settings_id_override,
         }
     }
 
@@ -169,11 +190,7 @@ impl CompletionPreparedSnapshot {
             kind: "lightweight_current_revision",
             context,
             expected_version,
-            snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot {
-                analysis: bsl_analysis_v2::AnalysisHostV2::default().snapshot(),
-                deps_id: bundle.deps_id.clone(),
-                index_snapshot: bundle.index_snapshot,
-            },
+            snapshot: None,
             wait_elapsed: None,
             snapshot_elapsed,
             wait_for_file_version_runtime: None,
@@ -184,7 +201,10 @@ impl CompletionPreparedSnapshot {
             file_path_override: Some(file_path),
             head_owner_type_hints_override: Some(head_owner_type_hints),
             head_ready_override: true,
+            exact_ready_override: false,
             deps_override: Some(bundle.deps),
+            deps_id_override: Some(bundle.deps_id),
+            index_snapshot_override: Some(bundle.index_snapshot),
             settings_id_override: Some(settings_id),
         }
     }
@@ -1534,6 +1554,7 @@ impl BslLanguageServer {
                         self.prepare_lsp_completion_first_response_v2_with_completion_mode_and_progress(
                             &uri,
                             file_id,
+                            position,
                             include_flow_sensitive,
                             Some(completion_observability_mode),
                             Some(&prepare_progress),
@@ -1692,7 +1713,7 @@ impl BslLanguageServer {
             };
 
             match prepared {
-                Ok(prepared) => {
+                Ok(mut prepared) => {
                     let context = prepared.context.clone();
                     let expected_version = prepared.expected_version;
                     timeline_capture.set_prepare_kind(prepared.kind);
@@ -1734,10 +1755,10 @@ impl BslLanguageServer {
                         .or_else(|| {
                             prepared
                                 .snapshot
-                                .analysis
-                                .file_text(file_id)
-                                .ok()
-                                .flatten()
+                                .as_ref()
+                                .and_then(|snapshot| {
+                                    snapshot.analysis.file_text(file_id).ok().flatten()
+                                })
                                 .map(|text| (text.len(), text.lines().count()))
                         })
                         .unwrap_or((0, 0));
@@ -1808,18 +1829,21 @@ impl BslLanguageServer {
                         .unwrap_or_default();
                     let mut head_ready = member_access_request
                         && (prepared.head_ready_override
-                            || prepared
-                                .snapshot
+                            || prepared.snapshot.as_ref().is_some_and(|snapshot| {
+                                snapshot
+                                    .analysis
+                                    .current_completion_head_ready(file_id)
+                                    .ok()
+                                    .unwrap_or(false)
+                            }));
+                    let exact_ready_before_wait = prepared.exact_ready_override
+                        || prepared.snapshot.as_ref().is_some_and(|snapshot| {
+                            snapshot
                                 .analysis
-                                .current_completion_head_ready(file_id)
+                                .current_type_index_serve_only_ready(file_id)
                                 .ok()
-                                .unwrap_or(false));
-                    let exact_ready_before_wait = prepared
-                        .snapshot
-                        .analysis
-                        .current_type_index_serve_only_ready(file_id)
-                        .ok()
-                        .unwrap_or(false);
+                                .unwrap_or(false)
+                        });
                     if member_access_request {
                         timeline_capture.set_exact_wait_head_ready_before_wait(head_ready);
                         timeline_capture
@@ -1859,6 +1883,39 @@ impl BslLanguageServer {
                                         .as_str(),
                                 );
                                 head_ready = true;
+                                if prepared.snapshot.is_none() {
+                                    match self
+                                        .analysis_v2
+                                        .prepare_completion_first_response_with_progress(
+                                            &context,
+                                            Some(self.coordinator.as_ref()),
+                                            None,
+                                            position.line,
+                                            position.character,
+                                        )
+                                        .await
+                                    {
+                                        Ok(refreshed_prepared) => {
+                                            prepared = CompletionPreparedSnapshot::from_lightweight(
+                                                context.clone(),
+                                                refreshed_prepared,
+                                                expected_version,
+                                            );
+                                        }
+                                        Err(outcome) => {
+                                            let outcome =
+                                                completion_prepare_error_outcome(outcome);
+                                            observe_cancelled_timeline_outcome(
+                                                &mut timeline_capture,
+                                                outcome,
+                                            );
+                                            completion_outcome = Some(outcome);
+                                            break 'completion_flow Some(
+                                                completion_incomplete_empty_response(),
+                                            );
+                                        }
+                                    }
+                                }
                             }
                             super::super::core::CompletionArtifactWaitOutcomeV2::ExactReady => {
                                 timeline_capture.set_exact_wait_artifact_outcome(
@@ -1934,13 +1991,16 @@ impl BslLanguageServer {
                         prepared
                             .head_owner_type_hints_override
                             .clone()
-                            .unwrap_or_else(|| {
-                                completion_member_access_owner_type_hints_from_current_revision_head(
-                                    &prepared.snapshot.analysis,
-                                    file_id,
-                                    position,
-                                )
+                            .or_else(|| {
+                                prepared.snapshot.as_ref().map(|snapshot| {
+                                    completion_member_access_owner_type_hints_from_current_revision_head(
+                                        &snapshot.analysis,
+                                        file_id,
+                                        position,
+                                    )
+                                })
                             })
+                            .unwrap_or_default()
                     } else {
                         Vec::new()
                     };
@@ -2087,6 +2147,22 @@ impl BslLanguageServer {
                     }
 
                     let query_bundle_started = Instant::now();
+                    let exact_snapshot_for_query = if head_route_candidate {
+                        None
+                    } else if let Some(snapshot) = refreshed_snapshot_after_wait {
+                        Some(snapshot)
+                    } else if let Some(snapshot) = prepared.snapshot.take() {
+                        Some(snapshot)
+                    } else {
+                        Some(
+                            self.analysis_v2
+                                .completion_current_revision_snapshot_for_origin_and_operation(
+                                    context.origin,
+                                    context.operation,
+                                )
+                                .await,
+                        )
+                    };
                     let (
                         file_content,
                         file_path,
@@ -2101,83 +2177,93 @@ impl BslLanguageServer {
                         let file_content_override = prepared.file_content_override.clone();
                         let file_path_override = prepared.file_path_override.clone();
                         let observed_file_version_override = prepared.observed_file_version;
-                        let snapshot = refreshed_snapshot_after_wait.unwrap_or(prepared.snapshot);
-                        let analysis = snapshot.analysis;
-                        let index_snapshot = snapshot.index_snapshot;
-                        let observed_deps_id = snapshot.deps_id;
-                        let observed_file_version = observed_file_version_override
-                            .or_else(|| analysis.file_version(file_id).ok().flatten());
-                        let observed_settings_id = prepared
-                            .settings_id_override
-                            .clone()
-                            .or_else(|| analysis.settings_id().ok());
-                        debug!(
-                        "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
-                            uri,
-                            file_id.0,
-                            observed_file_version,
-                            Some(observed_deps_id.as_str()),
-                            observed_settings_id.as_ref().map(|v| v.as_str()),
-                            index_snapshot.id.as_str(),
-                    );
-                        match analysis.file_text_len(file_id) {
-                            Ok(Some(len)) => debug!(
-                                "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
-                                uri, file_id.0, len
-                            ),
-                            Ok(None) => debug!(
-                                "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
-                                uri, file_id.0
-                            ),
-                            Err(_) => debug!(
-                                "Completion v2 (salsa) cancelled: uri={}, file_id={}",
-                                uri, file_id.0
-                            ),
-                        }
-
-                        let observed_byte_offset = analysis
-                            .utf16_position_to_byte_offset(
-                                file_id,
-                                position.line,
-                                position.character,
-                            )
-                            .ok()
-                            .flatten();
-                        let observed_point = analysis
-                            .utf16_position_to_point(file_id, position.line, position.character)
-                            .ok()
-                            .flatten();
-                        debug!(
-                        "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                        uri,
-                        file_id.0,
-                        position.line,
-                        position.character,
-                        observed_byte_offset,
-                        observed_point,
-                    );
-
                         if head_route_candidate {
-                            let file_content = file_content_override
-                                .or_else(|| analysis.file_text(file_id).ok().flatten());
-                            let file_path = file_path_override
-                                .or_else(|| analysis.file_path(file_id).ok().flatten());
-                            let deps = prepared
-                                .deps_override
+                            let index_snapshot = prepared
+                                .index_snapshot_override
                                 .clone()
-                                .or_else(|| analysis.deps_data().ok());
+                                .expect("lightweight completion prepare must carry index snapshot");
+                            let observed_deps_id = prepared
+                                .deps_id_override
+                                .clone()
+                                .expect("lightweight completion prepare must carry deps id");
+                            let observed_settings_id = prepared.settings_id_override.clone();
+                            debug!(
+                                "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                                uri,
+                                file_id.0,
+                                observed_file_version_override,
+                                Some(observed_deps_id.as_str()),
+                                observed_settings_id.as_ref().map(|v| v.as_str()),
+                                index_snapshot.id.as_str(),
+                            );
                             (
-                                file_content,
-                                file_path,
+                                file_content_override,
+                                file_path_override,
                                 current_revision_head_owner_type_hints.clone(),
-                                deps,
+                                prepared.deps_override.clone(),
                                 None,
                                 index_snapshot,
                                 observed_deps_id,
                                 observed_settings_id,
-                                observed_file_version,
+                                observed_file_version_override,
                             )
                         } else {
+                            let snapshot = exact_snapshot_for_query
+                                .expect("exact completion route must carry a fresh snapshot");
+                            let analysis = snapshot.analysis;
+                            let index_snapshot = snapshot.index_snapshot;
+                            let observed_deps_id = snapshot.deps_id;
+                            let observed_file_version = observed_file_version_override
+                                .or_else(|| analysis.file_version(file_id).ok().flatten());
+                            let observed_settings_id = prepared
+                                .settings_id_override
+                                .clone()
+                                .or_else(|| analysis.settings_id().ok());
+                            debug!(
+                            "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                                uri,
+                                file_id.0,
+                                observed_file_version,
+                                Some(observed_deps_id.as_str()),
+                                observed_settings_id.as_ref().map(|v| v.as_str()),
+                                index_snapshot.id.as_str(),
+                        );
+                            match analysis.file_text_len(file_id) {
+                                Ok(Some(len)) => debug!(
+                                    "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
+                                    uri, file_id.0, len
+                                ),
+                                Ok(None) => debug!(
+                                    "Completion v2 (salsa) active: uri={}, file_id={} (file not found)",
+                                    uri, file_id.0
+                                ),
+                                Err(_) => debug!(
+                                    "Completion v2 (salsa) cancelled: uri={}, file_id={}",
+                                    uri, file_id.0
+                                ),
+                            }
+
+                            let observed_byte_offset = analysis
+                                .utf16_position_to_byte_offset(
+                                    file_id,
+                                    position.line,
+                                    position.character,
+                                )
+                                .ok()
+                                .flatten();
+                            let observed_point = analysis
+                                .utf16_position_to_point(file_id, position.line, position.character)
+                                .ok()
+                                .flatten();
+                            debug!(
+                            "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                            uri,
+                            file_id.0,
+                            position.line,
+                            position.character,
+                            observed_byte_offset,
+                            observed_point,
+                        );
                             let context_for_query = context.clone();
                             let coordinator_for_query = self.coordinator.clone();
                             let uri_for_query = uri.clone();

@@ -15,6 +15,7 @@ use bsl_analysis_v2::{
     AnalysisHostV2, AnalysisV2, Change, DepsSnapshotId, FileId, SemanticDeps, SettingsId,
 };
 use bsl_shared::domain::types::ParseError;
+use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticProgram;
 
@@ -337,6 +338,19 @@ pub struct CompletionSupportBundle {
     pub index_snapshot: Arc<IndexSnapshot>,
 }
 
+/// Narrow immutable payload for completion first-response routing.
+pub struct CompletionFirstResponseSupport {
+    pub deps: Option<Arc<SemanticDeps>>,
+    pub deps_id: DepsSnapshotId,
+    pub index_snapshot: Arc<IndexSnapshot>,
+    pub settings_id: Option<SettingsId>,
+    pub file_content: Option<Arc<str>>,
+    pub file_path: Option<Arc<str>>,
+    pub head_owner_type_hints: Vec<TypeResolution>,
+    pub head_ready: bool,
+    pub exact_ready: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionFirstResponseReadiness {
     HeadReady,
@@ -346,7 +360,7 @@ pub enum CompletionFirstResponseReadiness {
 
 /// Prepared current-revision state for completion first response.
 pub struct PreparedCompletionFirstResponse {
-    pub snapshot: CompletionCurrentRevisionSnapshot,
+    pub support: CompletionFirstResponseSupport,
     pub wait_elapsed: Option<Duration>,
     pub snapshot_elapsed: Duration,
     pub wait_for_file_version_runtime: Option<WaitForFileVersionRuntimeTrace>,

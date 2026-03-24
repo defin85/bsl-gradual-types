@@ -1,4 +1,5 @@
 use super::*;
+use tower_lsp::lsp_types::Position;
 
 impl BslLanguageServer {
     pub async fn update_diagnostics_count(&self, uri: &Url, count: usize) {
@@ -218,6 +219,7 @@ impl BslLanguageServer {
         &self,
         uri: &Url,
         file_id: V2FileId,
+        position: Position,
         flow_sensitive: bool,
         completion_mode: Option<&'static str>,
         progress: Option<&bsl_runtime::application::PrepareStatefulProgress>,
@@ -251,6 +253,8 @@ impl BslLanguageServer {
                 &context,
                 Some(self.coordinator.as_ref()),
                 progress,
+                position.line,
+                position.character,
             )
             .await?;
 

@@ -7,13 +7,14 @@ mod policy;
 
 pub use facade::{
     CancellationPolicy, CompletionCurrentRevisionSnapshot, CompletionFirstResponseReadiness,
-    CompletionSupportBundle, ExecutionContext, ExecutionSettings, IntellisenseV2Facade,
-    ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage, PrepareStatefulProgress,
-    PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace, PrepareTimeoutSourceKind,
-    PreparedCompletionFirstResponse, PreparedOperationSnapshot, SemanticOperation,
-    SemanticOutcome, SemanticSnapshot, SingleflightQueryError, SnapshotWithDepsRuntimeTrace,
-    SnapshotWithDepsTimeoutResolutionKind, SnapshotWithDepsTimeoutRuntimeTrace,
-    WaitForFileVersionResolutionKind, WaitForFileVersionRuntimeTrace,
+    CompletionFirstResponseSupport, CompletionSupportBundle, ExecutionContext, ExecutionSettings,
+    IntellisenseV2Facade, ObservabilityMetricKind, ObservabilityOrigin, ObservabilityStage,
+    PrepareStatefulProgress, PrepareStatefulProgressSnapshot, PrepareTimeoutAttributionTrace,
+    PrepareTimeoutSourceKind, PreparedCompletionFirstResponse, PreparedOperationSnapshot,
+    SemanticOperation, SemanticOutcome, SemanticSnapshot, SingleflightQueryError,
+    SnapshotWithDepsRuntimeTrace, SnapshotWithDepsTimeoutResolutionKind,
+    SnapshotWithDepsTimeoutRuntimeTrace, WaitForFileVersionResolutionKind,
+    WaitForFileVersionRuntimeTrace,
 };
 pub use policy::{
     classify_optional_query, completion_fastpath_preconditions,

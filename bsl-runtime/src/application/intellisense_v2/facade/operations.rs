@@ -139,9 +139,17 @@ impl IntellisenseV2Facade {
         &self,
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
+        line: u32,
+        column: u32,
     ) -> Result<PreparedCompletionFirstResponse, SemanticOutcome> {
-        self.prepare_completion_first_response_with_progress(context, observability, None)
-            .await
+        self.prepare_completion_first_response_with_progress(
+            context,
+            observability,
+            None,
+            line,
+            column,
+        )
+        .await
     }
 
     pub async fn prepare_completion_first_response_with_progress(
@@ -149,6 +157,8 @@ impl IntellisenseV2Facade {
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
         progress: Option<&PrepareStatefulProgress>,
+        line: u32,
+        column: u32,
     ) -> Result<PreparedCompletionFirstResponse, SemanticOutcome> {
         debug_assert_eq!(context.operation, SemanticOperation::Completion);
 
@@ -345,12 +355,67 @@ impl IntellisenseV2Facade {
             progress.mark_phase("ready");
         }
 
+        let settings_id = snapshot.analysis.settings_id().ok();
+        let file_content = snapshot.analysis.file_text(context.file_id).ok().flatten();
+        let file_path = snapshot.analysis.file_path(context.file_id).ok().flatten();
+        let head_ready = snapshot
+            .analysis
+            .current_completion_head_ready(context.file_id)
+            .ok()
+            .unwrap_or(false);
+        let exact_ready = snapshot
+            .analysis
+            .current_type_index_serve_only_ready(context.file_id)
+            .ok()
+            .unwrap_or(false);
+        let head_owner_type_hints = if head_ready {
+            observed_file_version
+                .zip(settings_id.as_ref())
+                .zip(file_content.as_deref())
+                .map(
+                    |((file_version, settings_id), file_content)| {
+                        crate::application::type_system::
+                            completion_member_access_owner_type_hints_from_completion_head_for_version(
+                                &snapshot.analysis,
+                                context.file_id,
+                                file_version,
+                                &snapshot.deps_id,
+                                settings_id,
+                                file_content,
+                                line,
+                                column,
+                            )
+                    },
+                )
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let deps = {
+            let support_bundle = self.completion_support_bundle();
+            if support_bundle.deps_id == snapshot.deps_id {
+                Some(support_bundle.deps)
+            } else {
+                snapshot.analysis.deps_data().ok()
+            }
+        };
+
         Ok(PreparedCompletionFirstResponse {
             readiness: Self::classify_completion_first_response_readiness(
                 &snapshot.analysis,
                 context.file_id,
             ),
-            snapshot,
+            support: CompletionFirstResponseSupport {
+                deps,
+                deps_id: snapshot.deps_id,
+                index_snapshot: snapshot.index_snapshot,
+                settings_id,
+                file_content,
+                file_path,
+                head_owner_type_hints,
+                head_ready,
+                exact_ready,
+            },
             wait_elapsed,
             snapshot_elapsed,
             wait_for_file_version_runtime,

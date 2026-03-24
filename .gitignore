@@ -66,6 +66,9 @@ backend/tests/perf/reports/*
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.md
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.json
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.md
+!backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-openspec-validate.log
+!backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json
+!backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.md
 
 # Documentation build
 docs/_build/

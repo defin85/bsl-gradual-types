@@ -14,9 +14,9 @@
 
 ## 3. Validation
 - [x] 3.1 Провалидировать change: `openspec validate refactor-current-revision-readiness-fast-lane --strict --no-interactive`.
-- [ ] 3.2 Провести review change с владельцами LSP/document-sync/runtime readiness path, используя bundles `2026-03-22T16:19:59Z` и `2026-03-23T08:03:23Z` как evidence.
+- [x] 3.2 Провести review change с владельцами LSP/document-sync/runtime readiness path, используя bundles `2026-03-22T16:19:59Z` и `2026-03-23T08:03:23Z` как evidence.
 - [x] 3.3 Довести runtime path: completion consumer должен читать current-revision readiness через operation-aware fast lane, а не через background snapshot/readiness path.
 - [x] 3.4 Довести acceptance: shipped representative gate, workflow и docs должны проверять post-handoff readiness budgets/failure conditions на live LSP path.
-- [ ] 3.5 Синхронизировать traceability, task state и validation evidence между OpenSpec, Beads и checked-in артефактами.
+- [x] 3.5 Синхронизировать traceability, task state и validation evidence между OpenSpec, Beads и checked-in артефактами.
 
 > Этот change является producer-side prerequisite для финального shipped gate/evidence closure в `refactor-completion-prepare-lightweight-exact-split`: не закрывать split-prepare acceptance как завершённый, пока `3.3` и `3.4` здесь не зелёные.

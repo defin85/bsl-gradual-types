@@ -450,101 +450,28 @@ impl CompletionTimelineCapture {
     fn server_edge_details_trace(
         &self,
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
-        let transport_received_at_ms = self.transport_received_at_ms?;
-        let transport_received_at_ms_provenance = self
-            .transport_received_at_ms_provenance
-            .clone()
-            .unwrap_or_else(|| "request_context_call_entry".to_string());
-        let jsonrpc_dispatch_received_at_ms = self.jsonrpc_dispatch_received_at_ms;
-        let request_context_call_entered_at_ms = self.request_context_call_entered_at_ms;
-        let service_future_created_at_ms = self.service_future_created_at_ms;
-        let service_future_first_poll_entered_at_ms = self.service_future_first_poll_entered_at_ms;
-        let service_future_first_poll_outcome = self.service_future_first_poll_outcome.clone();
-        let service_future_first_wake_scheduled_at_ms =
-            self.service_future_first_wake_scheduled_at_ms;
-        let service_scope_entered_at_ms = self.service_scope_entered_at_ms;
-        let method_entered_at_ms = self.method_entered_at_ms;
-        let handler_entered_at_ms = self.handler_entered_at_ms?;
-        let response_sent_at_ms = self.response_sent_at_ms?;
-        let cancel_observed_at_ms = self.cancel_observed_at_ms;
-        Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
-            transport_received_at_ms,
-            transport_received_at_ms_provenance,
-            jsonrpc_dispatch_received_at_ms,
-            pre_method_attribution_provenance: self
-                .pre_method_attribution_provenance
-                .clone()
-                .unwrap_or_else(|| "unavailable".to_string()),
-            service_future_created_at_ms,
-            service_future_first_poll_entered_at_ms,
-            service_future_first_poll_outcome,
-            service_future_first_wake_scheduled_at_ms,
-            service_scope_entered_at_ms,
-            method_entered_at_ms,
-            handler_entered_at_ms,
-            response_sent_at_ms,
-            cancel_observed_at_ms,
-            dispatch_to_request_context_wait_ms: jsonrpc_dispatch_received_at_ms
-                .zip(request_context_call_entered_at_ms)
-                .map(
-                    |(jsonrpc_dispatch_received_at_ms, request_context_call_entered_at_ms)| {
-                        request_context_call_entered_at_ms
-                            .saturating_sub(jsonrpc_dispatch_received_at_ms)
-                    },
-                ),
-            transport_to_service_future_wait_ms: service_future_created_at_ms.map(
-                |service_future_created_at_ms| {
-                    service_future_created_at_ms.saturating_sub(transport_received_at_ms)
-                },
-            ),
-            service_future_to_scope_wait_ms: service_future_created_at_ms
-                .zip(service_scope_entered_at_ms)
-                .map(
-                    |(service_future_created_at_ms, service_scope_entered_at_ms)| {
-                        service_scope_entered_at_ms.saturating_sub(service_future_created_at_ms)
-                    },
-                ),
-            service_future_to_first_poll_wait_ms: service_future_created_at_ms
-                .zip(service_future_first_poll_entered_at_ms)
-                .map(
-                    |(service_future_created_at_ms, service_future_first_poll_entered_at_ms)| {
-                        service_future_first_poll_entered_at_ms
-                            .saturating_sub(service_future_created_at_ms)
-                    },
-                ),
-            first_poll_to_first_wake_wait_ms: service_future_first_poll_entered_at_ms
-                .zip(service_future_first_wake_scheduled_at_ms)
-                .map(
-                    |(
-                        service_future_first_poll_entered_at_ms,
-                        service_future_first_wake_scheduled_at_ms,
-                    )| {
-                        service_future_first_wake_scheduled_at_ms
-                            .saturating_sub(service_future_first_poll_entered_at_ms)
-                    },
-                ),
-            transport_to_service_scope_wait_ms: service_scope_entered_at_ms.map(
-                |service_scope_entered_at_ms| {
-                    service_scope_entered_at_ms.saturating_sub(transport_received_at_ms)
-                },
-            ),
-            service_scope_to_method_wait_ms: service_scope_entered_at_ms
-                .zip(method_entered_at_ms)
-                .map(|(service_scope_entered_at_ms, method_entered_at_ms)| {
-                    method_entered_at_ms.saturating_sub(service_scope_entered_at_ms)
-                }),
-            transport_to_method_wait_ms: method_entered_at_ms.map(|method_entered_at_ms| {
-                method_entered_at_ms.saturating_sub(transport_received_at_ms)
-            }),
-            method_prelude_exec_ms: method_entered_at_ms.map(|method_entered_at_ms| {
-                handler_entered_at_ms.saturating_sub(method_entered_at_ms)
-            }),
-            transport_to_handler_wait_ms: handler_entered_at_ms
-                .saturating_sub(transport_received_at_ms),
-            server_handler_exec_ms: response_sent_at_ms.saturating_sub(handler_entered_at_ms),
-            cancel_observed_after_handler_enter_ms: cancel_observed_at_ms
-                .map(|cancel_at| cancel_at.saturating_sub(handler_entered_at_ms)),
-        })
+        super::helpers::build_server_edge_details_trace(
+            &super::helpers::RequestServerEdgeTraceInputs {
+                transport_received_at_ms: self.transport_received_at_ms,
+                transport_received_at_ms_provenance: self
+                    .transport_received_at_ms_provenance
+                    .clone(),
+                jsonrpc_dispatch_received_at_ms: self.jsonrpc_dispatch_received_at_ms,
+                request_context_call_entered_at_ms: self.request_context_call_entered_at_ms,
+                pre_method_attribution_provenance: self.pre_method_attribution_provenance.clone(),
+                service_future_created_at_ms: self.service_future_created_at_ms,
+                service_future_first_poll_entered_at_ms: self
+                    .service_future_first_poll_entered_at_ms,
+                service_future_first_poll_outcome: self.service_future_first_poll_outcome.clone(),
+                service_future_first_wake_scheduled_at_ms: self
+                    .service_future_first_wake_scheduled_at_ms,
+                service_scope_entered_at_ms: self.service_scope_entered_at_ms,
+                method_entered_at_ms: self.method_entered_at_ms,
+                handler_entered_at_ms: self.handler_entered_at_ms,
+                response_sent_at_ms: self.response_sent_at_ms,
+                cancel_observed_at_ms: self.cancel_observed_at_ms,
+            },
+        )
     }
 
     fn prepare_details_mut(&mut self) -> &mut crate::types::CompletionTimelinePrepareDetailsTrace {

@@ -26,6 +26,151 @@ pub(super) fn record_lsp_interactive_fail_closed_reason(
     coordinator.record_intellisense_v2_interactive_fail_closed_reason("lsp", operation, reason);
 }
 
+#[derive(Debug, Clone, Default)]
+pub(super) struct RequestServerEdgeTraceInputs {
+    pub transport_received_at_ms: Option<u64>,
+    pub transport_received_at_ms_provenance: Option<String>,
+    pub jsonrpc_dispatch_received_at_ms: Option<u64>,
+    pub request_context_call_entered_at_ms: Option<u64>,
+    pub pre_method_attribution_provenance: Option<String>,
+    pub service_future_created_at_ms: Option<u64>,
+    pub service_future_first_poll_entered_at_ms: Option<u64>,
+    pub service_future_first_poll_outcome: Option<String>,
+    pub service_future_first_wake_scheduled_at_ms: Option<u64>,
+    pub service_scope_entered_at_ms: Option<u64>,
+    pub method_entered_at_ms: Option<u64>,
+    pub handler_entered_at_ms: Option<u64>,
+    pub response_sent_at_ms: Option<u64>,
+    pub cancel_observed_at_ms: Option<u64>,
+}
+
+pub(super) fn build_server_edge_details_trace(
+    inputs: &RequestServerEdgeTraceInputs,
+) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
+    let transport_received_at_ms = inputs.transport_received_at_ms?;
+    let transport_received_at_ms_provenance = inputs
+        .transport_received_at_ms_provenance
+        .clone()
+        .unwrap_or_else(|| "request_context_call_entry".to_string());
+    let jsonrpc_dispatch_received_at_ms = inputs.jsonrpc_dispatch_received_at_ms;
+    let request_context_call_entered_at_ms = inputs.request_context_call_entered_at_ms;
+    let service_future_created_at_ms = inputs.service_future_created_at_ms;
+    let service_future_first_poll_entered_at_ms = inputs.service_future_first_poll_entered_at_ms;
+    let service_future_first_poll_outcome = inputs.service_future_first_poll_outcome.clone();
+    let service_future_first_wake_scheduled_at_ms =
+        inputs.service_future_first_wake_scheduled_at_ms;
+    let service_scope_entered_at_ms = inputs.service_scope_entered_at_ms;
+    let method_entered_at_ms = inputs.method_entered_at_ms;
+    let handler_entered_at_ms = inputs.handler_entered_at_ms?;
+    let response_sent_at_ms = inputs.response_sent_at_ms?;
+    let cancel_observed_at_ms = inputs.cancel_observed_at_ms;
+
+    Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
+        transport_received_at_ms,
+        transport_received_at_ms_provenance,
+        jsonrpc_dispatch_received_at_ms,
+        pre_method_attribution_provenance: inputs
+            .pre_method_attribution_provenance
+            .clone()
+            .unwrap_or_else(|| "unavailable".to_string()),
+        service_future_created_at_ms,
+        service_future_first_poll_entered_at_ms,
+        service_future_first_poll_outcome,
+        service_future_first_wake_scheduled_at_ms,
+        service_scope_entered_at_ms,
+        method_entered_at_ms,
+        handler_entered_at_ms,
+        response_sent_at_ms,
+        cancel_observed_at_ms,
+        dispatch_to_request_context_wait_ms: jsonrpc_dispatch_received_at_ms
+            .zip(request_context_call_entered_at_ms)
+            .map(|(dispatch_ms, request_context_ms)| {
+                request_context_ms.saturating_sub(dispatch_ms)
+            }),
+        transport_to_service_future_wait_ms: service_future_created_at_ms
+            .map(|service_future_ms| service_future_ms.saturating_sub(transport_received_at_ms)),
+        service_future_to_scope_wait_ms: service_future_created_at_ms
+            .zip(service_scope_entered_at_ms)
+            .map(|(service_future_ms, service_scope_ms)| {
+                service_scope_ms.saturating_sub(service_future_ms)
+            }),
+        service_future_to_first_poll_wait_ms: service_future_created_at_ms
+            .zip(service_future_first_poll_entered_at_ms)
+            .map(|(service_future_ms, first_poll_ms)| {
+                first_poll_ms.saturating_sub(service_future_ms)
+            }),
+        first_poll_to_first_wake_wait_ms: service_future_first_poll_entered_at_ms
+            .zip(service_future_first_wake_scheduled_at_ms)
+            .map(|(first_poll_ms, first_wake_ms)| first_wake_ms.saturating_sub(first_poll_ms)),
+        transport_to_service_scope_wait_ms: service_scope_entered_at_ms
+            .map(|service_scope_ms| service_scope_ms.saturating_sub(transport_received_at_ms)),
+        service_scope_to_method_wait_ms: service_scope_entered_at_ms
+            .zip(method_entered_at_ms)
+            .map(|(service_scope_ms, method_ms)| method_ms.saturating_sub(service_scope_ms)),
+        transport_to_method_wait_ms: method_entered_at_ms
+            .map(|method_ms| method_ms.saturating_sub(transport_received_at_ms)),
+        method_prelude_exec_ms: method_entered_at_ms
+            .map(|method_ms| handler_entered_at_ms.saturating_sub(method_ms)),
+        transport_to_handler_wait_ms: handler_entered_at_ms
+            .saturating_sub(transport_received_at_ms),
+        server_handler_exec_ms: response_sent_at_ms.saturating_sub(handler_entered_at_ms),
+        cancel_observed_after_handler_enter_ms: cancel_observed_at_ms
+            .map(|cancel_ms| cancel_ms.saturating_sub(handler_entered_at_ms)),
+    })
+}
+
+#[cfg(test)]
+pub(super) fn record_current_request_server_edge_trace_for_testing(
+    method: &str,
+    uri: &Url,
+    method_entered_at_ms: u64,
+    handler_entered_at_ms: u64,
+    response_sent_at_ms: u64,
+) {
+    let request_id = super::super::request_context::current_request_id();
+    let request_context_call_entered_at_ms =
+        super::super::request_context::current_request_received_at_ms();
+    let inputs = RequestServerEdgeTraceInputs {
+        transport_received_at_ms: request_context_call_entered_at_ms,
+        transport_received_at_ms_provenance: request_context_call_entered_at_ms
+            .map(|_| "request_context_call_entry".to_string()),
+        jsonrpc_dispatch_received_at_ms:
+            super::super::request_context::current_request_jsonrpc_dispatch_received_at_ms(),
+        request_context_call_entered_at_ms,
+        pre_method_attribution_provenance: Some(
+            if request_id.is_some() && request_context_call_entered_at_ms.is_some() {
+                "same_request_authoritative".to_string()
+            } else {
+                "unavailable".to_string()
+            },
+        ),
+        service_future_created_at_ms:
+            super::super::request_context::current_request_service_future_created_at_ms(),
+        service_future_first_poll_entered_at_ms:
+            super::super::request_context::current_request_service_future_first_poll_entered_at_ms(),
+        service_future_first_poll_outcome:
+            super::super::request_context::current_request_service_future_first_poll_outcome(),
+        service_future_first_wake_scheduled_at_ms:
+            super::super::request_context::current_request_service_future_first_wake_scheduled_at_ms(
+            ),
+        service_scope_entered_at_ms:
+            super::super::request_context::current_request_service_scope_entered_at_ms(),
+        method_entered_at_ms: Some(method_entered_at_ms),
+        handler_entered_at_ms: Some(handler_entered_at_ms),
+        response_sent_at_ms: Some(response_sent_at_ms),
+        cancel_observed_at_ms: None,
+    };
+    let Some(server_edge_details) = build_server_edge_details_trace(&inputs) else {
+        return;
+    };
+    super::super::request_context::record_request_server_edge_trace_for_testing(
+        request_id.as_deref(),
+        method,
+        uri,
+        server_edge_details,
+    );
+}
+
 pub(super) fn should_schedule_profile(
     trigger: bsl_runtime::application::DiagnosticsTrigger,
     profile: bsl_runtime::application::DiagnosticsProfile,

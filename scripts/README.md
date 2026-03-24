@@ -244,7 +244,12 @@ Override для split-prepare evidence:
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 ```
 
-Override для documentSymbol mixed-load evidence:
+Default wrapper для documentSymbol mixed-load evidence:
+```bash
+./scripts/validate-document-symbol-interactive-isolation.sh
+```
+
+Нижележащий generic script можно вызвать и через явный override:
 ```bash
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
 ```
@@ -253,8 +258,9 @@ CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-c
 до `warm churn`; для documentSymbol isolation используется `outline`.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
 Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
-override `CHANGE_ID=refactor-document-symbol-interactive-isolation` нужен для
-change-specific checked-in representative report и aggregate readiness artifacts.
+wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит
+default change-specific entry point для representative report и aggregate
+readiness artifacts.
 
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 

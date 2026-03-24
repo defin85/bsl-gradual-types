@@ -85,8 +85,12 @@ cargo test --workspace --locked
 - Change-specific checked-in evidence bundles:
 
 ```bash
-CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
+./scripts/validate-document-symbol-interactive-isolation.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 ```
+
+`./scripts/validate-document-symbol-interactive-isolation.sh` is the canonical
+default entry point for the document-symbol isolation evidence bundle; it wraps
+the generic readiness script with the correct `CHANGE_ID`.
 
 Use these only when the task explicitly needs readiness/perf evidence.

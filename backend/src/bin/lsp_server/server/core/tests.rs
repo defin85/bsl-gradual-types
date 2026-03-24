@@ -623,6 +623,53 @@ async fn live_transport_get_completion_timeline(
         .expect("result field")
 }
 
+async fn take_test_request_server_edge_trace(
+    request_id: i64,
+) -> crate::server::request_context::TestRequestServerEdgeTrace {
+    tokio::time::timeout(Duration::from_secs(5), async move {
+        loop {
+            if let Some(trace) =
+                crate::server::request_context::take_request_server_edge_trace_for_testing(
+                    &request_id.to_string(),
+                )
+            {
+                break trace;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("test request server-edge trace must appear")
+}
+
+fn assert_request_first_poll_budget(
+    trace: &crate::server::request_context::TestRequestServerEdgeTrace,
+    expected_method: &str,
+    budget_ms: u64,
+) {
+    assert_eq!(
+        trace.method, expected_method,
+        "unexpected method in test request trace: {trace:?}"
+    );
+    let first_poll_wait_ms = trace
+        .server_edge_details
+        .service_future_to_first_poll_wait_ms
+        .expect("service_future_to_first_poll_wait_ms");
+    assert!(
+        first_poll_wait_ms <= budget_ms,
+        "{expected_method} must keep first poll within budget under outline burst, trace={trace:?}"
+    );
+    assert!(
+        !trace.uri.is_empty(),
+        "{expected_method} trace must retain URI for debugging, trace={trace:?}"
+    );
+    assert_eq!(
+        trace.server_edge_details.pre_method_attribution_provenance,
+        "same_request_authoritative",
+        "{expected_method} must expose authoritative pre-method attribution on live path, trace={trace:?}"
+    );
+}
+
 async fn live_transport_get_observability_metrics(
     harness: &mut LiveLspTransportHarness,
     request_id: i64,
@@ -15468,9 +15515,8 @@ async fn p33_document_symbol_returns_unavailable_before_ready_outline_from_did_o
         "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
         &PARSE_DELAY_MS.to_string(),
     );
-    let uri =
-        Url::parse("file:///test_p33_document_symbol_unavailable_did_open_parse_gap.bsl")
-            .expect("test uri");
+    let uri = Url::parse("file:///test_p33_document_symbol_unavailable_did_open_parse_gap.bsl")
+        .expect("test uri");
     let did_open = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
@@ -15931,8 +15977,8 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap()
-{
+async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -15984,9 +16030,10 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
     initialize_live_lsp_transport(&mut harness).await;
     prime_server_with_syntax_helper_deps(&server).await;
 
-    let uri =
-        Url::parse("file:///test_p33_document_symbol_burst_hover_signature_definition_parse_gap.bsl")
-            .expect("uri");
+    let uri = Url::parse(
+        "file:///test_p33_document_symbol_burst_hover_signature_definition_parse_gap.bsl",
+    )
+    .expect("uri");
     harness
         .send_notification(
             "textDocument/didOpen",
@@ -16081,7 +16128,8 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
     .await
     .expect("test must observe parse-snapshot gap before outline burst");
 
-    let hover_position = find_utf16_position_after_marker(&v2_fixture, "ЗначДляHover = МассивДляHover");
+    let hover_position =
+        find_utf16_position_after_marker(&v2_fixture, "ЗначДляHover = МассивДляHover");
     let signature_position =
         find_utf16_position_after_marker(&v2_fixture, "МассивДляSignature.Количество(");
     let definition_position =
@@ -16115,6 +16163,8 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
         hover_response.get("result").is_some(),
         "hover request under outline burst must still return a response envelope"
     );
+    let hover_trace = take_test_request_server_edge_trace(50_369).await;
+    assert_request_first_poll_budget(&hover_trace, "textDocument/hover", INTERACTIVE_BUDGET_MS);
     assert!(
         hover_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
         "outline burst must not delay hover on the current revision path"
@@ -16149,6 +16199,12 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
         signature_response.get("result").is_some(),
         "signatureHelp under outline burst must still return a response envelope"
     );
+    let signature_trace = take_test_request_server_edge_trace(50_379).await;
+    assert_request_first_poll_budget(
+        &signature_trace,
+        "textDocument/signatureHelp",
+        INTERACTIVE_BUDGET_MS,
+    );
     assert!(
         signature_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
         "outline burst must not delay signatureHelp on the current revision path"
@@ -16182,6 +16238,12 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
     assert!(
         definition_response.get("result").is_some(),
         "definition under outline burst must still return a response envelope"
+    );
+    let definition_trace = take_test_request_server_edge_trace(50_389).await;
+    assert_request_first_poll_budget(
+        &definition_trace,
+        "textDocument/definition",
+        INTERACTIVE_BUDGET_MS,
     );
     assert!(
         definition_started.elapsed() <= Duration::from_millis(INTERACTIVE_BUDGET_MS),
@@ -16252,9 +16314,8 @@ async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
     initialize_live_lsp_transport(&mut harness).await;
     prime_server_with_syntax_helper_deps(&server).await;
 
-    let uri =
-        Url::parse("file:///test_p33_document_symbol_did_save_same_version_refresh.bsl")
-            .expect("uri");
+    let uri = Url::parse("file:///test_p33_document_symbol_did_save_same_version_refresh.bsl")
+        .expect("uri");
     harness
         .send_notification(
             "textDocument/didOpen",
@@ -22434,15 +22495,18 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             .await;
 
         let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
-        server
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "bsl".to_string(),
-                    version: 1,
-                    text: module_text.clone(),
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
                 },
-            })
+            )
             .await;
 
         server.sync_v2_globals().await;

@@ -33,6 +33,7 @@ REQUIRED_FILES = (
     ".agents/skills/openspec-delivery-matrix/SKILL.md",
     ".agents/skills/docs-drift-audit/SKILL.md",
     "scripts/run-agent-readiness-checks.sh",
+    "scripts/validate-document-symbol-interactive-isolation.sh",
 )
 
 REQUIRED_SNIPPETS = {
@@ -57,7 +58,7 @@ REQUIRED_SNIPPETS = {
         "cargo run -p bsl-backend --bin bsl-lsp-server -- --help",
         "cargo run -p bsl-agent -- --help",
         "./scripts/run-intellisense-tests.sh smoke",
-        "CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh",
+        "./scripts/validate-document-symbol-interactive-isolation.sh",
     ),
     "docs/agent/codex-setup.md": (
         ".mcp.json",

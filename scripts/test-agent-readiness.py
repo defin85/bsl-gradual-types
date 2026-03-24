@@ -13,6 +13,9 @@ class AgentReadinessValidationTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     CHECK_SCRIPT = REPO_ROOT / "scripts" / "check-agent-readiness.py"
     WRAPPER_SCRIPT = REPO_ROOT / "scripts" / "run-agent-readiness-checks.sh"
+    DOCUMENT_SYMBOL_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
+    )
     TARGETS_FILE = REPO_ROOT / "scripts" / "doc-path-check-targets.txt"
     VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
 
@@ -38,10 +41,17 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn("./scripts/run-agent-readiness-checks.sh", content)
 
-    def test_verification_doc_exposes_document_symbol_readiness_override(self) -> None:
+    def test_verification_doc_exposes_document_symbol_readiness_wrapper(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn(
-            "CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh",
+            "./scripts/validate-document-symbol-interactive-isolation.sh",
+            content,
+        )
+
+    def test_document_symbol_wrapper_pins_change_id(self) -> None:
+        content = self.DOCUMENT_SYMBOL_WRAPPER.read_text(encoding="utf-8")
+        self.assertIn(
+            "CHANGE_ID=refactor-document-symbol-interactive-isolation",
             content,
         )
 

@@ -5,10 +5,12 @@ impl BslLanguageServer {
         &self,
         params: SignatureHelpParams,
     ) -> JsonRpcResult<Option<SignatureHelp>> {
+        let _method_entered_at_ms = super::super::unix_timestamp_ms();
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        {
+        let _handler_entered_at_ms = super::super::unix_timestamp_ms();
+        let result = {
             let file_id = self.get_or_create_file_id_v2(&uri).await;
             self.sync_v2_globals().await;
 
@@ -16,16 +18,135 @@ impl BslLanguageServer {
                 let settings = self.settings.read().await;
                 settings.enable_flow_sensitive
             };
-            let prepared = self
+            match self
                 .prepare_lsp_stateful_operation_v2(
                     &uri,
                     file_id,
                     bsl_runtime::application::SemanticOperation::SignatureHelp,
                     include_flow_sensitive,
                 )
-                .await;
-            let (context, prepared, expected_version) = match prepared {
-                Ok(values) => values,
+                .await
+            {
+                Ok((context, prepared, expected_version)) => {
+                    if let Some(wait_elapsed) = prepared.wait_elapsed {
+                        if let Some(threshold) =
+                            super::super::intellisense_v2_slow_wait_warn_threshold()
+                        {
+                            if wait_elapsed >= threshold {
+                                warn!(
+                                    uri = %uri,
+                                    file_id = file_id.0,
+                                    expected_version,
+                                    wait_ms = wait_elapsed.as_millis(),
+                                    threshold_ms = threshold.as_millis(),
+                                    "SignatureHelp v2: wait_for_file_version is slow"
+                                );
+                            }
+                        }
+                    }
+                    if let Some(threshold) =
+                        super::super::intellisense_v2_slow_snapshot_warn_threshold()
+                    {
+                        if prepared.snapshot_elapsed >= threshold {
+                            warn!(
+                                uri = %uri,
+                                file_id = file_id.0,
+                                snapshot_ms = prepared.snapshot_elapsed.as_millis(),
+                                threshold_ms = threshold.as_millis(),
+                                "SignatureHelp v2: snapshot acquisition is slow"
+                            );
+                        }
+                    }
+
+                    let (analysis, file_content, deps, ir_program) = {
+                        let analysis = prepared.snapshot.analysis;
+                        let observed_file_version = analysis.file_version(file_id).ok().flatten();
+                        let observed_deps_id = Some(prepared.snapshot.deps_id);
+                        let observed_settings_id = analysis.settings_id().ok();
+                        debug!(
+                            "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+                            uri,
+                            file_id.0,
+                            observed_file_version,
+                            observed_deps_id.as_ref().map(|v| v.as_str()),
+                            observed_settings_id.as_ref().map(|v| v.as_str()),
+                        );
+
+                        let file_content = analysis.file_text(file_id).ok().flatten();
+                        let deps = analysis.deps_data().ok();
+                        let ir_program =
+                            bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                                &context,
+                                &analysis,
+                                Some(self.coordinator.as_ref()),
+                                file_id,
+                            )
+                            .ok()
+                            .flatten();
+
+                        (analysis, file_content, deps, ir_program)
+                    };
+
+                    let started = Instant::now();
+                    let result = match (file_content, deps, ir_program) {
+                        (Some(file_content), Some(deps), Some(ir_program)) => {
+                            let exact_type_index_available = bsl_runtime::application::type_system::signature_help_exact_type_index_available_at_position(
+                                file_content.as_ref(),
+                                position.line,
+                                position.character,
+                                &analysis,
+                                file_id,
+                            );
+                            if !exact_type_index_available
+                                && !self
+                                    .has_matching_type_index_precompute_task_v2(
+                                        file_id,
+                                        Some(expected_version),
+                                    )
+                                    .await
+                            {
+                                super::helpers::record_lsp_interactive_fail_closed_reason(
+                                    self.coordinator.as_ref(),
+                                    "signature_help",
+                                    "missing_semantic_index",
+                                );
+                                None
+                            } else {
+                                handle_signature_help_v2(
+                                    &analysis,
+                                    file_id,
+                                    file_content,
+                                    position,
+                                    ir_program,
+                                    deps,
+                                    Some(self.coordinator.as_ref()),
+                                )
+                            }
+                        }
+                        (None, _, _) | (Some(_), None, _) => {
+                            super::helpers::record_lsp_interactive_fail_closed_reason(
+                                self.coordinator.as_ref(),
+                                "signature_help",
+                                "unavailable_by_contract",
+                            );
+                            None
+                        }
+                        (Some(_), Some(_), None) => {
+                            super::helpers::record_lsp_interactive_fail_closed_reason(
+                                self.coordinator.as_ref(),
+                                "signature_help",
+                                "missing_canonical_ir",
+                            );
+                            None
+                        }
+                    };
+                    let elapsed = started.elapsed();
+                    self.coordinator.record_signature_help_latency(elapsed);
+                    if result.is_none() {
+                        self.coordinator.record_signature_help_empty();
+                    }
+                    Ok(result)
+                }
                 Err(outcome) => {
                     super::helpers::record_lsp_interactive_fail_closed_reason(
                         self.coordinator.as_ref(),
@@ -38,124 +159,21 @@ impl BslLanguageServer {
                         outcome = outcome.as_str(),
                         "SignatureHelp v2: stateful operation not ready"
                     );
-                    return Ok(None);
-                }
-            };
-            if let Some(wait_elapsed) = prepared.wait_elapsed {
-                if let Some(threshold) = super::super::intellisense_v2_slow_wait_warn_threshold() {
-                    if wait_elapsed >= threshold {
-                        warn!(
-                            uri = %uri,
-                            file_id = file_id.0,
-                            expected_version,
-                            wait_ms = wait_elapsed.as_millis(),
-                            threshold_ms = threshold.as_millis(),
-                            "SignatureHelp v2: wait_for_file_version is slow"
-                        );
-                    }
+                    Ok(None)
                 }
             }
-            if let Some(threshold) = super::super::intellisense_v2_slow_snapshot_warn_threshold() {
-                if prepared.snapshot_elapsed >= threshold {
-                    warn!(
-                        uri = %uri,
-                        file_id = file_id.0,
-                        snapshot_ms = prepared.snapshot_elapsed.as_millis(),
-                        threshold_ms = threshold.as_millis(),
-                        "SignatureHelp v2: snapshot acquisition is slow"
-                    );
-                }
-            }
+        };
 
-            let (analysis, file_content, deps, ir_program) = {
-                let analysis = prepared.snapshot.analysis;
-                let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                let observed_deps_id = Some(prepared.snapshot.deps_id);
-                let observed_settings_id = analysis.settings_id().ok();
-                debug!(
-                    "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                    uri,
-                    file_id.0,
-                    observed_file_version,
-                    observed_deps_id.as_ref().map(|v| v.as_str()),
-                    observed_settings_id.as_ref().map(|v| v.as_str()),
-                );
+        #[cfg(test)]
+        super::helpers::record_current_request_server_edge_trace_for_testing(
+            "textDocument/signatureHelp",
+            &uri,
+            _method_entered_at_ms,
+            _handler_entered_at_ms,
+            super::super::unix_timestamp_ms(),
+        );
 
-                let file_content = analysis.file_text(file_id).ok().flatten();
-                let deps = analysis.deps_data().ok();
-                let ir_program =
-                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                        &context,
-                        &analysis,
-                        Some(self.coordinator.as_ref()),
-                        file_id,
-                    )
-                    .ok()
-                    .flatten();
-
-                (analysis, file_content, deps, ir_program)
-            };
-
-            let started = Instant::now();
-            let result = match (file_content, deps, ir_program) {
-                (Some(file_content), Some(deps), Some(ir_program)) => {
-                    let exact_type_index_available = bsl_runtime::application::type_system::signature_help_exact_type_index_available_at_position(
-                        file_content.as_ref(),
-                        position.line,
-                        position.character,
-                        &analysis,
-                        file_id,
-                    );
-                    if !exact_type_index_available
-                        && !self
-                            .has_matching_type_index_precompute_task_v2(
-                                file_id,
-                                Some(expected_version),
-                            )
-                            .await
-                    {
-                        super::helpers::record_lsp_interactive_fail_closed_reason(
-                            self.coordinator.as_ref(),
-                            "signature_help",
-                            "missing_semantic_index",
-                        );
-                        return Ok(None);
-                    }
-                    let signature_help = handle_signature_help_v2(
-                        &analysis,
-                        file_id,
-                        file_content,
-                        position,
-                        ir_program,
-                        deps,
-                        Some(self.coordinator.as_ref()),
-                    );
-                    signature_help
-                }
-                (None, _, _) | (Some(_), None, _) => {
-                    super::helpers::record_lsp_interactive_fail_closed_reason(
-                        self.coordinator.as_ref(),
-                        "signature_help",
-                        "unavailable_by_contract",
-                    );
-                    None
-                }
-                (Some(_), Some(_), None) => {
-                    super::helpers::record_lsp_interactive_fail_closed_reason(
-                        self.coordinator.as_ref(),
-                        "signature_help",
-                        "missing_canonical_ir",
-                    );
-                    None
-                }
-            };
-            let elapsed = started.elapsed();
-            self.coordinator.record_signature_help_latency(elapsed);
-            if result.is_none() {
-                self.coordinator.record_signature_help_empty();
-            }
-            Ok(result)
-        }
+        result
     }
 
     // ========================================================================

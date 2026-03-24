@@ -118,6 +118,16 @@ jobs:
           CHANGE_ID: refactor-current-revision-readiness-fast-lane
           BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json
         run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
+      - name: Run split-prepare warm-cache representative gate
+        env:
+          CHANGE_ID: refactor-completion-prepare-lightweight-exact-split
+          BSL_V2_REAL_CONF_BIG_WARM_CACHE_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p37_real_conf_big_warm_cache_completion_perf_report_live -- --nocapture
+      - name: Run split-prepare revision-churn representative gate
+        env:
+          CHANGE_ID: refactor-completion-prepare-lightweight-exact-split
+          BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
       - name: Upload perf gate reports
         if: always()
         uses: actions/upload-artifact@v4

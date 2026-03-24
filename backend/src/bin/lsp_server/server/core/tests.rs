@@ -19104,6 +19104,8 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     init_test_tracing();
     let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
     const PROFILE_NAME: &str = "p37_real_conf_big_warm_cache_completion_perf_report_live";
+    let change_id = std::env::var("CHANGE_ID")
+        .unwrap_or_else(|_| "refactor-completion-prepare-lightweight-exact-split".to_string());
     const WARMUP_REQUESTS: usize = 5;
     const MEASURE_REQUESTS: usize = 4;
     const WARM_HEAD_PATH_P95_BUDGET_MS: f64 = 150.0;
@@ -19516,7 +19518,7 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
 
     let report = serde_json::json!({
-        "change_id": "refactor-completion-prepare-lightweight-exact-split",
+        "change_id": change_id,
         "profile": PROFILE_NAME,
         "schema_version": 1,
         "configuration_path": conf_big_root,
@@ -19632,7 +19634,9 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 .join("tests")
                 .join("perf")
                 .join("reports")
-                .join("real-conf-big-warm-cache-completion-perf-live.json")
+                .join(format!(
+                    "{change_id}-real-conf-big-warm-cache-completion-perf-live.json"
+                ))
         });
     if let Some(parent) = report_path.parent() {
         std::fs::create_dir_all(parent)
@@ -20610,7 +20614,9 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 .join("tests")
                 .join("perf")
                 .join("reports")
-                .join("real-conf-big-post-handoff-readiness-completion-perf-live.json")
+                .join(format!(
+                    "{change_id}-real-conf-big-revision-churn-completion-perf-live.json"
+                ))
         });
     if let Some(parent) = report_path.parent() {
         std::fs::create_dir_all(parent)

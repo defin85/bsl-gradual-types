@@ -6,11 +6,15 @@ REPORT_DIR="${ROOT_DIR}/backend/tests/perf/reports"
 CHANGE_ID="${CHANGE_ID:-refactor-current-revision-readiness-fast-lane}"
 READINESS_REPORT="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.json"
 READINESS_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.md"
-REAL_MODULE_PROFILE="p38_real_conf_big_revision_churn_completion_perf_report_live"
-REAL_MODULE_REPORT="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json"
-REAL_MODULE_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md"
 OPENSPEC_LOG="${REPORT_DIR}/${CHANGE_ID}-openspec-validate.log"
 PERF_PROFILES="${PERF_PROFILES:-small large churn}"
+if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
+  if [[ "${CHANGE_ID}" == "refactor-completion-prepare-lightweight-exact-split" ]]; then
+    REAL_MODULE_PROFILES="warm churn"
+  else
+    REAL_MODULE_PROFILES="churn"
+  fi
+fi
 
 mkdir -p "${REPORT_DIR}"
 
@@ -31,7 +35,42 @@ BSL_V2_PERF_GATE_BLOCKING=1 \
 PERF_PROFILES="${PERF_PROFILES}" \
   "${ROOT_DIR}/scripts/run-intellisense-perf.sh"
 
-python3 - "${REPORT_DIR}" "${READINESS_REPORT}" "${READINESS_SUMMARY}" "${CHANGE_ID}" ${PERF_PROFILES} <<'PY'
+real_module_specs=()
+real_module_artifacts=()
+for profile in ${REAL_MODULE_PROFILES}; do
+  case "${profile}" in
+    warm)
+      profile_title="same-revision warm"
+      test_name="p37_real_conf_big_warm_cache_completion_perf_report_live"
+      report_var="BSL_V2_REAL_CONF_BIG_WARM_CACHE_COMPLETION_PERF_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-warm-cache-completion-perf-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-warm-cache-completion-perf-live.md"
+      ;;
+    churn)
+      profile_title="revision-churn/post-handoff readiness"
+      test_name="p38_real_conf_big_revision_churn_completion_perf_report_live"
+      report_var="BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md"
+      ;;
+    *)
+      echo "Unsupported REAL_MODULE_PROFILES entry: ${profile}" >&2
+      exit 1
+      ;;
+  esac
+
+  echo "[gate] Running real-module ${profile_title} gate..."
+  env CHANGE_ID="${CHANGE_ID}" "${report_var}=${report_path}" \
+    cargo test -p bsl-backend --bin bsl-lsp-server "${test_name}" -- --nocapture
+  real_module_specs+=("${profile}::${profile_title}::${test_name}::${report_path}::${summary_path}")
+  real_module_artifacts+=("${report_path}" "${summary_path}")
+done
+
+echo "[gate] Running OpenSpec strict validation..."
+openspec validate "${CHANGE_ID}" --strict --no-interactive \
+  | tee "${OPENSPEC_LOG}"
+
+python3 - "${REPORT_DIR}" "${READINESS_REPORT}" "${READINESS_SUMMARY}" "${OPENSPEC_LOG}" "${CHANGE_ID}" "${PERF_PROFILES}" "${REAL_MODULE_PROFILES}" "${real_module_specs[@]}" <<'PY'
 import json
 import pathlib
 import sys
@@ -39,10 +78,24 @@ import sys
 report_dir = pathlib.Path(sys.argv[1])
 aggregate_path = pathlib.Path(sys.argv[2])
 summary_path = pathlib.Path(sys.argv[3])
-expected_change_id = sys.argv[4]
-profiles = sys.argv[5:]
+openspec_log_path = pathlib.Path(sys.argv[4])
+expected_change_id = sys.argv[5]
+perf_profiles = sys.argv[6].split()
+real_module_profiles = sys.argv[7].split()
+real_module_specs = {}
+for raw_spec in sys.argv[8:]:
+    profile, profile_title, test_name, report_path, profile_summary_path = raw_spec.split("::", 4)
+    real_module_specs[profile] = {
+        "title": profile_title,
+        "test_name": test_name,
+        "report_path": pathlib.Path(report_path),
+        "summary_path": pathlib.Path(profile_summary_path),
+    }
 
+repo_root = report_dir.parents[3]
+backend_root = report_dir.parents[2]
 profile_rows = []
+real_module_rows = []
 aggregate = {
     "change_id": expected_change_id,
     "authoritative_perf_gate": True,
@@ -54,10 +107,16 @@ aggregate = {
         "command": f"CHANGE_ID={expected_change_id} BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh",
         "profiles": {},
     },
+    "real_module_gates": {},
+    "openspec_validation": {
+        "command": f"openspec validate {expected_change_id} --strict --no-interactive",
+        "log": str(openspec_log_path.relative_to(repo_root)),
+        "pass": True,
+    },
 }
 overall_pass = True
 
-for profile in profiles:
+for profile in perf_profiles:
     report_path = report_dir / f"intellisense_{profile}.json"
     data = json.loads(report_path.read_text(encoding="utf-8"))
     comparison = data.get("comparison") or {}
@@ -71,7 +130,7 @@ for profile in profiles:
     pass_flag = bool(data.get("pass")) and bool(comparison.get("pass", True))
     overall_pass = overall_pass and pass_flag
     aggregate["perf_gate"]["profiles"][profile] = {
-        "report": str(report_path.relative_to(report_dir.parents[2])),
+        "report": str(report_path.relative_to(backend_root)),
         "pass": pass_flag,
         "verdict": comparison.get("verdict", data.get("verdict", "fail")),
         "reason_codes": comparison.get("reason_codes", data.get("reason_codes", [])),
@@ -90,8 +149,62 @@ for profile in profiles:
         )
     )
 
+for profile in real_module_profiles:
+    spec = real_module_specs[profile]
+    report_path = spec["report_path"]
+    data = json.loads(report_path.read_text(encoding="utf-8"))
+    summary = data.get("summary") or {}
+    report_change_id = data.get("change_id", "-")
+    pass_flag = report_change_id == expected_change_id
+    overall_pass = overall_pass and pass_flag
+    aggregate["real_module_gates"][profile] = {
+        "profile_title": spec["title"],
+        "test_name": spec["test_name"],
+        "report": str(report_path.relative_to(backend_root)),
+        "summary": str(spec["summary_path"].relative_to(backend_root)),
+        "pass": pass_flag,
+        "report_change_id": report_change_id,
+        "measured_samples": len(data.get("measured_samples") or [])
+        or summary.get("measured_requests")
+        or summary.get("measured_trace_linked_samples")
+        or summary.get("measured_non_empty_samples", 0),
+        "head_hit_traces": summary.get("measured_head_hit_traces", 0),
+        "exact_hit_traces": summary.get("measured_exact_hit_traces", 0),
+        "prepare_timeout_delta": summary.get("measured_prepare_timeout_total_delta", 0),
+        "exact_deadline_delta": summary.get("measured_exact_deadline_total_delta", 0),
+    }
+    real_module_rows.append(
+        (
+            spec["title"],
+            "yes" if pass_flag else "no",
+            report_change_id,
+            aggregate["real_module_gates"][profile]["measured_samples"],
+            aggregate["real_module_gates"][profile]["head_hit_traces"],
+            aggregate["real_module_gates"][profile]["exact_hit_traces"],
+            aggregate["real_module_gates"][profile]["prepare_timeout_delta"],
+            aggregate["real_module_gates"][profile]["exact_deadline_delta"],
+        )
+    )
+    profile_lines = [
+        f"# {expected_change_id} real-module readiness gate",
+        "",
+        f"- profile: `{spec['test_name']}`",
+        f"- profile title: `{spec['title']}`",
+        f"- report: `{report_path}`",
+        f"- report change_id: `{report_change_id}`",
+        f"- measured samples: `{aggregate['real_module_gates'][profile]['measured_samples']}`",
+        f"- head_hit traces: `{aggregate['real_module_gates'][profile]['head_hit_traces']}`",
+        f"- exact_hit traces: `{aggregate['real_module_gates'][profile]['exact_hit_traces']}`",
+        f"- prepare_timeout delta: `{aggregate['real_module_gates'][profile]['prepare_timeout_delta']}`",
+        f"- exact_deadline delta: `{aggregate['real_module_gates'][profile]['exact_deadline_delta']}`",
+    ]
+    spec["summary_path"].write_text("\n".join(profile_lines) + "\n", encoding="utf-8")
+    print(f"[gate] Real-module summary written to {spec['summary_path']}")
+
 aggregate["pass"] = overall_pass
-aggregate_path.write_text(json.dumps(aggregate, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+aggregate_path.write_text(
+    json.dumps(aggregate, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+)
 
 lines = [
     f"# {expected_change_id} readiness gates",
@@ -102,7 +215,7 @@ lines = [
     "",
     "## Representative-matrix perf gate",
     f"- command: `CHANGE_ID={expected_change_id} BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh`",
-    f"- pass: {'yes' if overall_pass else 'no'}",
+    f"- pass: {'yes' if all(row[1] == 'yes' for row in profile_rows) else 'no'}",
     "",
     "| profile | pass | matrix entries | failing entries | fail_closed budget failures | reason codes |",
     "|---|---|---:|---:|---:|---|",
@@ -111,52 +224,49 @@ for profile, pass_flag, entries_total, failing_total, fail_closed_total, reason_
     lines.append(
         f"| {profile} | {pass_flag} | {entries_total} | {failing_total} | {fail_closed_total} | {reason_codes} |"
     )
-lines.append("")
+
+lines.extend(
+    [
+        "",
+        "## Real-module representative gates",
+        "| profile | pass | report change_id | measured samples | head_hit traces | exact_hit traces | prepare_timeout delta | exact_deadline delta |",
+        "|---|---|---|---:|---:|---:|---:|---:|",
+    ]
+)
+for (
+    profile_title,
+    pass_flag,
+    report_change_id,
+    measured_samples,
+    head_hit_traces,
+    exact_hit_traces,
+    prepare_timeout_delta,
+    exact_deadline_delta,
+) in real_module_rows:
+    lines.append(
+        f"| {profile_title} | {pass_flag} | {report_change_id} | {measured_samples} | {head_hit_traces} | {exact_hit_traces} | {prepare_timeout_delta} | {exact_deadline_delta} |"
+    )
+
+lines.extend(
+    [
+        "",
+        "## OpenSpec",
+        f"- command: `openspec validate {expected_change_id} --strict --no-interactive`",
+        "- pass: yes",
+        f"- log: `{openspec_log_path}`",
+        "",
+    ]
+)
 summary_path.write_text("\n".join(lines), encoding="utf-8")
 print(f"[gate] Summary written to {summary_path}")
 print(f"[gate] Aggregate written to {aggregate_path}")
 PY
 
-echo "[gate] Running real-module post-handoff readiness gate..."
-BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT="${REAL_MODULE_REPORT}" \
-  cargo test -p bsl-backend --bin bsl-lsp-server "${REAL_MODULE_PROFILE}" -- --nocapture
-
-python3 - "${REAL_MODULE_REPORT}" "${REAL_MODULE_SUMMARY}" "${CHANGE_ID}" "${REAL_MODULE_PROFILE}" <<'PY'
-import json
-import pathlib
-import sys
-
-report_path = pathlib.Path(sys.argv[1])
-summary_path = pathlib.Path(sys.argv[2])
-change_id = sys.argv[3]
-profile = sys.argv[4]
-
-data = json.loads(report_path.read_text(encoding="utf-8"))
-summary = data.get("summary") or {}
-lines = [
-    f"# {change_id} real-module readiness gate",
-    "",
-    f"- profile: `{profile}`",
-    f"- report: `{report_path}`",
-    f"- report change_id: `{data.get('change_id', '-')}`",
-    f"- measured samples: `{summary.get('measured_requests', summary.get('measured_trace_linked_samples', 0))}`",
-    f"- head_hit traces: `{summary.get('measured_head_hit_traces', 0)}`",
-    f"- exact_hit traces: `{summary.get('measured_exact_hit_traces', 0)}`",
-    f"- prepare_timeout delta: `{summary.get('measured_prepare_timeout_total_delta', 0)}`",
-    f"- exact_deadline delta: `{summary.get('measured_exact_deadline_total_delta', 0)}`",
-]
-summary_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-print(f"[gate] Real-module summary written to {summary_path}")
-PY
-
-echo "[gate] Running OpenSpec strict validation..."
-openspec validate "${CHANGE_ID}" --strict --no-interactive \
-  | tee "${OPENSPEC_LOG}"
-
 echo "[gate] Done."
 echo "[gate] Artifacts:"
 echo "  - ${READINESS_REPORT}"
 echo "  - ${READINESS_SUMMARY}"
-echo "  - ${REAL_MODULE_REPORT}"
-echo "  - ${REAL_MODULE_SUMMARY}"
+for artifact in "${real_module_artifacts[@]}"; do
+  echo "  - ${artifact}"
+done
 echo "  - ${OPENSPEC_LOG}"

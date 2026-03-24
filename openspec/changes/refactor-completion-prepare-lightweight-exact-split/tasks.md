@@ -13,10 +13,10 @@
 
 ## 3. Validation
 - [x] 3.1 Провалидировать change: `openspec validate refactor-completion-prepare-lightweight-exact-split --strict --no-interactive`.
-- [ ] 3.2 Зафиксировать checked-in outcome архитектурного review change с владельцами runtime/LSP completion boundary и подтвердить, что change не требует detached immutable snapshot как prereq.
+- [x] 3.2 Зафиксировать checked-in outcome архитектурного review change с владельцами runtime/LSP completion boundary и подтвердить, что change не требует detached immutable snapshot как prereq.
 
 ## 4. Implementation Closure
 - [x] 4.1 Сузить public lightweight completion boundary до узкого request-scoped payload и убрать `AnalysisV2` как внешний carrier completion first-response API.
-- [ ] 4.2 Довести shipped representative gate/evidence path: default workflow, CI, scripts, docs и checked-in reports должны запускать и подтверждать оба обязательных real-module профиля `p37 same-revision warm` и `p38 revision-churn/post-handoff readiness`.
+- [x] 4.2 Довести shipped representative gate/evidence path: default workflow, CI, scripts, docs и checked-in reports должны запускать и подтверждать оба обязательных real-module профиля `p37 same-revision warm` и `p38 revision-churn/post-handoff readiness`.
 
 > Зависимость между change: `4.1` можно закрывать параллельно, но `4.2` опирается на producer-side readiness invariants из `refactor-current-revision-readiness-fast-lane`. Финальный shipped gate/evidence для split-prepare нельзя считать завершённым, пока runtime/gate задачи `gy9c.13` и `gy9c.14` не зелёные.

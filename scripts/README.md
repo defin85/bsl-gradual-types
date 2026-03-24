@@ -199,10 +199,16 @@ Default selector set:
 - shipped cross-adapter smoke: LSP/runtime/web/MCP/CLI/module-context slices, включая current-revision stale proofs beyond completion и regression на removal of bare-identifier fallback;
 - authoritative representative-matrix perf gate через `./scripts/run-intellisense-perf.sh`
   в blocking mode для `small` / `large` / `churn`;
-- real-module post-handoff readiness gate через
+- для `refactor-current-revision-readiness-fast-lane`: real-module post-handoff readiness gate через
   `cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture`
   с report path
   `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`;
+- для `refactor-completion-prepare-lightweight-exact-split`: оба обязательных representative real-module профиля
+  `p37_real_conf_big_warm_cache_completion_perf_report_live` и
+  `p38_real_conf_big_revision_churn_completion_perf_report_live` с change-specific report paths
+  `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.json`
+  и
+  `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
@@ -227,6 +233,9 @@ Override для split-prepare evidence:
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 ```
 
+При таком override script автоматически расширяет `REAL_MODULE_PROFILES` до `warm churn`
+и пишет per-profile summaries рядом с report JSON.
+
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
 **Артефакты:**
@@ -235,6 +244,13 @@ CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate
 - `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json`
 - `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.md`
 - `backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-warm-cache-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-real-conf-big-revision-churn-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log`
 
 ---
 

@@ -567,6 +567,29 @@ export type CompletionTimelineServiceFutureFirstPollOutcome =
     | 'ready'
     | 'pending';
 
+export type CompletionTimelineFirstPollContentionClass =
+    | 'document_sync'
+    | 'completion'
+    | 'other_request'
+    | 'other_notification'
+    | 'mixed'
+    | 'none_visible'
+    | 'unavailable';
+
+export type CompletionTimelineFirstPollContentionUriScope =
+    | 'same_uri'
+    | 'other_uri'
+    | 'mixed'
+    | 'unavailable';
+
+export interface CompletionTimelineFirstPollContentionAttributionTrace {
+    contender_class: CompletionTimelineFirstPollContentionClass;
+    uri_scope: CompletionTimelineFirstPollContentionUriScope;
+    inflight_count: number;
+    oldest_inflight_age_ms?: number;
+    concurrency_level: number;
+}
+
 export interface CompletionTimelineExactArtifactPollTrace {
     poll_count: number;
     poll_elapsed_ms: number;
@@ -616,6 +639,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     service_future_first_poll_entered_at_ms?: number;
     service_future_first_poll_outcome?: CompletionTimelineServiceFutureFirstPollOutcome;
     service_future_first_wake_scheduled_at_ms?: number;
+    first_poll_contention_attribution?: CompletionTimelineFirstPollContentionAttributionTrace;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;

@@ -58,7 +58,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.';
 
 export function getAverageTraceProvenanceNotice(
     trace: Pick<CompletionTimelineTraceViewModel, 'trigger_mode'> | null | undefined
@@ -106,7 +106,28 @@ function stageDurationPercent(
     return Math.min(100, Math.max(raw, 0));
 }
 
-function mapTrace(trace: CompletionTimelineTrace): CompletionTimelineTraceViewModel {
+function sanitizeServerEdgeDetailsForContract(
+    contractVersion: number,
+    details: CompletionTimelineServerEdgeDetailsTrace | undefined
+): CompletionTimelineServerEdgeDetailsTrace | undefined {
+    if (!details) {
+        return undefined;
+    }
+
+    if (contractVersion < 12 && details.first_poll_contention_attribution) {
+        return {
+            ...details,
+            first_poll_contention_attribution: undefined,
+        };
+    }
+
+    return details;
+}
+
+function mapTrace(
+    trace: CompletionTimelineTrace,
+    contractVersion: number
+): CompletionTimelineTraceViewModel {
     const dominantStage = resolveDominantStageName(trace);
     const maxStageEnd = trace.stages.reduce(
         (max, stage) => Math.max(max, stage.started_offset_ms + stage.duration_ms),
@@ -128,6 +149,10 @@ function mapTrace(trace: CompletionTimelineTrace): CompletionTimelineTraceViewMo
 
     return {
         ...trace,
+        server_edge_details: sanitizeServerEdgeDetailsForContract(
+            contractVersion,
+            trace.server_edge_details
+        ),
         max_stage_end_ms: maxStageEnd,
         unattributed_overhead_ms: unattributedOverheadMs,
         dominant_stage: dominantStage,
@@ -164,7 +189,8 @@ function mostFrequentValue<T extends string>(
 }
 
 function buildAverageTrace(
-    traces: CompletionTimelineTraceViewModel[]
+    traces: CompletionTimelineTraceViewModel[],
+    contractVersion: number
 ): CompletionTimelineTraceViewModel | null {
     if (traces.length === 0) {
         return null;
@@ -255,7 +281,7 @@ function buildAverageTrace(
         dominant_stage: undefined,
         stages: averageStages,
     };
-    const averageTrace = mapTrace(averageTraceRaw);
+    const averageTrace = mapTrace(averageTraceRaw, contractVersion);
     return {
         ...averageTrace,
         sample_count: traces.length,
@@ -286,8 +312,8 @@ export function mapCompletionTimelineResponseToPanelState(
 ): CompletionTimelinePanelState {
     const traces = [...response.traces]
         .sort((left, right) => right.started_at_ms - left.started_at_ms)
-        .map(mapTrace);
-    const averageTrace = buildAverageTrace(traces);
+        .map((trace) => mapTrace(trace, response.version));
+    const averageTrace = buildAverageTrace(traces, response.version);
 
     return {
         kind: 'ready',

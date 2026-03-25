@@ -140,6 +140,17 @@ export function formatCompletionTimelineTraceForClipboard(
             ...(typeof trace.server_edge_details.first_poll_to_first_wake_wait_ms === 'number'
                 ? [`first_poll_to_first_wake_wait_ms=${trace.server_edge_details.first_poll_to_first_wake_wait_ms}`]
                 : []),
+            ...(trace.server_edge_details.first_poll_contention_attribution
+                ? [
+                    `first_poll_contention_contender_class=${trace.server_edge_details.first_poll_contention_attribution.contender_class}`,
+                    `first_poll_contention_uri_scope=${trace.server_edge_details.first_poll_contention_attribution.uri_scope}`,
+                    `first_poll_contention_inflight_count=${trace.server_edge_details.first_poll_contention_attribution.inflight_count}`,
+                    `first_poll_contention_concurrency_level=${trace.server_edge_details.first_poll_contention_attribution.concurrency_level}`,
+                    ...(typeof trace.server_edge_details.first_poll_contention_attribution.oldest_inflight_age_ms === 'number'
+                        ? [`first_poll_contention_oldest_inflight_age_ms=${trace.server_edge_details.first_poll_contention_attribution.oldest_inflight_age_ms}`]
+                        : []),
+                ]
+                : []),
             ...(typeof trace.server_edge_details.service_scope_to_method_wait_ms === 'number'
                 ? [`service_scope_to_method_wait_ms=${trace.server_edge_details.service_scope_to_method_wait_ms}`]
                 : []),
@@ -307,6 +318,23 @@ export function formatCompletionTimelineTraceForClipboard(
     return lines.join('\n');
 }
 
+function sanitizeTraceForContractVersion(
+    trace: CompletionTimelineTraceViewModel,
+    contractVersion: number
+): CompletionTimelineTraceViewModel {
+    if (contractVersion < 12 && trace.server_edge_details?.first_poll_contention_attribution) {
+        return {
+            ...trace,
+            server_edge_details: {
+                ...trace.server_edge_details,
+                first_poll_contention_attribution: undefined,
+            },
+        };
+    }
+
+    return trace;
+}
+
 function formatTurnHolderLine(
     label: string,
     holder: NonNullable<CompletionTimelineTraceViewModel['turn_attribution']>['active_holder']
@@ -358,9 +386,14 @@ function formatServerTimelineSectionForClipboard(
     if (state.version < 11) {
         lines.push('v11 first-poll / first-wake split is unavailable by design on this payload.');
     }
+    if (state.version < 12) {
+        lines.push('v12 first-poll contention attribution is unavailable by design on this payload.');
+    }
     const traces = mode === 'average'
-        ? (state.average_trace ? [state.average_trace] : [])
-        : state.traces;
+        ? (state.average_trace
+            ? [sanitizeTraceForContractVersion(state.average_trace, state.version)]
+            : [])
+        : state.traces.map((trace) => sanitizeTraceForContractVersion(trace, state.version));
     if (traces.length === 0) {
         lines.push('No server traces visible.');
         return lines.join('\n');

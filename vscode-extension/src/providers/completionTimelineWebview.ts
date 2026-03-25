@@ -790,6 +790,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 11) {
                 notices.push('v11 first-poll / first-wake split is unavailable by design on this payload.');
             }
+            if (contractVersion < 12) {
+                notices.push('v12 first-poll contention attribution is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -1017,6 +1020,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 ...(typeof details.first_poll_to_first_wake_wait_ms === 'number'
                     ? ['first_poll_to_first_wake_wait=' + escapeHtml(details.first_poll_to_first_wake_wait_ms) + 'ms']
                     : []),
+                ...(details.first_poll_contention_attribution
+                    ? [
+                        'first_poll_contention_contender_class=' + escapeHtml(details.first_poll_contention_attribution.contender_class),
+                        'first_poll_contention_uri_scope=' + escapeHtml(details.first_poll_contention_attribution.uri_scope),
+                        'first_poll_contention_inflight_count=' + escapeHtml(details.first_poll_contention_attribution.inflight_count),
+                        'first_poll_contention_concurrency_level=' + escapeHtml(details.first_poll_contention_attribution.concurrency_level),
+                        ...(typeof details.first_poll_contention_attribution.oldest_inflight_age_ms === 'number'
+                            ? ['first_poll_contention_oldest_inflight_age_ms=' + escapeHtml(details.first_poll_contention_attribution.oldest_inflight_age_ms) + 'ms']
+                            : []),
+                    ]
+                    : []),
                 ...(typeof details.transport_to_service_scope_wait_ms === 'number'
                     ? ['transport_to_service_scope_wait=' + escapeHtml(details.transport_to_service_scope_wait_ms) + 'ms']
                     : []),
@@ -1046,6 +1060,22 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 );
             }
             return '<div class="overhead">' + bits.join(' | ') + '</div>';
+        }
+
+        function sanitizeTraceForContractVersion(trace, contractVersion) {
+            if (
+                contractVersion < 12 &&
+                trace?.server_edge_details?.first_poll_contention_attribution
+            ) {
+                return {
+                    ...trace,
+                    server_edge_details: {
+                        ...trace.server_edge_details,
+                        first_poll_contention_attribution: undefined,
+                    },
+                };
+            }
+            return trace;
         }
 
         function renderTrace(trace) {
@@ -1180,14 +1210,16 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
 
         function renderReadyState(state) {
-            const traces = state.traces || [];
+            const traces = (state.traces || []).map((trace) =>
+                sanitizeTraceForContractVersion(trace, state.version)
+            );
             if (currentMode === 'average') {
                 if (!state.average_trace) {
                     serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
                         '<div class="placeholder">No completion traces to average yet.</div>';
                 } else {
                     serverRoot.innerHTML = renderContractAvailabilityNotice(state.version) +
-                        renderTrace(state.average_trace);
+                        renderTrace(sanitizeTraceForContractVersion(state.average_trace, state.version));
                 }
                 return;
             }
@@ -1231,6 +1263,8 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                             ? ' | v8 provenance unavailable by design'
                             : state.version < 11
                                 ? ' | v11 first-poll / first-wake split unavailable by design'
+                                : state.version < 12
+                                    ? ' | v12 first-poll contention attribution unavailable by design'
                                 : '');
             }
         }

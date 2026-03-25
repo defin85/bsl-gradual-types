@@ -2,6 +2,7 @@ import {
     CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
     CompletionTimelineFetchResult,
+    CompletionTimelineFirstPollContentionAttributionTrace,
     CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
@@ -64,6 +65,7 @@ export interface ObservabilityIncidentRequestSummary {
     service_future_first_poll_entered_at_ms?: number;
     service_future_first_poll_outcome?: string;
     service_future_first_wake_scheduled_at_ms?: number;
+    first_poll_contention_attribution?: CompletionTimelineFirstPollContentionAttributionTrace;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
@@ -104,6 +106,7 @@ export function buildObservabilityIncidentRequestSection(
     }
 
     const traces = completionTimeline.response.traces;
+    const contractVersion = completionTimeline.response.version;
     const captureScope = buildCaptureScope(traces);
     const gaps: string[] = [];
     const unusedProbeIds = new Set(clientProbes.map((probe) => probe.probe_id));
@@ -137,6 +140,10 @@ export function buildObservabilityIncidentRequestSection(
                 trace.server_edge_details?.service_future_first_poll_outcome,
             service_future_first_wake_scheduled_at_ms:
                 trace.server_edge_details?.service_future_first_wake_scheduled_at_ms,
+            first_poll_contention_attribution:
+                contractVersion >= 12
+                    ? trace.server_edge_details?.first_poll_contention_attribution
+                    : undefined,
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
@@ -236,6 +243,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.service_future_first_wake_scheduled_at_ms === 'number'
                 ? `service_future_first_wake_scheduled_at_ms=${request.service_future_first_wake_scheduled_at_ms}`
+                : undefined,
+            request.first_poll_contention_attribution
+                ? `first_poll_contention=${request.first_poll_contention_attribution.contender_class}:${request.first_poll_contention_attribution.uri_scope}|inflight_count=${request.first_poll_contention_attribution.inflight_count}|concurrency_level=${request.first_poll_contention_attribution.concurrency_level}${typeof request.first_poll_contention_attribution.oldest_inflight_age_ms === 'number' ? `|oldest_inflight_age_ms=${request.first_poll_contention_attribution.oldest_inflight_age_ms}` : ''}`
                 : undefined,
             request.pre_method_attribution_provenance
                 ? `pre_method_provenance=${request.pre_method_attribution_provenance}`

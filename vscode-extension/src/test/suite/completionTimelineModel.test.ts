@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 11,
+            version: 12,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -61,6 +61,13 @@ suite('Completion Timeline Model Test Suite', () => {
                         service_future_first_poll_entered_at_ms: 1_700_000_000_041,
                         service_future_first_poll_outcome: 'pending',
                         service_future_first_wake_scheduled_at_ms: 1_700_000_000_046,
+                        first_poll_contention_attribution: {
+                            contender_class: 'document_sync',
+                            uri_scope: 'same_uri',
+                            inflight_count: 1,
+                            oldest_inflight_age_ms: 1,
+                            concurrency_level: 16,
+                        },
                         pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_700_000_000_041,
                         method_entered_at_ms: 1_700_000_000_042,
@@ -157,7 +164,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 11);
+        assert.strictEqual(state.version, 12);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
@@ -183,6 +190,22 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_future_first_wake_scheduled_at_ms,
             1_700_000_000_046
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_attribution?.contender_class,
+            'document_sync'
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_attribution?.uri_scope,
+            'same_uri'
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_attribution?.inflight_count,
+            1
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_attribution?.concurrency_level,
+            16
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.pre_method_attribution_provenance,
@@ -256,6 +279,62 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
+    });
+
+    test('Older contract payloads should not surface v12 contention attribution', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 11,
+            traces: [
+                {
+                    trace_id: 'trace-v11',
+                    request_id: 'req-v11',
+                    uri: 'file:///tmp/v11.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        service_future_created_at_ms: 1_700_000_000_001,
+                        service_future_first_poll_entered_at_ms: 1_700_000_000_002,
+                        service_future_first_poll_outcome: 'pending',
+                        service_future_first_wake_scheduled_at_ms: 1_700_000_000_003,
+                        first_poll_contention_attribution: {
+                            contender_class: 'document_sync',
+                            uri_scope: 'same_uri',
+                            inflight_count: 1,
+                            oldest_inflight_age_ms: 1,
+                            concurrency_level: 16,
+                        },
+                        handler_entered_at_ms: 1_700_000_000_004,
+                        response_sent_at_ms: 1_700_000_000_014,
+                        transport_to_handler_wait_ms: 4,
+                        server_handler_exec_ms: 10,
+                    },
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.strictEqual(state.version, 11);
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_attribution,
+            undefined
+        );
     });
 
     test('Legacy v2 payload without server edge details remains readable', () => {
@@ -431,7 +510,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

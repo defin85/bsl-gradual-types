@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 11,
+                        version: 12,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -222,6 +222,13 @@ suite('LSP Custom Requests Test Suite', () => {
                                     service_future_first_poll_entered_at_ms: 1_700_000_000_003,
                                     service_future_first_poll_outcome: 'pending',
                                     service_future_first_wake_scheduled_at_ms: 1_700_000_000_007,
+                                    first_poll_contention_attribution: {
+                                        contender_class: 'document_sync',
+                                        uri_scope: 'same_uri',
+                                        inflight_count: 1,
+                                        oldest_inflight_age_ms: 2,
+                                        concurrency_level: 16
+                                    },
                                     pre_method_attribution_provenance: 'same_request_authoritative',
                                     service_scope_entered_at_ms: 1_700_000_000_002,
                                     method_entered_at_ms: 1_700_000_000_003,
@@ -403,7 +410,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 11);
+        assert.strictEqual(result.response.version, 12);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
@@ -430,6 +437,22 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.service_future_first_wake_scheduled_at_ms,
             1_700_000_000_007
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_contention_attribution?.contender_class,
+            'document_sync'
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_contention_attribution?.uri_scope,
+            'same_uri'
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_contention_attribution?.inflight_count,
+            1
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_contention_attribution?.concurrency_level,
+            16
         );
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.pre_method_attribution_provenance,

@@ -225,6 +225,8 @@ struct CompletionTimelineCapture {
     service_future_first_poll_entered_at_ms: Option<u64>,
     service_future_first_poll_outcome: Option<String>,
     service_future_first_wake_scheduled_at_ms: Option<u64>,
+    first_poll_contention_attribution:
+        Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
     service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
@@ -266,6 +268,7 @@ impl CompletionTimelineCapture {
             service_future_first_poll_entered_at_ms: None,
             service_future_first_poll_outcome: None,
             service_future_first_wake_scheduled_at_ms: None,
+            first_poll_contention_attribution: None,
             service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
@@ -422,6 +425,13 @@ impl CompletionTimelineCapture {
             Some(service_future_first_wake_scheduled_at_ms);
     }
 
+    fn set_first_poll_contention_attribution(
+        &mut self,
+        first_poll_contention_attribution: crate::types::CompletionTimelineFirstPollContentionAttributionTrace,
+    ) {
+        self.first_poll_contention_attribution = Some(first_poll_contention_attribution);
+    }
+
     fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
         self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
     }
@@ -465,6 +475,9 @@ impl CompletionTimelineCapture {
                 service_future_first_poll_outcome: self.service_future_first_poll_outcome.clone(),
                 service_future_first_wake_scheduled_at_ms: self
                     .service_future_first_wake_scheduled_at_ms,
+                first_poll_contention_attribution: self
+                    .first_poll_contention_attribution
+                    .clone(),
                 service_scope_entered_at_ms: self.service_scope_entered_at_ms,
                 method_entered_at_ms: self.method_entered_at_ms,
                 handler_entered_at_ms: self.handler_entered_at_ms,
@@ -2920,6 +2933,17 @@ impl BslLanguageServer {
                 service_future_first_wake_scheduled_at_ms,
             );
         }
+        if let Some(first_poll_contention_attribution) = super::super::request_context::
+            current_request_service_future_first_poll_contention_attribution()
+            .or_else(|| {
+                pending_request_context
+                    .and_then(|context| context.first_poll_contention_attribution.clone())
+            })
+        {
+            timeline_capture.set_first_poll_contention_attribution(
+                first_poll_contention_attribution,
+            );
+        }
         timeline_capture.set_response_sent_at_ms(super::super::unix_timestamp_ms());
         if !shadow_internal_request {
             if let Some(server_edge_details) = timeline_capture.server_edge_details_trace() {
@@ -3110,6 +3134,7 @@ mod tests {
         assert_eq!(details.service_future_first_poll_outcome, None);
         assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
         assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
+        assert_eq!(details.first_poll_contention_attribution, None);
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(2));
         assert_eq!(details.service_scope_to_method_wait_ms, Some(3));
         assert_eq!(details.transport_to_method_wait_ms, Some(5));
@@ -3129,6 +3154,15 @@ mod tests {
         capture.set_service_future_first_poll_entered_at_ms(1_700_000_000_000);
         capture.set_service_future_first_poll_outcome("pending");
         capture.set_service_future_first_wake_scheduled_at_ms(1_700_000_000_007);
+        capture.set_first_poll_contention_attribution(
+            crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+                contender_class: "document_sync".to_string(),
+                uri_scope: "same_uri".to_string(),
+                inflight_count: 1,
+                oldest_inflight_age_ms: Some(15),
+                concurrency_level: crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64,
+            },
+        );
         capture.set_service_scope_entered_at_ms(1_700_000_000_009);
         capture.set_method_entered_at_ms(1_700_000_000_012);
         capture.set_handler_entered_at_ms(1_700_000_000_020);
@@ -3160,6 +3194,17 @@ mod tests {
             Some(1_700_000_000_007)
         );
         assert_eq!(details.first_poll_to_first_wake_wait_ms, Some(7));
+        let contention = details
+            .first_poll_contention_attribution
+            .expect("v12 first-poll contention attribution");
+        assert_eq!(contention.contender_class, "document_sync");
+        assert_eq!(contention.uri_scope, "same_uri");
+        assert_eq!(contention.inflight_count, 1);
+        assert_eq!(contention.oldest_inflight_age_ms, Some(15));
+        assert_eq!(
+            contention.concurrency_level,
+            crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64
+        );
         assert_eq!(details.service_future_to_scope_wait_ms, Some(14));
     }
 
@@ -3195,6 +3240,7 @@ mod tests {
         );
         assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
         assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
+        assert_eq!(details.first_poll_contention_attribution, None);
     }
 
     #[test]

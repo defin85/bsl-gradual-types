@@ -10295,7 +10295,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        11
+        12
     );
     assert!(
         result
@@ -10663,6 +10663,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                     .get("service_future_first_poll_outcome")
                     .and_then(|value| value.as_str())
                     .expect("service_future_first_poll_outcome");
+                let first_poll_contention_attribution = server_edge_details
+                    .get("first_poll_contention_attribution")
+                    .and_then(|value| value.as_object())
+                    .expect("first_poll_contention_attribution");
                 assert!(
                     service_scope_entered_at_ms <= service_future_first_poll_entered_at_ms,
                     "service_scope_entered_at_ms must not exceed service_future_first_poll_entered_at_ms"
@@ -10681,6 +10685,61 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                         .saturating_sub(service_future_created_at_ms),
                     "service_future_to_first_poll_wait_ms must match timestamp delta"
                 );
+                let contender_class = first_poll_contention_attribution
+                    .get("contender_class")
+                    .and_then(|value| value.as_str())
+                    .expect("first_poll_contention_attribution.contender_class");
+                assert!(
+                    matches!(
+                        contender_class,
+                        "document_sync"
+                            | "completion"
+                            | "other_request"
+                            | "other_notification"
+                            | "mixed"
+                            | "none_visible"
+                            | "unavailable"
+                    ),
+                    "unexpected first_poll_contention_attribution.contender_class={contender_class}"
+                );
+                let uri_scope = first_poll_contention_attribution
+                    .get("uri_scope")
+                    .and_then(|value| value.as_str())
+                    .expect("first_poll_contention_attribution.uri_scope");
+                assert!(
+                    matches!(uri_scope, "same_uri" | "other_uri" | "mixed" | "unavailable"),
+                    "unexpected first_poll_contention_attribution.uri_scope={uri_scope}"
+                );
+                let inflight_count = first_poll_contention_attribution
+                    .get("inflight_count")
+                    .and_then(|value| value.as_u64())
+                    .expect("first_poll_contention_attribution.inflight_count");
+                let concurrency_level = first_poll_contention_attribution
+                    .get("concurrency_level")
+                    .and_then(|value| value.as_u64())
+                    .expect("first_poll_contention_attribution.concurrency_level");
+                assert!(
+                    concurrency_level > 0,
+                    "first_poll_contention_attribution.concurrency_level must stay positive"
+                );
+                if let Some(oldest_inflight_age_ms) = first_poll_contention_attribution
+                    .get("oldest_inflight_age_ms")
+                    .and_then(|value| value.as_u64())
+                {
+                    assert!(
+                        inflight_count > 0,
+                        "oldest_inflight_age_ms must not be emitted when inflight_count=0"
+                    );
+                    assert!(
+                        oldest_inflight_age_ms <= service_future_to_first_poll_wait_ms,
+                        "oldest_inflight_age_ms must stay bounded by the same trace first-poll gap"
+                    );
+                } else {
+                    assert!(
+                        inflight_count == 0 || contender_class == "unavailable",
+                        "oldest_inflight_age_ms may be absent only for inflight_count=0 or unavailable snapshots"
+                    );
+                }
                 if let Some(service_future_first_wake_scheduled_at_ms) = server_edge_details
                     .get("service_future_first_wake_scheduled_at_ms")
                     .and_then(|value| value.as_u64())
@@ -10726,6 +10785,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 assert!(
                     !server_edge_details.contains_key("first_poll_to_first_wake_wait_ms"),
                     "first_poll_to_first_wake_wait_ms must not be fabricated when service_future_first_poll_entered_at_ms is absent"
+                );
+                assert!(
+                    !server_edge_details.contains_key("first_poll_contention_attribution"),
+                    "first_poll_contention_attribution must not be fabricated when service_future_first_poll_entered_at_ms is absent"
                 );
             }
             assert_eq!(
@@ -10778,6 +10841,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             assert!(
                 !server_edge_details.contains_key("first_poll_to_first_wake_wait_ms"),
                 "first_poll_to_first_wake_wait_ms must not be fabricated when service_scope_entered_at_ms is absent"
+            );
+            assert!(
+                !server_edge_details.contains_key("first_poll_contention_attribution"),
+                "first_poll_contention_attribution must not be fabricated when service_scope_entered_at_ms is absent"
             );
         }
     } else {

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
@@ -6,7 +6,10 @@ use std::task::{Context, Poll, Wake, Waker};
 
 use tower::Service;
 use tower_lsp::jsonrpc::{Id, Request};
-use tower_lsp::lsp_types::{CancelParams, CompletionParams, NumberOrString, Position, Url};
+use tower_lsp::lsp_types::{
+    CancelParams, CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
+    DidOpenTextDocumentParams, DidSaveTextDocumentParams, NumberOrString, Position, Url,
+};
 
 tokio::task_local! {
     static LSP_REQUEST_ID: Option<String>;
@@ -62,6 +65,8 @@ struct PendingCompletionRequestEntry {
     service_future_first_poll_entered_at_ms: Option<u64>,
     service_future_first_poll_outcome: Option<String>,
     service_future_first_wake_scheduled_at_ms: Option<u64>,
+    first_poll_contention_attribution:
+        Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
     service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -75,6 +80,8 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) service_future_first_poll_entered_at_ms: Option<u64>,
     pub(crate) service_future_first_poll_outcome: Option<String>,
     pub(crate) service_future_first_wake_scheduled_at_ms: Option<u64>,
+    pub(crate) first_poll_contention_attribution:
+        Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
     pub(crate) service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -83,18 +90,61 @@ struct ServiceFuturePollObservationSnapshot {
     first_poll_entered_at_ms: Option<u64>,
     first_poll_outcome: Option<String>,
     first_wake_scheduled_at_ms: Option<u64>,
+    first_poll_contention_attribution:
+        Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum InflightRequestClass {
+    DocumentSync,
+    Completion,
+    OtherRequest,
+    OtherNotification,
+}
+
+impl InflightRequestClass {
+    fn as_contract_str(self) -> &'static str {
+        match self {
+            Self::DocumentSync => "document_sync",
+            Self::Completion => "completion",
+            Self::OtherRequest => "other_request",
+            Self::OtherNotification => "other_notification",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct InflightRequestMetadata {
+    entry_id: u64,
+    class: InflightRequestClass,
+    uri: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct InflightRequestEntry {
+    class: InflightRequestClass,
+    uri: Option<String>,
+    started_at_ms: u64,
+}
+
+#[derive(Debug, Default)]
+struct InflightRequestRegistry {
+    next_entry_id: u64,
+    by_entry_id: HashMap<u64, InflightRequestEntry>,
 }
 
 #[derive(Debug, Clone)]
 struct ServiceFuturePollObservationState {
     request_id: Option<String>,
+    inflight_request: Option<InflightRequestMetadata>,
     snapshot: Arc<Mutex<ServiceFuturePollObservationSnapshot>>,
 }
 
 impl ServiceFuturePollObservationState {
-    fn new(request_id: Option<String>) -> Self {
+    fn new(request_id: Option<String>, inflight_request: Option<InflightRequestMetadata>) -> Self {
         Self {
             request_id,
+            inflight_request,
             snapshot: Arc::new(Mutex::new(ServiceFuturePollObservationSnapshot::default())),
         }
     }
@@ -121,7 +171,23 @@ impl ServiceFuturePollObservationState {
             .first_wake_scheduled_at_ms
     }
 
+    fn first_poll_contention_attribution(
+        &self,
+    ) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_poll_contention_attribution
+            .clone()
+    }
+
     fn record_first_poll_entered_at_ms(&self, first_poll_entered_at_ms: u64) {
+        let first_poll_contention_attribution = self
+            .inflight_request
+            .as_ref()
+            .and_then(|current| {
+                first_poll_contention_attribution_for_request(current, first_poll_entered_at_ms)
+            });
         let should_record_pending = {
             let mut snapshot = self
                 .snapshot
@@ -129,6 +195,8 @@ impl ServiceFuturePollObservationState {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if snapshot.first_poll_entered_at_ms.is_none() {
                 snapshot.first_poll_entered_at_ms = Some(first_poll_entered_at_ms);
+                snapshot.first_poll_contention_attribution =
+                    first_poll_contention_attribution.clone();
                 true
             } else {
                 false
@@ -140,6 +208,14 @@ impl ServiceFuturePollObservationState {
                     request_id,
                     first_poll_entered_at_ms,
                 );
+                if let Some(first_poll_contention_attribution) =
+                    first_poll_contention_attribution.clone()
+                {
+                    record_pending_completion_first_poll_contention_attribution(
+                        request_id,
+                        first_poll_contention_attribution,
+                    );
+                }
             }
         }
     }
@@ -311,15 +387,33 @@ struct InstrumentedServiceFuture<F> {
     inner: Pin<Box<F>>,
     first_poll_observed: bool,
     observation: ServiceFuturePollObservationState,
+    inflight_request_entry_id: Option<u64>,
 }
 
 impl<F> InstrumentedServiceFuture<F> {
-    fn new(inner: F, observation: ServiceFuturePollObservationState) -> Self {
+    fn new(
+        inner: F,
+        observation: ServiceFuturePollObservationState,
+        inflight_request: Option<&InflightRequestMetadata>,
+    ) -> Self {
         Self {
             inner: Box::pin(inner),
             first_poll_observed: false,
             observation,
+            inflight_request_entry_id: inflight_request.map(|request| request.entry_id),
         }
+    }
+
+    fn clear_inflight_request_entry(&mut self) {
+        if let Some(entry_id) = self.inflight_request_entry_id.take() {
+            remove_inflight_request_entry(entry_id);
+        }
+    }
+}
+
+impl<F> Drop for InstrumentedServiceFuture<F> {
+    fn drop(&mut self) {
+        self.clear_inflight_request_entry();
     }
 }
 
@@ -348,6 +442,7 @@ where
             Poll::Ready(output) => {
                 this.observation.record_first_poll_outcome("ready");
                 first_wake_tracker.disable();
+                this.clear_inflight_request_entry();
                 Poll::Ready(output)
             }
             Poll::Pending => {
@@ -363,6 +458,12 @@ fn pending_completion_request_ids_cell() -> &'static Mutex<PendingCompletionRequ
     static CELL: std::sync::OnceLock<Mutex<PendingCompletionRequestIds>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(PendingCompletionRequestIds::default()))
+}
+
+fn inflight_request_registry_cell() -> &'static Mutex<InflightRequestRegistry> {
+    static CELL: std::sync::OnceLock<Mutex<InflightRequestRegistry>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(InflightRequestRegistry::default()))
 }
 
 fn completion_request_key(params: &CompletionParams) -> CompletionRequestKey {
@@ -381,6 +482,218 @@ fn completion_request_key_from_request(request: &Request) -> Option<CompletionRe
     let params = request.params()?.clone();
     let completion_params = serde_json::from_value::<CompletionParams>(params).ok()?;
     Some(completion_request_key(&completion_params))
+}
+
+fn inflight_request_class_for_request(request: &Request) -> InflightRequestClass {
+    match request.method() {
+        "textDocument/completion" => InflightRequestClass::Completion,
+        "textDocument/didOpen"
+        | "textDocument/didChange"
+        | "textDocument/didSave"
+        | "textDocument/didClose"
+        | "textDocument/willSave"
+        | "textDocument/willSaveWaitUntil" => InflightRequestClass::DocumentSync,
+        _ if request.id().is_some() => InflightRequestClass::OtherRequest,
+        _ => InflightRequestClass::OtherNotification,
+    }
+}
+
+fn request_uri_from_value(value: &serde_json::Value) -> Option<String> {
+    let object = value.as_object()?;
+
+    if let Some(uri) = object
+        .get("textDocument")
+        .and_then(|value| value.as_object())
+        .and_then(|text_document| text_document.get("uri"))
+        .and_then(|value| value.as_str())
+    {
+        return Some(uri.to_string());
+    }
+
+    if let Some(uri) = object
+        .get("textDocumentPosition")
+        .and_then(|value| value.as_object())
+        .and_then(|text_document_position| text_document_position.get("textDocument"))
+        .and_then(|value| value.as_object())
+        .and_then(|text_document| text_document.get("uri"))
+        .and_then(|value| value.as_str())
+    {
+        return Some(uri.to_string());
+    }
+
+    object
+        .get("textDocumentPositionParams")
+        .and_then(|value| value.as_object())
+        .and_then(|text_document_position| text_document_position.get("textDocument"))
+        .and_then(|value| value.as_object())
+        .and_then(|text_document| text_document.get("uri"))
+        .and_then(|value| value.as_str())
+        .map(|uri| uri.to_string())
+}
+
+fn request_uri_from_request(request: &Request) -> Option<String> {
+    let params = request.params()?.clone();
+    match request.method() {
+        "textDocument/completion" => serde_json::from_value::<CompletionParams>(params)
+            .ok()
+            .map(|completion| completion.text_document_position.text_document.uri.to_string()),
+        "textDocument/didOpen" => serde_json::from_value::<DidOpenTextDocumentParams>(params)
+            .ok()
+            .map(|did_open| did_open.text_document.uri.to_string()),
+        "textDocument/didChange" => serde_json::from_value::<DidChangeTextDocumentParams>(params)
+            .ok()
+            .map(|did_change| did_change.text_document.uri.to_string()),
+        "textDocument/didSave" => serde_json::from_value::<DidSaveTextDocumentParams>(params)
+            .ok()
+            .map(|did_save| did_save.text_document.uri.to_string()),
+        "textDocument/didClose" => serde_json::from_value::<DidCloseTextDocumentParams>(params)
+            .ok()
+            .map(|did_close| did_close.text_document.uri.to_string()),
+        _ => request_uri_from_value(&params),
+    }
+}
+
+fn unavailable_first_poll_contention_attribution(
+    concurrency_level: u64,
+) -> crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+    crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+        contender_class: "unavailable".to_string(),
+        uri_scope: "unavailable".to_string(),
+        inflight_count: 0,
+        oldest_inflight_age_ms: None,
+        concurrency_level,
+    }
+}
+
+fn register_inflight_request(
+    request: &Request,
+    started_at_ms: u64,
+) -> Option<InflightRequestMetadata> {
+    let class = inflight_request_class_for_request(request);
+    let uri = request_uri_from_request(request);
+    let mut registry = inflight_request_registry_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.next_entry_id = registry.next_entry_id.saturating_add(1);
+    let entry_id = registry.next_entry_id;
+    registry.by_entry_id.insert(
+        entry_id,
+        InflightRequestEntry {
+            class,
+            uri: uri.clone(),
+            started_at_ms,
+        },
+    );
+    Some(InflightRequestMetadata {
+        entry_id,
+        class,
+        uri,
+    })
+}
+
+fn remove_inflight_request_entry(entry_id: u64) {
+    let mut registry = inflight_request_registry_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.by_entry_id.remove(&entry_id);
+}
+
+#[cfg(test)]
+fn clear_inflight_request_registry_for_testing() {
+    let mut registry = inflight_request_registry_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    registry.by_entry_id.clear();
+    registry.next_entry_id = 0;
+}
+
+fn first_poll_contention_attribution_for_request(
+    current: &InflightRequestMetadata,
+    first_poll_entered_at_ms: u64,
+) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+    let concurrency_level = crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64;
+    if current.class != InflightRequestClass::Completion {
+        return Some(unavailable_first_poll_contention_attribution(concurrency_level));
+    }
+
+    let registry = inflight_request_registry_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(current_entry) = registry.by_entry_id.get(&current.entry_id) else {
+        return Some(unavailable_first_poll_contention_attribution(concurrency_level));
+    };
+
+    let contenders: Vec<&InflightRequestEntry> = registry
+        .by_entry_id
+        .iter()
+        .filter_map(|(entry_id, entry)| {
+            if *entry_id == current.entry_id {
+                None
+            } else {
+                Some(entry)
+            }
+        })
+        .collect();
+
+    if contenders.is_empty() {
+        return Some(crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+            contender_class: "none_visible".to_string(),
+            uri_scope: "unavailable".to_string(),
+            inflight_count: 0,
+            oldest_inflight_age_ms: None,
+            concurrency_level,
+        });
+    }
+
+    let class_set: HashSet<InflightRequestClass> =
+        contenders.iter().map(|entry| entry.class).collect();
+    let contender_class = if class_set.len() == 1 {
+        class_set
+            .iter()
+            .next()
+            .map(|class| class.as_contract_str().to_string())
+            .unwrap_or_else(|| "none_visible".to_string())
+    } else {
+        "mixed".to_string()
+    };
+
+    let current_uri = current_entry.uri.as_deref().or(current.uri.as_deref());
+    let mut saw_same_uri = false;
+    let mut saw_other_uri = false;
+    let mut saw_unknown_uri = current_uri.is_none();
+    for contender in &contenders {
+        match (current_uri, contender.uri.as_deref()) {
+            (Some(current_uri), Some(contender_uri)) if contender_uri == current_uri => {
+                saw_same_uri = true;
+            }
+            (Some(_), Some(_)) => saw_other_uri = true,
+            _ => saw_unknown_uri = true,
+        }
+    }
+    let uri_scope = if saw_same_uri && saw_other_uri {
+        "mixed"
+    } else if saw_unknown_uri {
+        "unavailable"
+    } else if saw_same_uri {
+        "same_uri"
+    } else if saw_other_uri {
+        "other_uri"
+    } else {
+        "unavailable"
+    };
+
+    let oldest_inflight_age_ms = contenders
+        .iter()
+        .map(|entry| first_poll_entered_at_ms.saturating_sub(entry.started_at_ms))
+        .max();
+
+    Some(crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+        contender_class,
+        uri_scope: uri_scope.to_string(),
+        inflight_count: contenders.len() as u64,
+        oldest_inflight_age_ms,
+        concurrency_level,
+    })
 }
 
 fn remove_request_id_from_key_queue(
@@ -444,6 +757,7 @@ fn record_pending_completion_request_id(
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
                 service_future_first_wake_scheduled_at_ms: None,
+                first_poll_contention_attribution: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -488,6 +802,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
                 service_future_first_wake_scheduled_at_ms: None,
+                first_poll_contention_attribution: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -563,6 +878,18 @@ fn record_pending_completion_service_future_first_wake_scheduled_at_ms(
     }
 }
 
+fn record_pending_completion_first_poll_contention_attribution(
+    request_id: &str,
+    first_poll_contention_attribution: crate::types::CompletionTimelineFirstPollContentionAttributionTrace,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.first_poll_contention_attribution = Some(first_poll_contention_attribution);
+    }
+}
+
 fn record_pending_completion_service_scope_entered_at_ms(
     request_id: &str,
     service_scope_entered_at_ms: u64,
@@ -612,6 +939,7 @@ pub(crate) fn record_completion_request_id_for_testing(
             service_future_first_poll_entered_at_ms: None,
             service_future_first_poll_outcome: None,
             service_future_first_wake_scheduled_at_ms: None,
+            first_poll_contention_attribution: None,
             service_scope_entered_at_ms: None,
         },
     ) {
@@ -647,6 +975,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
         service_future_first_poll_entered_at_ms: entry.service_future_first_poll_entered_at_ms,
         service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
         service_future_first_wake_scheduled_at_ms: entry.service_future_first_wake_scheduled_at_ms,
+        first_poll_contention_attribution: entry.first_poll_contention_attribution,
         service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
     })
 }
@@ -694,6 +1023,7 @@ pub(crate) fn take_completion_request_context(
                 service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
                 service_future_first_wake_scheduled_at_ms: entry
                     .service_future_first_wake_scheduled_at_ms,
+                first_poll_contention_attribution: entry.first_poll_contention_attribution,
                 service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
             });
         }
@@ -760,6 +1090,18 @@ pub(crate) fn current_request_service_future_first_wake_scheduled_at_ms() -> Opt
             state
                 .as_ref()
                 .and_then(|observation| observation.first_wake_scheduled_at_ms())
+        })
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn current_request_service_future_first_poll_contention_attribution(
+) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+    LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+        .try_with(|state| {
+            state
+                .as_ref()
+                .and_then(|observation| observation.first_poll_contention_attribution())
         })
         .ok()
         .flatten()
@@ -987,11 +1329,15 @@ where
         if let Some(request_id) = request_id.as_deref() {
             record_pending_completion_request_id(&request, request_id, request_received_at_ms);
         }
+        let inflight_request = request_received_at_ms.and_then(|request_received_at_ms| {
+            register_inflight_request(&request, request_received_at_ms)
+        });
         let service_future_poll_observation =
-            ServiceFuturePollObservationState::new(request_id.clone());
+            ServiceFuturePollObservationState::new(request_id.clone(), inflight_request.clone());
         let future = InstrumentedServiceFuture::new(
             self.inner.call(request),
             service_future_poll_observation.clone(),
+            inflight_request.as_ref(),
         );
         let service_future_created_at_ms = Some(super::unix_timestamp_ms());
         if let (Some(request_id), Some(service_future_created_at_ms)) =

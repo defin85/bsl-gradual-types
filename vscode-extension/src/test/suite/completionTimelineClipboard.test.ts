@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 11,
+            version: 12,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -65,6 +65,13 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         service_future_first_poll_entered_at_ms: 1_699_999_999_989,
                         service_future_first_poll_outcome: 'pending',
                         service_future_first_wake_scheduled_at_ms: 1_699_999_999_995,
+                        first_poll_contention_attribution: {
+                            contender_class: 'document_sync',
+                            uri_scope: 'same_uri',
+                            inflight_count: 1,
+                            oldest_inflight_age_ms: 17,
+                            concurrency_level: 16,
+                        },
                         pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_699_999_999_988,
                         method_entered_at_ms: 1_700_000_000_000,
@@ -204,7 +211,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v11'));
+        assert.ok(text!.includes('contract=v12'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -214,6 +221,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('service_future_first_poll_entered_at_ms=1699999999989'));
         assert.ok(text!.includes('service_future_first_poll_outcome=pending'));
         assert.ok(text!.includes('service_future_first_wake_scheduled_at_ms=1699999999995'));
+        assert.ok(text!.includes('first_poll_contention_contender_class=document_sync'));
+        assert.ok(text!.includes('first_poll_contention_uri_scope=same_uri'));
+        assert.ok(text!.includes('first_poll_contention_inflight_count=1'));
+        assert.ok(text!.includes('first_poll_contention_oldest_inflight_age_ms=17'));
+        assert.ok(text!.includes('first_poll_contention_concurrency_level=16'));
         assert.ok(text!.includes('pre_method_attribution_provenance=same_request_authoritative'));
         assert.ok(text!.includes('service_scope_entered_at_ms=1699999999988'));
         assert.ok(text!.includes('method_entered_at_ms=1700000000000'));
@@ -272,10 +284,39 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(
             text!.includes(
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
+                    .replace(
+                        'and v11 first-poll / first-wake split are unavailable by design.',
+                        'v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.'
+                    )
             )
         );
         assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(!text!.includes('trace-1 (invoked)'));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should mark v11 payload as missing v12 contention attribution by design', () => {
+        const state = buildReadyState();
+        if (state.kind !== 'ready') {
+            throw new Error('expected ready state fixture');
+        }
+        state.version = 11;
+        state.traces[0].server_edge_details = {
+            ...state.traces[0].server_edge_details!,
+            first_poll_contention_attribution: undefined,
+        };
+
+        const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('contract=v11'));
+        assert.ok(
+            text!.includes(
+                'v12 first-poll contention attribution is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(text!.includes('service_future_first_poll_entered_at_ms=1699999999989'));
+        assert.ok(!text!.includes('first_poll_contention_contender_class='));
+        assert.ok(!text!.includes('first_poll_contention_uri_scope='));
+        assert.ok(!text!.includes('first_poll_contention_inflight_count='));
     });
 
     test('formatVisibleCompletionTimelineForClipboard should mark v10 payload as missing v11 first-poll / first-wake split by design', () => {
@@ -301,6 +342,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                 'v11 first-poll / first-wake split is unavailable by design on this payload.'
             )
         );
+        assert.ok(
+            text!.includes(
+                'v12 first-poll contention attribution is unavailable by design on this payload.'
+            )
+        );
         assert.ok(text!.includes('service_future_created_at_ms=1699999999972'));
         assert.ok(text!.includes('transport_to_service_future_wait_ms=12'));
         assert.ok(text!.includes('service_future_to_scope_wait_ms=16'));
@@ -309,6 +355,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(!text!.includes('service_future_first_wake_scheduled_at_ms='));
         assert.ok(!text!.includes('service_future_to_first_poll_wait_ms='));
         assert.ok(!text!.includes('first_poll_to_first_wake_wait_ms='));
+        assert.ok(!text!.includes('first_poll_contention_contender_class='));
     });
 
     test('formatVisibleCompletionTimelineForClipboard should mark v7 payload as missing v8 provenance by design', () => {
@@ -356,6 +403,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(
             text!.includes(
                 'v11 first-poll / first-wake split is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(
+            text!.includes(
+                'v12 first-poll contention attribution is unavailable by design on this payload.'
             )
         );
         assert.ok(text!.includes('transport_to_method_wait_ms=40'));

@@ -218,6 +218,16 @@ pub struct CompletionTimelinePrepareTimeoutAttributionTrace {
     pub overshoot_ms: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletionTimelineFirstPollContentionAttributionTrace {
+    pub contender_class: String,
+    pub uri_scope: String,
+    pub inflight_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oldest_inflight_age_ms: Option<u64>,
+    pub concurrency_level: u64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionTimelinePrepareDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -285,6 +295,9 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub service_future_to_first_poll_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_poll_to_first_wake_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_poll_contention_attribution:
+        Option<CompletionTimelineFirstPollContentionAttributionTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_service_scope_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

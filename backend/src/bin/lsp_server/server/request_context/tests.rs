@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::sync::OnceLock;
 use std::sync::{Arc, Mutex};
 use std::task::{Wake, Waker};
 
@@ -8,6 +9,11 @@ struct NoopWake;
 
 impl Wake for NoopWake {
     fn wake(self: Arc<Self>) {}
+}
+
+fn inflight_registry_test_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[tokio::test]
@@ -52,6 +58,14 @@ async fn current_request_service_future_first_poll_outcome_is_none_outside_scope
 async fn current_request_service_future_first_wake_scheduled_at_ms_is_none_outside_scope() {
     assert_eq!(
         current_request_service_future_first_wake_scheduled_at_ms(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn current_request_service_future_first_poll_contention_attribution_is_none_outside_scope() {
+    assert_eq!(
+        current_request_service_future_first_poll_contention_attribution(),
         None
     );
 }
@@ -706,4 +720,154 @@ fn cancelled_request_id_extracted_for_numeric_and_string_ids() {
 
     let non_cancel = Request::build("textDocument/completion").id(1_i64).finish();
     assert_eq!(cancelled_request_id_from_request(&non_cancel), None);
+}
+
+#[test]
+fn first_poll_contention_snapshot_reports_same_uri_document_sync() {
+    let _guard = inflight_registry_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_inflight_request_registry_for_testing();
+    let uri = Url::parse("file:///contention_same_uri.bsl").expect("url");
+    let completion_request = Request::build("textDocument/completion")
+        .id("req-completion")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 3, "character": 2 },
+        }))
+        .finish();
+    let did_change_request = Request::build("textDocument/didChange")
+        .params(json!({
+            "textDocument": { "uri": uri, "version": 2 },
+            "contentChanges": [{ "text": "НовыйТекст" }],
+        }))
+        .finish();
+
+    let current = register_inflight_request(&completion_request, 1_700_000_000_100)
+        .expect("current completion inflight entry");
+    let contender = register_inflight_request(&did_change_request, 1_700_000_000_050)
+        .expect("document sync inflight entry");
+
+    let snapshot = first_poll_contention_attribution_for_request(&current, 1_700_000_000_120)
+        .expect("bounded contention snapshot");
+    assert_eq!(snapshot.contender_class, "document_sync");
+    assert_eq!(snapshot.uri_scope, "same_uri");
+    assert_eq!(snapshot.inflight_count, 1);
+    assert_eq!(snapshot.oldest_inflight_age_ms, Some(70));
+    assert_eq!(
+        snapshot.concurrency_level,
+        crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64
+    );
+
+    remove_inflight_request_entry(current.entry_id);
+    remove_inflight_request_entry(contender.entry_id);
+    clear_inflight_request_registry_for_testing();
+}
+
+#[test]
+fn first_poll_contention_snapshot_uses_mixed_for_multiple_visible_classes() {
+    let _guard = inflight_registry_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_inflight_request_registry_for_testing();
+    let uri = Url::parse("file:///contention_mixed_uri.bsl").expect("url");
+    let completion_request = Request::build("textDocument/completion")
+        .id("req-completion")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 4, "character": 1 },
+        }))
+        .finish();
+    let did_change_request = Request::build("textDocument/didChange")
+        .params(json!({
+            "textDocument": { "uri": uri, "version": 3 },
+            "contentChanges": [{ "text": "Изменение" }],
+        }))
+        .finish();
+    let workspace_symbol_request = Request::build("workspace/symbol")
+        .id("req-other")
+        .params(json!({ "query": "Тест" }))
+        .finish();
+
+    let current = register_inflight_request(&completion_request, 1_700_000_000_100)
+        .expect("current completion inflight entry");
+    let document_sync = register_inflight_request(&did_change_request, 1_700_000_000_060)
+        .expect("document sync inflight entry");
+    let other_request = register_inflight_request(&workspace_symbol_request, 1_700_000_000_080)
+        .expect("other request inflight entry");
+
+    let snapshot = first_poll_contention_attribution_for_request(&current, 1_700_000_000_130)
+        .expect("bounded contention snapshot");
+    assert_eq!(snapshot.contender_class, "mixed");
+    assert_eq!(snapshot.uri_scope, "unavailable");
+    assert_eq!(snapshot.inflight_count, 2);
+    assert_eq!(snapshot.oldest_inflight_age_ms, Some(70));
+
+    remove_inflight_request_entry(current.entry_id);
+    remove_inflight_request_entry(document_sync.entry_id);
+    remove_inflight_request_entry(other_request.entry_id);
+    clear_inflight_request_registry_for_testing();
+}
+
+#[test]
+fn first_poll_contention_snapshot_uses_none_visible_when_no_contenders() {
+    let _guard = inflight_registry_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_inflight_request_registry_for_testing();
+    let uri = Url::parse("file:///contention_none_visible.bsl").expect("url");
+    let completion_request = Request::build("textDocument/completion")
+        .id("req-completion")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": 2, "character": 9 },
+        }))
+        .finish();
+
+    let current = register_inflight_request(&completion_request, 1_700_000_000_100)
+        .expect("current completion inflight entry");
+    let snapshot = first_poll_contention_attribution_for_request(&current, 1_700_000_000_101)
+        .expect("bounded contention snapshot");
+
+    assert_eq!(snapshot.contender_class, "none_visible");
+    assert_eq!(snapshot.uri_scope, "unavailable");
+    assert_eq!(snapshot.inflight_count, 0);
+    assert_eq!(snapshot.oldest_inflight_age_ms, None);
+    assert_eq!(
+        snapshot.concurrency_level,
+        crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64
+    );
+
+    remove_inflight_request_entry(current.entry_id);
+    clear_inflight_request_registry_for_testing();
+}
+
+#[test]
+fn first_poll_contention_snapshot_uses_unavailable_when_current_completion_is_missing() {
+    let _guard = inflight_registry_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_inflight_request_registry_for_testing();
+    let uri = Url::parse("file:///contention_unavailable.bsl").expect("url");
+    let missing_current = InflightRequestMetadata {
+        entry_id: u64::MAX,
+        class: InflightRequestClass::Completion,
+        uri: Some(uri.to_string()),
+    };
+
+    let snapshot = first_poll_contention_attribution_for_request(
+        &missing_current,
+        1_700_000_000_200,
+    )
+    .expect("bounded contention snapshot");
+
+    assert_eq!(snapshot.contender_class, "unavailable");
+    assert_eq!(snapshot.uri_scope, "unavailable");
+    assert_eq!(snapshot.inflight_count, 0);
+    assert_eq!(snapshot.oldest_inflight_age_ms, None);
+    assert_eq!(
+        snapshot.concurrency_level,
+        crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64
+    );
+    clear_inflight_request_registry_for_testing();
 }

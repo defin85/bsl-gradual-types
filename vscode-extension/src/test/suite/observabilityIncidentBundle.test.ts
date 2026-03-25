@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -75,6 +75,13 @@ suite('Observability Incident Bundle Test Suite', () => {
                             service_future_first_poll_entered_at_ms: 1_700_000_001_500,
                             service_future_first_poll_outcome: 'pending',
                             service_future_first_wake_scheduled_at_ms: 1_700_000_001_880,
+                            first_poll_contention_attribution: {
+                                contender_class: 'document_sync',
+                                uri_scope: 'same_uri',
+                                inflight_count: 1,
+                                oldest_inflight_age_ms: 300,
+                                concurrency_level: 16,
+                            },
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
@@ -212,7 +219,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 11);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 12);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -249,6 +256,22 @@ suite('Observability Incident Bundle Test Suite', () => {
             bundle.incidentReport.requests[0].service_future_first_wake_scheduled_at_ms,
             1_700_000_001_880
         );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].first_poll_contention_attribution?.contender_class,
+            'document_sync'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].first_poll_contention_attribution?.uri_scope,
+            'same_uri'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].first_poll_contention_attribution?.inflight_count,
+            1
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].first_poll_contention_attribution?.concurrency_level,
+            16
+        );
         assert.strictEqual(bundle.incidentReport.requests[0].dispatch_to_request_context_wait_ms, 200);
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_future_wait_ms, 1200);
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, 800);
@@ -279,6 +302,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_entered_at_ms=1700000001500'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_outcome=pending'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_wake_scheduled_at_ms=1700000001880'));
+        assert.ok(bundle.summaryMarkdown.includes('first_poll_contention=document_sync:same_uri|inflight_count=1|concurrency_level=16|oldest_inflight_age_ms=300'));
         assert.ok(bundle.summaryMarkdown.includes('dispatch_to_request_context_wait_ms=200'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_future_wait_ms=1200'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_to_scope_wait_ms=800'));
@@ -398,7 +422,42 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_created_at_ms, 1_700_000_001_200);
         assert.ok(bundle.summaryMarkdown.includes('contract=v10'));
         assert.ok(bundle.summaryMarkdown.includes('first-poll / first-wake split is unavailable by design'));
+        assert.ok(bundle.summaryMarkdown.includes('contention attribution is unavailable by design'));
         assert.ok(!bundle.summaryMarkdown.includes('No gaps were recorded for this bundle.'));
+    });
+
+    test('v11 completion timeline should mark v12 contention attribution as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 11;
+        timeline.response.traces[0].server_edge_details = {
+            ...timeline.response.traces[0].server_edge_details!,
+            first_poll_contention_attribution: {
+                contender_class: 'document_sync',
+                uri_scope: 'same_uri',
+                inflight_count: 1,
+                oldest_inflight_age_ms: 300,
+                concurrency_level: 16,
+            },
+        };
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v11')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v12 first-poll contention attribution')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v11')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v12 first-poll contention attribution')));
+        assert.strictEqual(bundle.incidentReport.requests[0].first_poll_contention_attribution, undefined);
+        assert.ok(bundle.summaryMarkdown.includes('contract=v11'));
+        assert.ok(bundle.summaryMarkdown.includes('v12 first-poll contention attribution is unavailable by design'));
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

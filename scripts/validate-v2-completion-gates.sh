@@ -11,6 +11,8 @@ PERF_PROFILES="${PERF_PROFILES:-small large churn}"
 if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
   if [[ "${CHANGE_ID}" == "refactor-completion-prepare-lightweight-exact-split" ]]; then
     REAL_MODULE_PROFILES="warm churn"
+  elif [[ "${CHANGE_ID}" == "refactor-completion-superseded-active-turn-release" ]]; then
+    REAL_MODULE_PROFILES="churn overlap"
   elif [[ "${CHANGE_ID}" == "refactor-document-symbol-interactive-isolation" ]]; then
     REAL_MODULE_PROFILES="outline"
   else
@@ -61,6 +63,13 @@ for profile in ${REAL_MODULE_PROFILES}; do
       report_var="BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT"
       report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
       summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.md"
+      ;;
+    overlap)
+      profile_title="same-file overlap supersession"
+      test_name="p40_real_conf_big_same_file_overlap_completion_perf_report_live"
+      report_var="BSL_V2_REAL_CONF_BIG_OVERLAP_COMPLETION_PERF_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-overlap-completion-perf-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-overlap-completion-perf-live.md"
       ;;
     *)
       echo "Unsupported REAL_MODULE_PROFILES entry: ${profile}" >&2
@@ -217,6 +226,23 @@ for profile in real_module_profiles:
                 f"- documentSymbol present responses: `{summary.get('measured_document_symbol_present_responses_total', 0)}`",
                 f"- documentSymbol null responses: `{summary.get('measured_document_symbol_null_responses_total', 0)}`",
                 f"- ingress regression samples: `{summary.get('measured_ingress_regression_samples', 0)}`",
+            ]
+        )
+    if "measured_first_cancelled_or_superseded_traces" in summary:
+        profile_lines.extend(
+            [
+                f"- first cancelled/superseded traces: `{summary.get('measured_first_cancelled_or_superseded_traces', 0)}`",
+                f"- first empty responses: `{summary.get('measured_first_empty_response_samples', 0)}`",
+                f"- first registry cleared: `{summary.get('measured_first_registry_cleared_samples', 0)}`",
+                f"- second non-empty responses: `{summary.get('measured_second_non_empty_samples', 0)}`",
+                (
+                    "`p95(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_max_ms', 0)}ms`"
+                ),
             ]
         )
     spec["summary_path"].write_text("\n".join(profile_lines) + "\n", encoding="utf-8")

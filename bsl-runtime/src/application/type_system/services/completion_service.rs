@@ -996,6 +996,7 @@ async fn get_completion_internal(
         }
     }
     drop(_collect_guard);
+    tokio::task::yield_now().await;
 
     let ranking_input: Vec<RankingCandidate> = candidates
         .into_iter()
@@ -1012,6 +1013,7 @@ async fn get_completion_internal(
     let rank_started = Instant::now();
     let ranked = rank_candidates_with_trace(ranking_input, &context, trace_request_id);
     let rank_elapsed = rank_started.elapsed();
+    tokio::task::yield_now().await;
     let is_incomplete = ranked.candidates.len() > COMPLETION_MAX_ITEMS;
     let limited = ranked.candidates.into_iter().take(COMPLETION_MAX_ITEMS);
 
@@ -1063,6 +1065,7 @@ async fn get_completion_internal(
         }
     }
     drop(_format_guard);
+    tokio::task::yield_now().await;
 
     Ok(CompletionResult {
         items,

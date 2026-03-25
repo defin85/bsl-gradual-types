@@ -15265,6 +15265,231 @@ async fn p33_completion_transport_first_poll_stays_short_under_completion_burst(
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_same_file_completion_supersession_releases_active_turn_during_response_build() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIRST_REQUEST_ID: i64 = 40_710;
+    const SECOND_REQUEST_ID: i64 = 40_711;
+    const FIRST_POLL_BUDGET_MS: u64 = 150;
+
+    fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::List(list) => list.is_incomplete && list.items.is_empty(),
+            CompletionResponse::Array(items) => items.is_empty(),
+        }
+    }
+
+    fn completion_response_empty(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::List(list) => list.items.is_empty(),
+            CompletionResponse::Array(items) => items.is_empty(),
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _response_build_delay_guard =
+        EnvVarGuard::set("BSL_TEST_COMPLETION_RESPONSE_BUILD_DELAY_MS", "300");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf();
+    let fixture_path = workspace_root.join("examples").join("test_lsp.bsl");
+    let fixture_text =
+        std::fs::read_to_string(&fixture_path).expect("read examples/test_lsp.bsl fixture");
+    let uri = Url::from_file_path(&fixture_path).expect("fixture uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: fixture_text.clone(),
+                },
+            },
+        )
+        .await;
+    server.sync_v2_globals().await;
+
+    let position = find_utf16_position_after_marker(&fixture_text, "Arr.");
+    live_transport_write_completion_request(
+        &mut harness,
+        FIRST_REQUEST_ID,
+        &uri,
+        position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .completion_cancellation_registry_v2
+                .get(&FIRST_REQUEST_ID.to_string())
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first completion request must register before supersession");
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    live_transport_write_completion_request(
+        &mut harness,
+        SECOND_REQUEST_ID,
+        &uri,
+        position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+
+    let (first_response, second_response) = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut first_response = None;
+        let mut second_response = None;
+        loop {
+            let response = harness.read_message().await;
+            match response.get("id").and_then(|value| value.as_i64()) {
+                Some(FIRST_REQUEST_ID) => first_response = Some(response),
+                Some(SECOND_REQUEST_ID) => second_response = Some(response),
+                _ => {}
+            }
+            if first_response.is_some() && second_response.is_some() {
+                break (
+                    first_response.take().expect("first completion response"),
+                    second_response.take().expect("second completion response"),
+                );
+            }
+        }
+    })
+    .await
+    .expect("both completion responses must arrive");
+
+    for _ in 0..40 {
+        if server
+            .completion_cancellation_registry_v2
+            .get(&FIRST_REQUEST_ID.to_string())
+            .is_none()
+        {
+            break;
+        }
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        server
+            .completion_cancellation_registry_v2
+            .get(&FIRST_REQUEST_ID.to_string())
+            .is_none(),
+        "newer same-file completion must proactively cancel the older active request"
+    );
+
+    let parse_completion_response = |response: &serde_json::Value| {
+        let result = response
+            .get("result")
+            .cloned()
+            .expect("completion result field");
+        serde_json::from_value::<Option<CompletionResponse>>(result)
+            .expect("parse completion response")
+    };
+    let first_completion =
+        parse_completion_response(&first_response).expect("first completion result present");
+    assert!(
+        completion_response_incomplete_empty(&first_completion)
+            || completion_response_empty(&first_completion),
+        "older superseded completion must resolve to bounded empty response, response={first_response:?}"
+    );
+
+    assert!(
+        parse_completion_response(&second_response).is_some(),
+        "newer same-file completion must still produce a bounded response"
+    );
+
+    let traces = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 40_799, 32).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            let first_trace = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&FIRST_REQUEST_ID.to_string())
+            });
+            let second_trace = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&SECOND_REQUEST_ID.to_string())
+            });
+            if let (Some(first_trace), Some(second_trace)) = (first_trace, second_trace) {
+                break (first_trace.clone(), second_trace.clone());
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("completion overlap traces must appear in timeline");
+    let (first_trace, second_trace) = traces;
+
+    let second_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&second_trace, "service_future_to_first_poll_wait_ms")
+            .expect("second request service_future_to_first_poll_wait_ms");
+    assert!(
+        second_first_poll_wait_ms <= FIRST_POLL_BUDGET_MS,
+        "newer same-file completion must reach first poll within budget while stale response_build is cancelled, trace={second_trace:?}"
+    );
+    assert!(
+        matches!(
+            first_trace.get("outcome").and_then(|value| value.as_str()),
+            Some("cancelled" | "superseded")
+        ),
+        "older overlap trace must terminate with cancelled/superseded outcome, trace={first_trace:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap() {
     struct EnvVarGuard {
         key: &'static str,
@@ -22397,6 +22622,606 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     live_transport_close_document(&mut harness, &uri).await;
     drop(server);
     harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p40_real_conf_big_same_file_overlap_completion_perf_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p40 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                Self { key, previous }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        fn completion_response_empty(response: &CompletionResponse) -> bool {
+            match response {
+                CompletionResponse::List(list) => list.items.is_empty(),
+                CompletionResponse::Array(items) => items.is_empty(),
+            }
+        }
+
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _env_lock = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let _response_build_delay_guard =
+            EnvVarGuard::set("BSL_TEST_COMPLETION_RESPONSE_BUILD_DELAY_MS", "300");
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        const PROFILE_NAME: &str = "p40_real_conf_big_same_file_overlap_completion_perf_report_live";
+        const WARMUP_REQUESTS: usize = 1;
+        const MEASURE_REQUESTS: usize = 5;
+        const OVERLAP_FIRST_POLL_BUDGET_MS: u64 = 250;
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-completion-superseded-active-turn-release".to_string()
+        });
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p40 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p40_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: module_text.clone(),
+                },
+            })
+            .await;
+
+        server.sync_v2_globals().await;
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        let opened_version = server
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            .expect("latest received version for p40 opened file");
+        assert_eq!(opened_version, 1, "real conf_big fixture must open at version 1");
+        assert!(
+            server
+                .analysis_v2
+                .wait_for_file_version(file_id, opened_version)
+                .await,
+            "analysis runtime must catch up to opened real conf_big file version"
+        );
+
+        let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
+        let completion_context = Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        });
+
+        let mut warmup_samples = Vec::new();
+        for index in 0..WARMUP_REQUESTS {
+            let request_id = 40_200_000_i64 + index as i64;
+            let started = Instant::now();
+            let labels = live_transport_completion_labels_with_request(
+                &mut harness,
+                request_id,
+                &uri,
+                completion_position,
+                completion_context.clone(),
+            )
+            .await;
+            warmup_samples.push(serde_json::json!({
+                "step": format!("warmup_completion_{}", index + 1),
+                "request_id": request_id,
+                "elapsed_ms": started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                "label_count": labels.len(),
+                "top_labels": labels.into_iter().take(8).collect::<Vec<_>>(),
+                "version": opened_version,
+            }));
+        }
+
+        let metrics_before_measured = coordinator.observability_metrics();
+        let counters_before_measured = metrics_before_measured
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics_before_measured.counters object");
+
+        let parse_completion_response = |response: &serde_json::Value| {
+            let result = response
+                .get("result")
+                .cloned()
+                .expect("completion result field");
+            serde_json::from_value::<Option<CompletionResponse>>(result)
+                .expect("parse completion response")
+                .expect("completion result present")
+        };
+
+        let mut measured_samples = Vec::new();
+        for index in 0..MEASURE_REQUESTS {
+            let first_request_id = 40_200_100_i64 + (index as i64 * 10);
+            let second_request_id = first_request_id + 1;
+
+            live_transport_write_completion_request(
+                &mut harness,
+                first_request_id,
+                &uri,
+                completion_position,
+                completion_context.clone(),
+            )
+            .await;
+
+            tokio::time::timeout(Duration::from_secs(10), async {
+                loop {
+                    if server
+                        .completion_cancellation_registry_v2
+                        .get(&first_request_id.to_string())
+                        .is_some()
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("first overlap completion request must register");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+
+            live_transport_write_completion_request(
+                &mut harness,
+                second_request_id,
+                &uri,
+                completion_position,
+                completion_context.clone(),
+            )
+            .await;
+
+            let (first_response, second_response) =
+                tokio::time::timeout(Duration::from_secs(20), async {
+                    let mut first_response = None;
+                    let mut second_response = None;
+                    loop {
+                        let response = harness.read_message().await;
+                        match response.get("id").and_then(|value| value.as_i64()) {
+                            Some(id) if id == first_request_id => first_response = Some(response),
+                            Some(id) if id == second_request_id => {
+                                second_response = Some(response)
+                            }
+                            _ => {}
+                        }
+                        if first_response.is_some() && second_response.is_some() {
+                            break (
+                                first_response.take().expect("first overlap response"),
+                                second_response.take().expect("second overlap response"),
+                            );
+                        }
+                    }
+                })
+                .await
+                .expect("both overlap completion responses must arrive");
+
+            for _ in 0..80 {
+                if server
+                    .completion_cancellation_registry_v2
+                    .get(&first_request_id.to_string())
+                    .is_none()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+
+            let first_completion = parse_completion_response(&first_response);
+            let second_completion = parse_completion_response(&second_response);
+            let second_labels = normalize_lsp_member_labels(&second_completion);
+            measured_samples.push(serde_json::json!({
+                "step": format!("measured_same_file_overlap_{}", index + 1),
+                "first_request_id": first_request_id,
+                "second_request_id": second_request_id,
+                "first_response_empty": completion_response_empty(&first_completion),
+                "second_label_count": second_labels.len(),
+                "second_top_labels": second_labels.into_iter().take(8).collect::<Vec<_>>(),
+                "first_registry_cleared": server
+                    .completion_cancellation_registry_v2
+                    .get(&first_request_id.to_string())
+                    .is_none(),
+            }));
+        }
+
+        let completion_timeline =
+            live_transport_get_completion_timeline(&mut harness, 40_200_900, 160).await;
+        let observability_metrics =
+            live_transport_get_observability_metrics(&mut harness, 40_200_901).await;
+        let timeline_traces = completion_timeline
+            .get("traces")
+            .and_then(|value| value.as_array())
+            .expect("completion timeline traces array");
+        let filtered_traces: Vec<serde_json::Value> = timeline_traces
+            .iter()
+            .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+            .cloned()
+            .collect();
+        assert!(
+            !filtered_traces.is_empty(),
+            "expected non-empty completion timeline traces for p40 real conf_big overlap gate"
+        );
+
+        let counters = observability_metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+
+        let trace_request_id_present_total = filtered_traces
+            .iter()
+            .filter(|trace| {
+                trace
+                    .get("request_id")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+            })
+            .count();
+        let trace_matching_mode = if trace_request_id_present_total > 0 {
+            "request_id"
+        } else {
+            "ordinal_by_filtered_uri_trace_order"
+        };
+        let trace_summary = |trace: &serde_json::Value| {
+            serde_json::json!({
+                "request_id": trace.get("request_id").and_then(|value| value.as_str()),
+                "outcome": trace.get("outcome").and_then(|value| value.as_str()),
+                "route": completion_timeline_prepare_detail_str(trace, "route"),
+                "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+                "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "service_future_to_first_poll_wait_ms",
+                ),
+                "cancel_observed_after_handler_enter_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "cancel_observed_after_handler_enter_ms",
+                ),
+                "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
+                "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
+                "response_build_other_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build_other"),
+            })
+        };
+
+        let measured_samples = measured_samples
+            .into_iter()
+            .map(|sample| {
+                let first_request_id = sample
+                    .get("first_request_id")
+                    .and_then(|value| value.as_i64())
+                    .expect("first_request_id");
+                let second_request_id = sample
+                    .get("second_request_id")
+                    .and_then(|value| value.as_i64())
+                    .expect("second_request_id");
+                let first_trace = filtered_traces.iter().find(|trace| {
+                    trace.get("request_id").and_then(|value| value.as_str())
+                        == Some(&first_request_id.to_string())
+                });
+                let second_trace = filtered_traces.iter().find(|trace| {
+                    trace.get("request_id").and_then(|value| value.as_str())
+                        == Some(&second_request_id.to_string())
+                });
+
+                let mut sample_object = sample
+                    .as_object()
+                    .cloned()
+                    .expect("sample must be json object");
+                sample_object.insert(
+                    "first_trace".to_string(),
+                    first_trace.map(trace_summary).unwrap_or(serde_json::json!(null)),
+                );
+                sample_object.insert(
+                    "second_trace".to_string(),
+                    second_trace.map(trace_summary).unwrap_or(serde_json::json!(null)),
+                );
+                serde_json::Value::Object(sample_object)
+            })
+            .collect::<Vec<_>>();
+
+        let counter_delta = |name: &str| -> u64 {
+            read_u64_metric(counters.get(name))
+                .saturating_sub(read_u64_metric(counters_before_measured.get(name)))
+        };
+        let sample_histogram = |field: &str| {
+            let values = measured_samples
+                .iter()
+                .filter_map(|sample| {
+                    sample
+                        .get("second_trace")
+                        .and_then(|trace| trace.get(field))
+                        .and_then(|value| value.as_u64())
+                })
+                .map(|value| value as f64)
+                .collect::<Vec<_>>();
+            sample_histogram_value(&values)
+        };
+
+        let warmup_non_empty_samples = warmup_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("label_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            })
+            .count();
+        let measured_trace_linked_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample.get("first_trace").is_some_and(|trace| !trace.is_null())
+                    && sample.get("second_trace").is_some_and(|trace| !trace.is_null())
+            })
+            .count();
+        let measured_first_empty_response_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("first_response_empty")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+            })
+            .count();
+        let measured_first_registry_cleared_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("first_registry_cleared")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+            })
+            .count();
+        let measured_second_non_empty_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("second_label_count")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > 0
+            })
+            .count();
+        let measured_first_cancelled_or_superseded_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                matches!(
+                    sample
+                        .get("first_trace")
+                        .and_then(|trace| trace.get("outcome"))
+                        .and_then(|value| value.as_str()),
+                    Some("cancelled" | "superseded")
+                )
+            })
+            .count();
+        let measured_head_hit_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("second_trace")
+                    .and_then(|trace| trace.get("route"))
+                    .and_then(|value| value.as_str())
+                    == Some("head_hit")
+            })
+            .count();
+        let measured_exact_hit_traces = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("second_trace")
+                    .and_then(|trace| trace.get("route"))
+                    .and_then(|value| value.as_str())
+                    == Some("exact_hit")
+            })
+            .count();
+        let measured_second_first_poll_histogram = sample_histogram("service_future_to_first_poll_wait_ms");
+        let measured_second_first_poll_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("second_trace")
+                    .and_then(|trace| trace.get("service_future_to_first_poll_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+
+        let latest_trace_summaries = filtered_traces
+            .iter()
+            .rev()
+            .take(MEASURE_REQUESTS * 2 + WARMUP_REQUESTS)
+            .map(trace_summary)
+            .collect::<Vec<_>>();
+
+        let report = serde_json::json!({
+            "change_id": change_id,
+            "profile": PROFILE_NAME,
+            "schema_version": 1,
+            "configuration_path": conf_big_root,
+            "module_path": module_path,
+            "marker": "Объект.",
+            "request_plan": {
+                "cache_mode": "self_warmed_same_process",
+                "warmup_requests": WARMUP_REQUESTS,
+                "measured_requests": MEASURE_REQUESTS,
+                "transport_path": "tower_lsp_server_serve_duplex",
+                "profile_kind": "same-file-overlap",
+                "response_build_delay_ms": 300,
+                "completion_trigger_mode": "invoked",
+            },
+            "warmup_samples": warmup_samples,
+            "measured_samples": measured_samples,
+            "summary": {
+                "trace_count_for_uri": filtered_traces.len(),
+                "trace_matching_mode": trace_matching_mode,
+                "trace_request_id_present_total": trace_request_id_present_total,
+                "warmup_non_empty_samples": warmup_non_empty_samples,
+                "measured_trace_linked_samples": measured_trace_linked_samples,
+                "measured_first_empty_response_samples": measured_first_empty_response_samples,
+                "measured_first_registry_cleared_samples": measured_first_registry_cleared_samples,
+                "measured_first_cancelled_or_superseded_traces": measured_first_cancelled_or_superseded_traces,
+                "measured_second_non_empty_samples": measured_second_non_empty_samples,
+                "measured_head_hit_traces": measured_head_hit_traces,
+                "measured_exact_hit_traces": measured_exact_hit_traces,
+                "measured_prepare_timeout_total_delta": counter_delta(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
+                ),
+                "measured_exact_deadline_total_delta": counter_delta(
+                    "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
+                ),
+                "measured_cancelled_total_delta": counter_delta(
+                    "intellisense_v2_completion_result_total_cancelled"
+                ),
+                "measured_fail_closed_total_delta": counter_delta(
+                    "intellisense_v2_completion_result_total_fail_closed"
+                ),
+                "measured_service_future_to_first_poll_wait_ms": measured_second_first_poll_histogram,
+                "measured_service_future_to_first_poll_wait_max_ms": measured_second_first_poll_max_ms,
+            },
+            "latest_trace_summaries": latest_trace_summaries,
+            "completion_timeline": {
+                "trace_count": filtered_traces.len(),
+                "selected_traces": filtered_traces,
+                "raw": completion_timeline,
+            },
+            "observability": {
+                "raw": observability_metrics,
+            }
+        });
+
+        let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_OVERLAP_COMPLETION_PERF_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!(
+                        "{change_id}-real-conf-big-overlap-completion-perf-live.json"
+                    ))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p40 real conf_big overlap report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report).expect("serialize p40 real conf_big overlap report"),
+        )
+        .expect("write p40 real conf_big overlap report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        assert!(
+            warmup_non_empty_samples == WARMUP_REQUESTS,
+            "expected warmup completion samples to be non-empty before overlap profile, warmup_samples={warmup_samples:?}"
+        );
+        assert!(
+            trace_matching_mode == "request_id",
+            "expected request-context parity to expose JSON-RPC request ids in overlap trace set, trace_matching_mode={}, filtered_traces={filtered_traces:?}",
+            trace_matching_mode
+        );
+        assert!(
+            measured_trace_linked_samples == MEASURE_REQUESTS,
+            "expected every measured overlap sample to link both first and second traces, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_first_empty_response_samples == MEASURE_REQUESTS,
+            "older overlap request must always terminate with bounded empty response, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_first_registry_cleared_samples == MEASURE_REQUESTS,
+            "older overlap request must always clear cancellation registry entry, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_first_cancelled_or_superseded_traces == MEASURE_REQUESTS,
+            "older overlap trace must always terminate with cancelled/superseded outcome, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_second_non_empty_samples == MEASURE_REQUESTS,
+            "newer overlap request must return non-empty completion labels on representative module, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_head_hit_traces + measured_exact_hit_traces >= MEASURE_REQUESTS,
+            "newer overlap traces must preserve route attribution, measured_head_hit_traces={}, measured_exact_hit_traces={}, measured_samples={measured_samples:?}",
+            measured_head_hit_traces,
+            measured_exact_hit_traces
+        );
+        assert!(
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout") == 0
+                && counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline") == 0,
+            "overlap gate must not regress into prepare_timeout/exact_deadline, counters={counters:?}"
+        );
+        assert!(
+            measured_second_first_poll_max_ms <= OVERLAP_FIRST_POLL_BUDGET_MS,
+            "newer same-file completion must reach first poll within overlap budget, measured_second_first_poll_max_ms={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_second_first_poll_max_ms,
+            OVERLAP_FIRST_POLL_BUDGET_MS
+        );
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
     });
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }

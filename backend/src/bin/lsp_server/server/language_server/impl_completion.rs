@@ -20,17 +20,17 @@ impl CompletionTimelineStageStatus {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompletionPrepareGuardResult<T> {
-    Prepared(T),
+enum CompletionGuardResult<T> {
+    Completed(T),
     TimedOut,
     Aborted(&'static str),
 }
 
-impl<T> CompletionPrepareGuardResult<T> {
+impl<T> CompletionGuardResult<T> {
     #[cfg(test)]
     fn trace_outcome(&self) -> String {
         match self {
-            Self::Prepared(_) => "prepared".to_string(),
+            Self::Completed(_) => "completed".to_string(),
             Self::TimedOut => "timeout".to_string(),
             Self::Aborted(reason) => format!("aborted:{reason}"),
         }
@@ -834,12 +834,13 @@ fn observe_cancelled_timeline_outcome(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn wait_for_completion_prepare_abort(
+async fn wait_for_completion_abort(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,
     request_id: Option<&str>,
     request_epoch: u64,
     cancellation_token: Option<&super::super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
     cancel_event_emitted: &mut bool,
 ) -> &'static str {
     const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(10);
@@ -851,7 +852,7 @@ async fn wait_for_completion_prepare_abort(
             request_id,
             request_epoch,
             cancellation_token,
-            "prepare",
+            checkpoint,
             cancel_event_emitted,
         )
         .await
@@ -870,44 +871,64 @@ async fn wait_for_completion_prepare_abort(
     }
 }
 
-async fn run_completion_prepare_guard<T, PF, AF>(
-    prepare_future: PF,
-    prepare_timeout: Option<std::time::Duration>,
+async fn run_completion_guard<T, PF, AF>(
+    guarded_future: PF,
+    guarded_timeout: Option<std::time::Duration>,
     abort_future: Option<AF>,
-) -> CompletionPrepareGuardResult<T>
+) -> CompletionGuardResult<T>
 where
     PF: std::future::Future<Output = T>,
     AF: std::future::Future<Output = &'static str>,
 {
-    let mut prepare_future = std::pin::pin!(prepare_future);
+    let mut guarded_future = std::pin::pin!(guarded_future);
 
-    match (prepare_timeout, abort_future) {
+    match (guarded_timeout, abort_future) {
         (Some(timeout), Some(abort_future)) => {
             let mut abort_future = std::pin::pin!(abort_future);
             let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
             tokio::select! {
-                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
-                outcome = &mut abort_future => CompletionPrepareGuardResult::Aborted(outcome),
-                _ = &mut timeout_sleep => CompletionPrepareGuardResult::TimedOut,
+                completed = &mut guarded_future => CompletionGuardResult::Completed(completed),
+                outcome = &mut abort_future => CompletionGuardResult::Aborted(outcome),
+                _ = &mut timeout_sleep => CompletionGuardResult::TimedOut,
             }
         }
         (Some(timeout), None) => {
             let mut timeout_sleep = std::pin::pin!(tokio::time::sleep(timeout));
             tokio::select! {
-                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
-                _ = &mut timeout_sleep => CompletionPrepareGuardResult::TimedOut,
+                completed = &mut guarded_future => CompletionGuardResult::Completed(completed),
+                _ = &mut timeout_sleep => CompletionGuardResult::TimedOut,
             }
         }
         (None, Some(abort_future)) => {
             let mut abort_future = std::pin::pin!(abort_future);
             tokio::select! {
-                prepared = &mut prepare_future => CompletionPrepareGuardResult::Prepared(prepared),
-                outcome = &mut abort_future => CompletionPrepareGuardResult::Aborted(outcome),
+                completed = &mut guarded_future => CompletionGuardResult::Completed(completed),
+                outcome = &mut abort_future => CompletionGuardResult::Aborted(outcome),
             }
         }
-        (None, None) => CompletionPrepareGuardResult::Prepared(prepare_future.await),
+        (None, None) => CompletionGuardResult::Completed(guarded_future.await),
     }
 }
+
+fn release_completion_active_turn(
+    completion_active_turn_guard: &mut Option<super::helpers::CompletionActiveTurnGuard>,
+) {
+    drop(completion_active_turn_guard.take());
+}
+
+#[cfg(test)]
+async fn maybe_inject_response_build_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_COMPLETION_RESPONSE_BUILD_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+    }
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_response_build_delay_for_test() {}
 
 async fn completion_apply_age_for_file(
     server: &BslLanguageServer,
@@ -1246,10 +1267,12 @@ impl BslLanguageServer {
                     super::super::completion_dispatcher::CompletionTurnOutcome::Ready => {}
                     super::super::completion_dispatcher::CompletionTurnOutcome::SupersededBeforeStart => {
                         completion_outcome = Some("superseded");
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected => {
                         completion_outcome = Some("queue_rejected");
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
         }
     }
@@ -1382,11 +1405,13 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                 } else {
                     observe_cancelled_timeline_outcome(&mut timeline_capture, "cancelled");
                     completion_outcome = Some("cancelled");
+                    release_completion_active_turn(&mut completion_active_turn_guard);
                     break 'completion_flow Some(completion_incomplete_empty_response());
                 }
             }
@@ -1442,6 +1467,7 @@ impl BslLanguageServer {
             {
                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                 completion_outcome = Some(outcome);
+                release_completion_active_turn(&mut completion_active_turn_guard);
                 break 'completion_flow Some(completion_incomplete_empty_response());
             }
 
@@ -1476,8 +1502,8 @@ impl BslLanguageServer {
                 )
                 .await
                 {
-                    Ok(Some(prepared)) => CompletionPrepareGuardResult::Prepared(Ok(prepared)),
-                    Ok(None) => match run_completion_prepare_guard(
+                    Ok(Some(prepared)) => CompletionGuardResult::Completed(Ok(prepared)),
+                    Ok(None) => match run_completion_guard(
                         self.prepare_lsp_completion_first_response_v2_with_completion_mode_and_progress(
                             &uri,
                             file_id,
@@ -1488,20 +1514,21 @@ impl BslLanguageServer {
                         ),
                         prepare_timeout,
                         event_driven_guards_enabled.then(|| {
-                            wait_for_completion_prepare_abort(
+                            wait_for_completion_abort(
                                 self,
                                 file_id,
                                 completion_request_id.as_deref(),
                                 completion_ticket.request_epoch,
                                 completion_cancellation_token.as_ref(),
+                                "prepare",
                                 &mut cancel_event_emitted,
                             )
                         }),
                     )
                     .await
                     {
-                        CompletionPrepareGuardResult::Prepared(prepared) => {
-                            CompletionPrepareGuardResult::Prepared(prepared.map(
+                        CompletionGuardResult::Completed(prepared) => {
+                            CompletionGuardResult::Completed(prepared.map(
                                 |(context, prepared, expected_version)| {
                                     CompletionPreparedSnapshot::from_lightweight(
                                         context,
@@ -1511,17 +1538,17 @@ impl BslLanguageServer {
                                 },
                             ))
                         }
-                        CompletionPrepareGuardResult::TimedOut => {
-                            CompletionPrepareGuardResult::TimedOut
+                        CompletionGuardResult::TimedOut => {
+                            CompletionGuardResult::TimedOut
                         }
-                        CompletionPrepareGuardResult::Aborted(outcome) => {
-                            CompletionPrepareGuardResult::Aborted(outcome)
+                        CompletionGuardResult::Aborted(outcome) => {
+                            CompletionGuardResult::Aborted(outcome)
                         }
                     },
-                    Err(outcome) => CompletionPrepareGuardResult::Prepared(Err(outcome)),
+                    Err(outcome) => CompletionGuardResult::Completed(Err(outcome)),
                 }
             } else {
-                match run_completion_prepare_guard(
+                match run_completion_guard(
                     self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
                         &uri,
                         file_id,
@@ -1532,20 +1559,21 @@ impl BslLanguageServer {
                     ),
                     prepare_timeout,
                     event_driven_guards_enabled.then(|| {
-                        wait_for_completion_prepare_abort(
+                        wait_for_completion_abort(
                             self,
                             file_id,
                             completion_request_id.as_deref(),
                             completion_ticket.request_epoch,
                             completion_cancellation_token.as_ref(),
+                            "prepare",
                             &mut cancel_event_emitted,
                         )
                     }),
                 )
                 .await
                 {
-                    CompletionPrepareGuardResult::Prepared(prepared) => {
-                        CompletionPrepareGuardResult::Prepared(prepared.map(
+                    CompletionGuardResult::Completed(prepared) => {
+                        CompletionGuardResult::Completed(prepared.map(
                             |(context, prepared, expected_version)| {
                                 CompletionPreparedSnapshot::from_exact_stateful(
                                     context,
@@ -1555,11 +1583,11 @@ impl BslLanguageServer {
                             },
                         ))
                     }
-                    CompletionPrepareGuardResult::TimedOut => {
-                        CompletionPrepareGuardResult::TimedOut
+                    CompletionGuardResult::TimedOut => {
+                        CompletionGuardResult::TimedOut
                     }
-                    CompletionPrepareGuardResult::Aborted(outcome) => {
-                        CompletionPrepareGuardResult::Aborted(outcome)
+                    CompletionGuardResult::Aborted(outcome) => {
+                        CompletionGuardResult::Aborted(outcome)
                     }
                 }
             };
@@ -1576,12 +1604,12 @@ impl BslLanguageServer {
             }
 
             let prepared = match guarded_prepare {
-                CompletionPrepareGuardResult::Prepared(prepared) => {
+                CompletionGuardResult::Completed(prepared) => {
                     timeline_capture.set_prepare_guard_outcome("prepared");
                     timeline_capture.push_completed_stage("prepare_stateful", prepare_elapsed);
                     prepared
                 }
-                CompletionPrepareGuardResult::TimedOut => {
+                CompletionGuardResult::TimedOut => {
                     timeline_capture.set_prepare_guard_outcome("timeout");
                     timeline_capture.set_prepare_outcome("wait_not_ready");
                     timeline_capture.set_prepare_fail_closed_cause("prepare_timeout");
@@ -1623,9 +1651,10 @@ impl BslLanguageServer {
                         prepare_elapsed,
                     );
                     completion_outcome = Some("wait_not_ready");
+                    release_completion_active_turn(&mut completion_active_turn_guard);
                     break 'completion_flow Some(completion_incomplete_empty_response());
                 }
-                CompletionPrepareGuardResult::Aborted(outcome) => {
+                CompletionGuardResult::Aborted(outcome) => {
                     timeline_capture.set_prepare_guard_outcome(format!("aborted:{outcome}"));
                     timeline_capture.set_prepare_outcome(outcome);
                     observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
@@ -1635,6 +1664,7 @@ impl BslLanguageServer {
                     };
                     timeline_capture.push_stage("prepare_stateful", stage_status, prepare_elapsed);
                     completion_outcome = Some(outcome);
+                    release_completion_active_turn(&mut completion_active_turn_guard);
                     break 'completion_flow Some(completion_incomplete_empty_response());
                 }
             };
@@ -1673,6 +1703,7 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     let (snapshot_file_bytes, snapshot_file_lines) = prepared
@@ -1743,6 +1774,7 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
@@ -1837,6 +1869,9 @@ impl BslLanguageServer {
                                                 outcome,
                                             );
                                             completion_outcome = Some(outcome);
+                                            release_completion_active_turn(
+                                                &mut completion_active_turn_guard,
+                                            );
                                             break 'completion_flow Some(
                                                 completion_incomplete_empty_response(),
                                             );
@@ -2448,6 +2483,7 @@ impl BslLanguageServer {
                             {
                                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                                 completion_outcome = Some(outcome);
+                                release_completion_active_turn(&mut completion_active_turn_guard);
                                 break 'completion_flow Some(completion_incomplete_empty_response());
                             }
 
@@ -2527,81 +2563,117 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
                     let response_build_started = Instant::now();
-                    let mut completion_response = match (file_content, file_path, deps, ir_program)
-                    {
-                        (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
-                                file_content,
-                                file_path,
-                                Some(ir_program),
-                                member_access_owner_type_hints,
-                                deps,
-                                position,
-                                &uri,
-                                index_snapshot.as_ref(),
-                                snippet_support,
-                                include_flow_sensitive,
-                                trigger_char_hint,
-                            )
-                            .await
+                    let response_build_future = async {
+                        maybe_inject_response_build_delay_for_test().await;
+                        match (file_content, file_path, deps, ir_program) {
+                            (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+                                    file_content,
+                                    file_path,
+                                    Some(ir_program),
+                                    member_access_owner_type_hints,
+                                    deps,
+                                    position,
+                                    &uri,
+                                    index_snapshot.as_ref(),
+                                    snippet_support,
+                                    include_flow_sensitive,
+                                    trigger_char_hint,
+                                )
+                                .await
+                            }
+                            (Some(file_content), Some(file_path), Some(deps), None)
+                                if member_access_context
+                                    && !member_access_owner_type_hints.is_empty() =>
+                            {
+                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+                                    file_content,
+                                    file_path,
+                                    None,
+                                    member_access_owner_type_hints,
+                                    deps,
+                                    position,
+                                    &uri,
+                                    index_snapshot.as_ref(),
+                                    snippet_support,
+                                    include_flow_sensitive,
+                                    trigger_char_hint,
+                                )
+                                .await
+                            }
+                            (None, _, _, _) => {
+                                completion_outcome.get_or_insert("missing_file_content");
+                                empty()
+                            }
+                            (Some(_), None, _, _) => {
+                                completion_outcome.get_or_insert("missing_file_path");
+                                empty()
+                            }
+                            (Some(_), Some(_), None, _) => {
+                                completion_outcome.get_or_insert("missing_deps");
+                                empty()
+                            }
+                            (Some(file_content), Some(file_path), Some(deps), None) => {
+                                let (fallback_outcome, response) = resolve_completion_without_ir(
+                                    self,
+                                    file_id,
+                                    observed_deps_id.clone(),
+                                    observed_settings_id.clone(),
+                                    observed_file_version,
+                                    member_access_context,
+                                    file_content,
+                                    file_path,
+                                    member_access_owner_type_hints,
+                                    deps,
+                                    position,
+                                    &uri,
+                                    index_snapshot.as_ref(),
+                                    snippet_support,
+                                    include_flow_sensitive,
+                                    trigger_char_hint,
+                                )
+                                .await;
+                                completion_outcome.get_or_insert(fallback_outcome);
+                                response
+                            }
                         }
-                        (Some(file_content), Some(file_path), Some(deps), None)
-                            if member_access_context
-                                && !member_access_owner_type_hints.is_empty() =>
-                        {
-                            crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
-                                file_content,
-                                file_path,
-                                None,
-                                member_access_owner_type_hints,
-                                deps,
-                                position,
-                                &uri,
-                                index_snapshot.as_ref(),
-                                snippet_support,
-                                include_flow_sensitive,
-                                trigger_char_hint,
-                            )
-                            .await
-                        }
-                        (None, _, _, _) => {
-                            completion_outcome.get_or_insert("missing_file_content");
-                            empty()
-                        }
-                        (Some(_), None, _, _) => {
-                            completion_outcome.get_or_insert("missing_file_path");
-                            empty()
-                        }
-                        (Some(_), Some(_), None, _) => {
-                            completion_outcome.get_or_insert("missing_deps");
-                            empty()
-                        }
-                        (Some(file_content), Some(file_path), Some(deps), None) => {
-                            let (fallback_outcome, response) = resolve_completion_without_ir(
+                    };
+                    let mut completion_response = match run_completion_guard(
+                        response_build_future,
+                        None,
+                        event_driven_guards_enabled.then(|| {
+                            wait_for_completion_abort(
                                 self,
                                 file_id,
-                                observed_deps_id.clone(),
-                                observed_settings_id.clone(),
-                                observed_file_version,
-                                member_access_context,
-                                file_content,
-                                file_path,
-                                member_access_owner_type_hints,
-                                deps,
-                                position,
-                                &uri,
-                                index_snapshot.as_ref(),
-                                snippet_support,
-                                include_flow_sensitive,
-                                trigger_char_hint,
+                                completion_request_id.as_deref(),
+                                completion_ticket.request_epoch,
+                                completion_cancellation_token.as_ref(),
+                                "response_build",
+                                &mut cancel_event_emitted,
                             )
-                            .await;
-                            completion_outcome.get_or_insert(fallback_outcome);
-                            response
+                        }),
+                    )
+                    .await
+                    {
+                        CompletionGuardResult::Completed(completion_response) => completion_response,
+                        CompletionGuardResult::TimedOut => unreachable!(
+                            "response_build guard does not use timeouts"
+                        ),
+                        CompletionGuardResult::Aborted(outcome) => {
+                            timeline_capture.push_stage(
+                                "response_build",
+                                CompletionTimelineStageStatus::Cancelled,
+                                response_build_started.elapsed(),
+                            );
+                            observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
+                            completion_outcome = Some(outcome);
+                            release_completion_active_turn(&mut completion_active_turn_guard);
+                            break 'completion_flow Some(completion_incomplete_empty_response());
                         }
                     };
                     if let (Some(response), Some(file_version)) =
@@ -2645,6 +2717,7 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
@@ -2695,6 +2768,7 @@ impl BslLanguageServer {
         {
             observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
             completion_outcome = Some(outcome);
+            release_completion_active_turn(&mut completion_active_turn_guard);
             completion = Some(completion_incomplete_empty_response());
         }
 
@@ -3418,14 +3492,14 @@ mod tests {
 
     #[tokio::test]
     async fn prepare_guard_times_out_pending_prepare() {
-        let guarded = run_completion_prepare_guard(
+        let guarded = run_completion_guard(
             pending::<()>(),
             Some(std::time::Duration::from_millis(20)),
             Option::<std::future::Ready<&'static str>>::None,
         )
         .await;
 
-        assert!(matches!(guarded, CompletionPrepareGuardResult::TimedOut));
+        assert!(matches!(guarded, CompletionGuardResult::TimedOut));
         assert_eq!(guarded.trace_outcome(), "timeout");
     }
 
@@ -3437,7 +3511,7 @@ mod tests {
             let _ = tx.send("cancelled");
         });
 
-        let guarded = run_completion_prepare_guard(
+        let guarded = run_completion_guard(
             pending::<()>(),
             Some(std::time::Duration::from_secs(1)),
             Some(async move { rx.await.expect("abort outcome") }),
@@ -3446,14 +3520,14 @@ mod tests {
 
         assert!(matches!(
             guarded,
-            CompletionPrepareGuardResult::Aborted("cancelled")
+            CompletionGuardResult::Aborted("cancelled")
         ));
         assert_eq!(guarded.trace_outcome(), "aborted:cancelled");
     }
 
     #[tokio::test]
     async fn prepare_guard_marks_completed_prepare_branch() {
-        let guarded = run_completion_prepare_guard(
+        let guarded = run_completion_guard(
             async { 42_u32 },
             Some(std::time::Duration::from_secs(1)),
             Option::<std::future::Ready<&'static str>>::None,
@@ -3461,9 +3535,9 @@ mod tests {
         .await;
 
         match guarded {
-            CompletionPrepareGuardResult::Prepared(value) => assert_eq!(value, 42),
+            CompletionGuardResult::Completed(value) => assert_eq!(value, 42),
             other => panic!("expected prepared branch, got {other:?}"),
         }
-        assert_eq!(guarded.trace_outcome(), "prepared");
+        assert_eq!(guarded.trace_outcome(), "completed");
     }
 }

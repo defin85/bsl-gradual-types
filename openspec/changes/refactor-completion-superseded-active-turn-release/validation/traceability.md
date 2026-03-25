@@ -40,6 +40,7 @@
   `openspec/changes/refactor-completion-superseded-active-turn-release/specs/bsl-intellisense-v2/spec.md`
 - Код:
   `backend/src/bin/lsp_server/server/core/tests.rs`
+  `scripts/validate-completion-superseded-active-turn-release.sh`
   `scripts/validate-v2-completion-gates.sh`
 - Тест:
   `backend/src/bin/lsp_server/server/core/tests.rs::p40_real_conf_big_same_file_overlap_completion_perf_report_live`
@@ -48,9 +49,11 @@
 
 - Требование:
   `openspec/changes/refactor-completion-superseded-active-turn-release/tasks.md`
+  `openspec/changes/refactor-completion-superseded-active-turn-release/validation/overlap-gate.md`
 - Код:
   `scripts/run-intellisense-tests.sh`
   `scripts/test-intellisense-readiness-assets.py`
+  `scripts/validate-completion-superseded-active-turn-release.sh`
   `scripts/validate-v2-completion-gates.sh`
 - Тест:
   `python3 -m unittest scripts/test-intellisense-smoke-gate.py scripts/test-intellisense-readiness-assets.py`

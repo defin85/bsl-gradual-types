@@ -73,6 +73,16 @@ pub(crate) fn did_save_inline_parse_delay_active_for_test() -> bool {
     impl_document_sync::did_save_inline_parse_delay_active_for_test()
 }
 
+#[cfg(test)]
+pub(crate) fn reset_completion_checkpoint_hits_for_test() {
+    impl_completion::reset_completion_checkpoint_hits_for_test()
+}
+
+#[cfg(test)]
+pub(crate) fn completion_checkpoint_hits_for_test(checkpoint: &'static str) -> u64 {
+    impl_completion::completion_checkpoint_hits_for_test(checkpoint)
+}
+
 #[tower_lsp::async_trait]
 impl LanguageServer for BslLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> JsonRpcResult<InitializeResult> {

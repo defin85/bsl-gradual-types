@@ -86,11 +86,16 @@ cargo test --workspace --locked
 
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
+./scripts/validate-completion-superseded-active-turn-release.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
 ```
 
 `./scripts/validate-document-symbol-interactive-isolation.sh` is the canonical
 default entry point for the document-symbol isolation evidence bundle; it wraps
 the generic readiness script with the correct `CHANGE_ID`.
+`./scripts/validate-completion-superseded-active-turn-release.sh` is the
+canonical default entry point for the overlap supersession evidence bundle; it
+wraps the generic readiness script with the correct `CHANGE_ID`.
 
 Use these only when the task explicitly needs readiness/perf evidence.

@@ -994,6 +994,16 @@ impl CompletionDispatcherRegistry {
             .map(|dispatcher| (dispatcher.next_file_seq, dispatcher.latest_request_epoch))
     }
 
+    #[cfg(test)]
+    pub(crate) async fn debug_active_holder_request_id(&self, file_id: V2FileId) -> Option<String> {
+        let per_file = self.per_file.lock().await;
+        let dispatcher = per_file.get(&file_id)?;
+        dispatcher
+            .active_snapshot(Instant::now())
+            .1
+            .and_then(|holder| holder.request_id)
+    }
+
     pub(crate) async fn close_file_dispatcher(&self, file_id: V2FileId) -> Option<DispatchTicket> {
         let has_dispatcher = {
             let per_file = self.per_file.lock().await;

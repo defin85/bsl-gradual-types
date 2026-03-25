@@ -12,6 +12,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
     DOCUMENT_SYMBOL_CHANGE_ID = "refactor-document-symbol-interactive-isolation"
+    OVERLAP_CHANGE_ID = "refactor-completion-superseded-active-turn-release"
     QUALITY_GATES = (
         REPO_ROOT
         / "openspec"
@@ -36,6 +37,22 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "perf"
         / "reports"
         / f"{DOCUMENT_SYMBOL_CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
+    )
+    OVERLAP_GATE_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / OVERLAP_CHANGE_ID
+        / "validation"
+        / "overlap-gate.md"
+    )
+    OVERLAP_GATE_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{OVERLAP_CHANGE_ID}-real-conf-big-overlap-completion-perf-live.json"
     )
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
@@ -140,6 +157,11 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         return json.loads(
             self.DOCUMENT_SYMBOL_MIXED_LOAD_REPORT.read_text(encoding="utf-8")
         )["summary"]
+
+    def overlap_gate_summary(self) -> dict:
+        return json.loads(self.OVERLAP_GATE_REPORT.read_text(encoding="utf-8"))[
+            "summary"
+        ]
 
     @staticmethod
     def format_metric(value: float | int) -> str:
@@ -262,6 +284,43 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             (
                 "documentSymbol mixed-load validation doc drifted from authoritative "
                 f"checked-in report, missing snippets: {missing}"
+            ),
+        )
+
+    def test_overlap_validation_doc_matches_checked_in_report(self) -> None:
+        content = self.OVERLAP_GATE_DOC.read_text(encoding="utf-8")
+        summary = self.overlap_gate_summary()
+        expected_snippets = [
+            "./scripts/validate-completion-superseded-active-turn-release.sh",
+            (
+                f"CHANGE_ID={self.OVERLAP_CHANGE_ID} "
+                "./scripts/validate-v2-completion-gates.sh"
+            ),
+            f"`{summary['measured_first_cancelled_or_superseded_traces']}`",
+            f"`{summary['measured_first_empty_response_samples']}`",
+            f"`{summary['measured_first_registry_cleared_samples']}`",
+            f"`{summary['measured_second_non_empty_samples']}`",
+            f"`{summary['measured_head_hit_traces']}` `head_hit`",
+            f"`{summary['measured_exact_hit_traces']}` `exact_hit`",
+            f"`prepare_timeout` delta: `{summary['measured_prepare_timeout_total_delta']}`",
+            f"`exact_deadline` delta: `{summary['measured_exact_deadline_total_delta']}`",
+            f"`cancelled` delta: `{summary['measured_cancelled_total_delta']}`",
+            f"`fail_closed` delta: `{summary['measured_fail_closed_total_delta']}`",
+            (
+                "`p95(service_future_to_first_poll_wait_ms)="
+                f"{self.format_metric(summary['measured_service_future_to_first_poll_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(service_future_to_first_poll_wait_ms)="
+                f"{summary['measured_service_future_to_first_poll_wait_max_ms']}ms`"
+            ),
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in content]
+        self.assertFalse(
+            missing,
+            (
+                "overlap validation doc drifted from authoritative checked-in report, "
+                f"missing snippets: {missing}"
             ),
         )
 

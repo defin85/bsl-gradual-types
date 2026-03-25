@@ -930,6 +930,66 @@ async fn maybe_inject_response_build_delay_for_test() {
 #[cfg(not(test))]
 async fn maybe_inject_response_build_delay_for_test() {}
 
+#[cfg(test)]
+fn completion_checkpoint_delay_for_test(checkpoint: &'static str) -> Option<std::time::Duration> {
+    std::env::var("BSL_TEST_COMPLETION_CHECKPOINT_DELAYS")
+        .ok()
+        .and_then(|raw| {
+            raw.split(',').find_map(|entry| {
+                let (name, delay_ms) = entry.split_once('=')?;
+                let delay_ms = delay_ms.trim().parse::<u64>().ok()?;
+                (name.trim() == checkpoint && delay_ms > 0)
+                    .then_some(std::time::Duration::from_millis(delay_ms))
+            })
+        })
+}
+
+#[cfg(test)]
+fn completion_checkpoint_hits_for_test_state(
+) -> &'static std::sync::Mutex<std::collections::HashMap<&'static str, u64>> {
+    static STATE: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
+    > = std::sync::OnceLock::new();
+    STATE.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(test)]
+fn record_completion_checkpoint_hit_for_test(checkpoint: &'static str) {
+    let mut state = completion_checkpoint_hits_for_test_state()
+        .lock()
+        .expect("completion checkpoint test state");
+    *state.entry(checkpoint).or_insert(0) += 1;
+}
+
+#[cfg(test)]
+pub(crate) fn reset_completion_checkpoint_hits_for_test() {
+    completion_checkpoint_hits_for_test_state()
+        .lock()
+        .expect("completion checkpoint test state")
+        .clear();
+}
+
+#[cfg(test)]
+pub(crate) fn completion_checkpoint_hits_for_test(checkpoint: &'static str) -> u64 {
+    completion_checkpoint_hits_for_test_state()
+        .lock()
+        .expect("completion checkpoint test state")
+        .get(checkpoint)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+async fn maybe_inject_completion_checkpoint_delay_for_test(checkpoint: &'static str) {
+    if let Some(delay) = completion_checkpoint_delay_for_test(checkpoint) {
+        record_completion_checkpoint_hit_for_test(checkpoint);
+        tokio::time::sleep(delay).await;
+    }
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_completion_checkpoint_delay_for_test(_checkpoint: &'static str) {}
+
 async fn completion_apply_age_for_file(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,
@@ -2720,6 +2780,8 @@ impl BslLanguageServer {
                         release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
+                    maybe_inject_completion_checkpoint_delay_for_test("before_format_checkpoint")
+                        .await;
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
@@ -2734,6 +2796,9 @@ impl BslLanguageServer {
                     {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
+                        release_completion_active_turn(&mut completion_active_turn_guard);
+                        maybe_inject_completion_checkpoint_delay_for_test("after_format_outcome")
+                            .await;
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
                     completion_response

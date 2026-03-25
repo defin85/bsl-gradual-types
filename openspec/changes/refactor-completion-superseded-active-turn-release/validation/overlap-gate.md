@@ -1,6 +1,7 @@
 # Проверка overlap-профиля
 
-- Каноническая команда: `CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh`
+- Канонический wrapper: `./scripts/validate-completion-superseded-active-turn-release.sh`
+- Нижележащая generic команда с явным override: `CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh`
 - Точечная команда профиля: `CHANGE_ID=refactor-completion-superseded-active-turn-release cargo test -p bsl-backend --bin bsl-lsp-server p40_real_conf_big_same_file_overlap_completion_perf_report_live -- --nocapture`
 - Отчёт: `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.json`
 - Сводка: `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.md`

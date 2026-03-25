@@ -15490,6 +15490,253 @@ async fn p33_same_file_completion_supersession_releases_active_turn_during_respo
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIRST_REQUEST_ID: i64 = 40_712;
+    const SECOND_REQUEST_ID: i64 = 40_713;
+    const FIRST_POLL_BUDGET_MS: u64 = 450;
+
+    fn completion_response_incomplete_empty(response: &CompletionResponse) -> bool {
+        match response {
+            CompletionResponse::List(list) => list.is_incomplete && list.items.is_empty(),
+            CompletionResponse::Array(items) => items.is_empty(),
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    super::super::language_server::reset_completion_checkpoint_hits_for_test();
+    let _checkpoint_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
+        "before_format_checkpoint=1000,after_format_outcome=1000",
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf();
+    let fixture_path = workspace_root.join("examples").join("test_lsp.bsl");
+    let fixture_text =
+        std::fs::read_to_string(&fixture_path).expect("read examples/test_lsp.bsl fixture");
+    let uri = Url::from_file_path(&fixture_path).expect("fixture uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: fixture_text.clone(),
+                },
+            },
+        )
+        .await;
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+    let position = find_utf16_position_after_marker(&fixture_text, "Arr.");
+    live_transport_write_completion_request(
+        &mut harness,
+        FIRST_REQUEST_ID,
+        &uri,
+        position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .completion_cancellation_registry_v2
+                .get(&FIRST_REQUEST_ID.to_string())
+                .is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first completion request must register before supersession");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if super::super::language_server::completion_checkpoint_hits_for_test(
+                "before_format_checkpoint",
+            ) >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("first completion request must reach the pre-format checkpoint window");
+
+    live_transport_write_completion_request(
+        &mut harness,
+        SECOND_REQUEST_ID,
+        &uri,
+        position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if super::super::language_server::completion_checkpoint_hits_for_test(
+                "after_format_outcome",
+            ) >= 1
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("stale first completion must reach the post-format checkpoint window");
+
+    let second_request_active = tokio::time::timeout(Duration::from_millis(400), async {
+        loop {
+            if server
+                .completion_dispatcher_v2
+                .debug_active_holder_request_id(file_id)
+                .await
+                .as_deref()
+                == Some(&SECOND_REQUEST_ID.to_string())
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await;
+    assert!(
+        second_request_active.is_ok(),
+        "newer same-file completion must become the active holder while stale format checkpoint is still unwinding"
+    );
+
+    let (first_response, second_response) = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut first_response = None;
+        let mut second_response = None;
+        loop {
+            let response = harness.read_message().await;
+            match response.get("id").and_then(|value| value.as_i64()) {
+                Some(FIRST_REQUEST_ID) => first_response = Some(response),
+                Some(SECOND_REQUEST_ID) => second_response = Some(response),
+                _ => {}
+            }
+            if first_response.is_some() && second_response.is_some() {
+                break (
+                    first_response.take().expect("first completion response"),
+                    second_response.take().expect("second completion response"),
+                );
+            }
+        }
+    })
+    .await
+    .expect("both completion responses must arrive");
+
+    let parse_completion_response = |response: &serde_json::Value| {
+        let result = response
+            .get("result")
+            .cloned()
+            .expect("completion result field");
+        serde_json::from_value::<Option<CompletionResponse>>(result)
+            .expect("parse completion response")
+    };
+    let first_completion =
+        parse_completion_response(&first_response).expect("first completion result present");
+    assert!(
+        completion_response_incomplete_empty(&first_completion),
+        "older superseded completion must resolve to bounded empty response at format checkpoint, response={first_response:?}"
+    );
+    assert!(
+        parse_completion_response(&second_response).is_some(),
+        "newer same-file completion must still produce a bounded response"
+    );
+
+    let traces = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 40_814, 32).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            let first_trace = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&FIRST_REQUEST_ID.to_string())
+            });
+            let second_trace = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&SECOND_REQUEST_ID.to_string())
+            });
+            if let (Some(first_trace), Some(second_trace)) = (first_trace, second_trace) {
+                break (first_trace.clone(), second_trace.clone());
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("completion format-checkpoint traces must appear in timeline");
+    let (first_trace, second_trace) = traces;
+
+    let second_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&second_trace, "service_future_to_first_poll_wait_ms")
+            .expect("second request service_future_to_first_poll_wait_ms");
+    assert!(
+        second_first_poll_wait_ms <= FIRST_POLL_BUDGET_MS,
+        "newer same-file completion must reach first poll within budget while stale format checkpoint is unwinding, trace={second_trace:?}"
+    );
+    assert!(
+        matches!(
+            first_trace.get("outcome").and_then(|value| value.as_str()),
+            Some("cancelled" | "superseded")
+        ),
+        "older overlap trace must terminate with cancelled/superseded outcome, trace={first_trace:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap() {
     struct EnvVarGuard {
         key: &'static str,

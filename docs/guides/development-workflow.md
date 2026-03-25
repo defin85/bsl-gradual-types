@@ -118,6 +118,7 @@ npm --prefix ./vscode-extension test
 ```bash
 ./scripts/run-intellisense-perf.sh
 ./scripts/validate-v2-completion-gates.sh
+./scripts/validate-completion-superseded-active-turn-release.sh
 ```
 
 Запускайте их только когда change действительно требует readiness/perf evidence.

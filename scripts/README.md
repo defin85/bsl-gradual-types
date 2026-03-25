@@ -249,18 +249,28 @@ Default wrapper для documentSymbol mixed-load evidence:
 ./scripts/validate-document-symbol-interactive-isolation.sh
 ```
 
+Default wrapper for overlap supersession evidence:
+```bash
+./scripts/validate-completion-superseded-active-turn-release.sh
+```
+
 Нижележащий generic script можно вызвать и через явный override:
 ```bash
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
 ```
 
 При override для split-prepare script автоматически расширяет `REAL_MODULE_PROFILES`
-до `warm churn`; для documentSymbol isolation используется `outline`.
+до `warm churn`; для documentSymbol isolation используется `outline`; для
+overlap supersession используется `churn overlap`.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
 Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
 wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит
 default change-specific entry point для representative report и aggregate
 readiness artifacts.
+Wrapper `./scripts/validate-completion-superseded-active-turn-release.sh`
+служит default change-specific entry point для overlap representative report и
+aggregate readiness artifacts.
 
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
@@ -282,6 +292,13 @@ readiness artifacts.
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json`
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.md`
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-openspec-validate.log`
 
 ---
 

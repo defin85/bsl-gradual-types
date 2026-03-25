@@ -93,6 +93,7 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_during_response_build -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint -- --nocapture
 }
 
 run_extension_completion_observability_smoke() {

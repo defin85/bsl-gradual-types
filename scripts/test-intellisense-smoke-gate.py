@@ -29,6 +29,7 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
         "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap": "p33_document_symbol_burst_does_not_delay_completion_first_poll_under_parse_gap",
         "backend/src/bin/lsp_server/server/core/tests.rs::p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap": "p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap",
         "backend/src/bin/lsp_server/server/core/tests.rs::p33_did_save_rearms_same_version_outline_refresh_on_default_path": "p33_did_save_rearms_same_version_outline_refresh_on_default_path",
+        "backend/src/bin/lsp_server/server/core/tests.rs::p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint": "p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint",
         "bsl-agent/tests/stdio_integration.rs::stdio_type_at_position_revision_switch_does_not_return_stale_previous_revision_type": "stdio_type_at_position_revision_switch_does_not_return_stale_previous_revision_type",
         "bsl-agent/tests/stdio_integration.rs::stdio_definition_revision_switch_does_not_return_stale_previous_revision_location": "stdio_definition_revision_switch_does_not_return_stale_previous_revision_location",
         "backend/tests/form_module_object_unified_contract_test.rs::bare_owner_members_without_canonical_binding_stay_undeclared": "bare_owner_members_without_canonical_binding_stay_undeclared",

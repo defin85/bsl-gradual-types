@@ -141,6 +141,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order",
         "pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion",
         "p33_same_file_completion_supersession_releases_active_turn_during_response_build",
+        "p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint",
     ]
 
     def smoke_script_text(self) -> str:

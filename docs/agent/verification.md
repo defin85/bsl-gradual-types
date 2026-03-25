@@ -42,6 +42,7 @@ Expected outcome:
 
 - canonical agent docs, instruction layering и onboarding commands проходят fail-closed validation
 - shipped smoke selectors и readiness assets согласованы
+- shipped completion supersession smoke retains branch-level `p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint` proof alongside the response-build regression
 - cross-adapter smoke suite проходит без внешних фикстур
 
 ## Manual Or Broader Validation
@@ -96,6 +97,7 @@ default entry point for the document-symbol isolation evidence bundle; it wraps
 the generic readiness script with the correct `CHANGE_ID`.
 `./scripts/validate-completion-superseded-active-turn-release.sh` is the
 canonical default entry point for the overlap supersession evidence bundle; it
-wraps the generic readiness script with the correct `CHANGE_ID`.
+wraps the generic readiness script with the correct `CHANGE_ID` and collects
+both change-specific representative profiles (`churn` and `overlap`).
 
 Use these only when the task explicitly needs readiness/perf evidence.

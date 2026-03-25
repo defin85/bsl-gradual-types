@@ -208,6 +208,11 @@ jobs:
           CHANGE_ID: refactor-document-symbol-interactive-isolation
           BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json
         run: cargo test -p bsl-backend --bin bsl-lsp-server p39_real_conf_big_document_symbol_mixed_load_gate_live -- --nocapture
+      - name: Run overlap supersession revision-churn representative gate
+        env:
+          CHANGE_ID: refactor-completion-superseded-active-turn-release
+          BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
       - name: Run overlap supersession representative gate
         env:
           CHANGE_ID: refactor-completion-superseded-active-turn-release

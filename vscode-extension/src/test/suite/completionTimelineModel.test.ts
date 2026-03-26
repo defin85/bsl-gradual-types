@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 15,
+            version: 16,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -133,6 +133,9 @@ suite('Completion Timeline Model Test Suite', () => {
                         queue_outcome: 'enqueued',
                         turn_wait_outcome: 'ready',
                         dispatcher_resolution_latency_ms: 5,
+                        turn_wait_entered_at_ms: 1_700_000_000_041,
+                        turn_wait_resolved_at_ms: 1_700_000_000_045,
+                        wake_after_turn_resolution_at_ms: 1_700_000_000_046,
                         queue_capacity: 256,
                         queue_depth_before_enqueue: 1,
                         queue_depth_after_enqueue: 2,
@@ -172,7 +175,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 15);
+        assert.strictEqual(state.version, 16);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
@@ -285,6 +288,18 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].turn_attribution?.dispatcher_resolution_latency_ms,
             5
+        );
+        assert.strictEqual(
+            state.traces[0].turn_attribution?.turn_wait_entered_at_ms,
+            1_700_000_000_041
+        );
+        assert.strictEqual(
+            state.traces[0].turn_attribution?.turn_wait_resolved_at_ms,
+            1_700_000_000_045
+        );
+        assert.strictEqual(
+            state.traces[0].turn_attribution?.wake_after_turn_resolution_at_ms,
+            1_700_000_000_046
         );
         assert.strictEqual(state.traces[0].turn_attribution?.active_holder?.file_seq, 41);
         assert.strictEqual(state.client_probe_feed.updated_at_ms, 1_700_000_000_100);
@@ -505,6 +520,63 @@ suite('Completion Timeline Model Test Suite', () => {
         );
     });
 
+    test('v15 payload should not surface v16 turn-wait resolution detail', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 15,
+            traces: [
+                {
+                    trace_id: 'trace-v15',
+                    request_id: 'req-v15',
+                    uri: 'file:///tmp/v15.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'turn_wait',
+                    turn_attribution: {
+                        request_file_seq: 7,
+                        request_epoch: 2,
+                        queue_outcome: 'enqueued',
+                        turn_wait_outcome: 'ready',
+                        dispatcher_resolution_latency_ms: 3,
+                        turn_wait_entered_at_ms: 1_700_000_000_011,
+                        turn_wait_resolved_at_ms: 1_700_000_000_013,
+                        wake_after_turn_resolution_at_ms: 1_700_000_000_014,
+                        queue_capacity: 256,
+                        queue_depth_before_enqueue: 1,
+                        queue_depth_after_enqueue: 1,
+                        queued_completion_ahead_count: 1,
+                        did_change_ahead_count: 0,
+                        active_completion_count: 0,
+                        dropped_completion_file_seq: [],
+                    },
+                    stages: [
+                        {
+                            name: 'turn_wait',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.strictEqual(state.traces[0].turn_attribution?.turn_wait_entered_at_ms, undefined);
+        assert.strictEqual(state.traces[0].turn_attribution?.turn_wait_resolved_at_ms, undefined);
+        assert.strictEqual(
+            state.traces[0].turn_attribution?.wake_after_turn_resolution_at_ms,
+            undefined
+        );
+        assert.strictEqual(state.traces[0].turn_attribution?.dispatcher_resolution_latency_ms, 3);
+    });
+
     test('Legacy v2 payload without server edge details remains readable', () => {
         const payload = {
             version: 2,
@@ -678,7 +750,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 15,
+                        version: 16,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -264,6 +264,31 @@ suite('LSP Custom Requests Test Suite', () => {
                                     service_scope_to_method_wait_ms: 1,
                                     transport_to_handler_wait_ms: 3,
                                     server_handler_exec_ms: 15
+                                },
+                                turn_attribution: {
+                                    request_file_seq: 17,
+                                    request_epoch: 3,
+                                    queue_outcome: 'enqueued',
+                                    turn_wait_outcome: 'ready',
+                                    dispatcher_resolution_latency_ms: 4,
+                                    turn_wait_entered_at_ms: 1_700_000_000_004,
+                                    turn_wait_resolved_at_ms: 1_700_000_000_006,
+                                    wake_after_turn_resolution_at_ms: 1_700_000_000_007,
+                                    queue_capacity: 256,
+                                    queue_depth_before_enqueue: 1,
+                                    queue_depth_after_enqueue: 2,
+                                    queued_completion_ahead_count: 1,
+                                    did_change_ahead_count: 0,
+                                    active_completion_count: 0,
+                                    dropped_completion_file_seq: [],
+                                    queued_completion_ahead: {
+                                        request_id: 'req-0',
+                                        file_seq: 16,
+                                        request_epoch: 2,
+                                        trigger_mode: 'invoked',
+                                        version_hint: 7,
+                                        age_ms: 33
+                                    }
                                 },
                                 stages: [
                                     {
@@ -431,7 +456,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 15);
+        assert.strictEqual(result.response.version, 16);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
@@ -534,6 +559,22 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(
             result.response.traces[0].prepare_details?.wait_for_file_version_runtime?.resolution,
             'waiter'
+        );
+        assert.strictEqual(
+            result.response.traces[0].turn_attribution?.turn_wait_entered_at_ms,
+            1_700_000_000_004
+        );
+        assert.strictEqual(
+            result.response.traces[0].turn_attribution?.turn_wait_resolved_at_ms,
+            1_700_000_000_006
+        );
+        assert.strictEqual(
+            result.response.traces[0].turn_attribution?.wake_after_turn_resolution_at_ms,
+            1_700_000_000_007
+        );
+        assert.strictEqual(
+            result.response.traces[0].turn_attribution?.queued_completion_ahead?.request_epoch,
+            2
         );
     });
 

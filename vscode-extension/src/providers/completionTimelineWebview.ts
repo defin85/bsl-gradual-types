@@ -674,12 +674,24 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const dispatcherLatency = typeof turn.dispatcher_resolution_latency_ms === 'number'
                 ? ' | dispatcher_resolution_latency=' + escapeHtml(turn.dispatcher_resolution_latency_ms) + 'ms'
                 : '';
+            const turnWaitEnteredAt = typeof turn.turn_wait_entered_at_ms === 'number'
+                ? ' | turn_wait_entered_at=' + escapeHtml(turn.turn_wait_entered_at_ms)
+                : '';
+            const turnWaitResolvedAt = typeof turn.turn_wait_resolved_at_ms === 'number'
+                ? ' | turn_wait_resolved_at=' + escapeHtml(turn.turn_wait_resolved_at_ms)
+                : '';
+            const wakeAfterTurnResolutionAt = typeof turn.wake_after_turn_resolution_at_ms === 'number'
+                ? ' | wake_after_turn_resolution_at=' + escapeHtml(turn.wake_after_turn_resolution_at_ms)
+                : '';
             return '<div class="overhead">' +
                 'Turn attribution: file_seq=' + escapeHtml(turn.request_file_seq) +
                 ' | epoch=' + escapeHtml(turn.request_epoch) +
                 ' | queue_outcome=' + escapeHtml(turn.queue_outcome) +
                 waitOutcome +
                 dispatcherLatency +
+                turnWaitEnteredAt +
+                turnWaitResolvedAt +
+                wakeAfterTurnResolutionAt +
                 ' | queue=' + escapeHtml(turn.queue_depth_before_enqueue) + '->' +
                 escapeHtml(turn.queue_depth_after_enqueue) + '/' + escapeHtml(turn.queue_capacity) +
                 ' | queued_completion_ahead=' + escapeHtml(turn.queued_completion_ahead_count) +

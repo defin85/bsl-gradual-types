@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::{Future, poll_fn};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
 use bsl_analysis_v2::FileId as V2FileId;
@@ -97,6 +99,8 @@ impl CompletionTurnOutcome {
 pub(crate) struct CompletionTurnResolution {
     pub outcome: CompletionTurnOutcome,
     pub dispatcher_resolution_latency: Option<Duration>,
+    pub resolved_at_ms: Option<u64>,
+    pub wake_after_turn_resolution_at_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -106,10 +110,78 @@ pub(crate) struct CompletionTurnWaiter {
 
 impl CompletionTurnWaiter {
     pub(crate) async fn wait(self) -> CompletionTurnResolution {
-        self.receiver.await.unwrap_or(CompletionTurnResolution {
-            outcome: CompletionTurnOutcome::QueueRejected,
-            dispatcher_resolution_latency: None,
+        let mut receiver = self.receiver;
+        let wake_tracker = TurnWaitWakeTracker::new();
+        let resolution = poll_fn(|cx| {
+            let wrapped_waker = Waker::from(Arc::new(TurnWaitWakeTrackingWaker {
+                inner: cx.waker().clone(),
+                tracker: wake_tracker.clone(),
+            }));
+            let mut wrapped_cx = Context::from_waker(&wrapped_waker);
+            match std::pin::Pin::new(&mut receiver).poll(&mut wrapped_cx) {
+                Poll::Ready(resolution) => Poll::Ready(resolution.unwrap_or(CompletionTurnResolution {
+                    outcome: CompletionTurnOutcome::QueueRejected,
+                    dispatcher_resolution_latency: None,
+                    resolved_at_ms: None,
+                    wake_after_turn_resolution_at_ms: None,
+                })),
+                Poll::Pending => Poll::Pending,
+            }
         })
+        .await;
+        CompletionTurnResolution {
+            wake_after_turn_resolution_at_ms: wake_tracker.first_wake_at_ms(),
+            ..resolution
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct TurnWaitWakeTracker {
+    first_wake_at_ms: Arc<Mutex<Option<u64>>>,
+}
+
+impl TurnWaitWakeTracker {
+    fn new() -> Self {
+        Self {
+            first_wake_at_ms: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    fn observe_wake(&self) {
+        let mut first_wake_at_ms = self
+            .first_wake_at_ms
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if first_wake_at_ms.is_none() {
+            *first_wake_at_ms = Some(super::unix_timestamp_ms());
+        }
+    }
+
+    fn first_wake_at_ms(&self) -> Option<u64> {
+        self.first_wake_at_ms
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .copied()
+    }
+}
+
+#[derive(Debug)]
+struct TurnWaitWakeTrackingWaker {
+    inner: Waker,
+    tracker: TurnWaitWakeTracker,
+}
+
+impl Wake for TurnWaitWakeTrackingWaker {
+    fn wake(self: Arc<Self>) {
+        self.tracker.observe_wake();
+        self.inner.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.tracker.observe_wake();
+        self.inner.wake_by_ref();
     }
 }
 
@@ -599,6 +671,8 @@ impl CompletionTurnState {
                 CompletionTurnResolution {
                     outcome,
                     dispatcher_resolution_latency: None,
+                    resolved_at_ms: None,
+                    wake_after_turn_resolution_at_ms: None,
                 },
             ) {
                 resolved = resolved.saturating_add(1);
@@ -613,6 +687,8 @@ impl CompletionTurnState {
             let _ = sender.send(CompletionTurnResolution {
                 outcome,
                 dispatcher_resolution_latency: None,
+                resolved_at_ms: None,
+                wake_after_turn_resolution_at_ms: None,
             });
         }
     }
@@ -673,6 +749,8 @@ impl PerFileDispatcher {
                     let resolution = CompletionTurnResolution {
                         outcome: turn_outcome,
                         dispatcher_resolution_latency: Some(event.received_at.elapsed()),
+                        resolved_at_ms: Some(super::unix_timestamp_ms()),
+                        wake_after_turn_resolution_at_ms: None,
                     };
                     let mut turn_state = turn_state_for_drain
                         .lock()
@@ -733,6 +811,8 @@ impl PerFileDispatcher {
             CompletionTurnResolution {
                 outcome,
                 dispatcher_resolution_latency: None,
+                resolved_at_ms: None,
+                wake_after_turn_resolution_at_ms: None,
             },
         )
     }

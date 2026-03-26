@@ -521,6 +521,9 @@ export interface CompletionTimelineTurnAttributionTrace {
     queue_outcome: string;
     turn_wait_outcome?: string;
     dispatcher_resolution_latency_ms?: number;
+    turn_wait_entered_at_ms?: number;
+    turn_wait_resolved_at_ms?: number;
+    wake_after_turn_resolution_at_ms?: number;
     queue_capacity: number;
     queue_depth_before_enqueue: number;
     queue_depth_after_enqueue: number;

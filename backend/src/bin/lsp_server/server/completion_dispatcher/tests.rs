@@ -400,6 +400,10 @@ async fn request_epoch_advances_only_for_completion_requests() {
         completion_outcome.dispatcher_resolution_latency.is_some(),
         "ready turn resolution must carry dispatcher latency metadata"
     );
+    assert!(
+        completion_outcome.resolved_at_ms.is_some(),
+        "ready turn resolution must capture absolute resolution timestamp"
+    );
 
     let cancel = registry.emit_cancel(file_id, "42".to_string()).await;
     assert_eq!(cancel.file_seq, 4);
@@ -482,6 +486,10 @@ async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
     assert!(
         second_outcome.dispatcher_resolution_latency.is_some(),
         "ready turn resolution must include dispatcher latency metadata"
+    );
+    assert!(
+        second_outcome.resolved_at_ms.is_some(),
+        "ready turn resolution must capture absolute resolution timestamp"
     );
 
     let close = registry.close_file_dispatcher(file_id).await;

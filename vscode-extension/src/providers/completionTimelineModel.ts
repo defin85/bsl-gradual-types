@@ -58,7 +58,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -167,6 +167,27 @@ function sanitizeServerEdgeDetailsForContract(
     return sanitizeFirstPollContentionContendersForContract(details, contractVersion);
 }
 
+function sanitizeTurnAttributionForContract(
+    contractVersion: number,
+    turnAttribution: CompletionTimelineTurnAttributionTrace | undefined
+): CompletionTimelineTurnAttributionTrace | undefined {
+    if (!turnAttribution) {
+        return undefined;
+    }
+
+    if (contractVersion < 16) {
+        const {
+            turn_wait_entered_at_ms: _turnWaitEnteredAtMs,
+            turn_wait_resolved_at_ms: _turnWaitResolvedAtMs,
+            wake_after_turn_resolution_at_ms: _wakeAfterTurnResolutionAtMs,
+            ...legacyTurnAttribution
+        } = turnAttribution;
+        return legacyTurnAttribution;
+    }
+
+    return turnAttribution;
+}
+
 function mapTrace(
     trace: CompletionTimelineTrace,
     contractVersion: number
@@ -196,6 +217,7 @@ function mapTrace(
             contractVersion,
             trace.server_edge_details
         ),
+        turn_attribution: sanitizeTurnAttributionForContract(contractVersion, trace.turn_attribution),
         max_stage_end_ms: maxStageEnd,
         unattributed_overhead_ms: unattributedOverheadMs,
         dominant_stage: dominantStage,

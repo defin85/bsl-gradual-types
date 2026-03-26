@@ -775,6 +775,9 @@ fn dispatch_attribution_to_trace(
         queue_outcome: attribution.queue_outcome.as_str().to_string(),
         turn_wait_outcome: None,
         dispatcher_resolution_latency_ms: None,
+        turn_wait_entered_at_ms: None,
+        turn_wait_resolved_at_ms: None,
+        wake_after_turn_resolution_at_ms: None,
         queue_capacity: attribution.queue_capacity,
         queue_depth_before_enqueue: attribution.queue_depth_before_enqueue,
         queue_depth_after_enqueue: attribution.queue_depth_after_enqueue,
@@ -1274,6 +1277,7 @@ impl BslLanguageServer {
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
                     let turn_wait_started = Instant::now();
+                    let turn_wait_entered_at_ms = super::super::unix_timestamp_ms();
                     set_current_request_completion_phase("turn_wait");
                     let turn_resolution = turn_waiter.wait().await;
                     let turn_wait_elapsed = turn_wait_started.elapsed();
@@ -1286,6 +1290,12 @@ impl BslLanguageServer {
                         turn_resolution
                             .dispatcher_resolution_latency
                             .map(CompletionTimelineCapture::duration_to_ms);
+                    completion_dispatch_attribution.turn_wait_entered_at_ms =
+                        Some(turn_wait_entered_at_ms);
+                    completion_dispatch_attribution.turn_wait_resolved_at_ms =
+                        turn_resolution.resolved_at_ms;
+                    completion_dispatch_attribution.wake_after_turn_resolution_at_ms =
+                        turn_resolution.wake_after_turn_resolution_at_ms;
                     turn_resolution.outcome
                 } else {
                     completion_dispatch_attribution.turn_wait_outcome = Some(
@@ -3266,6 +3276,54 @@ mod tests {
             ])
         );
         assert_eq!(details.service_future_to_scope_wait_ms, Some(14));
+    }
+
+    #[test]
+    fn turn_attribution_trace_preserves_turn_wait_resolution_timestamps() {
+        let mut capture = sample_capture();
+        capture.set_turn_attribution(crate::types::CompletionTimelineTurnAttributionTrace {
+            request_file_seq: 41,
+            request_epoch: 7,
+            queue_outcome: "enqueued".to_string(),
+            turn_wait_outcome: Some("ready".to_string()),
+            dispatcher_resolution_latency_ms: Some(9),
+            turn_wait_entered_at_ms: Some(1_700_000_000_100),
+            turn_wait_resolved_at_ms: Some(1_700_000_000_108),
+            wake_after_turn_resolution_at_ms: Some(1_700_000_000_109),
+            queue_capacity: 256,
+            queue_depth_before_enqueue: 1,
+            queue_depth_after_enqueue: 2,
+            queued_completion_ahead_count: 1,
+            did_change_ahead_count: 0,
+            active_completion_count: 0,
+            dropped_completion_file_seq: vec![17],
+            active_holder: None,
+            queued_completion_ahead: Some(crate::types::CompletionTimelineTurnHolderTrace {
+                request_id: Some("req-0".to_string()),
+                file_seq: 40,
+                request_epoch: 6,
+                trigger_mode: "invoked".to_string(),
+                version_hint: Some(7),
+                age_ms: 25,
+            }),
+        });
+
+        let trace = capture.into_trace(
+            "trace-turn-attribution".to_string(),
+            std::time::Duration::from_millis(12),
+            "ok_non_empty",
+        );
+        let turn = trace.turn_attribution.expect("turn_attribution must be present");
+        assert_eq!(turn.turn_wait_outcome.as_deref(), Some("ready"));
+        assert_eq!(turn.dispatcher_resolution_latency_ms, Some(9));
+        assert_eq!(turn.turn_wait_entered_at_ms, Some(1_700_000_000_100));
+        assert_eq!(turn.turn_wait_resolved_at_ms, Some(1_700_000_000_108));
+        assert_eq!(turn.wake_after_turn_resolution_at_ms, Some(1_700_000_000_109));
+        let queued_ahead = turn
+            .queued_completion_ahead
+            .expect("queued_completion_ahead must be preserved");
+        assert_eq!(queued_ahead.request_id.as_deref(), Some("req-0"));
+        assert_eq!(queued_ahead.request_epoch, 6);
     }
 
     #[test]

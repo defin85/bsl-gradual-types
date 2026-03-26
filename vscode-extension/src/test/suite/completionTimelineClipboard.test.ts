@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 12,
+            version: 16,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -137,6 +137,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         queue_outcome: 'enqueued',
                         turn_wait_outcome: 'ready',
                         dispatcher_resolution_latency_ms: 4,
+                        turn_wait_entered_at_ms: 1_700_000_000_004,
+                        turn_wait_resolved_at_ms: 1_700_000_000_006,
+                        wake_after_turn_resolution_at_ms: 1_700_000_000_007,
                         queue_capacity: 256,
                         queue_depth_before_enqueue: 1,
                         queue_depth_after_enqueue: 2,
@@ -211,7 +214,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v12'));
+        assert.ok(text!.includes('contract=v16'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -267,6 +270,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('snapshot_with_deps_timeout_runtime | queue_wait_ms=11 | exec_ms=17 | wake_wait_ms=2868 | resolution=wake_wait'));
         assert.ok(text!.includes('turn_request_file_seq=17'));
         assert.ok(text!.includes('dispatcher_resolution_latency_ms=4'));
+        assert.ok(text!.includes('turn_wait_entered_at_ms=1700000000004'));
+        assert.ok(text!.includes('turn_wait_resolved_at_ms=1700000000006'));
+        assert.ok(text!.includes('wake_after_turn_resolution_at_ms=1700000000007'));
         assert.ok(text!.includes('active_holder | request=req-0'));
         assert.ok(text!.includes('query_bundle | completed'));
         assert.ok(
@@ -283,10 +289,10 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('average(1) (averaged) | sample=1'));
         assert.ok(
             text!.includes(
-                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
+                        'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
                     )
             )
         );

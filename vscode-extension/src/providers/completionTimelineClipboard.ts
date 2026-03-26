@@ -292,6 +292,17 @@ export function formatCompletionTimelineTraceForClipboard(
         if (dispatcherTrace) {
             turnBits.push(dispatcherTrace);
         }
+        if (typeof turn.turn_wait_entered_at_ms === 'number') {
+            turnBits.push(`turn_wait_entered_at_ms=${turn.turn_wait_entered_at_ms}`);
+        }
+        if (typeof turn.turn_wait_resolved_at_ms === 'number') {
+            turnBits.push(`turn_wait_resolved_at_ms=${turn.turn_wait_resolved_at_ms}`);
+        }
+        if (typeof turn.wake_after_turn_resolution_at_ms === 'number') {
+            turnBits.push(
+                `wake_after_turn_resolution_at_ms=${turn.wake_after_turn_resolution_at_ms}`
+            );
+        }
         if (turn.dropped_completion_file_seq.length > 0) {
             turnBits.push(`dropped_completion_file_seq=${turn.dropped_completion_file_seq.join(',')}`);
         }

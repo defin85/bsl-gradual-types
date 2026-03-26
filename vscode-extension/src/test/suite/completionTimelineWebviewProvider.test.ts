@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -323,6 +323,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             request_epoch: 1,
                             queue_outcome: 'enqueued',
                             dispatcher_resolution_latency_ms: 4,
+                            turn_wait_entered_at_ms: 1_700_000_000_003,
+                            turn_wait_resolved_at_ms: 1_700_000_000_006,
+                            wake_after_turn_resolution_at_ms: 1_700_000_000_007,
                             queue_capacity: 256,
                             queue_depth_before_enqueue: 0,
                             queue_depth_after_enqueue: 1,
@@ -379,7 +382,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v12'));
+        assert.ok(clipboardPayload.includes('contract=v16'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -413,6 +416,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
             )
         );
         assert.ok(clipboardPayload.includes('dispatcher_resolution_latency_ms=4'));
+        assert.ok(clipboardPayload.includes('turn_wait_entered_at_ms=1700000000003'));
+        assert.ok(clipboardPayload.includes('turn_wait_resolved_at_ms=1700000000006'));
+        assert.ok(clipboardPayload.includes('wake_after_turn_resolution_at_ms=1700000000007'));
         assert.ok(
             clipboardPayload.includes(
                 'snapshot_with_deps_timeout_runtime | queue_wait_ms=11 | exec_ms=17 | wake_wait_ms=2870 | resolution=wake_wait'
@@ -434,7 +440,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -555,7 +561,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
                     )
             )
         );

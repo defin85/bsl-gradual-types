@@ -137,6 +137,12 @@ pub struct CompletionTimelineTurnAttributionTrace {
     pub turn_wait_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dispatcher_resolution_latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_wait_entered_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_wait_resolved_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wake_after_turn_resolution_at_ms: Option<u64>,
     pub queue_capacity: usize,
     pub queue_depth_before_enqueue: usize,
     pub queue_depth_after_enqueue: usize,

@@ -7,6 +7,8 @@ import {
     CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
+    CompletionTimelineTurnAttributionTrace,
+    CompletionTimelineTurnHolderTrace,
     CompletionTimelineTransportReceivedAtMsProvenance,
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
@@ -68,6 +70,7 @@ export interface ObservabilityIncidentRequestSummary {
     service_future_first_wake_scheduled_at_ms?: number;
     first_poll_contention_attribution?: CompletionTimelineFirstPollContentionAttributionTrace;
     first_poll_contention_contenders?: CompletionTimelineFirstPollContentionContenderTrace[];
+    turn_attribution?: CompletionTimelineTurnAttributionTrace;
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
@@ -108,6 +111,25 @@ function sanitizeFirstPollContentionContenders(
         return contenders.map(({ phase: _phase, ...contender }) => contender);
     }
     return contenders;
+}
+
+function sanitizeTurnAttribution(
+    turnAttribution: CompletionTimelineTurnAttributionTrace | undefined,
+    contractVersion: number
+): CompletionTimelineTurnAttributionTrace | undefined {
+    if (!turnAttribution) {
+        return undefined;
+    }
+    if (contractVersion < 16) {
+        const {
+            turn_wait_entered_at_ms: _turnWaitEnteredAtMs,
+            turn_wait_resolved_at_ms: _turnWaitResolvedAtMs,
+            wake_after_turn_resolution_at_ms: _wakeAfterTurnResolutionAtMs,
+            ...legacyTurnAttribution
+        } = turnAttribution;
+        return legacyTurnAttribution;
+    }
+    return turnAttribution;
 }
 
 export function buildObservabilityIncidentRequestSection(
@@ -167,6 +189,7 @@ export function buildObservabilityIncidentRequestSection(
                     trace.server_edge_details?.first_poll_contention_contenders,
                     contractVersion
                 ),
+            turn_attribution: sanitizeTurnAttribution(trace.turn_attribution, contractVersion),
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
@@ -273,6 +296,29 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             formatFirstPollContentionContendersForSummary(
                 request.first_poll_contention_contenders
             ),
+            request.turn_attribution?.turn_wait_outcome
+                ? `turn_wait_outcome=${request.turn_attribution.turn_wait_outcome}`
+                : undefined,
+            typeof request.turn_attribution?.dispatcher_resolution_latency_ms === 'number'
+                ? `dispatcher_resolution_latency_ms=${request.turn_attribution.dispatcher_resolution_latency_ms}`
+                : undefined,
+            typeof request.turn_attribution?.turn_wait_entered_at_ms === 'number'
+                ? `turn_wait_entered_at_ms=${request.turn_attribution.turn_wait_entered_at_ms}`
+                : undefined,
+            typeof request.turn_attribution?.turn_wait_resolved_at_ms === 'number'
+                ? `turn_wait_resolved_at_ms=${request.turn_attribution.turn_wait_resolved_at_ms}`
+                : undefined,
+            typeof request.turn_attribution?.wake_after_turn_resolution_at_ms === 'number'
+                ? `wake_after_turn_resolution_at_ms=${request.turn_attribution.wake_after_turn_resolution_at_ms}`
+                : undefined,
+            formatTurnHolderForSummary(
+                'queued_completion_ahead_holder',
+                request.turn_attribution?.queued_completion_ahead
+            ),
+            formatTurnHolderForSummary(
+                'active_holder',
+                request.turn_attribution?.active_holder
+            ),
             request.pre_method_attribution_provenance
                 ? `pre_method_provenance=${request.pre_method_attribution_provenance}`
                 : undefined,
@@ -367,6 +413,20 @@ function formatFirstPollContentionContendersForSummary(
     return omittedCount > 0
         ? `first_poll_contenders=${preview};+${omittedCount}_more`
         : `first_poll_contenders=${preview}`;
+}
+
+function formatTurnHolderForSummary(
+    label: string,
+    holder?: CompletionTimelineTurnHolderTrace
+): string | undefined {
+    if (!holder) {
+        return undefined;
+    }
+    const requestId = holder.request_id ?? 'unavailable';
+    const versionHint = typeof holder.version_hint === 'number'
+        ? `|version_hint=${holder.version_hint}`
+        : '';
+    return `${label}=request:${requestId}|epoch:${holder.request_epoch}|file_seq:${holder.file_seq}|trigger:${holder.trigger_mode}${versionHint}|age_ms:${holder.age_ms}`;
 }
 
 function buildExactDeadlineSummary(

@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -119,6 +119,31 @@ suite('Observability Incident Bundle Test Suite', () => {
                             method_prelude_exec_ms: 0,
                             transport_to_handler_wait_ms: 3000,
                             server_handler_exec_ms: 172,
+                        },
+                        turn_attribution: {
+                            request_file_seq: 42,
+                            request_epoch: 7,
+                            queue_outcome: 'enqueued',
+                            turn_wait_outcome: 'ready',
+                            dispatcher_resolution_latency_ms: 4,
+                            turn_wait_entered_at_ms: 1_700_000_001_501,
+                            turn_wait_resolved_at_ms: 1_700_000_001_879,
+                            wake_after_turn_resolution_at_ms: 1_700_000_001_880,
+                            queue_capacity: 256,
+                            queue_depth_before_enqueue: 1,
+                            queue_depth_after_enqueue: 2,
+                            queued_completion_ahead_count: 1,
+                            did_change_ahead_count: 0,
+                            active_completion_count: 0,
+                            dropped_completion_file_seq: [],
+                            queued_completion_ahead: {
+                                request_id: 'req-0',
+                                file_seq: 41,
+                                request_epoch: 6,
+                                trigger_mode: 'invoked',
+                                version_hint: 9,
+                                age_ms: 301,
+                            },
                         },
                         stages: [
                             {
@@ -240,7 +265,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 15);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 16);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -319,6 +344,22 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, 800);
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_first_poll_wait_ms, 300);
         assert.strictEqual(bundle.incidentReport.requests[0].first_poll_to_first_wake_wait_ms, 380);
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.turn_wait_entered_at_ms,
+            1_700_000_001_501
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.turn_wait_resolved_at_ms,
+            1_700_000_001_879
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.wake_after_turn_resolution_at_ms,
+            1_700_000_001_880
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.queued_completion_ahead?.request_epoch,
+            6
+        );
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_scope_wait_ms, 2000);
         assert.strictEqual(bundle.incidentReport.requests[0].service_scope_to_method_wait_ms, 1000);
         assert.strictEqual(bundle.incidentReport.requests[1].prepare_timeout?.source, 'prepare_guard');
@@ -345,6 +386,11 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_outcome=pending'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_wake_scheduled_at_ms=1700000001880'));
         assert.ok(bundle.summaryMarkdown.includes('first_poll_contention=document_sync:same_uri|inflight_count=1|concurrency_level=16|oldest_inflight_age_ms=300'));
+        assert.ok(bundle.summaryMarkdown.includes('turn_wait_outcome=ready'));
+        assert.ok(bundle.summaryMarkdown.includes('turn_wait_entered_at_ms=1700000001501'));
+        assert.ok(bundle.summaryMarkdown.includes('turn_wait_resolved_at_ms=1700000001879'));
+        assert.ok(bundle.summaryMarkdown.includes('wake_after_turn_resolution_at_ms=1700000001880'));
+        assert.ok(bundle.summaryMarkdown.includes('queued_completion_ahead_holder=request:req-0|epoch:6|file_seq:41'));
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'first_poll_contenders=document_sync:textDocument/didChange@file:///tmp/test.bsl(age_ms=300);other_request:workspace/executeCommand:bsl.getCompletionTimeline@unavailable(age_ms=120);completion:textDocument/completion[phase=query_bundle]@file:///tmp/test.bsl(age_ms=90)'
@@ -620,6 +666,49 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'v15 completion phase detail inside first-poll contenders is unavailable by design'
+            )
+        );
+    });
+
+    test('v15 completion timeline should mark v16 turn-wait resolution detail as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 15;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v15')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v16 turn-wait resolution detail')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v15')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v16 turn-wait resolution detail')));
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.turn_wait_entered_at_ms,
+            undefined
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.turn_wait_resolved_at_ms,
+            undefined
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.wake_after_turn_resolution_at_ms,
+            undefined
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].turn_attribution?.queued_completion_ahead?.request_epoch,
+            6
+        );
+        assert.ok(bundle.summaryMarkdown.includes('contract=v15'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'v16 turn-wait resolution detail is unavailable by design'
             )
         );
     });

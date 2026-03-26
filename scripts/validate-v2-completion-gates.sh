@@ -13,6 +13,8 @@ if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
     REAL_MODULE_PROFILES="warm churn"
   elif [[ "${CHANGE_ID}" == "refactor-completion-superseded-active-turn-release" ]]; then
     REAL_MODULE_PROFILES="churn overlap"
+  elif [[ "${CHANGE_ID}" == "refactor-completion-turn-wait-lifecycle" ]]; then
+    REAL_MODULE_PROFILES="churn preactive_overlap"
   elif [[ "${CHANGE_ID}" == "refactor-document-symbol-interactive-isolation" ]]; then
     REAL_MODULE_PROFILES="outline"
   else
@@ -70,6 +72,13 @@ for profile in ${REAL_MODULE_PROFILES}; do
       report_var="BSL_V2_REAL_CONF_BIG_OVERLAP_COMPLETION_PERF_REPORT"
       report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-overlap-completion-perf-live.json"
       summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-overlap-completion-perf-live.md"
+      ;;
+    preactive_overlap)
+      profile_title="same-file pre-active turn_wait overlap"
+      test_name="p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live"
+      report_var="BSL_V2_REAL_CONF_BIG_PRE_ACTIVE_OVERLAP_COMPLETION_PERF_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.md"
       ;;
     *)
       echo "Unsupported REAL_MODULE_PROFILES entry: ${profile}" >&2
@@ -242,6 +251,23 @@ for profile in real_module_profiles:
                 (
                     "`max(service_future_to_first_poll_wait_ms)="
                     f"{summary.get('measured_service_future_to_first_poll_wait_max_ms', 0)}ms`"
+                ),
+            ]
+        )
+    if "measured_first_pre_active_turn_wait_ready_traces" in summary:
+        profile_lines.extend(
+            [
+                (
+                    "- first pre-active `turn_wait` ready traces: "
+                    f"`{summary.get('measured_first_pre_active_turn_wait_ready_traces', 0)}`"
+                ),
+                (
+                    "- stranded pre-active `turn_wait` samples: "
+                    f"`{summary.get('measured_stranded_pre_active_turn_wait_samples', 0)}`"
+                ),
+                (
+                    "- trace-linked samples: "
+                    f"`{summary.get('measured_trace_linked_samples', 0)}`"
                 ),
             ]
         )

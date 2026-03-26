@@ -437,7 +437,9 @@ impl CompletionTimelineCapture {
 
     fn set_first_poll_contention_contenders(
         &mut self,
-        first_poll_contention_contenders: Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>,
+        first_poll_contention_contenders: Vec<
+            crate::types::CompletionTimelineFirstPollContentionContenderTrace,
+        >,
     ) {
         self.first_poll_contention_contenders = Some(first_poll_contention_contenders);
     }
@@ -485,12 +487,8 @@ impl CompletionTimelineCapture {
                 service_future_first_poll_outcome: self.service_future_first_poll_outcome.clone(),
                 service_future_first_wake_scheduled_at_ms: self
                     .service_future_first_wake_scheduled_at_ms,
-                first_poll_contention_attribution: self
-                    .first_poll_contention_attribution
-                    .clone(),
-                first_poll_contention_contenders: self
-                    .first_poll_contention_contenders
-                    .clone(),
+                first_poll_contention_attribution: self.first_poll_contention_attribution.clone(),
+                first_poll_contention_contenders: self.first_poll_contention_contenders.clone(),
                 service_scope_entered_at_ms: self.service_scope_entered_at_ms,
                 method_entered_at_ms: self.method_entered_at_ms,
                 handler_entered_at_ms: self.handler_entered_at_ms,
@@ -1200,6 +1198,7 @@ impl BslLanguageServer {
         let (
             completion_ticket,
             completion_turn_outcome,
+            pre_active_terminal_outcome,
             _completion_request_registration,
             completion_cancellation_token,
             mut completion_drop_guard,
@@ -1222,7 +1221,7 @@ impl BslLanguageServer {
                 )
                 .await;
             let completion_ticket = completion_dispatch.ticket;
-            let superseded_active_request_ids = completion_dispatch.superseded_active_request_ids;
+            let superseded_request_ids = completion_dispatch.superseded_request_ids;
             let completion_request_registration = completion_request_id.clone().map(|request_id| {
                 self.completion_cancellation_registry_v2.register_request(
                     request_id,
@@ -1245,7 +1244,7 @@ impl BslLanguageServer {
                 Arc::clone(&self.completion_cancellation_registry_v2),
                 Arc::clone(&self.completion_dispatcher_v2),
             ));
-            for stale_request_id in superseded_active_request_ids {
+            for stale_request_id in superseded_request_ids {
                 if self
                     .completion_cancellation_registry_v2
                     .cancel_request(&stale_request_id)
@@ -1305,25 +1304,66 @@ impl BslLanguageServer {
                     );
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 };
+            #[cfg(test)]
+            if matches!(
+                completion_turn_outcome,
+                super::super::completion_dispatcher::CompletionTurnOutcome::Ready
+            ) {
+                maybe_inject_completion_checkpoint_delay_for_test(
+                    "before_active_turn_registration",
+                )
+                .await;
+            }
+            let mut pre_active_terminal_outcome = None;
             let completion_active_turn_guard = if matches!(
                 completion_turn_outcome,
                 super::super::completion_dispatcher::CompletionTurnOutcome::Ready
             ) {
-                let _ = self
+                let latest_request_epoch = self
+                    .completion_dispatcher_v2
+                    .latest_request_epoch(file_id)
+                    .await;
+                if completion_cancellation_token
+                    .as_ref()
+                    .is_some_and(|token| token.is_cancelled())
+                {
+                    pre_active_terminal_outcome = Some("cancelled");
+                    let _ = self
+                        .completion_dispatcher_v2
+                        .clear_pre_active_completion(file_id, completion_ticket.file_seq)
+                        .await;
+                    None
+                } else if !super::helpers::completion_publish_allowed(
+                    completion_ticket.request_epoch,
+                    latest_request_epoch,
+                ) {
+                    pre_active_terminal_outcome = Some("superseded");
+                    let _ = self
+                        .completion_dispatcher_v2
+                        .clear_pre_active_completion(file_id, completion_ticket.file_seq)
+                        .await;
+                    None
+                } else if self
                     .completion_dispatcher_v2
                     .mark_completion_active(file_id, completion_ticket, completion_request_metadata)
-                    .await;
-                Some(super::helpers::CompletionActiveTurnGuard::new(
-                    file_id,
-                    completion_ticket.file_seq,
-                    Arc::clone(&self.completion_dispatcher_v2),
-                ))
+                    .await
+                {
+                    Some(super::helpers::CompletionActiveTurnGuard::new(
+                        file_id,
+                        completion_ticket.file_seq,
+                        Arc::clone(&self.completion_dispatcher_v2),
+                    ))
+                } else {
+                    pre_active_terminal_outcome = Some("superseded");
+                    None
+                }
             } else {
                 None
             };
             (
                 completion_ticket,
                 Some(completion_turn_outcome),
+                pre_active_terminal_outcome,
                 completion_request_registration,
                 completion_cancellation_token,
                 completion_drop_guard,
@@ -1338,6 +1378,7 @@ impl BslLanguageServer {
                     queue_outcome:
                         super::super::completion_dispatcher::QueueEnqueueOutcome::Enqueued,
                 },
+                None,
                 None,
                 None,
                 None,
@@ -1378,6 +1419,11 @@ impl BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
         }
     }
+            }
+            if let Some(pre_active_terminal_outcome) = pre_active_terminal_outcome {
+                completion_outcome = Some(pre_active_terminal_outcome);
+                release_completion_active_turn(&mut completion_active_turn_guard);
+                break 'completion_flow Some(completion_incomplete_empty_response());
             }
 
             async fn try_prepare_shadow_head_fast_path(
@@ -1676,20 +1722,16 @@ impl BslLanguageServer {
                 )
                 .await
                 {
-                    CompletionGuardResult::Completed(prepared) => {
-                        CompletionGuardResult::Completed(prepared.map(
-                            |(context, prepared, expected_version)| {
-                                CompletionPreparedSnapshot::from_exact_stateful(
-                                    context,
-                                    prepared,
-                                    expected_version,
-                                )
-                            },
-                        ))
-                    }
-                    CompletionGuardResult::TimedOut => {
-                        CompletionGuardResult::TimedOut
-                    }
+                    CompletionGuardResult::Completed(prepared) => CompletionGuardResult::Completed(
+                        prepared.map(|(context, prepared, expected_version)| {
+                            CompletionPreparedSnapshot::from_exact_stateful(
+                                context,
+                                prepared,
+                                expected_version,
+                            )
+                        }),
+                    ),
+                    CompletionGuardResult::TimedOut => CompletionGuardResult::TimedOut,
                     CompletionGuardResult::Aborted(outcome) => {
                         CompletionGuardResult::Aborted(outcome)
                     }
@@ -2768,10 +2810,12 @@ impl BslLanguageServer {
                     )
                     .await
                     {
-                        CompletionGuardResult::Completed(completion_response) => completion_response,
-                        CompletionGuardResult::TimedOut => unreachable!(
-                            "response_build guard does not use timeouts"
-                        ),
+                        CompletionGuardResult::Completed(completion_response) => {
+                            completion_response
+                        }
+                        CompletionGuardResult::TimedOut => {
+                            unreachable!("response_build guard does not use timeouts")
+                        }
                         CompletionGuardResult::Aborted(outcome) => {
                             timeline_capture.push_stage(
                                 "response_build",
@@ -3313,12 +3357,17 @@ mod tests {
             std::time::Duration::from_millis(12),
             "ok_non_empty",
         );
-        let turn = trace.turn_attribution.expect("turn_attribution must be present");
+        let turn = trace
+            .turn_attribution
+            .expect("turn_attribution must be present");
         assert_eq!(turn.turn_wait_outcome.as_deref(), Some("ready"));
         assert_eq!(turn.dispatcher_resolution_latency_ms, Some(9));
         assert_eq!(turn.turn_wait_entered_at_ms, Some(1_700_000_000_100));
         assert_eq!(turn.turn_wait_resolved_at_ms, Some(1_700_000_000_108));
-        assert_eq!(turn.wake_after_turn_resolution_at_ms, Some(1_700_000_000_109));
+        assert_eq!(
+            turn.wake_after_turn_resolution_at_ms,
+            Some(1_700_000_000_109)
+        );
         let queued_ahead = turn
             .queued_completion_ahead
             .expect("queued_completion_ahead must be preserved");

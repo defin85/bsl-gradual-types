@@ -13,6 +13,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
     DOCUMENT_SYMBOL_CHANGE_ID = "refactor-document-symbol-interactive-isolation"
     OVERLAP_CHANGE_ID = "refactor-completion-superseded-active-turn-release"
+    TURN_WAIT_CHANGE_ID = "refactor-completion-turn-wait-lifecycle"
     QUALITY_GATES = (
         REPO_ROOT
         / "openspec"
@@ -54,6 +55,22 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{OVERLAP_CHANGE_ID}-real-conf-big-overlap-completion-perf-live.json"
     )
+    TURN_WAIT_GATE_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / TURN_WAIT_CHANGE_ID
+        / "validation"
+        / "pre-active-overlap-gate.md"
+    )
+    TURN_WAIT_GATE_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{TURN_WAIT_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
+    )
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
         (
@@ -87,6 +104,14 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         (
             "backend/src/bin/lsp_server/server/core/tests.rs::"
             "p33_did_save_rearms_same_version_outline_refresh_on_default_path"
+        ),
+        (
+            "backend/src/bin/lsp_server/server/core/tests.rs::"
+            "p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration"
+        ),
+        (
+            "backend/src/bin/lsp_server/server/core/tests.rs::"
+            "p28_cancel_request_releases_pre_active_turn_wait_before_active_registration"
         ),
         (
             "backend/tests/form_module_object_unified_contract_test.rs::"
@@ -123,6 +148,8 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency",
         "interactive_wait_budget_timeout_can_still_report_timeout_attribution_on_success",
         "snapshot_with_deps_timeout_can_report_queue_wait_runtime_split_via_progress",
+        "turn_waiter_preserves_non_zero_absolute_lifecycle_after_observed_wait",
+        "turn_attribution_trace_preserves_turn_wait_resolution_timestamps",
         "p22_get_completion_timeline_exposes_versioned_contract",
         "p22_get_completion_timeline_contains_completion_trace",
         "dispatch_context_service_records_completion_context_for_position_lookup",
@@ -140,6 +167,8 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "exact_wait_artifact_poll_is_serialised_into_trace",
         "overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order",
         "pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion",
+        "p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration",
+        "p28_cancel_request_releases_pre_active_turn_wait_before_active_registration",
         "p33_same_file_completion_supersession_releases_active_turn_during_response_build",
         "p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint",
     ]
@@ -161,6 +190,11 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
 
     def overlap_gate_summary(self) -> dict:
         return json.loads(self.OVERLAP_GATE_REPORT.read_text(encoding="utf-8"))[
+            "summary"
+        ]
+
+    def turn_wait_gate_summary(self) -> dict:
+        return json.loads(self.TURN_WAIT_GATE_REPORT.read_text(encoding="utf-8"))[
             "summary"
         ]
 
@@ -321,6 +355,45 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             missing,
             (
                 "overlap validation doc drifted from authoritative checked-in report, "
+                f"missing snippets: {missing}"
+            ),
+        )
+
+    def test_turn_wait_validation_doc_matches_checked_in_report(self) -> None:
+        content = self.TURN_WAIT_GATE_DOC.read_text(encoding="utf-8")
+        summary = self.turn_wait_gate_summary()
+        expected_snippets = [
+            "./scripts/validate-completion-turn-wait-lifecycle.sh",
+            (
+                f"CHANGE_ID={self.TURN_WAIT_CHANGE_ID} "
+                "./scripts/validate-v2-completion-gates.sh"
+            ),
+            f"`{summary['measured_first_cancelled_or_superseded_traces']}`",
+            f"`{summary['measured_first_empty_response_samples']}`",
+            f"`{summary['measured_first_registry_cleared_samples']}`",
+            f"`{summary['measured_first_pre_active_turn_wait_ready_traces']}`",
+            f"`{summary['measured_stranded_pre_active_turn_wait_samples']}`",
+            f"`{summary['measured_second_non_empty_samples']}`",
+            f"`{summary['measured_head_hit_traces']}` `head_hit`",
+            f"`{summary['measured_exact_hit_traces']}` `exact_hit`",
+            f"`prepare_timeout` delta: `{summary['measured_prepare_timeout_total_delta']}`",
+            f"`exact_deadline` delta: `{summary['measured_exact_deadline_total_delta']}`",
+            f"`cancelled` delta: `{summary['measured_cancelled_total_delta']}`",
+            f"`fail_closed` delta: `{summary['measured_fail_closed_total_delta']}`",
+            (
+                "`p95(service_future_to_first_poll_wait_ms)="
+                f"{self.format_metric(summary['measured_service_future_to_first_poll_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(service_future_to_first_poll_wait_ms)="
+                f"{summary['measured_service_future_to_first_poll_wait_max_ms']}ms`"
+            ),
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in content]
+        self.assertFalse(
+            missing,
+            (
+                "turn-wait validation doc drifted from authoritative checked-in report, "
                 f"missing snippets: {missing}"
             ),
         )

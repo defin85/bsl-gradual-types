@@ -188,9 +188,11 @@ Representative matrix:
 
 По умолчанию script собирает producer-side evidence для
 `refactor-current-revision-readiness-fast-lane`; consumer-side split-prepare
-artifacts и outline-isolation mixed-load evidence можно собрать тем же entry point
-через override `CHANGE_ID=refactor-completion-prepare-lightweight-exact-split`
-или `CHANGE_ID=refactor-document-symbol-interactive-isolation`.
+artifacts, outline-isolation mixed-load evidence и pre-active `turn_wait`
+overlap evidence можно собрать тем же entry point через override
+`CHANGE_ID=refactor-completion-prepare-lightweight-exact-split`,
+`CHANGE_ID=refactor-document-symbol-interactive-isolation` или
+`CHANGE_ID=refactor-completion-turn-wait-lifecycle`.
 
 Default selector set:
 - contract-sync guards (`scripts/test-intellisense-smoke-gate.py`,
@@ -220,6 +222,13 @@ Default selector set:
   который на real module делает честный `didOpen` outline bootstrap, затем
   прогоняет `didChange`/`didSave` + burst `documentSymbol` + `completion`
   и fail-ит при outline-induced starvation interactive ingress;
+- для `refactor-completion-turn-wait-lifecycle`: оба обязательных representative real-module профиля
+  `p38_real_conf_big_revision_churn_completion_perf_report_live` и
+  `p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live`
+  с change-specific report paths
+  `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-revision-churn-completion-perf-live.json`
+  и
+  `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-pre-active-overlap-completion-perf-live.json`;
 - fail-closed budget enforcement для mandatory операций `completion`, `hover`,
   `definition`, `type_at_position`, `members`;
 - strict-валидация change через OpenSpec.
@@ -254,15 +263,22 @@ Default wrapper for overlap supersession evidence:
 ./scripts/validate-completion-superseded-active-turn-release.sh
 ```
 
+Default wrapper for pre-active turn_wait lifecycle evidence:
+```bash
+./scripts/validate-completion-turn-wait-lifecycle.sh
+```
+
 Нижележащий generic script можно вызвать и через явный override:
 ```bash
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
 
 При override для split-prepare script автоматически расширяет `REAL_MODULE_PROFILES`
 до `warm churn`; для documentSymbol isolation используется `outline`; для
-overlap supersession используется `churn overlap`.
+overlap supersession используется `churn overlap`; для pre-active `turn_wait`
+lifecycle используется `churn preactive_overlap`.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
 Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
 wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит
@@ -272,6 +288,10 @@ Wrapper `./scripts/validate-completion-superseded-active-turn-release.sh`
 служит default change-specific entry point для overlap supersession bundle и
 aggregate readiness artifacts; он собирает both `churn` and `overlap`
 representative profiles.
+Wrapper `./scripts/validate-completion-turn-wait-lifecycle.sh` служит default
+change-specific entry point для pre-active `turn_wait` lifecycle bundle и
+aggregate readiness artifacts; он собирает both `churn` and
+`preactive_overlap` representative profiles.
 
 **Важно:** скрипт не зависит от `.github/workflows/*` и предназначен для локального запуска или внешнего CI (например, Jenkins/GitLab Runner).
 
@@ -300,6 +320,13 @@ representative profiles.
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.json`
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.md`
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-openspec-validate.log`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-readiness-gate.json`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-readiness-gate.md`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-revision-churn-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-revision-churn-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-pre-active-overlap-completion-perf-live.json`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-pre-active-overlap-completion-perf-live.md`
+- `backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-openspec-validate.log`
 
 ---
 

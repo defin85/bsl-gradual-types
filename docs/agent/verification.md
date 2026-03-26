@@ -88,8 +88,10 @@ cargo test --workspace --locked
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
+./scripts/validate-completion-turn-wait-lifecycle.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
 
 `./scripts/validate-document-symbol-interactive-isolation.sh` is the canonical
@@ -99,5 +101,9 @@ the generic readiness script with the correct `CHANGE_ID`.
 canonical default entry point for the overlap supersession evidence bundle; it
 wraps the generic readiness script with the correct `CHANGE_ID` and collects
 both change-specific representative profiles (`churn` and `overlap`).
+`./scripts/validate-completion-turn-wait-lifecycle.sh` is the canonical
+default entry point for the pre-active `turn_wait` lifecycle evidence bundle;
+it wraps the generic readiness script with the correct `CHANGE_ID` and collects
+both change-specific representative profiles (`churn` and `preactive_overlap`).
 
 Use these only when the task explicitly needs readiness/perf evidence.

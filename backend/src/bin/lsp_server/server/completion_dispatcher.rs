@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::{Future, poll_fn};
+use std::future::{poll_fn, Future};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
@@ -119,12 +119,14 @@ impl CompletionTurnWaiter {
             }));
             let mut wrapped_cx = Context::from_waker(&wrapped_waker);
             match std::pin::Pin::new(&mut receiver).poll(&mut wrapped_cx) {
-                Poll::Ready(resolution) => Poll::Ready(resolution.unwrap_or(CompletionTurnResolution {
-                    outcome: CompletionTurnOutcome::QueueRejected,
-                    dispatcher_resolution_latency: None,
-                    resolved_at_ms: None,
-                    wake_after_turn_resolution_at_ms: None,
-                })),
+                Poll::Ready(resolution) => {
+                    Poll::Ready(resolution.unwrap_or(CompletionTurnResolution {
+                        outcome: CompletionTurnOutcome::QueueRejected,
+                        dispatcher_resolution_latency: None,
+                        resolved_at_ms: None,
+                        wake_after_turn_resolution_at_ms: None,
+                    }))
+                }
                 Poll::Pending => Poll::Pending,
             }
         })
@@ -190,7 +192,7 @@ pub(crate) struct CompletionRequestDispatch {
     pub ticket: DispatchTicket,
     pub turn_waiter: Option<CompletionTurnWaiter>,
     pub attribution: CompletionDispatchAttributionSnapshot,
-    pub superseded_active_request_ids: Vec<String>,
+    pub superseded_request_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -712,6 +714,13 @@ struct ActiveCompletionEntry {
     started_at: Instant,
 }
 
+#[derive(Debug, Clone)]
+struct PreActiveCompletionEntry {
+    request_id: Option<String>,
+    file_seq: u64,
+    request_epoch: u64,
+}
+
 #[derive(Debug)]
 struct PerFileDispatcher {
     queue: CompletionEventQueue,
@@ -719,6 +728,7 @@ struct PerFileDispatcher {
     latest_request_epoch: u64,
     latest_request_epoch_shared: Arc<AtomicU64>,
     turn_state: Arc<Mutex<CompletionTurnState>>,
+    pre_active_completions: Arc<Mutex<HashMap<u64, PreActiveCompletionEntry>>>,
     active_completions: Arc<Mutex<HashMap<u64, ActiveCompletionEntry>>>,
     drain_task: JoinHandle<()>,
 }
@@ -731,6 +741,7 @@ impl PerFileDispatcher {
         let turn_state = Arc::new(Mutex::new(CompletionTurnState {
             waiters: HashMap::new(),
         }));
+        let pre_active_completions = Arc::new(Mutex::new(HashMap::new()));
         let active_completions = Arc::new(Mutex::new(HashMap::new()));
         let turn_state_for_drain = Arc::clone(&turn_state);
         let latest_epoch_for_drain = Arc::clone(&latest_request_epoch_shared);
@@ -770,6 +781,7 @@ impl PerFileDispatcher {
             latest_request_epoch: 0,
             latest_request_epoch_shared,
             turn_state,
+            pre_active_completions,
             active_completions,
             drain_task,
         }
@@ -831,6 +843,68 @@ impl PerFileDispatcher {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         turn_state.resolve_all(CompletionTurnOutcome::QueueRejected);
+    }
+
+    fn register_pre_active_completion(&self, ticket: DispatchTicket, request_id: Option<String>) {
+        let mut pre_active = self
+            .pre_active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pre_active.insert(
+            ticket.file_seq,
+            PreActiveCompletionEntry {
+                request_id,
+                file_seq: ticket.file_seq,
+                request_epoch: ticket.request_epoch,
+            },
+        );
+    }
+
+    fn clear_pre_active_completion(&self, file_seq: u64) -> bool {
+        let mut pre_active = self
+            .pre_active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        pre_active.remove(&file_seq).is_some()
+    }
+
+    fn supersede_stale_pre_active_request_ids(
+        &self,
+        incoming_request_epoch: u64,
+    ) -> (Vec<String>, Vec<u64>) {
+        let mut pre_active = self
+            .pre_active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let stale_file_seq: Vec<u64> = pre_active
+            .values()
+            .filter(|entry| entry.request_epoch < incoming_request_epoch)
+            .map(|entry| entry.file_seq)
+            .collect();
+        let mut request_ids = Vec::new();
+        for file_seq in &stale_file_seq {
+            if let Some(entry) = pre_active.remove(file_seq) {
+                if let Some(request_id) = entry.request_id {
+                    request_ids.push(request_id);
+                }
+            }
+        }
+        request_ids.sort();
+        request_ids.dedup();
+        (request_ids, stale_file_seq)
+    }
+
+    fn cancel_pre_active_completion(&self, request_epoch: u64) -> Option<u64> {
+        let mut pre_active = self
+            .pre_active_completions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let file_seq = pre_active
+            .values()
+            .find(|entry| entry.request_epoch == request_epoch)
+            .map(|entry| entry.file_seq)?;
+        pre_active.remove(&file_seq);
+        Some(file_seq)
     }
 
     fn register_active_completion(
@@ -990,6 +1064,10 @@ impl CompletionDispatcherRegistry {
             trigger_mode,
         };
         let mut ticket = dispatcher.next_ticket(&payload);
+        let pre_active_request_id = match &payload {
+            CompletionEventPayload::CompletionRequest { request_id, .. } => request_id.clone(),
+            _ => None,
+        };
         let event = CompletionEventEnvelope {
             file_id,
             file_seq: ticket.file_seq,
@@ -999,11 +1077,10 @@ impl CompletionDispatcherRegistry {
         };
         let (sender, receiver) = oneshot::channel();
         dispatcher.register_turn_waiter(ticket.file_seq, sender);
+        dispatcher.register_pre_active_completion(ticket, pre_active_request_id);
 
         let (queue_outcome, dropped_completion_file_seq) =
             dispatcher.queue.try_enqueue_with_report(event);
-        let superseded_active_request_ids =
-            dispatcher.stale_active_request_ids(ticket.request_epoch);
         let queue_after = dispatcher.queue.summary(observed_at);
         ticket.queue_outcome = queue_outcome;
         let attribution = CompletionDispatchAttributionSnapshot {
@@ -1020,29 +1097,41 @@ impl CompletionDispatcherRegistry {
             active_holder,
             queued_completion_ahead: queue_before.first_completion,
         };
-        let _ = dispatcher.resolve_turn_waiters(
-            &dropped_completion_file_seq,
-            CompletionTurnOutcome::SupersededBeforeStart,
-        );
         if matches!(
             queue_outcome,
             QueueEnqueueOutcome::Full | QueueEnqueueOutcome::Closed
         ) {
+            let _ = dispatcher.clear_pre_active_completion(ticket.file_seq);
             let _ = dispatcher
                 .resolve_turn_waiter(ticket.file_seq, CompletionTurnOutcome::QueueRejected);
             return CompletionRequestDispatch {
                 ticket,
                 turn_waiter: None,
                 attribution,
-                superseded_active_request_ids,
+                superseded_request_ids: Vec::new(),
             };
         }
+
+        let mut superseded_request_ids = dispatcher.stale_active_request_ids(ticket.request_epoch);
+        let (mut superseded_pre_active_request_ids, superseded_pre_active_file_seq) =
+            dispatcher.supersede_stale_pre_active_request_ids(ticket.request_epoch);
+        superseded_request_ids.append(&mut superseded_pre_active_request_ids);
+        superseded_request_ids.sort();
+        superseded_request_ids.dedup();
+        let mut superseded_completion_file_seq = dropped_completion_file_seq.clone();
+        superseded_completion_file_seq.extend(superseded_pre_active_file_seq);
+        superseded_completion_file_seq.sort_unstable();
+        superseded_completion_file_seq.dedup();
+        let _ = dispatcher.resolve_turn_waiters(
+            &superseded_completion_file_seq,
+            CompletionTurnOutcome::SupersededBeforeStart,
+        );
 
         CompletionRequestDispatch {
             ticket,
             turn_waiter: Some(CompletionTurnWaiter { receiver }),
             attribution,
-            superseded_active_request_ids,
+            superseded_request_ids,
         }
     }
 
@@ -1116,6 +1205,9 @@ impl CompletionDispatcherRegistry {
         let Some(dispatcher) = per_file.get(&file_id) else {
             return false;
         };
+        if !dispatcher.clear_pre_active_completion(ticket.file_seq) {
+            return false;
+        }
         dispatcher.register_active_completion(ticket, metadata);
         true
     }
@@ -1126,6 +1218,35 @@ impl CompletionDispatcherRegistry {
             return false;
         };
         dispatcher.unregister_active_completion(file_seq);
+        true
+    }
+
+    pub(crate) async fn clear_pre_active_completion(
+        &self,
+        file_id: V2FileId,
+        file_seq: u64,
+    ) -> bool {
+        let per_file = self.per_file.lock().await;
+        let Some(dispatcher) = per_file.get(&file_id) else {
+            return false;
+        };
+        dispatcher.clear_pre_active_completion(file_seq)
+    }
+
+    pub(crate) async fn cancel_pre_active_completion(
+        &self,
+        file_id: V2FileId,
+        request_epoch: u64,
+    ) -> bool {
+        let per_file = self.per_file.lock().await;
+        let Some(dispatcher) = per_file.get(&file_id) else {
+            return false;
+        };
+        let Some(file_seq) = dispatcher.cancel_pre_active_completion(request_epoch) else {
+            return false;
+        };
+        let _ =
+            dispatcher.resolve_turn_waiter(file_seq, CompletionTurnOutcome::SupersededBeforeStart);
         true
     }
 

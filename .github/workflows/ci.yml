@@ -32,6 +32,7 @@ on:
       - "scripts/test-intellisense-smoke-gate.py"
       - "scripts/validate-v2-completion-gates.sh"
       - "scripts/validate-completion-superseded-active-turn-release.sh"
+      - "scripts/validate-completion-turn-wait-lifecycle.sh"
       - "scripts/README.md"
       - "scripts/run-intellisense-tests.sh"
   push:
@@ -66,6 +67,7 @@ on:
       - "scripts/test-intellisense-smoke-gate.py"
       - "scripts/validate-v2-completion-gates.sh"
       - "scripts/validate-completion-superseded-active-turn-release.sh"
+      - "scripts/validate-completion-turn-wait-lifecycle.sh"
       - "scripts/README.md"
       - "scripts/run-intellisense-tests.sh"
 
@@ -218,6 +220,16 @@ jobs:
           CHANGE_ID: refactor-completion-superseded-active-turn-release
           BSL_V2_REAL_CONF_BIG_OVERLAP_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.json
         run: cargo test -p bsl-backend --bin bsl-lsp-server p40_real_conf_big_same_file_overlap_completion_perf_report_live -- --nocapture
+      - name: Run turn-wait lifecycle revision-churn representative gate
+        env:
+          CHANGE_ID: refactor-completion-turn-wait-lifecycle
+          BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-revision-churn-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p38_real_conf_big_revision_churn_completion_perf_report_live -- --nocapture
+      - name: Run turn-wait lifecycle pre-active overlap representative gate
+        env:
+          CHANGE_ID: refactor-completion-turn-wait-lifecycle
+          BSL_V2_REAL_CONF_BIG_PRE_ACTIVE_OVERLAP_COMPLETION_PERF_REPORT: ${{ github.workspace }}/backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-real-conf-big-pre-active-overlap-completion-perf-live.json
+        run: cargo test -p bsl-backend --bin bsl-lsp-server p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live -- --nocapture
       - name: Upload perf gate reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -234,3 +246,5 @@ jobs:
             backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-*.md
             backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-*.json
             backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-*.md
+            backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-*.json
+            backend/tests/perf/reports/refactor-completion-turn-wait-lifecycle-*.md

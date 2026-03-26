@@ -34,6 +34,7 @@ REQUIRED_FILES = (
     ".agents/skills/docs-drift-audit/SKILL.md",
     "scripts/run-agent-readiness-checks.sh",
     "scripts/validate-document-symbol-interactive-isolation.sh",
+    "scripts/validate-completion-turn-wait-lifecycle.sh",
 )
 
 REQUIRED_SNIPPETS = {
@@ -59,6 +60,7 @@ REQUIRED_SNIPPETS = {
         "cargo run -p bsl-agent -- --help",
         "./scripts/run-intellisense-tests.sh smoke",
         "./scripts/validate-document-symbol-interactive-isolation.sh",
+        "./scripts/validate-completion-turn-wait-lifecycle.sh",
     ),
     "docs/agent/codex-setup.md": (
         ".mcp.json",

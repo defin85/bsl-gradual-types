@@ -16,6 +16,9 @@ class AgentReadinessValidationTest(unittest.TestCase):
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
+    TURN_WAIT_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-completion-turn-wait-lifecycle.sh"
+    )
     TARGETS_FILE = REPO_ROOT / "scripts" / "doc-path-check-targets.txt"
     VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
 
@@ -48,10 +51,24 @@ class AgentReadinessValidationTest(unittest.TestCase):
             content,
         )
 
+    def test_verification_doc_exposes_turn_wait_readiness_wrapper(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn(
+            "./scripts/validate-completion-turn-wait-lifecycle.sh",
+            content,
+        )
+
     def test_document_symbol_wrapper_pins_change_id(self) -> None:
         content = self.DOCUMENT_SYMBOL_WRAPPER.read_text(encoding="utf-8")
         self.assertIn(
             "CHANGE_ID=refactor-document-symbol-interactive-isolation",
+            content,
+        )
+
+    def test_turn_wait_wrapper_pins_change_id(self) -> None:
+        content = self.TURN_WAIT_WRAPPER.read_text(encoding="utf-8")
+        self.assertIn(
+            "CHANGE_ID=refactor-completion-turn-wait-lifecycle",
             content,
         )
 

@@ -160,6 +160,9 @@ impl BslLanguageServer {
             tokio::spawn(async move {
                 let file_id = entry.file_id;
                 let cancelled_request_epoch = entry.request_epoch;
+                let _ = dispatcher
+                    .cancel_pre_active_completion(file_id, cancelled_request_epoch)
+                    .await;
                 let ticket = dispatcher.emit_cancel(file_id, request_id.clone()).await;
                 if matches!(
                     ticket.queue_outcome,

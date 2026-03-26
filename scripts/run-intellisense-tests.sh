@@ -75,6 +75,8 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-runtime snapshot_with_deps_runtime_trace_exposes_queue_and_exec_latency -- --nocapture
   cargo test -p bsl-runtime interactive_wait_budget_timeout_can_still_report_timeout_attribution_on_success -- --nocapture
   cargo test -p bsl-runtime snapshot_with_deps_timeout_can_report_queue_wait_runtime_split_via_progress -- --nocapture
+  cargo test -p bsl-backend server::completion_dispatcher::tests::turn_waiter_preserves_non_zero_absolute_lifecycle_after_observed_wait -- --exact
+  cargo test -p bsl-backend server::language_server::impl_completion::tests::turn_attribution_trace_preserves_turn_wait_resolution_timestamps -- --exact
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_exposes_versioned_contract -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p22_get_completion_timeline_contains_completion_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server dispatch_context_service_records_completion_context_for_position_lookup -- --nocapture
@@ -92,6 +94,8 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server exact_wait_artifact_poll_is_serialised_into_trace -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server overlapping_completion_request_context_can_be_taken_by_request_id_out_of_order -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server pre_method_attribution_provenance_stays_fail_closed_for_overlapping_completion -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p28_cancel_request_releases_pre_active_turn_wait_before_active_registration -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_during_response_build -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint -- --nocapture
 }

@@ -523,6 +523,41 @@ async fn turn_dispatch_returns_queue_rejected_when_queue_saturated_by_cancel_onl
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn turn_waiter_preserves_non_zero_absolute_lifecycle_after_observed_wait() {
+    let (sender, receiver) = oneshot::channel();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let _ = sender.send(CompletionTurnResolution {
+            outcome: CompletionTurnOutcome::Ready,
+            dispatcher_resolution_latency: Some(Duration::from_millis(50)),
+            resolved_at_ms: Some(super::super::unix_timestamp_ms()),
+            wake_after_turn_resolution_at_ms: None,
+        });
+    });
+
+    let entered_at_ms = super::super::unix_timestamp_ms();
+    let wait_started = Instant::now();
+    let resolution = CompletionTurnWaiter { receiver }.wait().await;
+    let wait_elapsed = wait_started.elapsed();
+
+    assert!(
+        wait_elapsed >= Duration::from_millis(40),
+        "turn_wait test must observe a real wait before resolution, elapsed={wait_elapsed:?}"
+    );
+    let resolved_at_ms = resolution
+        .resolved_at_ms
+        .expect("observed wait must capture absolute resolution timestamp");
+    assert!(
+        resolved_at_ms.saturating_sub(entered_at_ms) >= 40,
+        "absolute turn_wait lifecycle must not collapse a real wait into near-zero duration"
+    );
+    assert!(
+        resolution.wake_after_turn_resolution_at_ms.is_some(),
+        "observed wait must capture wake-after-resolution timestamp"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn queue_capacity_update_applies_to_existing_dispatchers() {
     let registry = CompletionDispatcherRegistry::new(1);
     let file_id = V2FileId(123);
@@ -614,7 +649,7 @@ async fn dispatch_attribution_reports_active_completion_holder() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn newer_request_reports_superseded_active_request_ids() {
+async fn newer_request_reports_superseded_request_ids_for_active_completion() {
     let registry = CompletionDispatcherRegistry::new(8);
     let file_id = V2FileId(125);
 
@@ -650,7 +685,7 @@ async fn newer_request_reports_superseded_active_request_ids() {
         .await;
 
     assert_eq!(
-        second.superseded_active_request_ids,
+        second.superseded_request_ids,
         vec!["r1".to_string()],
         "newer completion request must identify older active request ids for proactive cancellation"
     );
@@ -660,6 +695,113 @@ async fn newer_request_reports_superseded_active_request_ids() {
             .mark_completion_inactive(file_id, first.ticket.file_seq)
             .await
     );
+    let close = registry.close_file_dispatcher(file_id).await;
+    assert!(close.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn newer_request_supersedes_pre_active_turn_wait_request_before_active_registration() {
+    let registry = CompletionDispatcherRegistry::new(8);
+    let file_id = V2FileId(126);
+
+    let first = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r1".to_string()),
+            Some(1),
+            "invoked".to_string(),
+        )
+        .await;
+    let first_turn = tokio::time::timeout(
+        Duration::from_millis(200),
+        first.turn_waiter.expect("first waiter").wait(),
+    )
+    .await
+    .expect("first waiter timeout");
+    assert_eq!(first_turn.outcome, CompletionTurnOutcome::Ready);
+
+    let second = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r2".to_string()),
+            Some(2),
+            "trigger_character".to_string(),
+        )
+        .await;
+    assert_eq!(
+        second.superseded_request_ids,
+        vec!["r1".to_string()],
+        "newer same-file completion must discover pre-active turn_wait predecessor"
+    );
+    assert!(
+        !registry
+            .mark_completion_active(
+                file_id,
+                first.ticket,
+                CompletionRequestMetadata {
+                    request_id: Some("r1".to_string()),
+                    version_hint: Some(1),
+                    trigger_mode: "invoked".to_string(),
+                },
+            )
+            .await,
+        "stale pre-active completion must not become active after newer same-file request"
+    );
+
+    let second_turn = tokio::time::timeout(
+        Duration::from_millis(200),
+        second.turn_waiter.expect("second waiter").wait(),
+    )
+    .await
+    .expect("second waiter timeout");
+    assert_eq!(second_turn.outcome, CompletionTurnOutcome::Ready);
+
+    let close = registry.close_file_dispatcher(file_id).await;
+    assert!(close.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn explicit_cancel_stops_pre_active_turn_wait_request_before_active_registration() {
+    let registry = CompletionDispatcherRegistry::new(8);
+    let file_id = V2FileId(127);
+
+    let first = registry
+        .emit_completion_request_with_turn(
+            file_id,
+            Some("r1".to_string()),
+            Some(1),
+            "invoked".to_string(),
+        )
+        .await;
+    let first_turn = tokio::time::timeout(
+        Duration::from_millis(200),
+        first.turn_waiter.expect("first waiter").wait(),
+    )
+    .await
+    .expect("first waiter timeout");
+    assert_eq!(first_turn.outcome, CompletionTurnOutcome::Ready);
+
+    assert!(
+        registry
+            .cancel_pre_active_completion(file_id, first.ticket.request_epoch)
+            .await,
+        "explicit cancel must discover the pre-active turn_wait request"
+    );
+    assert!(
+        !registry
+            .mark_completion_active(
+                file_id,
+                first.ticket,
+                CompletionRequestMetadata {
+                    request_id: Some("r1".to_string()),
+                    version_hint: Some(1),
+                    trigger_mode: "invoked".to_string(),
+                },
+            )
+            .await,
+        "cancelled pre-active completion must not become active"
+    );
+
     let close = registry.close_file_dispatcher(file_id).await;
     assert!(close.is_some());
 }

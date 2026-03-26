@@ -647,6 +647,9 @@ impl Drop for CompletionRequestDropCancelGuard {
         };
         let dispatcher = Arc::clone(&self.dispatcher);
         tokio::spawn(async move {
+            let _ = dispatcher
+                .cancel_pre_active_completion(entry.file_id, entry.request_epoch)
+                .await;
             let _ = dispatcher.emit_cancel(entry.file_id, request_id).await;
         });
     }

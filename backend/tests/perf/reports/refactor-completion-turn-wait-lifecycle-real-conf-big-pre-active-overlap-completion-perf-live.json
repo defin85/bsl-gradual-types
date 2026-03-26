@@ -40,23 +40,23 @@
               "uri_scope": "unavailable"
             },
             "first_poll_contention_contenders": [],
-            "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527873972,
-            "jsonrpc_dispatch_received_at_ms": 1774527873972,
-            "method_entered_at_ms": 1774527873972,
+            "first_poll_to_first_wake_wait_ms": 1,
+            "handler_entered_at_ms": 1774530907434,
+            "jsonrpc_dispatch_received_at_ms": 1774530907434,
+            "method_entered_at_ms": 1774530907434,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527873978,
-            "server_handler_exec_ms": 6,
-            "service_future_created_at_ms": 1774527873972,
-            "service_future_first_poll_entered_at_ms": 1774527873972,
+            "response_sent_at_ms": 1774530907439,
+            "server_handler_exec_ms": 5,
+            "service_future_created_at_ms": 1774530907434,
+            "service_future_first_poll_entered_at_ms": 1774530907434,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527873972,
+            "service_future_first_wake_scheduled_at_ms": 1774530907435,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527873972,
+            "service_scope_entered_at_ms": 1774530907434,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527873972,
+            "transport_received_at_ms": 1774530907434,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0,
@@ -89,7 +89,7 @@
               "status": "completed"
             },
             {
-              "duration_ms": 4,
+              "duration_ms": 2,
               "name": "response_build",
               "started_offset_ms": 0,
               "status": "completed"
@@ -97,12 +97,12 @@
             {
               "duration_ms": 0,
               "name": "terminal",
-              "started_offset_ms": 4,
+              "started_offset_ms": 2,
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774527873972,
-          "total_duration_ms": 5,
+          "started_at_ms": 1774530907434,
+          "total_duration_ms": 4,
           "trace_id": "completion-trace-1",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -117,10 +117,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 1,
             "request_file_seq": 2,
-            "turn_wait_entered_at_ms": 1774527873972,
+            "turn_wait_entered_at_ms": 1774530907434,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527873972,
-            "wake_after_turn_resolution_at_ms": 1774527873972
+            "turn_wait_resolved_at_ms": 1774530907435,
+            "wake_after_turn_resolution_at_ms": 1774530907435
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -128,8 +128,8 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 20,
-            "apply_age_at_terminal_ms": 21,
+            "apply_age_at_start_ms": 16,
+            "apply_age_at_terminal_ms": 17,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -171,22 +171,22 @@
               }
             ],
             "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527873991,
-            "jsonrpc_dispatch_received_at_ms": 1774527873991,
-            "method_entered_at_ms": 1774527873991,
+            "handler_entered_at_ms": 1774530907449,
+            "jsonrpc_dispatch_received_at_ms": 1774530907449,
+            "method_entered_at_ms": 1774530907449,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527873997,
-            "server_handler_exec_ms": 6,
-            "service_future_created_at_ms": 1774527873991,
-            "service_future_first_poll_entered_at_ms": 1774527873991,
+            "response_sent_at_ms": 1774530907454,
+            "server_handler_exec_ms": 5,
+            "service_future_created_at_ms": 1774530907449,
+            "service_future_first_poll_entered_at_ms": 1774530907449,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527873991,
+            "service_future_first_wake_scheduled_at_ms": 1774530907449,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527873991,
+            "service_scope_entered_at_ms": 1774530907449,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527873991,
+            "transport_received_at_ms": 1774530907449,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0,
@@ -207,7 +207,7 @@
               "status": "completed"
             },
             {
-              "duration_ms": 1,
+              "duration_ms": 0,
               "name": "prepare_stateful",
               "started_offset_ms": 0,
               "status": "completed"
@@ -215,24 +215,24 @@
             {
               "duration_ms": 0,
               "name": "query_bundle",
-              "started_offset_ms": 1,
+              "started_offset_ms": 0,
               "status": "completed"
             },
             {
-              "duration_ms": 3,
+              "duration_ms": 2,
               "name": "response_build",
-              "started_offset_ms": 1,
+              "started_offset_ms": 0,
               "status": "completed"
             },
             {
               "duration_ms": 0,
               "name": "terminal",
-              "started_offset_ms": 4,
+              "started_offset_ms": 2,
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774527873991,
-          "total_duration_ms": 5,
+          "started_at_ms": 1774530907449,
+          "total_duration_ms": 4,
           "trace_id": "completion-trace-2",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -247,10 +247,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 3,
             "request_file_seq": 4,
-            "turn_wait_entered_at_ms": 1774527873991,
+            "turn_wait_entered_at_ms": 1774530907449,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527873991,
-            "wake_after_turn_resolution_at_ms": 1774527873991
+            "turn_wait_resolved_at_ms": 1774530907449,
+            "wake_after_turn_resolution_at_ms": 1774530907449
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -271,8 +271,8 @@
           },
           "request_id": "40300100",
           "server_edge_details": {
-            "cancel_observed_after_handler_enter_ms": 302,
-            "cancel_observed_at_ms": 1774527874292,
+            "cancel_observed_after_handler_enter_ms": 301,
+            "cancel_observed_at_ms": 1774530907750,
             "dispatch_to_request_context_wait_ms": 0,
             "first_poll_contention_attribution": {
               "concurrency_level": 16,
@@ -281,25 +281,25 @@
               "uri_scope": "unavailable"
             },
             "first_poll_contention_contenders": [],
-            "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527873990,
-            "jsonrpc_dispatch_received_at_ms": 1774527873990,
-            "method_entered_at_ms": 1774527873990,
-            "method_prelude_exec_ms": 0,
+            "first_poll_to_first_wake_wait_ms": 1,
+            "handler_entered_at_ms": 1774530907449,
+            "jsonrpc_dispatch_received_at_ms": 1774530907448,
+            "method_entered_at_ms": 1774530907448,
+            "method_prelude_exec_ms": 1,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874292,
-            "server_handler_exec_ms": 302,
-            "service_future_created_at_ms": 1774527873990,
-            "service_future_first_poll_entered_at_ms": 1774527873990,
+            "response_sent_at_ms": 1774530907750,
+            "server_handler_exec_ms": 301,
+            "service_future_created_at_ms": 1774530907448,
+            "service_future_first_poll_entered_at_ms": 1774530907448,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527873990,
+            "service_future_first_wake_scheduled_at_ms": 1774530907449,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527873990,
+            "service_scope_entered_at_ms": 1774530907448,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527873990,
+            "transport_received_at_ms": 1774530907448,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 0,
+            "transport_to_handler_wait_ms": 1,
             "transport_to_method_wait_ms": 0,
             "transport_to_service_future_wait_ms": 0,
             "transport_to_service_scope_wait_ms": 0
@@ -318,8 +318,8 @@
               "status": "cancelled"
             }
           ],
-          "started_at_ms": 1774527873990,
-          "total_duration_ms": 302,
+          "started_at_ms": 1774530907448,
+          "total_duration_ms": 301,
           "trace_id": "completion-trace-3",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -334,10 +334,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 2,
             "request_file_seq": 3,
-            "turn_wait_entered_at_ms": 1774527873990,
+            "turn_wait_entered_at_ms": 1774530907449,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527873990,
-            "wake_after_turn_resolution_at_ms": 1774527873990
+            "turn_wait_resolved_at_ms": 1774530907449,
+            "wake_after_turn_resolution_at_ms": 1774530907449
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -345,8 +345,8 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 329,
-            "apply_age_at_terminal_ms": 330,
+            "apply_age_at_start_ms": 321,
+            "apply_age_at_terminal_ms": 321,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -388,22 +388,22 @@
               }
             ],
             "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527874300,
-            "jsonrpc_dispatch_received_at_ms": 1774527874300,
-            "method_entered_at_ms": 1774527874300,
+            "handler_entered_at_ms": 1774530907754,
+            "jsonrpc_dispatch_received_at_ms": 1774530907754,
+            "method_entered_at_ms": 1774530907754,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874305,
-            "server_handler_exec_ms": 5,
-            "service_future_created_at_ms": 1774527874300,
-            "service_future_first_poll_entered_at_ms": 1774527874300,
+            "response_sent_at_ms": 1774530907758,
+            "server_handler_exec_ms": 4,
+            "service_future_created_at_ms": 1774530907754,
+            "service_future_first_poll_entered_at_ms": 1774530907754,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874300,
+            "service_future_first_wake_scheduled_at_ms": 1774530907754,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874300,
+            "service_scope_entered_at_ms": 1774530907754,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874300,
+            "transport_received_at_ms": 1774530907754,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0,
@@ -436,7 +436,7 @@
               "status": "completed"
             },
             {
-              "duration_ms": 3,
+              "duration_ms": 2,
               "name": "response_build",
               "started_offset_ms": 0,
               "status": "completed"
@@ -444,12 +444,12 @@
             {
               "duration_ms": 0,
               "name": "terminal",
-              "started_offset_ms": 3,
+              "started_offset_ms": 2,
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774527874300,
-          "total_duration_ms": 5,
+          "started_at_ms": 1774530907754,
+          "total_duration_ms": 4,
           "trace_id": "completion-trace-4",
           "trigger_mode": "invoked",
           "turn_attribution": {
@@ -464,10 +464,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 5,
             "request_file_seq": 7,
-            "turn_wait_entered_at_ms": 1774527874300,
+            "turn_wait_entered_at_ms": 1774530907754,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874300,
-            "wake_after_turn_resolution_at_ms": 1774527874300
+            "turn_wait_resolved_at_ms": 1774530907754,
+            "wake_after_turn_resolution_at_ms": 1774530907754
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -489,7 +489,7 @@
           "request_id": "40300110",
           "server_edge_details": {
             "cancel_observed_after_handler_enter_ms": 302,
-            "cancel_observed_at_ms": 1774527874601,
+            "cancel_observed_at_ms": 1774530908055,
             "dispatch_to_request_context_wait_ms": 0,
             "first_poll_contention_attribution": {
               "concurrency_level": 16,
@@ -499,22 +499,22 @@
             },
             "first_poll_contention_contenders": [],
             "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527874299,
-            "jsonrpc_dispatch_received_at_ms": 1774527874299,
-            "method_entered_at_ms": 1774527874299,
+            "handler_entered_at_ms": 1774530907753,
+            "jsonrpc_dispatch_received_at_ms": 1774530907753,
+            "method_entered_at_ms": 1774530907753,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874601,
+            "response_sent_at_ms": 1774530908055,
             "server_handler_exec_ms": 302,
-            "service_future_created_at_ms": 1774527874299,
-            "service_future_first_poll_entered_at_ms": 1774527874299,
+            "service_future_created_at_ms": 1774530907753,
+            "service_future_first_poll_entered_at_ms": 1774530907753,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874299,
+            "service_future_first_wake_scheduled_at_ms": 1774530907753,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874299,
+            "service_scope_entered_at_ms": 1774530907753,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874299,
+            "transport_received_at_ms": 1774530907753,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
             "transport_to_handler_wait_ms": 0,
             "transport_to_method_wait_ms": 0,
@@ -535,7 +535,7 @@
               "status": "cancelled"
             }
           ],
-          "started_at_ms": 1774527874299,
+          "started_at_ms": 1774530907753,
           "total_duration_ms": 301,
           "trace_id": "completion-trace-5",
           "trigger_mode": "invoked",
@@ -551,10 +551,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 4,
             "request_file_seq": 6,
-            "turn_wait_entered_at_ms": 1774527874299,
+            "turn_wait_entered_at_ms": 1774530907753,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874299,
-            "wake_after_turn_resolution_at_ms": 1774527874299
+            "turn_wait_resolved_at_ms": 1774530907753,
+            "wake_after_turn_resolution_at_ms": 1774530907753
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -562,8 +562,8 @@
           "dominant_stage": "response_build",
           "outcome": "ok_non_empty",
           "prepare_details": {
-            "apply_age_at_start_ms": 634,
-            "apply_age_at_terminal_ms": 635,
+            "apply_age_at_start_ms": 627,
+            "apply_age_at_terminal_ms": 627,
             "exact_wait": {
               "current_revision_head_owner_hints_ready": true,
               "exact_ready_before_wait": false,
@@ -587,451 +587,17 @@
           },
           "request_id": "40300121",
           "server_edge_details": {
-            "dispatch_to_request_context_wait_ms": 0,
-            "first_poll_contention_attribution": {
-              "concurrency_level": 16,
-              "contender_class": "completion",
-              "inflight_count": 1,
-              "oldest_inflight_age_ms": 1,
-              "uri_scope": "same_uri"
-            },
-            "first_poll_contention_contenders": [
-              {
-                "age_ms": 1,
-                "method": "textDocument/completion",
-                "phase": "turn_wait",
-                "request_class": "completion",
-                "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-              }
-            ],
-            "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527874605,
-            "jsonrpc_dispatch_received_at_ms": 1774527874605,
-            "method_entered_at_ms": 1774527874605,
-            "method_prelude_exec_ms": 0,
-            "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874610,
-            "server_handler_exec_ms": 5,
-            "service_future_created_at_ms": 1774527874605,
-            "service_future_first_poll_entered_at_ms": 1774527874605,
-            "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874605,
-            "service_future_to_first_poll_wait_ms": 0,
-            "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874605,
-            "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874605,
-            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 0,
-            "transport_to_method_wait_ms": 0,
-            "transport_to_service_future_wait_ms": 0,
-            "transport_to_service_scope_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "sync_globals",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "prepare_stateful",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "query_bundle",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 3,
-              "name": "response_build",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 3,
-              "status": "completed"
-            }
-          ],
-          "started_at_ms": 1774527874605,
-          "total_duration_ms": 4,
-          "trace_id": "completion-trace-6",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 7,
-            "request_file_seq": 10,
-            "turn_wait_entered_at_ms": 1774527874605,
-            "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874605,
-            "wake_after_turn_resolution_at_ms": 1774527874605
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "terminal",
-          "outcome": "cancelled",
-          "prepare_details": {
-            "exact_wait": null,
-            "fail_closed_cause": null,
-            "min_file_version": 1,
-            "progress": null,
-            "route": null,
-            "shadow_version_at_start": 1,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "40300120",
-          "server_edge_details": {
-            "cancel_observed_after_handler_enter_ms": 301,
-            "cancel_observed_at_ms": 1774527874906,
-            "dispatch_to_request_context_wait_ms": 0,
-            "first_poll_contention_attribution": {
-              "concurrency_level": 16,
-              "contender_class": "none_visible",
-              "inflight_count": 0,
-              "uri_scope": "unavailable"
-            },
-            "first_poll_contention_contenders": [],
-            "first_poll_to_first_wake_wait_ms": 1,
-            "handler_entered_at_ms": 1774527874605,
-            "jsonrpc_dispatch_received_at_ms": 1774527874604,
-            "method_entered_at_ms": 1774527874604,
-            "method_prelude_exec_ms": 1,
-            "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874906,
-            "server_handler_exec_ms": 301,
-            "service_future_created_at_ms": 1774527874604,
-            "service_future_first_poll_entered_at_ms": 1774527874604,
-            "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874605,
-            "service_future_to_first_poll_wait_ms": 0,
-            "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874604,
-            "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874604,
-            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 1,
-            "transport_to_method_wait_ms": 0,
-            "transport_to_service_future_wait_ms": 0,
-            "transport_to_service_scope_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 0,
-              "status": "cancelled"
-            }
-          ],
-          "started_at_ms": 1774527874604,
-          "total_duration_ms": 301,
-          "trace_id": "completion-trace-7",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 6,
-            "request_file_seq": 9,
-            "turn_wait_entered_at_ms": 1774527874605,
-            "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874605,
-            "wake_after_turn_resolution_at_ms": 1774527874605
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "response_build",
-          "outcome": "ok_non_empty",
-          "prepare_details": {
-            "apply_age_at_start_ms": 938,
-            "apply_age_at_terminal_ms": 939,
-            "exact_wait": {
-              "current_revision_head_owner_hints_ready": true,
-              "exact_ready_before_wait": false,
-              "head_ready_before_wait": true
-            },
-            "fail_closed_cause": null,
-            "guard_outcome": "prepared",
-            "kind": "lightweight_current_revision",
-            "min_file_version": 1,
-            "observed_file_version": 1,
-            "outcome": "ready",
-            "progress": {},
-            "route": "head_hit",
-            "shadow_version_at_start": 1,
-            "snapshot_elapsed_ms": 0,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_budget_ms": 120,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "40300131",
-          "server_edge_details": {
-            "dispatch_to_request_context_wait_ms": 0,
-            "first_poll_contention_attribution": {
-              "concurrency_level": 16,
-              "contender_class": "completion",
-              "inflight_count": 1,
-              "oldest_inflight_age_ms": 1,
-              "uri_scope": "same_uri"
-            },
-            "first_poll_contention_contenders": [
-              {
-                "age_ms": 1,
-                "method": "textDocument/completion",
-                "phase": "turn_wait",
-                "request_class": "completion",
-                "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-              }
-            ],
-            "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527874909,
-            "jsonrpc_dispatch_received_at_ms": 1774527874909,
-            "method_entered_at_ms": 1774527874909,
-            "method_prelude_exec_ms": 0,
-            "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527874914,
-            "server_handler_exec_ms": 5,
-            "service_future_created_at_ms": 1774527874909,
-            "service_future_first_poll_entered_at_ms": 1774527874909,
-            "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874909,
-            "service_future_to_first_poll_wait_ms": 0,
-            "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874909,
-            "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874909,
-            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 0,
-            "transport_to_method_wait_ms": 0,
-            "transport_to_service_future_wait_ms": 0,
-            "transport_to_service_scope_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "sync_globals",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "prepare_stateful",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "query_bundle",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 3,
-              "name": "response_build",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 3,
-              "status": "completed"
-            }
-          ],
-          "started_at_ms": 1774527874909,
-          "total_duration_ms": 4,
-          "trace_id": "completion-trace-8",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 9,
-            "request_file_seq": 13,
-            "turn_wait_entered_at_ms": 1774527874909,
-            "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874909,
-            "wake_after_turn_resolution_at_ms": 1774527874909
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "terminal",
-          "outcome": "cancelled",
-          "prepare_details": {
-            "exact_wait": null,
-            "fail_closed_cause": null,
-            "min_file_version": 1,
-            "progress": null,
-            "route": null,
-            "shadow_version_at_start": 1,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "40300130",
-          "server_edge_details": {
-            "cancel_observed_after_handler_enter_ms": 300,
-            "cancel_observed_at_ms": 1774527875208,
-            "dispatch_to_request_context_wait_ms": 0,
-            "first_poll_contention_attribution": {
-              "concurrency_level": 16,
-              "contender_class": "none_visible",
-              "inflight_count": 0,
-              "uri_scope": "unavailable"
-            },
-            "first_poll_contention_contenders": [],
-            "first_poll_to_first_wake_wait_ms": 1,
-            "handler_entered_at_ms": 1774527874908,
-            "jsonrpc_dispatch_received_at_ms": 1774527874908,
-            "method_entered_at_ms": 1774527874908,
-            "method_prelude_exec_ms": 0,
-            "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527875208,
-            "server_handler_exec_ms": 300,
-            "service_future_created_at_ms": 1774527874908,
-            "service_future_first_poll_entered_at_ms": 1774527874908,
-            "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527874909,
-            "service_future_to_first_poll_wait_ms": 0,
-            "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527874908,
-            "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527874908,
-            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 0,
-            "transport_to_method_wait_ms": 0,
-            "transport_to_service_future_wait_ms": 0,
-            "transport_to_service_scope_wait_ms": 0
-          },
-          "stages": [
-            {
-              "duration_ms": 0,
-              "name": "turn_wait",
-              "started_offset_ms": 0,
-              "status": "completed"
-            },
-            {
-              "duration_ms": 0,
-              "name": "terminal",
-              "started_offset_ms": 0,
-              "status": "cancelled"
-            }
-          ],
-          "started_at_ms": 1774527874908,
-          "total_duration_ms": 301,
-          "trace_id": "completion-trace-9",
-          "trigger_mode": "invoked",
-          "turn_attribution": {
-            "active_completion_count": 0,
-            "did_change_ahead_count": 0,
-            "dispatcher_resolution_latency_ms": 0,
-            "dropped_completion_file_seq": [],
-            "queue_capacity": 256,
-            "queue_depth_after_enqueue": 1,
-            "queue_depth_before_enqueue": 0,
-            "queue_outcome": "enqueued",
-            "queued_completion_ahead_count": 0,
-            "request_epoch": 8,
-            "request_file_seq": 12,
-            "turn_wait_entered_at_ms": 1774527874909,
-            "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527874909,
-            "wake_after_turn_resolution_at_ms": 1774527874909
-          },
-          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-        },
-        {
-          "dominant_stage": "response_build",
-          "outcome": "ok_non_empty",
-          "prepare_details": {
-            "apply_age_at_start_ms": 1245,
-            "apply_age_at_terminal_ms": 1245,
-            "exact_wait": {
-              "current_revision_head_owner_hints_ready": true,
-              "exact_ready_before_wait": false,
-              "head_ready_before_wait": true
-            },
-            "fail_closed_cause": null,
-            "guard_outcome": "prepared",
-            "kind": "lightweight_current_revision",
-            "min_file_version": 1,
-            "observed_file_version": 1,
-            "outcome": "ready",
-            "progress": {},
-            "route": "head_hit",
-            "shadow_version_at_start": 1,
-            "snapshot_elapsed_ms": 0,
-            "snapshot_with_deps_runtime": null,
-            "snapshot_with_deps_timeout_runtime": null,
-            "timeout_attribution": null,
-            "wait_budget_ms": 120,
-            "wait_for_file_version_runtime": null
-          },
-          "request_id": "40300141",
-          "server_edge_details": {
             "dispatch_to_request_context_wait_ms": 1,
             "first_poll_contention_attribution": {
               "concurrency_level": 16,
               "contender_class": "completion",
               "inflight_count": 1,
-              "oldest_inflight_age_ms": 2,
+              "oldest_inflight_age_ms": 1,
               "uri_scope": "same_uri"
             },
             "first_poll_contention_contenders": [
               {
-                "age_ms": 2,
+                "age_ms": 1,
                 "method": "textDocument/completion",
                 "phase": "turn_wait",
                 "request_class": "completion",
@@ -1039,22 +605,22 @@
               }
             ],
             "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527875214,
-            "jsonrpc_dispatch_received_at_ms": 1774527875213,
-            "method_entered_at_ms": 1774527875214,
+            "handler_entered_at_ms": 1774530908060,
+            "jsonrpc_dispatch_received_at_ms": 1774530908059,
+            "method_entered_at_ms": 1774530908060,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527875219,
+            "response_sent_at_ms": 1774530908065,
             "server_handler_exec_ms": 5,
-            "service_future_created_at_ms": 1774527875214,
-            "service_future_first_poll_entered_at_ms": 1774527875214,
+            "service_future_created_at_ms": 1774530908060,
+            "service_future_first_poll_entered_at_ms": 1774530908060,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527875214,
+            "service_future_first_wake_scheduled_at_ms": 1774530908060,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527875214,
+            "service_scope_entered_at_ms": 1774530908060,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527875213,
+            "transport_received_at_ms": 1774530908059,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
             "transport_to_handler_wait_ms": 1,
             "transport_to_method_wait_ms": 1,
@@ -1099,7 +665,441 @@
               "status": "completed"
             }
           ],
-          "started_at_ms": 1774527875214,
+          "started_at_ms": 1774530908060,
+          "total_duration_ms": 4,
+          "trace_id": "completion-trace-6",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 7,
+            "request_file_seq": 10,
+            "turn_wait_entered_at_ms": 1774530908060,
+            "turn_wait_outcome": "ready",
+            "turn_wait_resolved_at_ms": 1774530908060,
+            "wake_after_turn_resolution_at_ms": 1774530908060
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "terminal",
+          "outcome": "cancelled",
+          "prepare_details": {
+            "exact_wait": null,
+            "fail_closed_cause": null,
+            "min_file_version": 1,
+            "progress": null,
+            "route": null,
+            "shadow_version_at_start": 1,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "40300120",
+          "server_edge_details": {
+            "cancel_observed_after_handler_enter_ms": 301,
+            "cancel_observed_at_ms": 1774530908360,
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_contention_attribution": {
+              "concurrency_level": 16,
+              "contender_class": "none_visible",
+              "inflight_count": 0,
+              "uri_scope": "unavailable"
+            },
+            "first_poll_contention_contenders": [],
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774530908059,
+            "jsonrpc_dispatch_received_at_ms": 1774530908059,
+            "method_entered_at_ms": 1774530908059,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774530908360,
+            "server_handler_exec_ms": 301,
+            "service_future_created_at_ms": 1774530908059,
+            "service_future_first_poll_entered_at_ms": 1774530908059,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774530908059,
+            "service_future_to_first_poll_wait_ms": 0,
+            "service_future_to_scope_wait_ms": 0,
+            "service_scope_entered_at_ms": 1774530908059,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774530908059,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 0,
+              "status": "cancelled"
+            }
+          ],
+          "started_at_ms": 1774530908059,
+          "total_duration_ms": 301,
+          "trace_id": "completion-trace-7",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 6,
+            "request_file_seq": 9,
+            "turn_wait_entered_at_ms": 1774530908059,
+            "turn_wait_outcome": "ready",
+            "turn_wait_resolved_at_ms": 1774530908059,
+            "wake_after_turn_resolution_at_ms": 1774530908059
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "response_build",
+          "outcome": "ok_non_empty",
+          "prepare_details": {
+            "apply_age_at_start_ms": 931,
+            "apply_age_at_terminal_ms": 931,
+            "exact_wait": {
+              "current_revision_head_owner_hints_ready": true,
+              "exact_ready_before_wait": false,
+              "head_ready_before_wait": true
+            },
+            "fail_closed_cause": null,
+            "guard_outcome": "prepared",
+            "kind": "lightweight_current_revision",
+            "min_file_version": 1,
+            "observed_file_version": 1,
+            "outcome": "ready",
+            "progress": {},
+            "route": "head_hit",
+            "shadow_version_at_start": 1,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "40300131",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_contention_attribution": {
+              "concurrency_level": 16,
+              "contender_class": "completion",
+              "inflight_count": 1,
+              "oldest_inflight_age_ms": 1,
+              "uri_scope": "same_uri"
+            },
+            "first_poll_contention_contenders": [
+              {
+                "age_ms": 1,
+                "method": "textDocument/completion",
+                "phase": "turn_wait",
+                "request_class": "completion",
+                "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+              }
+            ],
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774530908364,
+            "jsonrpc_dispatch_received_at_ms": 1774530908364,
+            "method_entered_at_ms": 1774530908364,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774530908368,
+            "server_handler_exec_ms": 4,
+            "service_future_created_at_ms": 1774530908364,
+            "service_future_first_poll_entered_at_ms": 1774530908364,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774530908364,
+            "service_future_to_first_poll_wait_ms": 0,
+            "service_future_to_scope_wait_ms": 0,
+            "service_scope_entered_at_ms": 1774530908364,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774530908364,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "query_bundle",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 2,
+              "name": "response_build",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 2,
+              "status": "completed"
+            }
+          ],
+          "started_at_ms": 1774530908364,
+          "total_duration_ms": 4,
+          "trace_id": "completion-trace-8",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 9,
+            "request_file_seq": 13,
+            "turn_wait_entered_at_ms": 1774530908364,
+            "turn_wait_outcome": "ready",
+            "turn_wait_resolved_at_ms": 1774530908364,
+            "wake_after_turn_resolution_at_ms": 1774530908364
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "terminal",
+          "outcome": "cancelled",
+          "prepare_details": {
+            "exact_wait": null,
+            "fail_closed_cause": null,
+            "min_file_version": 1,
+            "progress": null,
+            "route": null,
+            "shadow_version_at_start": 1,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "40300130",
+          "server_edge_details": {
+            "cancel_observed_after_handler_enter_ms": 303,
+            "cancel_observed_at_ms": 1774530908666,
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_contention_attribution": {
+              "concurrency_level": 16,
+              "contender_class": "none_visible",
+              "inflight_count": 0,
+              "uri_scope": "unavailable"
+            },
+            "first_poll_contention_contenders": [],
+            "first_poll_to_first_wake_wait_ms": 1,
+            "handler_entered_at_ms": 1774530908363,
+            "jsonrpc_dispatch_received_at_ms": 1774530908363,
+            "method_entered_at_ms": 1774530908363,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774530908666,
+            "server_handler_exec_ms": 303,
+            "service_future_created_at_ms": 1774530908363,
+            "service_future_first_poll_entered_at_ms": 1774530908363,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774530908364,
+            "service_future_to_first_poll_wait_ms": 0,
+            "service_future_to_scope_wait_ms": 0,
+            "service_scope_entered_at_ms": 1774530908363,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774530908363,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 0,
+              "status": "cancelled"
+            }
+          ],
+          "started_at_ms": 1774530908363,
+          "total_duration_ms": 302,
+          "trace_id": "completion-trace-9",
+          "trigger_mode": "invoked",
+          "turn_attribution": {
+            "active_completion_count": 0,
+            "did_change_ahead_count": 0,
+            "dispatcher_resolution_latency_ms": 0,
+            "dropped_completion_file_seq": [],
+            "queue_capacity": 256,
+            "queue_depth_after_enqueue": 1,
+            "queue_depth_before_enqueue": 0,
+            "queue_outcome": "enqueued",
+            "queued_completion_ahead_count": 0,
+            "request_epoch": 8,
+            "request_file_seq": 12,
+            "turn_wait_entered_at_ms": 1774530908363,
+            "turn_wait_outcome": "ready",
+            "turn_wait_resolved_at_ms": 1774530908364,
+            "wake_after_turn_resolution_at_ms": 1774530908364
+          },
+          "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+        },
+        {
+          "dominant_stage": "response_build",
+          "outcome": "ok_non_empty",
+          "prepare_details": {
+            "apply_age_at_start_ms": 1236,
+            "apply_age_at_terminal_ms": 1237,
+            "exact_wait": {
+              "current_revision_head_owner_hints_ready": true,
+              "exact_ready_before_wait": false,
+              "head_ready_before_wait": true
+            },
+            "fail_closed_cause": null,
+            "guard_outcome": "prepared",
+            "kind": "lightweight_current_revision",
+            "min_file_version": 1,
+            "observed_file_version": 1,
+            "outcome": "ready",
+            "progress": {},
+            "route": "head_hit",
+            "shadow_version_at_start": 1,
+            "snapshot_elapsed_ms": 0,
+            "snapshot_with_deps_runtime": null,
+            "snapshot_with_deps_timeout_runtime": null,
+            "timeout_attribution": null,
+            "wait_budget_ms": 120,
+            "wait_for_file_version_runtime": null
+          },
+          "request_id": "40300141",
+          "server_edge_details": {
+            "dispatch_to_request_context_wait_ms": 0,
+            "first_poll_contention_attribution": {
+              "concurrency_level": 16,
+              "contender_class": "completion",
+              "inflight_count": 1,
+              "oldest_inflight_age_ms": 1,
+              "uri_scope": "same_uri"
+            },
+            "first_poll_contention_contenders": [
+              {
+                "age_ms": 1,
+                "method": "textDocument/completion",
+                "phase": "turn_wait",
+                "request_class": "completion",
+                "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+              }
+            ],
+            "first_poll_to_first_wake_wait_ms": 0,
+            "handler_entered_at_ms": 1774530908669,
+            "jsonrpc_dispatch_received_at_ms": 1774530908669,
+            "method_entered_at_ms": 1774530908669,
+            "method_prelude_exec_ms": 0,
+            "pre_method_attribution_provenance": "same_request_authoritative",
+            "response_sent_at_ms": 1774530908674,
+            "server_handler_exec_ms": 5,
+            "service_future_created_at_ms": 1774530908669,
+            "service_future_first_poll_entered_at_ms": 1774530908669,
+            "service_future_first_poll_outcome": "pending",
+            "service_future_first_wake_scheduled_at_ms": 1774530908669,
+            "service_future_to_first_poll_wait_ms": 0,
+            "service_future_to_scope_wait_ms": 0,
+            "service_scope_entered_at_ms": 1774530908669,
+            "service_scope_to_method_wait_ms": 0,
+            "transport_received_at_ms": 1774530908669,
+            "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+            "transport_to_handler_wait_ms": 0,
+            "transport_to_method_wait_ms": 0,
+            "transport_to_service_future_wait_ms": 0,
+            "transport_to_service_scope_wait_ms": 0
+          },
+          "stages": [
+            {
+              "duration_ms": 0,
+              "name": "turn_wait",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "sync_globals",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "prepare_stateful",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "query_bundle",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 2,
+              "name": "response_build",
+              "started_offset_ms": 0,
+              "status": "completed"
+            },
+            {
+              "duration_ms": 0,
+              "name": "terminal",
+              "started_offset_ms": 2,
+              "status": "completed"
+            }
+          ],
+          "started_at_ms": 1774530908669,
           "total_duration_ms": 4,
           "trace_id": "completion-trace-10",
           "trigger_mode": "invoked",
@@ -1115,10 +1115,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 11,
             "request_file_seq": 16,
-            "turn_wait_entered_at_ms": 1774527875214,
+            "turn_wait_entered_at_ms": 1774530908669,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527875214,
-            "wake_after_turn_resolution_at_ms": 1774527875214
+            "turn_wait_resolved_at_ms": 1774530908669,
+            "wake_after_turn_resolution_at_ms": 1774530908669
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         },
@@ -1140,8 +1140,8 @@
           "request_id": "40300140",
           "server_edge_details": {
             "cancel_observed_after_handler_enter_ms": 301,
-            "cancel_observed_at_ms": 1774527875514,
-            "dispatch_to_request_context_wait_ms": 1,
+            "cancel_observed_at_ms": 1774530908970,
+            "dispatch_to_request_context_wait_ms": 0,
             "first_poll_contention_attribution": {
               "concurrency_level": 16,
               "contender_class": "none_visible",
@@ -1150,27 +1150,27 @@
             },
             "first_poll_contention_contenders": [],
             "first_poll_to_first_wake_wait_ms": 0,
-            "handler_entered_at_ms": 1774527875213,
-            "jsonrpc_dispatch_received_at_ms": 1774527875211,
-            "method_entered_at_ms": 1774527875213,
+            "handler_entered_at_ms": 1774530908669,
+            "jsonrpc_dispatch_received_at_ms": 1774530908668,
+            "method_entered_at_ms": 1774530908669,
             "method_prelude_exec_ms": 0,
             "pre_method_attribution_provenance": "same_request_authoritative",
-            "response_sent_at_ms": 1774527875514,
+            "response_sent_at_ms": 1774530908970,
             "server_handler_exec_ms": 301,
-            "service_future_created_at_ms": 1774527875213,
-            "service_future_first_poll_entered_at_ms": 1774527875213,
+            "service_future_created_at_ms": 1774530908669,
+            "service_future_first_poll_entered_at_ms": 1774530908669,
             "service_future_first_poll_outcome": "pending",
-            "service_future_first_wake_scheduled_at_ms": 1774527875213,
+            "service_future_first_wake_scheduled_at_ms": 1774530908669,
             "service_future_to_first_poll_wait_ms": 0,
             "service_future_to_scope_wait_ms": 0,
-            "service_scope_entered_at_ms": 1774527875213,
+            "service_scope_entered_at_ms": 1774530908669,
             "service_scope_to_method_wait_ms": 0,
-            "transport_received_at_ms": 1774527875211,
+            "transport_received_at_ms": 1774530908668,
             "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-            "transport_to_handler_wait_ms": 2,
-            "transport_to_method_wait_ms": 2,
-            "transport_to_service_future_wait_ms": 2,
-            "transport_to_service_scope_wait_ms": 2
+            "transport_to_handler_wait_ms": 1,
+            "transport_to_method_wait_ms": 1,
+            "transport_to_service_future_wait_ms": 1,
+            "transport_to_service_scope_wait_ms": 1
           },
           "stages": [
             {
@@ -1186,7 +1186,7 @@
               "status": "cancelled"
             }
           ],
-          "started_at_ms": 1774527875213,
+          "started_at_ms": 1774530908669,
           "total_duration_ms": 301,
           "trace_id": "completion-trace-11",
           "trigger_mode": "invoked",
@@ -1202,10 +1202,10 @@
             "queued_completion_ahead_count": 0,
             "request_epoch": 10,
             "request_file_seq": 15,
-            "turn_wait_entered_at_ms": 1774527875213,
+            "turn_wait_entered_at_ms": 1774530908669,
             "turn_wait_outcome": "ready",
-            "turn_wait_resolved_at_ms": 1774527875213,
-            "wake_after_turn_resolution_at_ms": 1774527875213
+            "turn_wait_resolved_at_ms": 1774530908669,
+            "wake_after_turn_resolution_at_ms": 1774530908669
           },
           "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
         }
@@ -1250,23 +1250,23 @@
             "uri_scope": "unavailable"
           },
           "first_poll_contention_contenders": [],
-          "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527873972,
-          "jsonrpc_dispatch_received_at_ms": 1774527873972,
-          "method_entered_at_ms": 1774527873972,
+          "first_poll_to_first_wake_wait_ms": 1,
+          "handler_entered_at_ms": 1774530907434,
+          "jsonrpc_dispatch_received_at_ms": 1774530907434,
+          "method_entered_at_ms": 1774530907434,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527873978,
-          "server_handler_exec_ms": 6,
-          "service_future_created_at_ms": 1774527873972,
-          "service_future_first_poll_entered_at_ms": 1774527873972,
+          "response_sent_at_ms": 1774530907439,
+          "server_handler_exec_ms": 5,
+          "service_future_created_at_ms": 1774530907434,
+          "service_future_first_poll_entered_at_ms": 1774530907434,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527873972,
+          "service_future_first_wake_scheduled_at_ms": 1774530907435,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527873972,
+          "service_scope_entered_at_ms": 1774530907434,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527873972,
+          "transport_received_at_ms": 1774530907434,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0,
@@ -1299,7 +1299,7 @@
             "status": "completed"
           },
           {
-            "duration_ms": 4,
+            "duration_ms": 2,
             "name": "response_build",
             "started_offset_ms": 0,
             "status": "completed"
@@ -1307,12 +1307,12 @@
           {
             "duration_ms": 0,
             "name": "terminal",
-            "started_offset_ms": 4,
+            "started_offset_ms": 2,
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774527873972,
-        "total_duration_ms": 5,
+        "started_at_ms": 1774530907434,
+        "total_duration_ms": 4,
         "trace_id": "completion-trace-1",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1327,10 +1327,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 1,
           "request_file_seq": 2,
-          "turn_wait_entered_at_ms": 1774527873972,
+          "turn_wait_entered_at_ms": 1774530907434,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527873972,
-          "wake_after_turn_resolution_at_ms": 1774527873972
+          "turn_wait_resolved_at_ms": 1774530907435,
+          "wake_after_turn_resolution_at_ms": 1774530907435
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -1338,8 +1338,8 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 20,
-          "apply_age_at_terminal_ms": 21,
+          "apply_age_at_start_ms": 16,
+          "apply_age_at_terminal_ms": 17,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1381,22 +1381,22 @@
             }
           ],
           "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527873991,
-          "jsonrpc_dispatch_received_at_ms": 1774527873991,
-          "method_entered_at_ms": 1774527873991,
+          "handler_entered_at_ms": 1774530907449,
+          "jsonrpc_dispatch_received_at_ms": 1774530907449,
+          "method_entered_at_ms": 1774530907449,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527873997,
-          "server_handler_exec_ms": 6,
-          "service_future_created_at_ms": 1774527873991,
-          "service_future_first_poll_entered_at_ms": 1774527873991,
+          "response_sent_at_ms": 1774530907454,
+          "server_handler_exec_ms": 5,
+          "service_future_created_at_ms": 1774530907449,
+          "service_future_first_poll_entered_at_ms": 1774530907449,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527873991,
+          "service_future_first_wake_scheduled_at_ms": 1774530907449,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527873991,
+          "service_scope_entered_at_ms": 1774530907449,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527873991,
+          "transport_received_at_ms": 1774530907449,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0,
@@ -1417,7 +1417,7 @@
             "status": "completed"
           },
           {
-            "duration_ms": 1,
+            "duration_ms": 0,
             "name": "prepare_stateful",
             "started_offset_ms": 0,
             "status": "completed"
@@ -1425,24 +1425,24 @@
           {
             "duration_ms": 0,
             "name": "query_bundle",
-            "started_offset_ms": 1,
+            "started_offset_ms": 0,
             "status": "completed"
           },
           {
-            "duration_ms": 3,
+            "duration_ms": 2,
             "name": "response_build",
-            "started_offset_ms": 1,
+            "started_offset_ms": 0,
             "status": "completed"
           },
           {
             "duration_ms": 0,
             "name": "terminal",
-            "started_offset_ms": 4,
+            "started_offset_ms": 2,
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774527873991,
-        "total_duration_ms": 5,
+        "started_at_ms": 1774530907449,
+        "total_duration_ms": 4,
         "trace_id": "completion-trace-2",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1457,10 +1457,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 3,
           "request_file_seq": 4,
-          "turn_wait_entered_at_ms": 1774527873991,
+          "turn_wait_entered_at_ms": 1774530907449,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527873991,
-          "wake_after_turn_resolution_at_ms": 1774527873991
+          "turn_wait_resolved_at_ms": 1774530907449,
+          "wake_after_turn_resolution_at_ms": 1774530907449
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -1481,8 +1481,8 @@
         },
         "request_id": "40300100",
         "server_edge_details": {
-          "cancel_observed_after_handler_enter_ms": 302,
-          "cancel_observed_at_ms": 1774527874292,
+          "cancel_observed_after_handler_enter_ms": 301,
+          "cancel_observed_at_ms": 1774530907750,
           "dispatch_to_request_context_wait_ms": 0,
           "first_poll_contention_attribution": {
             "concurrency_level": 16,
@@ -1491,25 +1491,25 @@
             "uri_scope": "unavailable"
           },
           "first_poll_contention_contenders": [],
-          "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527873990,
-          "jsonrpc_dispatch_received_at_ms": 1774527873990,
-          "method_entered_at_ms": 1774527873990,
-          "method_prelude_exec_ms": 0,
+          "first_poll_to_first_wake_wait_ms": 1,
+          "handler_entered_at_ms": 1774530907449,
+          "jsonrpc_dispatch_received_at_ms": 1774530907448,
+          "method_entered_at_ms": 1774530907448,
+          "method_prelude_exec_ms": 1,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874292,
-          "server_handler_exec_ms": 302,
-          "service_future_created_at_ms": 1774527873990,
-          "service_future_first_poll_entered_at_ms": 1774527873990,
+          "response_sent_at_ms": 1774530907750,
+          "server_handler_exec_ms": 301,
+          "service_future_created_at_ms": 1774530907448,
+          "service_future_first_poll_entered_at_ms": 1774530907448,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527873990,
+          "service_future_first_wake_scheduled_at_ms": 1774530907449,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527873990,
+          "service_scope_entered_at_ms": 1774530907448,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527873990,
+          "transport_received_at_ms": 1774530907448,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 0,
+          "transport_to_handler_wait_ms": 1,
           "transport_to_method_wait_ms": 0,
           "transport_to_service_future_wait_ms": 0,
           "transport_to_service_scope_wait_ms": 0
@@ -1528,8 +1528,8 @@
             "status": "cancelled"
           }
         ],
-        "started_at_ms": 1774527873990,
-        "total_duration_ms": 302,
+        "started_at_ms": 1774530907448,
+        "total_duration_ms": 301,
         "trace_id": "completion-trace-3",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1544,10 +1544,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 2,
           "request_file_seq": 3,
-          "turn_wait_entered_at_ms": 1774527873990,
+          "turn_wait_entered_at_ms": 1774530907449,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527873990,
-          "wake_after_turn_resolution_at_ms": 1774527873990
+          "turn_wait_resolved_at_ms": 1774530907449,
+          "wake_after_turn_resolution_at_ms": 1774530907449
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -1555,8 +1555,8 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 329,
-          "apply_age_at_terminal_ms": 330,
+          "apply_age_at_start_ms": 321,
+          "apply_age_at_terminal_ms": 321,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1598,22 +1598,22 @@
             }
           ],
           "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527874300,
-          "jsonrpc_dispatch_received_at_ms": 1774527874300,
-          "method_entered_at_ms": 1774527874300,
+          "handler_entered_at_ms": 1774530907754,
+          "jsonrpc_dispatch_received_at_ms": 1774530907754,
+          "method_entered_at_ms": 1774530907754,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874305,
-          "server_handler_exec_ms": 5,
-          "service_future_created_at_ms": 1774527874300,
-          "service_future_first_poll_entered_at_ms": 1774527874300,
+          "response_sent_at_ms": 1774530907758,
+          "server_handler_exec_ms": 4,
+          "service_future_created_at_ms": 1774530907754,
+          "service_future_first_poll_entered_at_ms": 1774530907754,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874300,
+          "service_future_first_wake_scheduled_at_ms": 1774530907754,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874300,
+          "service_scope_entered_at_ms": 1774530907754,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874300,
+          "transport_received_at_ms": 1774530907754,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0,
@@ -1646,7 +1646,7 @@
             "status": "completed"
           },
           {
-            "duration_ms": 3,
+            "duration_ms": 2,
             "name": "response_build",
             "started_offset_ms": 0,
             "status": "completed"
@@ -1654,12 +1654,12 @@
           {
             "duration_ms": 0,
             "name": "terminal",
-            "started_offset_ms": 3,
+            "started_offset_ms": 2,
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774527874300,
-        "total_duration_ms": 5,
+        "started_at_ms": 1774530907754,
+        "total_duration_ms": 4,
         "trace_id": "completion-trace-4",
         "trigger_mode": "invoked",
         "turn_attribution": {
@@ -1674,10 +1674,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 5,
           "request_file_seq": 7,
-          "turn_wait_entered_at_ms": 1774527874300,
+          "turn_wait_entered_at_ms": 1774530907754,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874300,
-          "wake_after_turn_resolution_at_ms": 1774527874300
+          "turn_wait_resolved_at_ms": 1774530907754,
+          "wake_after_turn_resolution_at_ms": 1774530907754
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -1699,7 +1699,7 @@
         "request_id": "40300110",
         "server_edge_details": {
           "cancel_observed_after_handler_enter_ms": 302,
-          "cancel_observed_at_ms": 1774527874601,
+          "cancel_observed_at_ms": 1774530908055,
           "dispatch_to_request_context_wait_ms": 0,
           "first_poll_contention_attribution": {
             "concurrency_level": 16,
@@ -1709,22 +1709,22 @@
           },
           "first_poll_contention_contenders": [],
           "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527874299,
-          "jsonrpc_dispatch_received_at_ms": 1774527874299,
-          "method_entered_at_ms": 1774527874299,
+          "handler_entered_at_ms": 1774530907753,
+          "jsonrpc_dispatch_received_at_ms": 1774530907753,
+          "method_entered_at_ms": 1774530907753,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874601,
+          "response_sent_at_ms": 1774530908055,
           "server_handler_exec_ms": 302,
-          "service_future_created_at_ms": 1774527874299,
-          "service_future_first_poll_entered_at_ms": 1774527874299,
+          "service_future_created_at_ms": 1774530907753,
+          "service_future_first_poll_entered_at_ms": 1774530907753,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874299,
+          "service_future_first_wake_scheduled_at_ms": 1774530907753,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874299,
+          "service_scope_entered_at_ms": 1774530907753,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874299,
+          "transport_received_at_ms": 1774530907753,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
           "transport_to_handler_wait_ms": 0,
           "transport_to_method_wait_ms": 0,
@@ -1745,7 +1745,7 @@
             "status": "cancelled"
           }
         ],
-        "started_at_ms": 1774527874299,
+        "started_at_ms": 1774530907753,
         "total_duration_ms": 301,
         "trace_id": "completion-trace-5",
         "trigger_mode": "invoked",
@@ -1761,10 +1761,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 4,
           "request_file_seq": 6,
-          "turn_wait_entered_at_ms": 1774527874299,
+          "turn_wait_entered_at_ms": 1774530907753,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874299,
-          "wake_after_turn_resolution_at_ms": 1774527874299
+          "turn_wait_resolved_at_ms": 1774530907753,
+          "wake_after_turn_resolution_at_ms": 1774530907753
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -1772,8 +1772,8 @@
         "dominant_stage": "response_build",
         "outcome": "ok_non_empty",
         "prepare_details": {
-          "apply_age_at_start_ms": 634,
-          "apply_age_at_terminal_ms": 635,
+          "apply_age_at_start_ms": 627,
+          "apply_age_at_terminal_ms": 627,
           "exact_wait": {
             "current_revision_head_owner_hints_ready": true,
             "exact_ready_before_wait": false,
@@ -1797,451 +1797,17 @@
         },
         "request_id": "40300121",
         "server_edge_details": {
-          "dispatch_to_request_context_wait_ms": 0,
-          "first_poll_contention_attribution": {
-            "concurrency_level": 16,
-            "contender_class": "completion",
-            "inflight_count": 1,
-            "oldest_inflight_age_ms": 1,
-            "uri_scope": "same_uri"
-          },
-          "first_poll_contention_contenders": [
-            {
-              "age_ms": 1,
-              "method": "textDocument/completion",
-              "phase": "turn_wait",
-              "request_class": "completion",
-              "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-            }
-          ],
-          "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527874605,
-          "jsonrpc_dispatch_received_at_ms": 1774527874605,
-          "method_entered_at_ms": 1774527874605,
-          "method_prelude_exec_ms": 0,
-          "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874610,
-          "server_handler_exec_ms": 5,
-          "service_future_created_at_ms": 1774527874605,
-          "service_future_first_poll_entered_at_ms": 1774527874605,
-          "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874605,
-          "service_future_to_first_poll_wait_ms": 0,
-          "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874605,
-          "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874605,
-          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 0,
-          "transport_to_method_wait_ms": 0,
-          "transport_to_service_future_wait_ms": 0,
-          "transport_to_service_scope_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "sync_globals",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "prepare_stateful",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "query_bundle",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 3,
-            "name": "response_build",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 3,
-            "status": "completed"
-          }
-        ],
-        "started_at_ms": 1774527874605,
-        "total_duration_ms": 4,
-        "trace_id": "completion-trace-6",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 7,
-          "request_file_seq": 10,
-          "turn_wait_entered_at_ms": 1774527874605,
-          "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874605,
-          "wake_after_turn_resolution_at_ms": 1774527874605
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "terminal",
-        "outcome": "cancelled",
-        "prepare_details": {
-          "exact_wait": null,
-          "fail_closed_cause": null,
-          "min_file_version": 1,
-          "progress": null,
-          "route": null,
-          "shadow_version_at_start": 1,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "40300120",
-        "server_edge_details": {
-          "cancel_observed_after_handler_enter_ms": 301,
-          "cancel_observed_at_ms": 1774527874906,
-          "dispatch_to_request_context_wait_ms": 0,
-          "first_poll_contention_attribution": {
-            "concurrency_level": 16,
-            "contender_class": "none_visible",
-            "inflight_count": 0,
-            "uri_scope": "unavailable"
-          },
-          "first_poll_contention_contenders": [],
-          "first_poll_to_first_wake_wait_ms": 1,
-          "handler_entered_at_ms": 1774527874605,
-          "jsonrpc_dispatch_received_at_ms": 1774527874604,
-          "method_entered_at_ms": 1774527874604,
-          "method_prelude_exec_ms": 1,
-          "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874906,
-          "server_handler_exec_ms": 301,
-          "service_future_created_at_ms": 1774527874604,
-          "service_future_first_poll_entered_at_ms": 1774527874604,
-          "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874605,
-          "service_future_to_first_poll_wait_ms": 0,
-          "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874604,
-          "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874604,
-          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 1,
-          "transport_to_method_wait_ms": 0,
-          "transport_to_service_future_wait_ms": 0,
-          "transport_to_service_scope_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 0,
-            "status": "cancelled"
-          }
-        ],
-        "started_at_ms": 1774527874604,
-        "total_duration_ms": 301,
-        "trace_id": "completion-trace-7",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 6,
-          "request_file_seq": 9,
-          "turn_wait_entered_at_ms": 1774527874605,
-          "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874605,
-          "wake_after_turn_resolution_at_ms": 1774527874605
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "response_build",
-        "outcome": "ok_non_empty",
-        "prepare_details": {
-          "apply_age_at_start_ms": 938,
-          "apply_age_at_terminal_ms": 939,
-          "exact_wait": {
-            "current_revision_head_owner_hints_ready": true,
-            "exact_ready_before_wait": false,
-            "head_ready_before_wait": true
-          },
-          "fail_closed_cause": null,
-          "guard_outcome": "prepared",
-          "kind": "lightweight_current_revision",
-          "min_file_version": 1,
-          "observed_file_version": 1,
-          "outcome": "ready",
-          "progress": {},
-          "route": "head_hit",
-          "shadow_version_at_start": 1,
-          "snapshot_elapsed_ms": 0,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_budget_ms": 120,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "40300131",
-        "server_edge_details": {
-          "dispatch_to_request_context_wait_ms": 0,
-          "first_poll_contention_attribution": {
-            "concurrency_level": 16,
-            "contender_class": "completion",
-            "inflight_count": 1,
-            "oldest_inflight_age_ms": 1,
-            "uri_scope": "same_uri"
-          },
-          "first_poll_contention_contenders": [
-            {
-              "age_ms": 1,
-              "method": "textDocument/completion",
-              "phase": "turn_wait",
-              "request_class": "completion",
-              "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-            }
-          ],
-          "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527874909,
-          "jsonrpc_dispatch_received_at_ms": 1774527874909,
-          "method_entered_at_ms": 1774527874909,
-          "method_prelude_exec_ms": 0,
-          "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527874914,
-          "server_handler_exec_ms": 5,
-          "service_future_created_at_ms": 1774527874909,
-          "service_future_first_poll_entered_at_ms": 1774527874909,
-          "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874909,
-          "service_future_to_first_poll_wait_ms": 0,
-          "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874909,
-          "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874909,
-          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 0,
-          "transport_to_method_wait_ms": 0,
-          "transport_to_service_future_wait_ms": 0,
-          "transport_to_service_scope_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "sync_globals",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "prepare_stateful",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "query_bundle",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 3,
-            "name": "response_build",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 3,
-            "status": "completed"
-          }
-        ],
-        "started_at_ms": 1774527874909,
-        "total_duration_ms": 4,
-        "trace_id": "completion-trace-8",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 9,
-          "request_file_seq": 13,
-          "turn_wait_entered_at_ms": 1774527874909,
-          "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874909,
-          "wake_after_turn_resolution_at_ms": 1774527874909
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "terminal",
-        "outcome": "cancelled",
-        "prepare_details": {
-          "exact_wait": null,
-          "fail_closed_cause": null,
-          "min_file_version": 1,
-          "progress": null,
-          "route": null,
-          "shadow_version_at_start": 1,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "40300130",
-        "server_edge_details": {
-          "cancel_observed_after_handler_enter_ms": 300,
-          "cancel_observed_at_ms": 1774527875208,
-          "dispatch_to_request_context_wait_ms": 0,
-          "first_poll_contention_attribution": {
-            "concurrency_level": 16,
-            "contender_class": "none_visible",
-            "inflight_count": 0,
-            "uri_scope": "unavailable"
-          },
-          "first_poll_contention_contenders": [],
-          "first_poll_to_first_wake_wait_ms": 1,
-          "handler_entered_at_ms": 1774527874908,
-          "jsonrpc_dispatch_received_at_ms": 1774527874908,
-          "method_entered_at_ms": 1774527874908,
-          "method_prelude_exec_ms": 0,
-          "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527875208,
-          "server_handler_exec_ms": 300,
-          "service_future_created_at_ms": 1774527874908,
-          "service_future_first_poll_entered_at_ms": 1774527874908,
-          "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527874909,
-          "service_future_to_first_poll_wait_ms": 0,
-          "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527874908,
-          "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527874908,
-          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 0,
-          "transport_to_method_wait_ms": 0,
-          "transport_to_service_future_wait_ms": 0,
-          "transport_to_service_scope_wait_ms": 0
-        },
-        "stages": [
-          {
-            "duration_ms": 0,
-            "name": "turn_wait",
-            "started_offset_ms": 0,
-            "status": "completed"
-          },
-          {
-            "duration_ms": 0,
-            "name": "terminal",
-            "started_offset_ms": 0,
-            "status": "cancelled"
-          }
-        ],
-        "started_at_ms": 1774527874908,
-        "total_duration_ms": 301,
-        "trace_id": "completion-trace-9",
-        "trigger_mode": "invoked",
-        "turn_attribution": {
-          "active_completion_count": 0,
-          "did_change_ahead_count": 0,
-          "dispatcher_resolution_latency_ms": 0,
-          "dropped_completion_file_seq": [],
-          "queue_capacity": 256,
-          "queue_depth_after_enqueue": 1,
-          "queue_depth_before_enqueue": 0,
-          "queue_outcome": "enqueued",
-          "queued_completion_ahead_count": 0,
-          "request_epoch": 8,
-          "request_file_seq": 12,
-          "turn_wait_entered_at_ms": 1774527874909,
-          "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527874909,
-          "wake_after_turn_resolution_at_ms": 1774527874909
-        },
-        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
-      },
-      {
-        "dominant_stage": "response_build",
-        "outcome": "ok_non_empty",
-        "prepare_details": {
-          "apply_age_at_start_ms": 1245,
-          "apply_age_at_terminal_ms": 1245,
-          "exact_wait": {
-            "current_revision_head_owner_hints_ready": true,
-            "exact_ready_before_wait": false,
-            "head_ready_before_wait": true
-          },
-          "fail_closed_cause": null,
-          "guard_outcome": "prepared",
-          "kind": "lightweight_current_revision",
-          "min_file_version": 1,
-          "observed_file_version": 1,
-          "outcome": "ready",
-          "progress": {},
-          "route": "head_hit",
-          "shadow_version_at_start": 1,
-          "snapshot_elapsed_ms": 0,
-          "snapshot_with_deps_runtime": null,
-          "snapshot_with_deps_timeout_runtime": null,
-          "timeout_attribution": null,
-          "wait_budget_ms": 120,
-          "wait_for_file_version_runtime": null
-        },
-        "request_id": "40300141",
-        "server_edge_details": {
           "dispatch_to_request_context_wait_ms": 1,
           "first_poll_contention_attribution": {
             "concurrency_level": 16,
             "contender_class": "completion",
             "inflight_count": 1,
-            "oldest_inflight_age_ms": 2,
+            "oldest_inflight_age_ms": 1,
             "uri_scope": "same_uri"
           },
           "first_poll_contention_contenders": [
             {
-              "age_ms": 2,
+              "age_ms": 1,
               "method": "textDocument/completion",
               "phase": "turn_wait",
               "request_class": "completion",
@@ -2249,22 +1815,22 @@
             }
           ],
           "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527875214,
-          "jsonrpc_dispatch_received_at_ms": 1774527875213,
-          "method_entered_at_ms": 1774527875214,
+          "handler_entered_at_ms": 1774530908060,
+          "jsonrpc_dispatch_received_at_ms": 1774530908059,
+          "method_entered_at_ms": 1774530908060,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527875219,
+          "response_sent_at_ms": 1774530908065,
           "server_handler_exec_ms": 5,
-          "service_future_created_at_ms": 1774527875214,
-          "service_future_first_poll_entered_at_ms": 1774527875214,
+          "service_future_created_at_ms": 1774530908060,
+          "service_future_first_poll_entered_at_ms": 1774530908060,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527875214,
+          "service_future_first_wake_scheduled_at_ms": 1774530908060,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527875214,
+          "service_scope_entered_at_ms": 1774530908060,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527875213,
+          "transport_received_at_ms": 1774530908059,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
           "transport_to_handler_wait_ms": 1,
           "transport_to_method_wait_ms": 1,
@@ -2309,7 +1875,441 @@
             "status": "completed"
           }
         ],
-        "started_at_ms": 1774527875214,
+        "started_at_ms": 1774530908060,
+        "total_duration_ms": 4,
+        "trace_id": "completion-trace-6",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 7,
+          "request_file_seq": 10,
+          "turn_wait_entered_at_ms": 1774530908060,
+          "turn_wait_outcome": "ready",
+          "turn_wait_resolved_at_ms": 1774530908060,
+          "wake_after_turn_resolution_at_ms": 1774530908060
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "terminal",
+        "outcome": "cancelled",
+        "prepare_details": {
+          "exact_wait": null,
+          "fail_closed_cause": null,
+          "min_file_version": 1,
+          "progress": null,
+          "route": null,
+          "shadow_version_at_start": 1,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "40300120",
+        "server_edge_details": {
+          "cancel_observed_after_handler_enter_ms": 301,
+          "cancel_observed_at_ms": 1774530908360,
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_contention_attribution": {
+            "concurrency_level": 16,
+            "contender_class": "none_visible",
+            "inflight_count": 0,
+            "uri_scope": "unavailable"
+          },
+          "first_poll_contention_contenders": [],
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774530908059,
+          "jsonrpc_dispatch_received_at_ms": 1774530908059,
+          "method_entered_at_ms": 1774530908059,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774530908360,
+          "server_handler_exec_ms": 301,
+          "service_future_created_at_ms": 1774530908059,
+          "service_future_first_poll_entered_at_ms": 1774530908059,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774530908059,
+          "service_future_to_first_poll_wait_ms": 0,
+          "service_future_to_scope_wait_ms": 0,
+          "service_scope_entered_at_ms": 1774530908059,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774530908059,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 0,
+            "status": "cancelled"
+          }
+        ],
+        "started_at_ms": 1774530908059,
+        "total_duration_ms": 301,
+        "trace_id": "completion-trace-7",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 6,
+          "request_file_seq": 9,
+          "turn_wait_entered_at_ms": 1774530908059,
+          "turn_wait_outcome": "ready",
+          "turn_wait_resolved_at_ms": 1774530908059,
+          "wake_after_turn_resolution_at_ms": 1774530908059
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "response_build",
+        "outcome": "ok_non_empty",
+        "prepare_details": {
+          "apply_age_at_start_ms": 931,
+          "apply_age_at_terminal_ms": 931,
+          "exact_wait": {
+            "current_revision_head_owner_hints_ready": true,
+            "exact_ready_before_wait": false,
+            "head_ready_before_wait": true
+          },
+          "fail_closed_cause": null,
+          "guard_outcome": "prepared",
+          "kind": "lightweight_current_revision",
+          "min_file_version": 1,
+          "observed_file_version": 1,
+          "outcome": "ready",
+          "progress": {},
+          "route": "head_hit",
+          "shadow_version_at_start": 1,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "40300131",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_contention_attribution": {
+            "concurrency_level": 16,
+            "contender_class": "completion",
+            "inflight_count": 1,
+            "oldest_inflight_age_ms": 1,
+            "uri_scope": "same_uri"
+          },
+          "first_poll_contention_contenders": [
+            {
+              "age_ms": 1,
+              "method": "textDocument/completion",
+              "phase": "turn_wait",
+              "request_class": "completion",
+              "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+            }
+          ],
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774530908364,
+          "jsonrpc_dispatch_received_at_ms": 1774530908364,
+          "method_entered_at_ms": 1774530908364,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774530908368,
+          "server_handler_exec_ms": 4,
+          "service_future_created_at_ms": 1774530908364,
+          "service_future_first_poll_entered_at_ms": 1774530908364,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774530908364,
+          "service_future_to_first_poll_wait_ms": 0,
+          "service_future_to_scope_wait_ms": 0,
+          "service_scope_entered_at_ms": 1774530908364,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774530908364,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "query_bundle",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 2,
+            "name": "response_build",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 2,
+            "status": "completed"
+          }
+        ],
+        "started_at_ms": 1774530908364,
+        "total_duration_ms": 4,
+        "trace_id": "completion-trace-8",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 9,
+          "request_file_seq": 13,
+          "turn_wait_entered_at_ms": 1774530908364,
+          "turn_wait_outcome": "ready",
+          "turn_wait_resolved_at_ms": 1774530908364,
+          "wake_after_turn_resolution_at_ms": 1774530908364
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "terminal",
+        "outcome": "cancelled",
+        "prepare_details": {
+          "exact_wait": null,
+          "fail_closed_cause": null,
+          "min_file_version": 1,
+          "progress": null,
+          "route": null,
+          "shadow_version_at_start": 1,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "40300130",
+        "server_edge_details": {
+          "cancel_observed_after_handler_enter_ms": 303,
+          "cancel_observed_at_ms": 1774530908666,
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_contention_attribution": {
+            "concurrency_level": 16,
+            "contender_class": "none_visible",
+            "inflight_count": 0,
+            "uri_scope": "unavailable"
+          },
+          "first_poll_contention_contenders": [],
+          "first_poll_to_first_wake_wait_ms": 1,
+          "handler_entered_at_ms": 1774530908363,
+          "jsonrpc_dispatch_received_at_ms": 1774530908363,
+          "method_entered_at_ms": 1774530908363,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774530908666,
+          "server_handler_exec_ms": 303,
+          "service_future_created_at_ms": 1774530908363,
+          "service_future_first_poll_entered_at_ms": 1774530908363,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774530908364,
+          "service_future_to_first_poll_wait_ms": 0,
+          "service_future_to_scope_wait_ms": 0,
+          "service_scope_entered_at_ms": 1774530908363,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774530908363,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 0,
+            "status": "cancelled"
+          }
+        ],
+        "started_at_ms": 1774530908363,
+        "total_duration_ms": 302,
+        "trace_id": "completion-trace-9",
+        "trigger_mode": "invoked",
+        "turn_attribution": {
+          "active_completion_count": 0,
+          "did_change_ahead_count": 0,
+          "dispatcher_resolution_latency_ms": 0,
+          "dropped_completion_file_seq": [],
+          "queue_capacity": 256,
+          "queue_depth_after_enqueue": 1,
+          "queue_depth_before_enqueue": 0,
+          "queue_outcome": "enqueued",
+          "queued_completion_ahead_count": 0,
+          "request_epoch": 8,
+          "request_file_seq": 12,
+          "turn_wait_entered_at_ms": 1774530908363,
+          "turn_wait_outcome": "ready",
+          "turn_wait_resolved_at_ms": 1774530908364,
+          "wake_after_turn_resolution_at_ms": 1774530908364
+        },
+        "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+      },
+      {
+        "dominant_stage": "response_build",
+        "outcome": "ok_non_empty",
+        "prepare_details": {
+          "apply_age_at_start_ms": 1236,
+          "apply_age_at_terminal_ms": 1237,
+          "exact_wait": {
+            "current_revision_head_owner_hints_ready": true,
+            "exact_ready_before_wait": false,
+            "head_ready_before_wait": true
+          },
+          "fail_closed_cause": null,
+          "guard_outcome": "prepared",
+          "kind": "lightweight_current_revision",
+          "min_file_version": 1,
+          "observed_file_version": 1,
+          "outcome": "ready",
+          "progress": {},
+          "route": "head_hit",
+          "shadow_version_at_start": 1,
+          "snapshot_elapsed_ms": 0,
+          "snapshot_with_deps_runtime": null,
+          "snapshot_with_deps_timeout_runtime": null,
+          "timeout_attribution": null,
+          "wait_budget_ms": 120,
+          "wait_for_file_version_runtime": null
+        },
+        "request_id": "40300141",
+        "server_edge_details": {
+          "dispatch_to_request_context_wait_ms": 0,
+          "first_poll_contention_attribution": {
+            "concurrency_level": 16,
+            "contender_class": "completion",
+            "inflight_count": 1,
+            "oldest_inflight_age_ms": 1,
+            "uri_scope": "same_uri"
+          },
+          "first_poll_contention_contenders": [
+            {
+              "age_ms": 1,
+              "method": "textDocument/completion",
+              "phase": "turn_wait",
+              "request_class": "completion",
+              "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+            }
+          ],
+          "first_poll_to_first_wake_wait_ms": 0,
+          "handler_entered_at_ms": 1774530908669,
+          "jsonrpc_dispatch_received_at_ms": 1774530908669,
+          "method_entered_at_ms": 1774530908669,
+          "method_prelude_exec_ms": 0,
+          "pre_method_attribution_provenance": "same_request_authoritative",
+          "response_sent_at_ms": 1774530908674,
+          "server_handler_exec_ms": 5,
+          "service_future_created_at_ms": 1774530908669,
+          "service_future_first_poll_entered_at_ms": 1774530908669,
+          "service_future_first_poll_outcome": "pending",
+          "service_future_first_wake_scheduled_at_ms": 1774530908669,
+          "service_future_to_first_poll_wait_ms": 0,
+          "service_future_to_scope_wait_ms": 0,
+          "service_scope_entered_at_ms": 1774530908669,
+          "service_scope_to_method_wait_ms": 0,
+          "transport_received_at_ms": 1774530908669,
+          "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
+          "transport_to_handler_wait_ms": 0,
+          "transport_to_method_wait_ms": 0,
+          "transport_to_service_future_wait_ms": 0,
+          "transport_to_service_scope_wait_ms": 0
+        },
+        "stages": [
+          {
+            "duration_ms": 0,
+            "name": "turn_wait",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "sync_globals",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "prepare_stateful",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "query_bundle",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 2,
+            "name": "response_build",
+            "started_offset_ms": 0,
+            "status": "completed"
+          },
+          {
+            "duration_ms": 0,
+            "name": "terminal",
+            "started_offset_ms": 2,
+            "status": "completed"
+          }
+        ],
+        "started_at_ms": 1774530908669,
         "total_duration_ms": 4,
         "trace_id": "completion-trace-10",
         "trigger_mode": "invoked",
@@ -2325,10 +2325,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 11,
           "request_file_seq": 16,
-          "turn_wait_entered_at_ms": 1774527875214,
+          "turn_wait_entered_at_ms": 1774530908669,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527875214,
-          "wake_after_turn_resolution_at_ms": 1774527875214
+          "turn_wait_resolved_at_ms": 1774530908669,
+          "wake_after_turn_resolution_at_ms": 1774530908669
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       },
@@ -2350,8 +2350,8 @@
         "request_id": "40300140",
         "server_edge_details": {
           "cancel_observed_after_handler_enter_ms": 301,
-          "cancel_observed_at_ms": 1774527875514,
-          "dispatch_to_request_context_wait_ms": 1,
+          "cancel_observed_at_ms": 1774530908970,
+          "dispatch_to_request_context_wait_ms": 0,
           "first_poll_contention_attribution": {
             "concurrency_level": 16,
             "contender_class": "none_visible",
@@ -2360,27 +2360,27 @@
           },
           "first_poll_contention_contenders": [],
           "first_poll_to_first_wake_wait_ms": 0,
-          "handler_entered_at_ms": 1774527875213,
-          "jsonrpc_dispatch_received_at_ms": 1774527875211,
-          "method_entered_at_ms": 1774527875213,
+          "handler_entered_at_ms": 1774530908669,
+          "jsonrpc_dispatch_received_at_ms": 1774530908668,
+          "method_entered_at_ms": 1774530908669,
           "method_prelude_exec_ms": 0,
           "pre_method_attribution_provenance": "same_request_authoritative",
-          "response_sent_at_ms": 1774527875514,
+          "response_sent_at_ms": 1774530908970,
           "server_handler_exec_ms": 301,
-          "service_future_created_at_ms": 1774527875213,
-          "service_future_first_poll_entered_at_ms": 1774527875213,
+          "service_future_created_at_ms": 1774530908669,
+          "service_future_first_poll_entered_at_ms": 1774530908669,
           "service_future_first_poll_outcome": "pending",
-          "service_future_first_wake_scheduled_at_ms": 1774527875213,
+          "service_future_first_wake_scheduled_at_ms": 1774530908669,
           "service_future_to_first_poll_wait_ms": 0,
           "service_future_to_scope_wait_ms": 0,
-          "service_scope_entered_at_ms": 1774527875213,
+          "service_scope_entered_at_ms": 1774530908669,
           "service_scope_to_method_wait_ms": 0,
-          "transport_received_at_ms": 1774527875211,
+          "transport_received_at_ms": 1774530908668,
           "transport_received_at_ms_provenance": "jsonrpc_dispatch_received",
-          "transport_to_handler_wait_ms": 2,
-          "transport_to_method_wait_ms": 2,
-          "transport_to_service_future_wait_ms": 2,
-          "transport_to_service_scope_wait_ms": 2
+          "transport_to_handler_wait_ms": 1,
+          "transport_to_method_wait_ms": 1,
+          "transport_to_service_future_wait_ms": 1,
+          "transport_to_service_scope_wait_ms": 1
         },
         "stages": [
           {
@@ -2396,7 +2396,7 @@
             "status": "cancelled"
           }
         ],
-        "started_at_ms": 1774527875213,
+        "started_at_ms": 1774530908669,
         "total_duration_ms": 301,
         "trace_id": "completion-trace-11",
         "trigger_mode": "invoked",
@@ -2412,10 +2412,10 @@
           "queued_completion_ahead_count": 0,
           "request_epoch": 10,
           "request_file_seq": 15,
-          "turn_wait_entered_at_ms": 1774527875213,
+          "turn_wait_entered_at_ms": 1774530908669,
           "turn_wait_outcome": "ready",
-          "turn_wait_resolved_at_ms": 1774527875213,
-          "wake_after_turn_resolution_at_ms": 1774527875213
+          "turn_wait_resolved_at_ms": 1774530908669,
+          "wake_after_turn_resolution_at_ms": 1774530908669
         },
         "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
       }
@@ -2438,7 +2438,7 @@
     {
       "fail_closed_cause": null,
       "outcome": "ok_non_empty",
-      "pre_active_turn_wait_contender_age_ms": 2,
+      "pre_active_turn_wait_contender_age_ms": 1,
       "request_id": "40300141",
       "route": "head_hit",
       "service_future_to_first_poll_wait_ms": 0,
@@ -2453,7 +2453,7 @@
       "request_id": "40300130",
       "route": null,
       "service_future_to_first_poll_wait_ms": 0,
-      "total_duration_ms": 301,
+      "total_duration_ms": 302,
       "turn_wait_ms": 0,
       "turn_wait_outcome": "ready"
     },
@@ -2508,7 +2508,7 @@
       "request_id": "40300111",
       "route": "head_hit",
       "service_future_to_first_poll_wait_ms": 0,
-      "total_duration_ms": 5,
+      "total_duration_ms": 4,
       "turn_wait_ms": 0,
       "turn_wait_outcome": "ready"
     },
@@ -2519,7 +2519,7 @@
       "request_id": "40300100",
       "route": null,
       "service_future_to_first_poll_wait_ms": 0,
-      "total_duration_ms": 302,
+      "total_duration_ms": 301,
       "turn_wait_ms": 0,
       "turn_wait_outcome": "ready"
     },
@@ -2530,7 +2530,7 @@
       "request_id": "40300101",
       "route": "head_hit",
       "service_future_to_first_poll_wait_ms": 0,
-      "total_duration_ms": 5,
+      "total_duration_ms": 4,
       "turn_wait_ms": 0,
       "turn_wait_outcome": "ready"
     },
@@ -2541,7 +2541,7 @@
       "request_id": "40300000",
       "route": "head_hit",
       "service_future_to_first_poll_wait_ms": 0,
-      "total_duration_ms": 5,
+      "total_duration_ms": 4,
       "turn_wait_ms": 0,
       "turn_wait_outcome": "ready"
     }
@@ -2559,7 +2559,7 @@
         "request_id": "40300100",
         "route": null,
         "service_future_to_first_poll_wait_ms": 0,
-        "total_duration_ms": 302,
+        "total_duration_ms": 301,
         "turn_wait_ms": 0,
         "turn_wait_outcome": "ready"
       },
@@ -2582,7 +2582,7 @@
         "request_id": "40300101",
         "route": "head_hit",
         "service_future_to_first_poll_wait_ms": 0,
-        "total_duration_ms": 5,
+        "total_duration_ms": 4,
         "turn_wait_ms": 0,
         "turn_wait_outcome": "ready"
       },
@@ -2622,7 +2622,7 @@
         "request_id": "40300111",
         "route": "head_hit",
         "service_future_to_first_poll_wait_ms": 0,
-        "total_duration_ms": 5,
+        "total_duration_ms": 4,
         "turn_wait_ms": 0,
         "turn_wait_outcome": "ready"
       },
@@ -2679,7 +2679,7 @@
         "request_id": "40300130",
         "route": null,
         "service_future_to_first_poll_wait_ms": 0,
-        "total_duration_ms": 301,
+        "total_duration_ms": 302,
         "turn_wait_ms": 0,
         "turn_wait_outcome": "ready"
       },
@@ -2738,7 +2738,7 @@
       "second_trace": {
         "fail_closed_cause": null,
         "outcome": "ok_non_empty",
-        "pre_active_turn_wait_contender_age_ms": 2,
+        "pre_active_turn_wait_contender_age_ms": 1,
         "request_id": "40300141",
         "route": "head_hit",
         "service_future_to_first_poll_wait_ms": 0,
@@ -2891,15 +2891,15 @@
       "histograms": {
         "completion_duration_ms": {
           "count": 11,
-          "p50": 5.0,
+          "p50": 4.0,
           "p95": 302.0,
           "p99": 302.0
         },
         "completion_stage_cancel_observed_after_handler_enter_ms": {
           "count": 5,
           "p50": 301.0,
-          "p95": 302.0,
-          "p99": 302.0
+          "p95": 303.0,
+          "p99": 303.0
         },
         "completion_stage_collect_ms": {
           "count": 6,
@@ -2927,21 +2927,21 @@
         },
         "completion_stage_prepare_apply_age_at_start_ms": {
           "count": 6,
-          "p50": 634.0,
-          "p95": 1245.0,
-          "p99": 1245.0
+          "p50": 627.0,
+          "p95": 1236.0,
+          "p99": 1236.0
         },
         "completion_stage_prepare_apply_age_at_terminal_ms": {
           "count": 6,
-          "p50": 635.0,
-          "p95": 1245.0,
-          "p99": 1245.0
+          "p50": 627.0,
+          "p95": 1237.0,
+          "p99": 1237.0
         },
         "completion_stage_prepare_stateful_ms": {
           "count": 6,
           "p50": 0.0,
-          "p95": 1.0,
-          "p99": 1.0
+          "p95": 0.0,
+          "p99": 0.0
         },
         "completion_stage_query_bundle_ms": {
           "count": 6,
@@ -2957,15 +2957,15 @@
         },
         "completion_stage_response_build_ms": {
           "count": 6,
-          "p50": 3.0,
-          "p95": 4.0,
-          "p99": 4.0
+          "p50": 2.0,
+          "p95": 3.0,
+          "p99": 3.0
         },
         "completion_stage_server_handler_exec_ms": {
           "count": 11,
-          "p50": 6.0,
-          "p95": 302.0,
-          "p99": 302.0
+          "p50": 5.0,
+          "p95": 303.0,
+          "p99": 303.0
         },
         "completion_stage_snapshot_read_ms": {
           "count": 6,
@@ -2982,8 +2982,8 @@
         "completion_stage_transport_to_handler_wait_ms": {
           "count": 11,
           "p50": 0.0,
-          "p95": 2.0,
-          "p99": 2.0
+          "p95": 1.0,
+          "p99": 1.0
         },
         "completion_stage_turn_wait_ms": {
           "count": 11,
@@ -3089,9 +3089,9 @@
         },
         "intellisense_v2_deps_update_build_ms": {
           "count": 1,
-          "p50": 3192.0,
-          "p95": 3192.0,
-          "p99": 3192.0
+          "p50": 2835.0,
+          "p95": 2835.0,
+          "p99": 2835.0
         },
         "intellisense_v2_drilldown_saturation_sample_latency_ms_origin_lsp_reason_exec_work_class_background": {
           "count": 2,
@@ -3481,7 +3481,7 @@
       "rates": {
         "completion_incomplete_rate": 0.4545454545454546
       },
-      "uptime_seconds": 15
+      "uptime_seconds": 18
     }
   },
   "profile": "p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live",
@@ -3523,7 +3523,7 @@
   },
   "warmup_samples": [
     {
-      "elapsed_ms": 16,
+      "elapsed_ms": 13,
       "label_count": 86,
       "request_id": 40300000,
       "step": "warmup_completion_1",

@@ -475,6 +475,10 @@ async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
         first_outcome.outcome,
         CompletionTurnOutcome::SupersededBeforeStart
     );
+    assert!(
+        first_outcome.resolved_at_ms.is_some(),
+        "proactive supersede resolution must capture absolute resolution timestamp"
+    );
 
     let second_outcome = tokio::time::timeout(
         Duration::from_millis(200),
@@ -494,6 +498,41 @@ async fn newer_turn_request_supersedes_pending_stale_request_before_start() {
 
     let close = registry.close_file_dispatcher(file_id).await;
     assert!(close.is_some());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn resolve_turn_waiter_records_absolute_resolution_timestamp_for_proactive_stop() {
+    let dispatcher = PerFileDispatcher::new(8);
+    let (sender, receiver) = oneshot::channel();
+    dispatcher.register_turn_waiter(41, sender);
+
+    let waiter = tokio::spawn(async move { CompletionTurnWaiter { receiver }.wait().await });
+    tokio::task::yield_now().await;
+
+    assert!(
+        dispatcher.resolve_turn_waiter(41, CompletionTurnOutcome::SupersededBeforeStart),
+        "proactive stop must resolve the pending turn waiter"
+    );
+
+    let resolution = tokio::time::timeout(Duration::from_millis(200), waiter)
+        .await
+        .expect("turn waiter join timeout")
+        .expect("turn waiter join");
+    assert_eq!(
+        resolution.outcome,
+        CompletionTurnOutcome::SupersededBeforeStart
+    );
+    assert!(
+        resolution.resolved_at_ms.is_some(),
+        "proactive stop must capture absolute resolution timestamp"
+    );
+    assert!(
+        resolution.wake_after_turn_resolution_at_ms.is_some(),
+        "pending waiter must capture wake-after-resolution timestamp"
+    );
+
+    dispatcher.queue.close();
+    dispatcher.drain_task.abort();
 }
 
 #[tokio::test(flavor = "current_thread")]

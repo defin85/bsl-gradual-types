@@ -15799,6 +15799,14 @@ async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_bef
         "pre-active overlap trace must prove that the stale predecessor had already exited queue, trace={first_trace:?}"
     );
     assert!(
+        first_trace
+            .get("turn_attribution")
+            .and_then(|value| value.get("turn_wait_resolved_at_ms"))
+            .and_then(|value| value.as_u64())
+            .is_some(),
+        "pre-active overlap trace must expose absolute turn_wait resolution timestamp, trace={first_trace:?}"
+    );
+    assert!(
         matches!(
             first_trace.get("outcome").and_then(|value| value.as_str()),
             Some("cancelled" | "superseded")

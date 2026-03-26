@@ -653,6 +653,18 @@ struct CompletionTurnState {
 }
 
 impl CompletionTurnState {
+    fn resolution(
+        outcome: CompletionTurnOutcome,
+        dispatcher_resolution_latency: Option<Duration>,
+    ) -> CompletionTurnResolution {
+        CompletionTurnResolution {
+            outcome,
+            dispatcher_resolution_latency,
+            resolved_at_ms: Some(super::unix_timestamp_ms()),
+            wake_after_turn_resolution_at_ms: None,
+        }
+    }
+
     fn register(&mut self, file_seq: u64, sender: oneshot::Sender<CompletionTurnResolution>) {
         self.waiters.insert(file_seq, sender);
     }
@@ -668,15 +680,7 @@ impl CompletionTurnState {
     fn resolve_many(&mut self, file_seq: &[u64], outcome: CompletionTurnOutcome) -> usize {
         let mut resolved = 0usize;
         for seq in file_seq {
-            if self.resolve(
-                *seq,
-                CompletionTurnResolution {
-                    outcome,
-                    dispatcher_resolution_latency: None,
-                    resolved_at_ms: None,
-                    wake_after_turn_resolution_at_ms: None,
-                },
-            ) {
+            if self.resolve(*seq, Self::resolution(outcome, None)) {
                 resolved = resolved.saturating_add(1);
             }
         }
@@ -686,12 +690,7 @@ impl CompletionTurnState {
     fn resolve_all(&mut self, outcome: CompletionTurnOutcome) {
         let pending = std::mem::take(&mut self.waiters);
         for (_, sender) in pending {
-            let _ = sender.send(CompletionTurnResolution {
-                outcome,
-                dispatcher_resolution_latency: None,
-                resolved_at_ms: None,
-                wake_after_turn_resolution_at_ms: None,
-            });
+            let _ = sender.send(Self::resolution(outcome, None));
         }
     }
 }
@@ -757,12 +756,10 @@ impl PerFileDispatcher {
                     } else {
                         CompletionTurnOutcome::Ready
                     };
-                    let resolution = CompletionTurnResolution {
-                        outcome: turn_outcome,
-                        dispatcher_resolution_latency: Some(event.received_at.elapsed()),
-                        resolved_at_ms: Some(super::unix_timestamp_ms()),
-                        wake_after_turn_resolution_at_ms: None,
-                    };
+                    let resolution = CompletionTurnState::resolution(
+                        turn_outcome,
+                        Some(event.received_at.elapsed()),
+                    );
                     let mut turn_state = turn_state_for_drain
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -818,15 +815,7 @@ impl PerFileDispatcher {
             .turn_state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        turn_state.resolve(
-            file_seq,
-            CompletionTurnResolution {
-                outcome,
-                dispatcher_resolution_latency: None,
-                resolved_at_ms: None,
-                wake_after_turn_resolution_at_ms: None,
-            },
-        )
+        turn_state.resolve(file_seq, CompletionTurnState::resolution(outcome, None))
     }
 
     fn resolve_turn_waiters(&self, file_seq: &[u64], outcome: CompletionTurnOutcome) -> usize {

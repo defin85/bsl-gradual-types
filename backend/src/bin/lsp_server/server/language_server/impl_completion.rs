@@ -3084,6 +3084,10 @@ impl BslLanguageServer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::completion_cancellation::CompletionCancellationRegistry;
+    use crate::server::completion_dispatcher::{
+        CompletionDispatcherRegistry, CompletionTurnOutcome,
+    };
     use crate::server::request_context;
     use std::future::pending;
     use tower_lsp::lsp_types::Url;
@@ -3172,6 +3176,55 @@ mod tests {
         assert_eq!(capture.stages.len(), 1);
         assert_eq!(capture.stages[0].name, "terminal");
         assert_eq!(capture.stages[0].status, "cancelled");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn completion_request_drop_guard_clears_pre_active_entry_before_async_cancel() {
+        let dispatcher = Arc::new(CompletionDispatcherRegistry::new(8));
+        let cancellation_registry = Arc::new(CompletionCancellationRegistry::default());
+        let file_id = bsl_analysis_v2::FileId(777);
+        let dispatch = dispatcher
+            .emit_completion_request_with_turn(
+                file_id,
+                Some("req-drop".to_string()),
+                Some(1),
+                "invoked".to_string(),
+            )
+            .await;
+        let _registration = cancellation_registry.register_request(
+            "req-drop".to_string(),
+            file_id,
+            dispatch.ticket.request_epoch,
+        );
+
+        let turn_outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            dispatch.turn_waiter.expect("turn waiter").wait(),
+        )
+        .await
+        .expect("turn waiter timeout");
+        assert_eq!(
+            turn_outcome.outcome,
+            CompletionTurnOutcome::Ready
+        );
+
+        let guard = super::helpers::CompletionRequestDropCancelGuard::new(
+            Some("req-drop".to_string()),
+            Arc::clone(&cancellation_registry),
+            Arc::clone(&dispatcher),
+        );
+        drop(guard);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        assert!(
+            !dispatcher
+                .cancel_pre_active_completion(file_id, dispatch.ticket.request_epoch)
+                .await,
+            "unexpected drop must not leave a stale pre-active entry behind"
+        );
+
+        let close = dispatcher.close_file_dispatcher(file_id).await;
+        assert!(close.is_some());
     }
 
     #[test]

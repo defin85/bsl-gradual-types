@@ -67,6 +67,8 @@ struct PendingCompletionRequestEntry {
     service_future_first_wake_scheduled_at_ms: Option<u64>,
     first_poll_contention_attribution:
         Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+    first_poll_contention_contenders:
+        Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
     service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -82,6 +84,8 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) service_future_first_wake_scheduled_at_ms: Option<u64>,
     pub(crate) first_poll_contention_attribution:
         Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+    pub(crate) first_poll_contention_contenders:
+        Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
     pub(crate) service_scope_entered_at_ms: Option<u64>,
 }
 
@@ -92,6 +96,8 @@ struct ServiceFuturePollObservationSnapshot {
     first_wake_scheduled_at_ms: Option<u64>,
     first_poll_contention_attribution:
         Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+    first_poll_contention_contenders:
+        Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -123,8 +129,17 @@ struct InflightRequestMetadata {
 #[derive(Debug, Clone)]
 struct InflightRequestEntry {
     class: InflightRequestClass,
+    method: String,
+    command: Option<String>,
+    phase: Option<String>,
     uri: Option<String>,
     started_at_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct FirstPollContentionSnapshot {
+    attribution: crate::types::CompletionTimelineFirstPollContentionAttributionTrace,
+    contenders: Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
 }
 
 #[derive(Debug, Default)]
@@ -181,13 +196,34 @@ impl ServiceFuturePollObservationState {
             .clone()
     }
 
+    fn first_poll_contention_contenders(
+        &self,
+    ) -> Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>> {
+        self.snapshot
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .first_poll_contention_contenders
+            .clone()
+    }
+
+    fn set_inflight_phase(&self, phase: Option<&str>) {
+        let Some(entry_id) = self.inflight_request.as_ref().map(|request| request.entry_id) else {
+            return;
+        };
+        set_inflight_request_phase(entry_id, phase);
+    }
+
     fn record_first_poll_entered_at_ms(&self, first_poll_entered_at_ms: u64) {
-        let first_poll_contention_attribution = self
-            .inflight_request
-            .as_ref()
-            .and_then(|current| {
-                first_poll_contention_attribution_for_request(current, first_poll_entered_at_ms)
+        let first_poll_contention_snapshot =
+            self.inflight_request.as_ref().and_then(|current| {
+                first_poll_contention_snapshot_for_request(current, first_poll_entered_at_ms)
             });
+        let first_poll_contention_attribution = first_poll_contention_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.attribution.clone());
+        let first_poll_contention_contenders = first_poll_contention_snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.contenders.clone());
         let should_record_pending = {
             let mut snapshot = self
                 .snapshot
@@ -197,6 +233,8 @@ impl ServiceFuturePollObservationState {
                 snapshot.first_poll_entered_at_ms = Some(first_poll_entered_at_ms);
                 snapshot.first_poll_contention_attribution =
                     first_poll_contention_attribution.clone();
+                snapshot.first_poll_contention_contenders =
+                    first_poll_contention_contenders.clone();
                 true
             } else {
                 false
@@ -214,6 +252,14 @@ impl ServiceFuturePollObservationState {
                     record_pending_completion_first_poll_contention_attribution(
                         request_id,
                         first_poll_contention_attribution,
+                    );
+                }
+                if let Some(first_poll_contention_contenders) =
+                    first_poll_contention_contenders.clone()
+                {
+                    record_pending_completion_first_poll_contention_contenders(
+                        request_id,
+                        first_poll_contention_contenders,
                     );
                 }
             }
@@ -553,6 +599,17 @@ fn request_uri_from_request(request: &Request) -> Option<String> {
     }
 }
 
+fn request_execute_command_name_from_request(request: &Request) -> Option<String> {
+    if request.method() != "workspace/executeCommand" {
+        return None;
+    }
+    request
+        .params()?
+        .get("command")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
 fn unavailable_first_poll_contention_attribution(
     concurrency_level: u64,
 ) -> crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
@@ -565,11 +622,15 @@ fn unavailable_first_poll_contention_attribution(
     }
 }
 
+const MAX_FIRST_POLL_CONTENTION_CONTENDERS: usize = 5;
+
 fn register_inflight_request(
     request: &Request,
     started_at_ms: u64,
 ) -> Option<InflightRequestMetadata> {
     let class = inflight_request_class_for_request(request);
+    let method = request.method().to_string();
+    let command = request_execute_command_name_from_request(request);
     let uri = request_uri_from_request(request);
     let mut registry = inflight_request_registry_cell()
         .lock()
@@ -580,6 +641,9 @@ fn register_inflight_request(
         entry_id,
         InflightRequestEntry {
             class,
+            method: method.clone(),
+            command,
+            phase: None,
             uri: uri.clone(),
             started_at_ms,
         },
@@ -598,6 +662,16 @@ fn remove_inflight_request_entry(entry_id: u64) {
     registry.by_entry_id.remove(&entry_id);
 }
 
+fn set_inflight_request_phase(entry_id: u64, phase: Option<&str>) {
+    let mut registry = inflight_request_registry_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(entry) = registry.by_entry_id.get_mut(&entry_id) else {
+        return;
+    };
+    entry.phase = phase.map(str::to_string);
+}
+
 #[cfg(test)]
 fn clear_inflight_request_registry_for_testing() {
     let mut registry = inflight_request_registry_cell()
@@ -607,20 +681,26 @@ fn clear_inflight_request_registry_for_testing() {
     registry.next_entry_id = 0;
 }
 
-fn first_poll_contention_attribution_for_request(
+fn first_poll_contention_snapshot_for_request(
     current: &InflightRequestMetadata,
     first_poll_entered_at_ms: u64,
-) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+) -> Option<FirstPollContentionSnapshot> {
     let concurrency_level = crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64;
     if current.class != InflightRequestClass::Completion {
-        return Some(unavailable_first_poll_contention_attribution(concurrency_level));
+        return Some(FirstPollContentionSnapshot {
+            attribution: unavailable_first_poll_contention_attribution(concurrency_level),
+            contenders: None,
+        });
     }
 
     let registry = inflight_request_registry_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(current_entry) = registry.by_entry_id.get(&current.entry_id) else {
-        return Some(unavailable_first_poll_contention_attribution(concurrency_level));
+        return Some(FirstPollContentionSnapshot {
+            attribution: unavailable_first_poll_contention_attribution(concurrency_level),
+            contenders: None,
+        });
     };
 
     let contenders: Vec<&InflightRequestEntry> = registry
@@ -636,12 +716,15 @@ fn first_poll_contention_attribution_for_request(
         .collect();
 
     if contenders.is_empty() {
-        return Some(crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
-            contender_class: "none_visible".to_string(),
-            uri_scope: "unavailable".to_string(),
-            inflight_count: 0,
-            oldest_inflight_age_ms: None,
-            concurrency_level,
+        return Some(FirstPollContentionSnapshot {
+            attribution: crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+                contender_class: "none_visible".to_string(),
+                uri_scope: "unavailable".to_string(),
+                inflight_count: 0,
+                oldest_inflight_age_ms: None,
+                concurrency_level,
+            },
+            contenders: Some(Vec::new()),
         });
     }
 
@@ -687,13 +770,48 @@ fn first_poll_contention_attribution_for_request(
         .map(|entry| first_poll_entered_at_ms.saturating_sub(entry.started_at_ms))
         .max();
 
-    Some(crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
-        contender_class,
-        uri_scope: uri_scope.to_string(),
-        inflight_count: contenders.len() as u64,
-        oldest_inflight_age_ms,
-        concurrency_level,
+    let mut contender_entries = contenders
+        .iter()
+        .map(|entry| crate::types::CompletionTimelineFirstPollContentionContenderTrace {
+            request_class: entry.class.as_contract_str().to_string(),
+            method: entry.method.clone(),
+            command: entry.command.clone(),
+            phase: entry.phase.clone(),
+            uri: entry.uri.clone(),
+            age_ms: first_poll_entered_at_ms.saturating_sub(entry.started_at_ms),
+        })
+        .collect::<Vec<_>>();
+    contender_entries.sort_by(|left, right| {
+        right
+            .age_ms
+            .cmp(&left.age_ms)
+            .then_with(|| left.request_class.cmp(&right.request_class))
+            .then_with(|| left.method.cmp(&right.method))
+            .then_with(|| left.command.cmp(&right.command))
+            .then_with(|| left.phase.cmp(&right.phase))
+            .then_with(|| left.uri.cmp(&right.uri))
+    });
+    contender_entries.truncate(MAX_FIRST_POLL_CONTENTION_CONTENDERS);
+
+    Some(FirstPollContentionSnapshot {
+        attribution: crate::types::CompletionTimelineFirstPollContentionAttributionTrace {
+            contender_class,
+            uri_scope: uri_scope.to_string(),
+            inflight_count: contenders.len() as u64,
+            oldest_inflight_age_ms,
+            concurrency_level,
+        },
+        contenders: Some(contender_entries),
     })
+}
+
+#[cfg(test)]
+fn first_poll_contention_attribution_for_request(
+    current: &InflightRequestMetadata,
+    first_poll_entered_at_ms: u64,
+) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+    first_poll_contention_snapshot_for_request(current, first_poll_entered_at_ms)
+        .map(|snapshot| snapshot.attribution)
 }
 
 fn remove_request_id_from_key_queue(
@@ -758,6 +876,7 @@ fn record_pending_completion_request_id(
                 service_future_first_poll_outcome: None,
                 service_future_first_wake_scheduled_at_ms: None,
                 first_poll_contention_attribution: None,
+                first_poll_contention_contenders: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -803,6 +922,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 service_future_first_poll_outcome: None,
                 service_future_first_wake_scheduled_at_ms: None,
                 first_poll_contention_attribution: None,
+                first_poll_contention_contenders: None,
                 service_scope_entered_at_ms: None,
             },
         );
@@ -890,6 +1010,18 @@ fn record_pending_completion_first_poll_contention_attribution(
     }
 }
 
+fn record_pending_completion_first_poll_contention_contenders(
+    request_id: &str,
+    first_poll_contention_contenders: Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.first_poll_contention_contenders = Some(first_poll_contention_contenders);
+    }
+}
+
 fn record_pending_completion_service_scope_entered_at_ms(
     request_id: &str,
     service_scope_entered_at_ms: u64,
@@ -940,6 +1072,7 @@ pub(crate) fn record_completion_request_id_for_testing(
             service_future_first_poll_outcome: None,
             service_future_first_wake_scheduled_at_ms: None,
             first_poll_contention_attribution: None,
+            first_poll_contention_contenders: None,
             service_scope_entered_at_ms: None,
         },
     ) {
@@ -976,6 +1109,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
         service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
         service_future_first_wake_scheduled_at_ms: entry.service_future_first_wake_scheduled_at_ms,
         first_poll_contention_attribution: entry.first_poll_contention_attribution,
+        first_poll_contention_contenders: entry.first_poll_contention_contenders,
         service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
     })
 }
@@ -1024,6 +1158,7 @@ pub(crate) fn take_completion_request_context(
                 service_future_first_wake_scheduled_at_ms: entry
                     .service_future_first_wake_scheduled_at_ms,
                 first_poll_contention_attribution: entry.first_poll_contention_attribution,
+                first_poll_contention_contenders: entry.first_poll_contention_contenders,
                 service_scope_entered_at_ms: entry.service_scope_entered_at_ms,
             });
         }
@@ -1105,6 +1240,26 @@ pub(crate) fn current_request_service_future_first_poll_contention_attribution(
         })
         .ok()
         .flatten()
+}
+
+pub(crate) fn current_request_service_future_first_poll_contention_contenders(
+) -> Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>> {
+    LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
+        .try_with(|state| {
+            state
+                .as_ref()
+                .and_then(|observation| observation.first_poll_contention_contenders())
+        })
+        .ok()
+        .flatten()
+}
+
+pub(crate) fn set_current_request_inflight_phase(phase: &str) {
+    let _ = LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION.try_with(|state| {
+        if let Some(observation) = state.as_ref() {
+            observation.set_inflight_phase(Some(phase));
+        }
+    });
 }
 
 #[cfg(test)]

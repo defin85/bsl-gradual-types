@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 12,
+                        version: 15,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -229,6 +229,27 @@ suite('LSP Custom Requests Test Suite', () => {
                                         oldest_inflight_age_ms: 2,
                                         concurrency_level: 16
                                     },
+                                    first_poll_contention_contenders: [
+                                        {
+                                            request_class: 'document_sync',
+                                            method: 'textDocument/didChange',
+                                            uri: 'file:///test.bsl',
+                                            age_ms: 2
+                                        },
+                                        {
+                                            request_class: 'other_request',
+                                            method: 'workspace/executeCommand',
+                                            command: 'bsl.getCompletionTimeline',
+                                            age_ms: 1
+                                        },
+                                        {
+                                            request_class: 'completion',
+                                            method: 'textDocument/completion',
+                                            phase: 'query_bundle',
+                                            uri: 'file:///test.bsl',
+                                            age_ms: 1
+                                        }
+                                    ],
                                     pre_method_attribution_provenance: 'same_request_authoritative',
                                     service_scope_entered_at_ms: 1_700_000_000_002,
                                     method_entered_at_ms: 1_700_000_000_003,
@@ -410,7 +431,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 12);
+        assert.strictEqual(result.response.version, 15);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
@@ -453,6 +474,30 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.first_poll_contention_attribution?.concurrency_level,
             16
+        );
+        assert.deepStrictEqual(
+            result.response.traces[0].server_edge_details?.first_poll_contention_contenders,
+            [
+                {
+                    request_class: 'document_sync',
+                    method: 'textDocument/didChange',
+                    uri: 'file:///test.bsl',
+                    age_ms: 2,
+                },
+                {
+                    request_class: 'other_request',
+                    method: 'workspace/executeCommand',
+                    command: 'bsl.getCompletionTimeline',
+                    age_ms: 1,
+                },
+                {
+                    request_class: 'completion',
+                    method: 'textDocument/completion',
+                    phase: 'query_bundle',
+                    uri: 'file:///test.bsl',
+                    age_ms: 1,
+                },
+            ]
         );
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.pre_method_attribution_provenance,

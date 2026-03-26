@@ -2,6 +2,7 @@ import {
     CompletionTimelineExactArtifactPollTrace,
     CompletionTimelineExactWaitDetailsTrace,
     CompletionTimelineFetchResult,
+    CompletionTimelineFirstPollContentionContenderTrace,
     CompletionTimelineFirstPollContentionAttributionTrace,
     CompletionTimelinePreMethodAttributionProvenance,
     CompletionTimelinePrepareRuntimeTrace,
@@ -66,6 +67,7 @@ export interface ObservabilityIncidentRequestSummary {
     service_future_first_poll_outcome?: string;
     service_future_first_wake_scheduled_at_ms?: number;
     first_poll_contention_attribution?: CompletionTimelineFirstPollContentionAttributionTrace;
+    first_poll_contention_contenders?: CompletionTimelineFirstPollContentionContenderTrace[];
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     transport_to_handler_wait_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
@@ -90,6 +92,22 @@ export interface ObservabilityIncidentRequestSection {
     requestCount: number;
     requests: ObservabilityIncidentRequestSummary[];
     gaps: string[];
+}
+
+function sanitizeFirstPollContentionContenders(
+    contenders: CompletionTimelineFirstPollContentionContenderTrace[] | undefined,
+    contractVersion: number
+): CompletionTimelineFirstPollContentionContenderTrace[] | undefined {
+    if (!contenders || contractVersion < 13) {
+        return undefined;
+    }
+    if (contractVersion < 14) {
+        return contenders.map(({ command: _command, phase: _phase, ...contender }) => contender);
+    }
+    if (contractVersion < 15) {
+        return contenders.map(({ phase: _phase, ...contender }) => contender);
+    }
+    return contenders;
 }
 
 export function buildObservabilityIncidentRequestSection(
@@ -144,6 +162,11 @@ export function buildObservabilityIncidentRequestSection(
                 contractVersion >= 12
                     ? trace.server_edge_details?.first_poll_contention_attribution
                     : undefined,
+            first_poll_contention_contenders:
+                sanitizeFirstPollContentionContenders(
+                    trace.server_edge_details?.first_poll_contention_contenders,
+                    contractVersion
+                ),
             pre_method_attribution_provenance:
                 trace.server_edge_details?.pre_method_attribution_provenance,
             transport_to_handler_wait_ms: trace.server_edge_details?.transport_to_handler_wait_ms,
@@ -247,6 +270,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             request.first_poll_contention_attribution
                 ? `first_poll_contention=${request.first_poll_contention_attribution.contender_class}:${request.first_poll_contention_attribution.uri_scope}|inflight_count=${request.first_poll_contention_attribution.inflight_count}|concurrency_level=${request.first_poll_contention_attribution.concurrency_level}${typeof request.first_poll_contention_attribution.oldest_inflight_age_ms === 'number' ? `|oldest_inflight_age_ms=${request.first_poll_contention_attribution.oldest_inflight_age_ms}` : ''}`
                 : undefined,
+            formatFirstPollContentionContendersForSummary(
+                request.first_poll_contention_contenders
+            ),
             request.pre_method_attribution_provenance
                 ? `pre_method_provenance=${request.pre_method_attribution_provenance}`
                 : undefined,
@@ -316,6 +342,31 @@ function buildCaptureScope(traces: CompletionTimelineTrace[]): ObservabilityInci
         kind: 'multi_uri',
         uri_count: uniqueUris.length,
     };
+}
+
+function formatFirstPollContentionContendersForSummary(
+    contenders?: CompletionTimelineFirstPollContentionContenderTrace[]
+): string | undefined {
+    if (!contenders || contenders.length === 0) {
+        return undefined;
+    }
+
+    const preview = contenders
+        .slice(0, 3)
+        .map((contender) => {
+            const uri = contender.uri ?? 'unavailable';
+            const method =
+                contender.command
+                    ? `${contender.method}:${contender.command}`
+                    : contender.method;
+            const phaseSuffix = contender.phase ? `[phase=${contender.phase}]` : '';
+            return `${contender.request_class}:${method}${phaseSuffix}@${uri}(age_ms=${contender.age_ms})`;
+        })
+        .join(';');
+    const omittedCount = contenders.length - 3;
+    return omittedCount > 0
+        ? `first_poll_contenders=${preview};+${omittedCount}_more`
+        : `first_poll_contenders=${preview}`;
 }
 
 function buildExactDeadlineSummary(

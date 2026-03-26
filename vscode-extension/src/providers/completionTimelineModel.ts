@@ -58,7 +58,43 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.';
+
+function sanitizeFirstPollContentionContendersForContract(
+    details: CompletionTimelineServerEdgeDetailsTrace,
+    contractVersion: number
+): CompletionTimelineServerEdgeDetailsTrace {
+    if (!details.first_poll_contention_contenders) {
+        return details;
+    }
+
+    if (contractVersion < 13) {
+        return {
+            ...details,
+            first_poll_contention_contenders: undefined,
+        };
+    }
+
+    if (contractVersion < 14) {
+        return {
+            ...details,
+            first_poll_contention_contenders: details.first_poll_contention_contenders.map(
+                ({ command: _command, phase: _phase, ...contender }) => contender
+            ),
+        };
+    }
+
+    if (contractVersion < 15) {
+        return {
+            ...details,
+            first_poll_contention_contenders: details.first_poll_contention_contenders.map(
+                ({ phase: _phase, ...contender }) => contender
+            ),
+        };
+    }
+
+    return details;
+}
 
 export function getAverageTraceProvenanceNotice(
     trace: Pick<CompletionTimelineTraceViewModel, 'trigger_mode'> | null | undefined
@@ -114,14 +150,21 @@ function sanitizeServerEdgeDetailsForContract(
         return undefined;
     }
 
-    if (contractVersion < 12 && details.first_poll_contention_attribution) {
+    if (
+        contractVersion < 12 &&
+        (
+            details.first_poll_contention_attribution
+            || details.first_poll_contention_contenders
+        )
+    ) {
         return {
             ...details,
             first_poll_contention_attribution: undefined,
+            first_poll_contention_contenders: undefined,
         };
     }
 
-    return details;
+    return sanitizeFirstPollContentionContendersForContract(details, contractVersion);
 }
 
 function mapTrace(

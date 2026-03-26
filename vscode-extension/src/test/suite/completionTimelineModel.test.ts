@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 12,
+            version: 15,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -68,6 +68,14 @@ suite('Completion Timeline Model Test Suite', () => {
                             oldest_inflight_age_ms: 1,
                             concurrency_level: 16,
                         },
+                        first_poll_contention_contenders: [
+                            {
+                                request_class: 'document_sync',
+                                method: 'textDocument/didChange',
+                                uri: 'file:///tmp/test.bsl',
+                                age_ms: 1,
+                            },
+                        ],
                         pre_method_attribution_provenance: 'same_request_authoritative',
                         service_scope_entered_at_ms: 1_700_000_000_041,
                         method_entered_at_ms: 1_700_000_000_042,
@@ -164,7 +172,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 12);
+        assert.strictEqual(state.version, 15);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
@@ -206,6 +214,17 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.first_poll_contention_attribution?.concurrency_level,
             16
+        );
+        assert.deepStrictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_contenders,
+            [
+                {
+                    request_class: 'document_sync',
+                    method: 'textDocument/didChange',
+                    uri: 'file:///tmp/test.bsl',
+                    age_ms: 1,
+                },
+            ]
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.pre_method_attribution_provenance,
@@ -281,14 +300,14 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
     });
 
-    test('Older contract payloads should not surface v12 contention attribution', () => {
+    test('Older contract payloads should not surface v13 contender snapshot', () => {
         const payload: CompletionTimelineResponse = {
-            version: 11,
+            version: 12,
             traces: [
                 {
-                    trace_id: 'trace-v11',
-                    request_id: 'req-v11',
-                    uri: 'file:///tmp/v11.bsl',
+                    trace_id: 'trace-v12',
+                    request_id: 'req-v12',
+                    uri: 'file:///tmp/v12.bsl',
                     trigger_mode: 'invoked',
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_010,
@@ -307,6 +326,14 @@ suite('Completion Timeline Model Test Suite', () => {
                             oldest_inflight_age_ms: 1,
                             concurrency_level: 16,
                         },
+                        first_poll_contention_contenders: [
+                            {
+                                request_class: 'document_sync',
+                                method: 'textDocument/didChange',
+                                uri: 'file:///tmp/v12.bsl',
+                                age_ms: 1,
+                            },
+                        ],
                         handler_entered_at_ms: 1_700_000_000_004,
                         response_sent_at_ms: 1_700_000_000_014,
                         transport_to_handler_wait_ms: 4,
@@ -330,10 +357,151 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 11);
+        assert.strictEqual(state.version, 12);
         assert.strictEqual(
-            state.traces[0].server_edge_details?.first_poll_contention_attribution,
+            state.traces[0].server_edge_details?.first_poll_contention_contenders,
             undefined
+        );
+    });
+
+    test('v13 payload should not surface v14 executeCommand command detail inside contenders', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 13,
+            traces: [
+                {
+                    trace_id: 'trace-v13',
+                    request_id: 'req-v13',
+                    uri: 'file:///tmp/v13.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        service_future_created_at_ms: 1_700_000_000_001,
+                        service_future_first_poll_entered_at_ms: 1_700_000_000_002,
+                        service_future_first_poll_outcome: 'pending',
+                        service_future_first_wake_scheduled_at_ms: 1_700_000_000_003,
+                        first_poll_contention_attribution: {
+                            contender_class: 'other_request',
+                            uri_scope: 'unavailable',
+                            inflight_count: 1,
+                            oldest_inflight_age_ms: 1,
+                            concurrency_level: 16,
+                        },
+                        first_poll_contention_contenders: [
+                            {
+                                request_class: 'other_request',
+                                method: 'workspace/executeCommand',
+                                command: 'bsl.getCompletionTimeline',
+                                phase: 'query_bundle',
+                                age_ms: 1,
+                            },
+                        ],
+                        handler_entered_at_ms: 1_700_000_000_004,
+                        response_sent_at_ms: 1_700_000_000_014,
+                        transport_to_handler_wait_ms: 4,
+                        server_handler_exec_ms: 10,
+                    },
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.deepStrictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_contenders,
+            [
+                {
+                    request_class: 'other_request',
+                    method: 'workspace/executeCommand',
+                    age_ms: 1,
+                },
+            ]
+        );
+    });
+
+    test('v14 payload should not surface v15 completion phase detail inside contenders', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 14,
+            traces: [
+                {
+                    trace_id: 'trace-v14',
+                    request_id: 'req-v14',
+                    uri: 'file:///tmp/v14.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'query_bundle',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        service_future_created_at_ms: 1_700_000_000_001,
+                        service_future_first_poll_entered_at_ms: 1_700_000_000_002,
+                        service_future_first_poll_outcome: 'pending',
+                        service_future_first_wake_scheduled_at_ms: 1_700_000_000_003,
+                        first_poll_contention_attribution: {
+                            contender_class: 'completion',
+                            uri_scope: 'same_uri',
+                            inflight_count: 1,
+                            oldest_inflight_age_ms: 1,
+                            concurrency_level: 16,
+                        },
+                        first_poll_contention_contenders: [
+                            {
+                                request_class: 'completion',
+                                method: 'textDocument/completion',
+                                phase: 'query_bundle',
+                                uri: 'file:///tmp/v14.bsl',
+                                age_ms: 1,
+                            },
+                        ],
+                        handler_entered_at_ms: 1_700_000_000_004,
+                        response_sent_at_ms: 1_700_000_000_014,
+                        transport_to_handler_wait_ms: 4,
+                        server_handler_exec_ms: 10,
+                    },
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.deepStrictEqual(
+            state.traces[0].server_edge_details?.first_poll_contention_contenders,
+            [
+                {
+                    request_class: 'completion',
+                    method: 'textDocument/completion',
+                    uri: 'file:///tmp/v14.bsl',
+                    age_ms: 1,
+                },
+            ]
         );
     });
 
@@ -510,7 +678,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

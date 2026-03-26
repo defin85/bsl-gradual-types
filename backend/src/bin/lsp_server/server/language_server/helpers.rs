@@ -39,6 +39,8 @@ pub(super) struct RequestServerEdgeTraceInputs {
     pub service_future_first_wake_scheduled_at_ms: Option<u64>,
     pub first_poll_contention_attribution:
         Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+    pub first_poll_contention_contenders:
+        Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
     pub service_scope_entered_at_ms: Option<u64>,
     pub method_entered_at_ms: Option<u64>,
     pub handler_entered_at_ms: Option<u64>,
@@ -62,6 +64,7 @@ pub(super) fn build_server_edge_details_trace(
     let service_future_first_wake_scheduled_at_ms =
         inputs.service_future_first_wake_scheduled_at_ms;
     let first_poll_contention_attribution = inputs.first_poll_contention_attribution.clone();
+    let first_poll_contention_contenders = inputs.first_poll_contention_contenders.clone();
     let service_scope_entered_at_ms = inputs.service_scope_entered_at_ms;
     let method_entered_at_ms = inputs.method_entered_at_ms;
     let handler_entered_at_ms = inputs.handler_entered_at_ms?;
@@ -81,6 +84,7 @@ pub(super) fn build_server_edge_details_trace(
         service_future_first_poll_outcome,
         service_future_first_wake_scheduled_at_ms,
         first_poll_contention_attribution,
+        first_poll_contention_contenders,
         service_scope_entered_at_ms,
         method_entered_at_ms,
         handler_entered_at_ms,
@@ -159,6 +163,8 @@ pub(super) fn record_current_request_server_edge_trace_for_testing(
             ),
         first_poll_contention_attribution: super::super::request_context::
             current_request_service_future_first_poll_contention_attribution(),
+        first_poll_contention_contenders: super::super::request_context::
+            current_request_service_future_first_poll_contention_contenders(),
         service_scope_entered_at_ms:
             super::super::request_context::current_request_service_scope_entered_at_ms(),
         method_entered_at_ms: Some(method_entered_at_ms),

@@ -227,6 +227,8 @@ struct CompletionTimelineCapture {
     service_future_first_wake_scheduled_at_ms: Option<u64>,
     first_poll_contention_attribution:
         Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace>,
+    first_poll_contention_contenders:
+        Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
     service_scope_entered_at_ms: Option<u64>,
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
@@ -269,6 +271,7 @@ impl CompletionTimelineCapture {
             service_future_first_poll_outcome: None,
             service_future_first_wake_scheduled_at_ms: None,
             first_poll_contention_attribution: None,
+            first_poll_contention_contenders: None,
             service_scope_entered_at_ms: None,
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
@@ -432,6 +435,13 @@ impl CompletionTimelineCapture {
         self.first_poll_contention_attribution = Some(first_poll_contention_attribution);
     }
 
+    fn set_first_poll_contention_contenders(
+        &mut self,
+        first_poll_contention_contenders: Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>,
+    ) {
+        self.first_poll_contention_contenders = Some(first_poll_contention_contenders);
+    }
+
     fn set_service_scope_entered_at_ms(&mut self, service_scope_entered_at_ms: u64) {
         self.service_scope_entered_at_ms = Some(service_scope_entered_at_ms);
     }
@@ -477,6 +487,9 @@ impl CompletionTimelineCapture {
                     .service_future_first_wake_scheduled_at_ms,
                 first_poll_contention_attribution: self
                     .first_poll_contention_attribution
+                    .clone(),
+                first_poll_contention_contenders: self
+                    .first_poll_contention_contenders
                     .clone(),
                 service_scope_entered_at_ms: self.service_scope_entered_at_ms,
                 method_entered_at_ms: self.method_entered_at_ms,
@@ -1016,6 +1029,10 @@ async fn completion_apply_age_for_file(
         .map(|enqueued_at| enqueued_at.elapsed())
 }
 
+fn set_current_request_completion_phase(phase: &'static str) {
+    super::super::request_context::set_current_request_inflight_phase(phase);
+}
+
 impl BslLanguageServer {
     pub(super) async fn lsp_completion(
         &self,
@@ -1056,6 +1073,7 @@ impl BslLanguageServer {
                 .as_ref()
                 .map(|context| context.request_id.clone())
         });
+        set_current_request_completion_phase("method_entry");
         if !shadow_internal_request {
             self.coordinator
                 .record_intellisense_v2_completion_trigger_mode(trigger_mode);
@@ -1256,6 +1274,7 @@ impl BslLanguageServer {
                     super::super::completion_dispatcher::CompletionTurnOutcome::QueueRejected
                 } else if let Some(turn_waiter) = completion_dispatch.turn_waiter {
                     let turn_wait_started = Instant::now();
+                    set_current_request_completion_phase("turn_wait");
                     let turn_resolution = turn_waiter.wait().await;
                     let turn_wait_elapsed = turn_wait_started.elapsed();
                     self.coordinator
@@ -1499,6 +1518,7 @@ impl BslLanguageServer {
                     "warm"
                 });
             let sync_globals_started = Instant::now();
+            set_current_request_completion_phase("sync_globals");
             self.sync_v2_globals().await;
             let sync_globals_elapsed = sync_globals_started.elapsed();
             self.coordinator
@@ -1564,6 +1584,7 @@ impl BslLanguageServer {
                 "exact_stateful"
             });
             let prepare_progress = bsl_runtime::application::PrepareStatefulProgress::new();
+            set_current_request_completion_phase("prepare_stateful");
             let guarded_prepare = if member_access_request {
                 match try_prepare_shadow_head_fast_path(
                     self,
@@ -1891,6 +1912,7 @@ impl BslLanguageServer {
                             );
                         }
                         let exact_wait_started = Instant::now();
+                        set_current_request_completion_phase("wait_exact_type_index");
                         let artifact_wait_outcome = self
                             .wait_for_current_completion_artifact_ready_v2(
                                 file_id,
@@ -2059,6 +2081,7 @@ impl BslLanguageServer {
                             );
                         }
                         let exact_wait_started = Instant::now();
+                        set_current_request_completion_phase("wait_exact_type_index");
                         let exact_wait = self
                             .wait_for_current_type_index_serve_only_ready_v2(
                                 file_id,
@@ -2181,6 +2204,7 @@ impl BslLanguageServer {
                         refreshed_snapshot_after_wait = Some(snapshot_after_wait);
                     }
 
+                    set_current_request_completion_phase("query_bundle");
                     let query_bundle_started = Instant::now();
                     let exact_snapshot_for_query = if head_route_candidate {
                         None
@@ -2640,6 +2664,7 @@ impl BslLanguageServer {
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
 
+                    set_current_request_completion_phase("response_build");
                     let response_build_started = Instant::now();
                     let response_build_future = async {
                         maybe_inject_response_build_delay_for_test().await;
@@ -2832,6 +2857,7 @@ impl BslLanguageServer {
         };
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
+        set_current_request_completion_phase("publish");
         if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
             event_driven_guards_enabled,
             self,
@@ -2943,6 +2969,16 @@ impl BslLanguageServer {
             timeline_capture.set_first_poll_contention_attribution(
                 first_poll_contention_attribution,
             );
+        }
+        if let Some(first_poll_contention_contenders) = super::super::request_context::
+            current_request_service_future_first_poll_contention_contenders()
+            .or_else(|| {
+                pending_request_context
+                    .and_then(|context| context.first_poll_contention_contenders.clone())
+            })
+        {
+            timeline_capture
+                .set_first_poll_contention_contenders(first_poll_contention_contenders);
         }
         timeline_capture.set_response_sent_at_ms(super::super::unix_timestamp_ms());
         if !shadow_internal_request {
@@ -3135,6 +3171,7 @@ mod tests {
         assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
         assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
         assert_eq!(details.first_poll_contention_attribution, None);
+        assert_eq!(details.first_poll_contention_contenders, None);
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(2));
         assert_eq!(details.service_scope_to_method_wait_ms, Some(3));
         assert_eq!(details.transport_to_method_wait_ms, Some(5));
@@ -3163,6 +3200,16 @@ mod tests {
                 concurrency_level: crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64,
             },
         );
+        capture.set_first_poll_contention_contenders(vec![
+            crate::types::CompletionTimelineFirstPollContentionContenderTrace {
+                request_class: "document_sync".to_string(),
+                method: "textDocument/didChange".to_string(),
+                command: None,
+                phase: None,
+                uri: Some("file:///completion_timeline_capture_test.bsl".to_string()),
+                age_ms: 15,
+            },
+        ]);
         capture.set_service_scope_entered_at_ms(1_700_000_000_009);
         capture.set_method_entered_at_ms(1_700_000_000_012);
         capture.set_handler_entered_at_ms(1_700_000_000_020);
@@ -3205,6 +3252,19 @@ mod tests {
             contention.concurrency_level,
             crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL as u64
         );
+        assert_eq!(
+            details.first_poll_contention_contenders,
+            Some(vec![
+                crate::types::CompletionTimelineFirstPollContentionContenderTrace {
+                    request_class: "document_sync".to_string(),
+                    method: "textDocument/didChange".to_string(),
+                    command: None,
+                    phase: None,
+                    uri: Some("file:///completion_timeline_capture_test.bsl".to_string()),
+                    age_ms: 15,
+                },
+            ])
+        );
         assert_eq!(details.service_future_to_scope_wait_ms, Some(14));
     }
 
@@ -3241,6 +3301,7 @@ mod tests {
         assert_eq!(details.service_future_first_wake_scheduled_at_ms, None);
         assert_eq!(details.first_poll_to_first_wake_wait_ms, None);
         assert_eq!(details.first_poll_contention_attribution, None);
+        assert_eq!(details.first_poll_contention_contenders, None);
     }
 
     #[test]

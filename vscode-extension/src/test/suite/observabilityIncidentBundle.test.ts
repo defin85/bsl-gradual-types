@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -82,6 +82,27 @@ suite('Observability Incident Bundle Test Suite', () => {
                                 oldest_inflight_age_ms: 300,
                                 concurrency_level: 16,
                             },
+                            first_poll_contention_contenders: [
+                                {
+                                    request_class: 'document_sync',
+                                    method: 'textDocument/didChange',
+                                    uri: 'file:///tmp/test.bsl',
+                                    age_ms: 300,
+                                },
+                                {
+                                    request_class: 'other_request',
+                                    method: 'workspace/executeCommand',
+                                    command: 'bsl.getCompletionTimeline',
+                                    age_ms: 120,
+                                },
+                                {
+                                    request_class: 'completion',
+                                    method: 'textDocument/completion',
+                                    phase: 'query_bundle',
+                                    uri: 'file:///tmp/test.bsl',
+                                    age_ms: 90,
+                                },
+                            ],
                             pre_method_attribution_provenance: 'same_request_authoritative',
                             service_scope_entered_at_ms: 1_700_000_002_000,
                             method_entered_at_ms: 1_700_000_003_000,
@@ -219,7 +240,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 12);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 15);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -272,6 +293,27 @@ suite('Observability Incident Bundle Test Suite', () => {
             bundle.incidentReport.requests[0].first_poll_contention_attribution?.concurrency_level,
             16
         );
+        assert.deepStrictEqual(bundle.incidentReport.requests[0].first_poll_contention_contenders, [
+            {
+                request_class: 'document_sync',
+                method: 'textDocument/didChange',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 300,
+            },
+            {
+                request_class: 'other_request',
+                method: 'workspace/executeCommand',
+                command: 'bsl.getCompletionTimeline',
+                age_ms: 120,
+            },
+            {
+                request_class: 'completion',
+                method: 'textDocument/completion',
+                phase: 'query_bundle',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 90,
+            },
+        ]);
         assert.strictEqual(bundle.incidentReport.requests[0].dispatch_to_request_context_wait_ms, 200);
         assert.strictEqual(bundle.incidentReport.requests[0].transport_to_service_future_wait_ms, 1200);
         assert.strictEqual(bundle.incidentReport.requests[0].service_future_to_scope_wait_ms, 800);
@@ -303,6 +345,11 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_poll_outcome=pending'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_first_wake_scheduled_at_ms=1700000001880'));
         assert.ok(bundle.summaryMarkdown.includes('first_poll_contention=document_sync:same_uri|inflight_count=1|concurrency_level=16|oldest_inflight_age_ms=300'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'first_poll_contenders=document_sync:textDocument/didChange@file:///tmp/test.bsl(age_ms=300);other_request:workspace/executeCommand:bsl.getCompletionTimeline@unavailable(age_ms=120);completion:textDocument/completion[phase=query_bundle]@file:///tmp/test.bsl(age_ms=90)'
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('dispatch_to_request_context_wait_ms=200'));
         assert.ok(bundle.summaryMarkdown.includes('transport_to_service_future_wait_ms=1200'));
         assert.ok(bundle.summaryMarkdown.includes('service_future_to_scope_wait_ms=800'));
@@ -458,6 +505,123 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].first_poll_contention_attribution, undefined);
         assert.ok(bundle.summaryMarkdown.includes('contract=v11'));
         assert.ok(bundle.summaryMarkdown.includes('v12 first-poll contention attribution is unavailable by design'));
+    });
+
+    test('v12 completion timeline should mark v13 contender snapshot as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 12;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v12')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v13 first-poll contender snapshot')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v12')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v13 first-poll contender snapshot')));
+        assert.strictEqual(bundle.incidentReport.requests[0].first_poll_contention_contenders, undefined);
+        assert.ok(bundle.summaryMarkdown.includes('contract=v12'));
+        assert.ok(bundle.summaryMarkdown.includes('v13 first-poll contender snapshot is unavailable by design'));
+    });
+
+    test('v13 completion timeline should mark v14 executeCommand command detail as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 13;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v13')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v14 executeCommand command detail')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v13')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v14 executeCommand command detail')));
+        assert.deepStrictEqual(bundle.incidentReport.requests[0].first_poll_contention_contenders, [
+            {
+                request_class: 'document_sync',
+                method: 'textDocument/didChange',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 300,
+            },
+            {
+                request_class: 'other_request',
+                method: 'workspace/executeCommand',
+                age_ms: 120,
+            },
+            {
+                request_class: 'completion',
+                method: 'textDocument/completion',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 90,
+            },
+        ]);
+        assert.ok(bundle.summaryMarkdown.includes('contract=v13'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'v14 executeCommand command detail inside first-poll contenders is unavailable by design'
+            )
+        );
+    });
+
+    test('v14 completion timeline should mark v15 completion phase detail as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 14;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v14')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v15 completion phase detail')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v14')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v15 completion phase detail')));
+        assert.deepStrictEqual(bundle.incidentReport.requests[0].first_poll_contention_contenders, [
+            {
+                request_class: 'document_sync',
+                method: 'textDocument/didChange',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 300,
+            },
+            {
+                request_class: 'other_request',
+                method: 'workspace/executeCommand',
+                command: 'bsl.getCompletionTimeline',
+                age_ms: 120,
+            },
+            {
+                request_class: 'completion',
+                method: 'textDocument/completion',
+                uri: 'file:///tmp/test.bsl',
+                age_ms: 90,
+            },
+        ]);
+        assert.ok(bundle.summaryMarkdown.includes('contract=v14'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'v15 completion phase detail inside first-poll contenders is unavailable by design'
+            )
+        );
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

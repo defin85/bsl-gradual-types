@@ -555,7 +555,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, and v12 first-poll contention attribution are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, and v15 completion phase detail are unavailable by design.'
                     )
             )
         );

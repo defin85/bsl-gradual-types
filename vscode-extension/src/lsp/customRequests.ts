@@ -590,6 +590,21 @@ export interface CompletionTimelineFirstPollContentionAttributionTrace {
     concurrency_level: number;
 }
 
+export type CompletionTimelineInflightRequestClass =
+    | 'document_sync'
+    | 'completion'
+    | 'other_request'
+    | 'other_notification';
+
+export interface CompletionTimelineFirstPollContentionContenderTrace {
+    request_class: CompletionTimelineInflightRequestClass;
+    method: string;
+    command?: string;
+    phase?: string;
+    uri?: string;
+    age_ms: number;
+}
+
 export interface CompletionTimelineExactArtifactPollTrace {
     poll_count: number;
     poll_elapsed_ms: number;
@@ -640,6 +655,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     service_future_first_poll_outcome?: CompletionTimelineServiceFutureFirstPollOutcome;
     service_future_first_wake_scheduled_at_ms?: number;
     first_poll_contention_attribution?: CompletionTimelineFirstPollContentionAttributionTrace;
+    first_poll_contention_contenders?: CompletionTimelineFirstPollContentionContenderTrace[];
     pre_method_attribution_provenance?: CompletionTimelinePreMethodAttributionProvenance;
     service_scope_entered_at_ms?: number;
     method_entered_at_ms?: number;

@@ -1,0 +1,215 @@
+{
+  "surface": "lsp-completion-timeline",
+  "major_version": 11,
+  "schema_version": 1,
+  "compatibility": {
+    "breaking_change_requires_major_bump": true,
+    "breaking_change_requires_migration_note": true
+  },
+  "request": {
+    "method": "workspace/executeCommand",
+    "command": "bsl.getCompletionTimeline",
+    "params_shape": {
+      "optional_fields": [
+        "limit",
+        "request_id"
+      ],
+      "limit_bounds": {
+        "minimum": 1,
+        "maximum": 200,
+        "default": 200
+      }
+    }
+  },
+  "response": {
+    "version": 14,
+    "retention_max_entries_default": 200,
+    "trace_fields": [
+      "trace_id",
+      "request_id",
+      "uri",
+      "trigger_mode",
+      "outcome",
+      "started_at_ms",
+      "total_duration_ms",
+      "dominant_stage",
+      "prepare_details",
+      "server_edge_details",
+      "turn_attribution",
+      "stages"
+    ],
+    "prepare_details_fields": [
+      "wait_budget_ms",
+      "guard_outcome",
+      "outcome",
+      "route",
+      "fail_closed_cause",
+      "min_file_version",
+      "shadow_version_at_start",
+      "observed_file_version",
+      "wait_elapsed_ms",
+      "snapshot_elapsed_ms",
+      "apply_age_at_start_ms",
+      "apply_age_at_terminal_ms",
+      "progress",
+      "wait_for_file_version_runtime",
+      "snapshot_with_deps_runtime",
+      "snapshot_with_deps_timeout_runtime",
+      "timeout_attribution",
+      "exact_wait"
+    ],
+    "prepare_progress_fields": [
+      "phase",
+      "phase_started_offset_ms",
+      "wait_completed_offset_ms",
+      "snapshot_completed_offset_ms"
+    ],
+    "prepare_runtime_fields": [
+      "queue_wait_ms",
+      "exec_ms",
+      "wake_wait_ms",
+      "resolution"
+    ],
+    "prepare_timeout_attribution_fields": [
+      "source",
+      "phase",
+      "budget_ms",
+      "elapsed_ms",
+      "overshoot_ms"
+    ],
+    "exact_wait_fields": [
+      "head_ready_before_wait",
+      "exact_ready_before_wait",
+      "current_revision_head_owner_hints_ready",
+      "artifact_wait_outcome",
+      "type_index_wait_outcome",
+      "type_index_waiter_action",
+      "matching_task_state",
+      "task_phase",
+      "artifact_poll"
+    ],
+    "exact_artifact_poll_fields": [
+      "poll_count",
+      "poll_elapsed_ms",
+      "observed_file_version",
+      "head_ready",
+      "exact_ready"
+    ],
+    "server_edge_details_fields": [
+      "transport_received_at_ms",
+      "transport_received_at_ms_provenance",
+      "jsonrpc_dispatch_received_at_ms",
+      "pre_method_attribution_provenance",
+      "service_future_created_at_ms",
+      "service_future_first_poll_entered_at_ms",
+      "service_future_first_poll_outcome",
+      "service_future_first_wake_scheduled_at_ms",
+      "service_scope_entered_at_ms",
+      "method_entered_at_ms",
+      "handler_entered_at_ms",
+      "response_sent_at_ms",
+      "cancel_observed_at_ms",
+      "dispatch_to_request_context_wait_ms",
+      "transport_to_service_future_wait_ms",
+      "service_future_to_scope_wait_ms",
+      "service_future_to_first_poll_wait_ms",
+      "first_poll_to_first_wake_wait_ms",
+      "first_poll_contention_attribution",
+      "first_poll_contention_contenders",
+      "transport_to_service_scope_wait_ms",
+      "service_scope_to_method_wait_ms",
+      "transport_to_method_wait_ms",
+      "method_prelude_exec_ms",
+      "transport_to_handler_wait_ms",
+      "server_handler_exec_ms",
+      "cancel_observed_after_handler_enter_ms"
+    ],
+    "first_poll_contention_attribution_fields": [
+      "contender_class",
+      "uri_scope",
+      "inflight_count",
+      "oldest_inflight_age_ms",
+      "concurrency_level"
+    ],
+    "first_poll_contention_contender_fields": [
+      "request_class",
+      "method",
+      "command",
+      "uri",
+      "age_ms"
+    ],
+    "first_poll_contention_contender_classes": [
+      "document_sync",
+      "completion",
+      "other_request",
+      "other_notification",
+      "mixed",
+      "none_visible",
+      "unavailable"
+    ],
+    "first_poll_contention_request_classes": [
+      "document_sync",
+      "completion",
+      "other_request",
+      "other_notification"
+    ],
+    "first_poll_contention_uri_scopes": [
+      "same_uri",
+      "other_uri",
+      "mixed",
+      "unavailable"
+    ],
+    "turn_attribution_fields": [
+      "request_file_seq",
+      "request_epoch",
+      "queue_outcome",
+      "turn_wait_outcome",
+      "dispatcher_resolution_latency_ms",
+      "queue_capacity",
+      "queue_depth_before_enqueue",
+      "queue_depth_after_enqueue",
+      "queued_completion_ahead_count",
+      "did_change_ahead_count",
+      "active_completion_count",
+      "dropped_completion_file_seq",
+      "active_holder",
+      "queued_completion_ahead"
+    ],
+    "turn_holder_fields": [
+      "request_id",
+      "file_seq",
+      "request_epoch",
+      "trigger_mode",
+      "version_hint",
+      "age_ms"
+    ],
+    "stage_fields": [
+      "name",
+      "status",
+      "started_offset_ms",
+      "duration_ms"
+    ],
+    "stage_statuses": [
+      "completed",
+      "cancelled",
+      "failed",
+      "skipped"
+    ],
+    "prepare_routes": [
+      "head_hit",
+      "exact_hit"
+    ],
+    "prepare_fail_closed_causes": [
+      "prepare_timeout",
+      "exact_deadline"
+    ],
+    "outcomes": [
+      "ok_non_empty",
+      "ok_empty",
+      "fail_closed",
+      "cancelled",
+      "superseded",
+      "handler_error"
+    ]
+  }
+}

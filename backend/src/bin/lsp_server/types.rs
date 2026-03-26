@@ -228,6 +228,19 @@ pub struct CompletionTimelineFirstPollContentionAttributionTrace {
     pub concurrency_level: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CompletionTimelineFirstPollContentionContenderTrace {
+    pub request_class: String,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    pub age_ms: u64,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CompletionTimelinePrepareDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,6 +311,9 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub first_poll_contention_attribution:
         Option<CompletionTimelineFirstPollContentionAttributionTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_poll_contention_contenders:
+        Option<Vec<CompletionTimelineFirstPollContentionContenderTrace>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_service_scope_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

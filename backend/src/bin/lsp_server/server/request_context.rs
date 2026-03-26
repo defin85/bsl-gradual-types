@@ -472,7 +472,13 @@ where
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
         if this.first_poll_observed {
-            return this.inner.as_mut().poll(cx);
+            return match this.inner.as_mut().poll(cx) {
+                Poll::Ready(output) => {
+                    this.clear_inflight_request_entry();
+                    Poll::Ready(output)
+                }
+                Poll::Pending => Poll::Pending,
+            };
         }
 
         this.first_poll_observed = true;

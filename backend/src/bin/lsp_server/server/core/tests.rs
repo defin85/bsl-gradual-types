@@ -15820,6 +15820,191 @@ async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_bef
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_turn_wait_requests(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const REQUEST_COUNT: usize = 24;
+    const FIRST_REQUEST_ID: i64 = 40_717;
+    const LAST_REQUEST_ID: i64 = FIRST_REQUEST_ID + REQUEST_COUNT as i64 - 1;
+    const FIRST_POLL_BUDGET_MS: u64 = 450;
+    const STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS: u64 = 500;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    super::super::language_server::reset_completion_checkpoint_hits_for_test();
+    let _checkpoint_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
+        "before_active_turn_registration=500",
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root")
+        .to_path_buf();
+    let fixture_path = workspace_root.join("examples").join("test_lsp.bsl");
+    let fixture_text =
+        std::fs::read_to_string(&fixture_path).expect("read examples/test_lsp.bsl fixture");
+    let uri = Url::from_file_path(&fixture_path).expect("fixture uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: fixture_text.clone(),
+                },
+            },
+        )
+        .await;
+    server.sync_v2_globals().await;
+
+    let position = find_utf16_position_after_marker(&fixture_text, "Arr.");
+    let completion_context = Some(CompletionContext {
+        trigger_kind: CompletionTriggerKind::INVOKED,
+        trigger_character: None,
+    });
+    let warmup_labels = live_transport_completion_labels_with_request(
+        &mut harness,
+        40_716,
+        &uri,
+        position,
+        completion_context.clone(),
+    )
+    .await;
+    assert!(
+        !warmup_labels.is_empty(),
+        "warmup completion must prime event-driven path before burst overlap regression"
+    );
+
+    for request_id in FIRST_REQUEST_ID..=LAST_REQUEST_ID {
+        live_transport_write_completion_request(
+            &mut harness,
+            request_id,
+            &uri,
+            position,
+            completion_context.clone(),
+        )
+        .await;
+    }
+
+    let responses = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut responses = std::collections::BTreeMap::new();
+        while responses.len() < REQUEST_COUNT {
+            let response = harness.read_message().await;
+            let Some(request_id) = response.get("id").and_then(|value| value.as_i64()) else {
+                continue;
+            };
+            if (FIRST_REQUEST_ID..=LAST_REQUEST_ID).contains(&request_id) {
+                responses.insert(request_id, response);
+            }
+        }
+        responses
+    })
+    .await
+    .expect("burst overlap responses must arrive");
+
+    let last_response = responses
+        .get(&LAST_REQUEST_ID)
+        .expect("last burst completion response");
+    let last_completion = last_response
+        .get("result")
+        .cloned()
+        .map(|result| serde_json::from_value::<Option<CompletionResponse>>(result).expect("parse last completion result"))
+        .flatten()
+        .expect("last burst completion result present");
+    let last_labels = normalize_lsp_member_labels(&last_completion);
+    assert!(
+        !last_labels.is_empty(),
+        "latest burst completion must still return bounded non-empty labels, response={last_response:?}"
+    );
+
+    let timeline = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 40_817, 160).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            let last_trace = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&LAST_REQUEST_ID.to_string())
+            });
+            if let Some(last_trace) = last_trace {
+                break last_trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("burst overlap last trace must appear in completion timeline");
+
+    let last_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&timeline, "service_future_to_first_poll_wait_ms")
+            .expect("last request service_future_to_first_poll_wait_ms");
+    assert!(
+        last_first_poll_wait_ms <= FIRST_POLL_BUDGET_MS,
+        "latest same-file burst completion must reach first poll within budget even while superseded predecessors are stopping pre-active, trace={timeline:?}"
+    );
+
+    let stranded_pre_active_turn_wait_contender_age_ms = timeline
+        .get("server_edge_details")
+        .and_then(|details| details.get("first_poll_contention_contenders"))
+        .and_then(|value| value.as_array())
+        .and_then(|contenders| {
+            contenders.iter().find_map(|contender| {
+                let request_class = contender.get("request_class").and_then(|value| value.as_str());
+                let phase = contender.get("phase").and_then(|value| value.as_str());
+                if request_class == Some("completion") && phase == Some("turn_wait") {
+                    contender.get("age_ms").and_then(|value| value.as_u64())
+                } else {
+                    None
+                }
+            })
+        })
+        .unwrap_or(0);
+    assert!(
+        stranded_pre_active_turn_wait_contender_age_ms <= STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS,
+        "latest same-file burst completion must not observe long-lived superseded pre-active turn_wait contender, trace={timeline:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p28_cancel_request_releases_pre_active_turn_wait_before_active_registration() {
     struct EnvVarGuard {
         key: &'static str,

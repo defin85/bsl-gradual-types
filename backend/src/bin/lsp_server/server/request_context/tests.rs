@@ -481,6 +481,96 @@ async fn request_context_service_records_first_poll_and_first_wake_for_pending_f
 }
 
 #[tokio::test]
+async fn request_context_service_clears_inflight_entry_when_pending_future_later_becomes_ready() {
+    #[derive(Debug, Default)]
+    struct PendingOnceState {
+        waker: Option<Waker>,
+        returned_pending: bool,
+    }
+
+    #[derive(Debug)]
+    struct PendingOnceReadyFuture {
+        state: Arc<Mutex<PendingOnceState>>,
+    }
+
+    impl Future for PendingOnceReadyFuture {
+        type Output = Result<(), ()>;
+
+        fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+            let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !state.returned_pending {
+                state.returned_pending = true;
+                state.waker = Some(cx.waker().clone());
+                return Poll::Pending;
+            }
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    let _guard = inflight_registry_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    clear_inflight_request_registry_for_testing();
+
+    let state = Arc::new(Mutex::new(PendingOnceState::default()));
+    let uri = Url::parse("file:///request_context_pending_ready_inflight_cleanup.bsl").expect("url");
+    let position = Position::new(7, 2);
+    let request = Request::build("textDocument/completion")
+        .id("req-pending-ready-cleanup")
+        .params(json!({
+            "textDocument": { "uri": uri },
+            "position": { "line": position.line, "character": position.character },
+        }))
+        .finish();
+    let inflight_request = register_inflight_request(&request, 1_700_000_000_100)
+        .expect("completion inflight entry");
+    let observation = ServiceFuturePollObservationState::new(
+        Some("req-pending-ready-cleanup".to_string()),
+        Some(inflight_request.clone()),
+    );
+    let mut future = Box::pin(InstrumentedServiceFuture::new(
+        PendingOnceReadyFuture {
+            state: state.clone(),
+        },
+        observation,
+        Some(&inflight_request),
+    ));
+    let noop_waker = Waker::from(Arc::new(NoopWake));
+    let mut cx = Context::from_waker(&noop_waker);
+    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Pending));
+    assert_eq!(
+        inflight_request_registry_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .by_entry_id
+            .len(),
+        1,
+        "pending completion future must register exactly one inflight entry"
+    );
+
+    let stored_waker = state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .waker
+        .clone()
+        .expect("stored waker");
+    stored_waker.wake_by_ref();
+
+    assert!(matches!(future.as_mut().poll(&mut cx), Poll::Ready(Ok(()))));
+    assert!(
+        inflight_request_registry_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .by_entry_id
+            .is_empty(),
+        "completion inflight entry must be cleared as soon as InstrumentedServiceFuture becomes ready after a pending first poll"
+    );
+
+    drop(future);
+    clear_inflight_request_registry_for_testing();
+}
+
+#[tokio::test]
 async fn request_context_service_does_not_fabricate_first_wake_for_ready_first_poll() {
     #[derive(Clone, Debug, Default)]
     struct ReadyCaptureService;

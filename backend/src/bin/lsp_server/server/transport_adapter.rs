@@ -387,7 +387,9 @@ fn to_jsonrpc_error(err: &TransportCodecError) -> Error {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::HashMap;
     use std::pin::Pin;
+    use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::sync::Notify;
@@ -449,6 +451,175 @@ mod tests {
                     request_id,
                     json!({ "capabilities": {} }),
                 )))
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct SameFileOverlapState {
+        first_completion_release: Notify,
+        completion_calls_by_key: Mutex<HashMap<String, usize>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct SameFileOverlapService {
+        state: Arc<SameFileOverlapState>,
+    }
+
+    impl Service<Request> for SameFileOverlapService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().expect("request id").clone();
+            let method = request.method().to_string();
+            let params = request.params().cloned();
+            let state = self.state.clone();
+            Box::pin(async move {
+                if method != "textDocument/completion" {
+                    return Ok(Some(JsonRpcResponse::from_ok(
+                        request_id,
+                        json!({ "capabilities": {} }),
+                    )));
+                }
+
+                let overlap_key = params
+                    .as_ref()
+                    .and_then(|value| {
+                        Some(format!(
+                            "{}:{}:{}",
+                            value.get("textDocument")?.get("uri")?.as_str()?,
+                            value.get("position")?.get("line")?.as_u64()?,
+                            value.get("position")?.get("character")?.as_u64()?,
+                        ))
+                    })
+                    .expect("same-file completion params");
+                let call_index = {
+                    let mut calls = state
+                        .completion_calls_by_key
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let entry = calls.entry(overlap_key).or_insert(0);
+                    *entry += 1;
+                    *entry
+                };
+
+                if call_index == 1 {
+                    state.first_completion_release.notified().await;
+                    return Ok(Some(JsonRpcResponse::from_ok(
+                        request_id,
+                        json!({ "items": [{ "label": "older" }], "isIncomplete": false }),
+                    )));
+                }
+
+                Ok(Some(JsonRpcResponse::from_ok(
+                    request_id,
+                    json!({ "items": [{ "label": "newer" }], "isIncomplete": false }),
+                )))
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct CancellableCompletionState {
+        completion_release: Notify,
+        registered: Notify,
+        pending_cancellations: Mutex<HashMap<String, Arc<Notify>>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct CancellableCompletionService {
+        state: Arc<CancellableCompletionState>,
+    }
+
+    impl Service<Request> for CancellableCompletionService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let params = request.params().cloned();
+            let state = self.state.clone();
+            Box::pin(async move {
+                match method.as_str() {
+                    "textDocument/completion" => {
+                        let request_id = request_id.expect("completion request id");
+                        let request_id_text = request_id.to_string();
+                        let cancel_notify = Arc::new(Notify::new());
+                        {
+                            let mut pending = state
+                                .pending_cancellations
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            pending.insert(request_id_text.clone(), cancel_notify.clone());
+                        }
+                        state.registered.notify_waiters();
+
+                        let response = tokio::select! {
+                            _ = cancel_notify.notified() => {
+                                JsonRpcResponse::from_error(
+                                    request_id.clone(),
+                                    Error::request_cancelled(),
+                                )
+                            }
+                            _ = state.completion_release.notified() => {
+                                JsonRpcResponse::from_ok(
+                                    request_id.clone(),
+                                    json!({ "items": [{ "label": "released" }], "isIncomplete": false }),
+                                )
+                            }
+                        };
+
+                        let mut pending = state
+                            .pending_cancellations
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        pending.remove(&request_id_text);
+
+                        Ok(Some(response))
+                    }
+                    "$/cancelRequest" => {
+                        let cancelled_request_id = params
+                            .as_ref()
+                            .and_then(|value| value.get("id"))
+                            .map(|value| {
+                                value
+                                    .as_i64()
+                                    .map(|id| id.to_string())
+                                    .or_else(|| value.as_str().map(ToString::to_string))
+                            })
+                            .flatten()
+                            .expect("cancel request id");
+                        let notify = {
+                            let pending = state
+                                .pending_cancellations
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner());
+                            pending.get(&cancelled_request_id).cloned()
+                        };
+                        if let Some(notify) = notify {
+                            notify.notify_waiters();
+                        }
+                        Ok(None)
+                    }
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
             })
         }
     }
@@ -620,6 +791,194 @@ mod tests {
             .await
             .is_err(),
             "completion handoff must not emit duplicate terminal responses"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_keeps_same_file_overlap_off_transport_after_handoff() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let overlap_state = Arc::new(SameFileOverlapState::default());
+
+        let server_task = tokio::spawn({
+            let overlap_state = overlap_state.clone();
+            async move {
+                serve_with_completion_handoff(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    SameFileOverlapService {
+                        state: overlap_state,
+                    },
+                    1,
+                )
+                .await;
+            }
+        });
+
+        for request_id in [1_i64, 2_i64] {
+            let request = json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///same-file.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            });
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        let mut reader = BufReader::new(client_read);
+        let newer_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("newer same-file completion must not wait behind older handoff owner");
+        assert_eq!(
+            newer_response.get("id").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+
+        overlap_state.first_completion_release.notify_waiters();
+        let older_response = read_framed_message(&mut reader).await;
+        assert_eq!(
+            older_response.get("id").and_then(|value| value.as_i64()),
+            Some(1)
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_emits_single_terminal_response_for_handoff_cancel_race() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let cancel_state = Arc::new(CancellableCompletionState::default());
+
+        let server_task = tokio::spawn({
+            let cancel_state = cancel_state.clone();
+            async move {
+                serve_with_completion_handoff(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    CancellableCompletionService {
+                        state: cancel_state,
+                    },
+                    1,
+                )
+                .await;
+            }
+        });
+
+        let completion_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": "file:///cancel-race.bsl" },
+                "position": { "line": 0, "character": 0 }
+            }
+        });
+        let completion_body =
+            serde_json::to_vec(&completion_request).expect("serialize completion request");
+        let completion_header = format!("Content-Length: {}\r\n\r\n", completion_body.len());
+        client_write
+            .write_all(completion_header.as_bytes())
+            .await
+            .expect("write completion request header");
+        client_write
+            .write_all(&completion_body)
+            .await
+            .expect("write completion request body");
+        client_write
+            .flush()
+            .await
+            .expect("flush completion request");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                let pending = cancel_state
+                    .pending_cancellations
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if pending.contains_key("1") {
+                    break;
+                }
+                drop(pending);
+                cancel_state.registered.notified().await;
+            }
+        })
+        .await
+        .expect("completion handoff owner must register cancellable request");
+
+        let cancel_request = json!({
+            "jsonrpc": "2.0",
+            "method": "$/cancelRequest",
+            "params": { "id": 1 }
+        });
+        let cancel_body = serde_json::to_vec(&cancel_request).expect("serialize cancel request");
+        let cancel_header = format!("Content-Length: {}\r\n\r\n", cancel_body.len());
+        client_write
+            .write_all(cancel_header.as_bytes())
+            .await
+            .expect("write cancel request header");
+        client_write
+            .write_all(&cancel_body)
+            .await
+            .expect("write cancel request body");
+        client_write.flush().await.expect("flush cancel request");
+
+        let mut reader = BufReader::new(client_read);
+        let cancelled_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("cancelled completion must resolve promptly after handoff");
+        assert_eq!(
+            cancelled_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            Some(1)
+        );
+        assert_eq!(
+            cancelled_response
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_i64()),
+            Some(-32800)
+        );
+
+        cancel_state.completion_release.notify_waiters();
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                read_framed_message(&mut reader),
+            )
+            .await
+            .is_err(),
+            "cancelled handoff owner must not emit a second terminal response after release"
         );
 
         drop(client_write);

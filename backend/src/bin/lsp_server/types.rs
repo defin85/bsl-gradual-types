@@ -287,6 +287,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_received_at_ms_provenance: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jsonrpc_dispatch_received_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_slot_released_at_ms: Option<u64>,
     pub pre_method_attribution_provenance: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_future_created_at_ms: Option<u64>,
@@ -306,6 +308,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub cancel_observed_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dispatch_to_request_context_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transport_to_slot_release_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_service_future_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -328,6 +332,10 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub transport_to_method_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub method_prelude_exec_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_release_to_handler_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_release_to_response_wait_ms: Option<u64>,
     pub transport_to_handler_wait_ms: u64,
     pub server_handler_exec_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]

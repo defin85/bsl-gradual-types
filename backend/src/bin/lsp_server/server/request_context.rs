@@ -61,6 +61,7 @@ struct PendingCompletionRequestEntry {
     cancelled_before_take: bool,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
+    transport_slot_released_at_ms: Option<u64>,
     service_future_created_at_ms: Option<u64>,
     service_future_first_poll_entered_at_ms: Option<u64>,
     service_future_first_poll_outcome: Option<String>,
@@ -78,6 +79,7 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) cancelled_before_take: bool,
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
+    pub(crate) transport_slot_released_at_ms: Option<u64>,
     pub(crate) service_future_created_at_ms: Option<u64>,
     pub(crate) service_future_first_poll_entered_at_ms: Option<u64>,
     pub(crate) service_future_first_poll_outcome: Option<String>,
@@ -207,17 +209,20 @@ impl ServiceFuturePollObservationState {
     }
 
     fn set_inflight_phase(&self, phase: Option<&str>) {
-        let Some(entry_id) = self.inflight_request.as_ref().map(|request| request.entry_id) else {
+        let Some(entry_id) = self
+            .inflight_request
+            .as_ref()
+            .map(|request| request.entry_id)
+        else {
             return;
         };
         set_inflight_request_phase(entry_id, phase);
     }
 
     fn record_first_poll_entered_at_ms(&self, first_poll_entered_at_ms: u64) {
-        let first_poll_contention_snapshot =
-            self.inflight_request.as_ref().and_then(|current| {
-                first_poll_contention_snapshot_for_request(current, first_poll_entered_at_ms)
-            });
+        let first_poll_contention_snapshot = self.inflight_request.as_ref().and_then(|current| {
+            first_poll_contention_snapshot_for_request(current, first_poll_entered_at_ms)
+        });
         let first_poll_contention_attribution = first_poll_contention_snapshot
             .as_ref()
             .map(|snapshot| snapshot.attribution.clone());
@@ -513,8 +518,7 @@ fn pending_completion_request_ids_cell() -> &'static Mutex<PendingCompletionRequ
 }
 
 fn inflight_request_registry_cell() -> &'static Mutex<InflightRequestRegistry> {
-    static CELL: std::sync::OnceLock<Mutex<InflightRequestRegistry>> =
-        std::sync::OnceLock::new();
+    static CELL: std::sync::OnceLock<Mutex<InflightRequestRegistry>> = std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(InflightRequestRegistry::default()))
 }
 
@@ -586,9 +590,17 @@ fn request_uri_from_value(value: &serde_json::Value) -> Option<String> {
 fn request_uri_from_request(request: &Request) -> Option<String> {
     let params = request.params()?.clone();
     match request.method() {
-        "textDocument/completion" => serde_json::from_value::<CompletionParams>(params)
-            .ok()
-            .map(|completion| completion.text_document_position.text_document.uri.to_string()),
+        "textDocument/completion" => {
+            serde_json::from_value::<CompletionParams>(params)
+                .ok()
+                .map(|completion| {
+                    completion
+                        .text_document_position
+                        .text_document
+                        .uri
+                        .to_string()
+                })
+        }
         "textDocument/didOpen" => serde_json::from_value::<DidOpenTextDocumentParams>(params)
             .ok()
             .map(|did_open| did_open.text_document.uri.to_string()),
@@ -778,14 +790,16 @@ fn first_poll_contention_snapshot_for_request(
 
     let mut contender_entries = contenders
         .iter()
-        .map(|entry| crate::types::CompletionTimelineFirstPollContentionContenderTrace {
-            request_class: entry.class.as_contract_str().to_string(),
-            method: entry.method.clone(),
-            command: entry.command.clone(),
-            phase: entry.phase.clone(),
-            uri: entry.uri.clone(),
-            age_ms: first_poll_entered_at_ms.saturating_sub(entry.started_at_ms),
-        })
+        .map(
+            |entry| crate::types::CompletionTimelineFirstPollContentionContenderTrace {
+                request_class: entry.class.as_contract_str().to_string(),
+                method: entry.method.clone(),
+                command: entry.command.clone(),
+                phase: entry.phase.clone(),
+                uri: entry.uri.clone(),
+                age_ms: first_poll_entered_at_ms.saturating_sub(entry.started_at_ms),
+            },
+        )
         .collect::<Vec<_>>();
     contender_entries.sort_by(|left, right| {
         right
@@ -877,6 +891,7 @@ fn record_pending_completion_request_id(
                 cancelled_before_take: false,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
+                transport_slot_released_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
@@ -923,6 +938,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 cancelled_before_take: false,
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
+                transport_slot_released_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
@@ -951,6 +967,18 @@ fn mark_pending_completion_request_cancelled_before_take(request_id: &str) {
         entry.cancelled_before_take = true;
     }
     remove_request_id_from_key_queue(&mut pending, &key, request_id);
+}
+
+pub(crate) fn record_pending_completion_transport_slot_released_at_ms(
+    request_id: &str,
+    transport_slot_released_at_ms: u64,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        entry.transport_slot_released_at_ms = Some(transport_slot_released_at_ms);
+    }
 }
 
 fn record_pending_completion_service_future_created_at_ms(
@@ -1018,7 +1046,9 @@ fn record_pending_completion_first_poll_contention_attribution(
 
 fn record_pending_completion_first_poll_contention_contenders(
     request_id: &str,
-    first_poll_contention_contenders: Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>,
+    first_poll_contention_contenders: Vec<
+        crate::types::CompletionTimelineFirstPollContentionContenderTrace,
+    >,
 ) {
     let mut pending = pending_completion_request_ids_cell()
         .lock()
@@ -1073,6 +1103,7 @@ pub(crate) fn record_completion_request_id_for_testing(
             cancelled_before_take: false,
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
+            transport_slot_released_at_ms: None,
             service_future_created_at_ms: None,
             service_future_first_poll_entered_at_ms: None,
             service_future_first_poll_outcome: None,
@@ -1110,6 +1141,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
         cancelled_before_take: entry.cancelled_before_take,
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
+        transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
         service_future_created_at_ms: entry.service_future_created_at_ms,
         service_future_first_poll_entered_at_ms: entry.service_future_first_poll_entered_at_ms,
         service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
@@ -1157,6 +1189,7 @@ pub(crate) fn take_completion_request_context(
                 cancelled_before_take: entry.cancelled_before_take,
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
+                transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
                 service_future_created_at_ms: entry.service_future_created_at_ms,
                 service_future_first_poll_entered_at_ms: entry
                     .service_future_first_poll_entered_at_ms,

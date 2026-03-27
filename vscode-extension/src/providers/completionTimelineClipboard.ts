@@ -99,6 +99,9 @@ export function formatCompletionTimelineTraceForClipboard(
             ...(typeof trace.server_edge_details.jsonrpc_dispatch_received_at_ms === 'number'
                 ? [`jsonrpc_dispatch_received_at_ms=${trace.server_edge_details.jsonrpc_dispatch_received_at_ms}`]
                 : []),
+            ...(typeof trace.server_edge_details.transport_slot_released_at_ms === 'number'
+                ? [`transport_slot_released_at_ms=${trace.server_edge_details.transport_slot_released_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.service_future_created_at_ms === 'number'
                 ? [`service_future_created_at_ms=${trace.server_edge_details.service_future_created_at_ms}`]
                 : []),
@@ -127,6 +130,9 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             ...(typeof trace.server_edge_details.dispatch_to_request_context_wait_ms === 'number'
                 ? [`dispatch_to_request_context_wait_ms=${trace.server_edge_details.dispatch_to_request_context_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.transport_to_slot_release_wait_ms === 'number'
+                ? [`transport_to_slot_release_wait_ms=${trace.server_edge_details.transport_to_slot_release_wait_ms}`]
                 : []),
             ...(typeof trace.server_edge_details.transport_to_service_future_wait_ms === 'number'
                 ? [`transport_to_service_future_wait_ms=${trace.server_edge_details.transport_to_service_future_wait_ms}`]
@@ -159,6 +165,12 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             ...(typeof trace.server_edge_details.method_prelude_exec_ms === 'number'
                 ? [`method_prelude_exec_ms=${trace.server_edge_details.method_prelude_exec_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.slot_release_to_handler_wait_ms === 'number'
+                ? [`slot_release_to_handler_wait_ms=${trace.server_edge_details.slot_release_to_handler_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.slot_release_to_response_wait_ms === 'number'
+                ? [`slot_release_to_response_wait_ms=${trace.server_edge_details.slot_release_to_response_wait_ms}`]
                 : []),
             `transport_to_handler_wait_ms=${trace.server_edge_details.transport_to_handler_wait_ms}`,
             `server_handler_exec_ms=${trace.server_edge_details.server_handler_exec_ms}`,

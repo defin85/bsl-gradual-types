@@ -219,6 +219,7 @@ struct CompletionTimelineCapture {
     transport_received_at_ms: Option<u64>,
     transport_received_at_ms_provenance: Option<String>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
+    transport_slot_released_at_ms: Option<u64>,
     request_context_call_entered_at_ms: Option<u64>,
     pre_method_attribution_provenance: Option<String>,
     service_future_created_at_ms: Option<u64>,
@@ -264,6 +265,7 @@ impl CompletionTimelineCapture {
             transport_received_at_ms: None,
             transport_received_at_ms_provenance: None,
             jsonrpc_dispatch_received_at_ms: None,
+            transport_slot_released_at_ms: None,
             request_context_call_entered_at_ms: None,
             pre_method_attribution_provenance: None,
             service_future_created_at_ms: None,
@@ -393,6 +395,10 @@ impl CompletionTimelineCapture {
         self.jsonrpc_dispatch_received_at_ms = Some(jsonrpc_dispatch_received_at_ms);
     }
 
+    fn set_transport_slot_released_at_ms(&mut self, transport_slot_released_at_ms: u64) {
+        self.transport_slot_released_at_ms = Some(transport_slot_released_at_ms);
+    }
+
     fn set_request_context_call_entered_at_ms(&mut self, request_context_call_entered_at_ms: u64) {
         self.request_context_call_entered_at_ms = Some(request_context_call_entered_at_ms);
     }
@@ -479,6 +485,7 @@ impl CompletionTimelineCapture {
                     .transport_received_at_ms_provenance
                     .clone(),
                 jsonrpc_dispatch_received_at_ms: self.jsonrpc_dispatch_received_at_ms,
+                transport_slot_released_at_ms: self.transport_slot_released_at_ms,
                 request_context_call_entered_at_ms: self.request_context_call_entered_at_ms,
                 pre_method_attribution_provenance: self.pre_method_attribution_provenance.clone(),
                 service_future_created_at_ms: self.service_future_created_at_ms,
@@ -1179,6 +1186,11 @@ impl BslLanguageServer {
             })
         {
             timeline_capture.set_service_future_created_at_ms(service_future_created_at_ms);
+        }
+        if let Some(transport_slot_released_at_ms) =
+            pending_request_context.and_then(|context| context.transport_slot_released_at_ms)
+        {
+            timeline_capture.set_transport_slot_released_at_ms(transport_slot_released_at_ms);
         }
         if let Some(service_scope_entered_at_ms) = current_request_service_scope_entered_at_ms
             .or_else(|| {
@@ -3203,10 +3215,7 @@ mod tests {
         )
         .await
         .expect("turn waiter timeout");
-        assert_eq!(
-            turn_outcome.outcome,
-            CompletionTurnOutcome::Ready
-        );
+        assert_eq!(turn_outcome.outcome, CompletionTurnOutcome::Ready);
 
         let guard = super::helpers::CompletionRequestDropCancelGuard::new(
             Some("req-drop".to_string()),
@@ -3495,6 +3504,58 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 30);
         assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
         assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
+    }
+
+    #[test]
+    fn server_edge_details_derive_transport_slot_release_boundary_when_present() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
+        capture.set_transport_slot_released_at_ms(1_700_000_000_002);
+        capture.set_service_scope_entered_at_ms(1_700_000_000_003);
+        capture.set_method_entered_at_ms(1_700_000_000_004);
+        capture.set_handler_entered_at_ms(1_700_000_000_006);
+        capture.set_response_sent_at_ms(1_700_000_000_020);
+
+        let trace = capture.into_trace(
+            "trace-slot-release-boundary".to_string(),
+            std::time::Duration::from_millis(25),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(
+            details.transport_slot_released_at_ms,
+            Some(1_700_000_000_002)
+        );
+        assert_eq!(details.transport_to_slot_release_wait_ms, Some(7));
+        assert_eq!(details.slot_release_to_handler_wait_ms, Some(4));
+        assert_eq!(details.slot_release_to_response_wait_ms, Some(18));
+    }
+
+    #[test]
+    fn server_edge_details_do_not_fabricate_slot_release_split_when_absent() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
+        capture.set_service_scope_entered_at_ms(1_700_000_000_003);
+        capture.set_method_entered_at_ms(1_700_000_000_004);
+        capture.set_handler_entered_at_ms(1_700_000_000_006);
+        capture.set_response_sent_at_ms(1_700_000_000_020);
+
+        let trace = capture.into_trace(
+            "trace-slot-release-absent".to_string(),
+            std::time::Duration::from_millis(25),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(details.transport_slot_released_at_ms, None);
+        assert_eq!(details.transport_to_slot_release_wait_ms, None);
+        assert_eq!(details.slot_release_to_handler_wait_ms, None);
+        assert_eq!(details.slot_release_to_response_wait_ms, None);
     }
 
     #[test]

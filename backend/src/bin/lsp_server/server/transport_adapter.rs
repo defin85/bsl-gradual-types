@@ -242,10 +242,16 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
                         .boxed();
 
                     if is_completion {
-                        let task = CompletionHandoffTask::new(request_id, future);
+                        let task = CompletionHandoffTask::new(request_id.clone(), future);
                         if completion_tasks_tx.send(task).await.is_err() {
                             error!("completion handoff queue closed unexpectedly");
                             break;
+                        }
+                        if let Some(request_id) = request_id.as_deref() {
+                            super::request_context::record_pending_completion_transport_slot_released_at_ms(
+                                request_id,
+                                super::unix_timestamp_ms(),
+                            );
                         }
                     } else if server_tasks_tx.send(future).await.is_err() {
                         error!("server task queue closed unexpectedly");

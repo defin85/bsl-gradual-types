@@ -364,6 +364,22 @@ async fn dispatch_context_service_records_completion_context_for_position_lookup
 }
 
 #[tokio::test]
+async fn pending_completion_context_preserves_transport_slot_release_timestamp() {
+    let uri = Url::parse("file:///pending_completion_slot_release.bsl").expect("url");
+    let position = Position::new(7, 2);
+    record_completion_request_id_for_testing(&uri, position, "req-slot-release");
+    record_pending_completion_transport_slot_released_at_ms("req-slot-release", 1_700_000_000_222);
+
+    let captured = take_completion_request_context(&uri, position)
+        .expect("captured pending completion request context");
+    assert_eq!(captured.request_id, "req-slot-release");
+    assert_eq!(
+        captured.transport_slot_released_at_ms,
+        Some(1_700_000_000_222)
+    );
+}
+
+#[tokio::test]
 async fn request_context_service_records_first_poll_and_first_wake_for_pending_future() {
     #[derive(Debug, Default)]
     struct PendingOnceState {
@@ -497,7 +513,10 @@ async fn request_context_service_clears_inflight_entry_when_pending_future_later
         type Output = Result<(), ()>;
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if !state.returned_pending {
                 state.returned_pending = true;
                 state.waker = Some(cx.waker().clone());
@@ -513,7 +532,8 @@ async fn request_context_service_clears_inflight_entry_when_pending_future_later
     clear_inflight_request_registry_for_testing();
 
     let state = Arc::new(Mutex::new(PendingOnceState::default()));
-    let uri = Url::parse("file:///request_context_pending_ready_inflight_cleanup.bsl").expect("url");
+    let uri =
+        Url::parse("file:///request_context_pending_ready_inflight_cleanup.bsl").expect("url");
     let position = Position::new(7, 2);
     let request = Request::build("textDocument/completion")
         .id("req-pending-ready-cleanup")
@@ -522,8 +542,8 @@ async fn request_context_service_clears_inflight_entry_when_pending_future_later
             "position": { "line": position.line, "character": position.character },
         }))
         .finish();
-    let inflight_request = register_inflight_request(&request, 1_700_000_000_100)
-        .expect("completion inflight entry");
+    let inflight_request =
+        register_inflight_request(&request, 1_700_000_000_100).expect("completion inflight entry");
     let observation = ServiceFuturePollObservationState::new(
         Some("req-pending-ready-cleanup".to_string()),
         Some(inflight_request.clone()),
@@ -1014,7 +1034,10 @@ async fn current_request_inflight_phase_updates_registered_completion_entry() {
     assert_eq!(contenders.len(), 1);
     assert_eq!(contenders[0].request_class, "completion");
     assert_eq!(contenders[0].method, "textDocument/completion");
-    assert_eq!(contenders[0].phase.as_deref(), Some("wait_exact_type_index"));
+    assert_eq!(
+        contenders[0].phase.as_deref(),
+        Some("wait_exact_type_index")
+    );
     assert_eq!(contenders[0].age_ms, 60);
 
     remove_inflight_request_entry(current.entry_id);
@@ -1113,11 +1136,9 @@ fn first_poll_contention_snapshot_uses_unavailable_when_current_completion_is_mi
         uri: Some(uri.to_string()),
     };
 
-    let snapshot = first_poll_contention_attribution_for_request(
-        &missing_current,
-        1_700_000_000_200,
-    )
-    .expect("bounded contention snapshot");
+    let snapshot =
+        first_poll_contention_attribution_for_request(&missing_current, 1_700_000_000_200)
+            .expect("bounded contention snapshot");
 
     assert_eq!(snapshot.contender_class, "unavailable");
     assert_eq!(snapshot.uri_scope, "unavailable");

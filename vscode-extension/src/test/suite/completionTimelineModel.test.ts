@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 16,
+            version: 17,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -57,6 +57,7 @@ suite('Completion Timeline Model Test Suite', () => {
                         transport_received_at_ms: 1_700_000_000_040,
                         transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                         jsonrpc_dispatch_received_at_ms: 1_700_000_000_040,
+                        transport_slot_released_at_ms: 1_700_000_000_041,
                         service_future_created_at_ms: 1_700_000_000_040,
                         service_future_first_poll_entered_at_ms: 1_700_000_000_041,
                         service_future_first_poll_outcome: 'pending',
@@ -82,12 +83,15 @@ suite('Completion Timeline Model Test Suite', () => {
                         handler_entered_at_ms: 1_700_000_000_042,
                         response_sent_at_ms: 1_700_000_000_090,
                         dispatch_to_request_context_wait_ms: 0,
+                        transport_to_slot_release_wait_ms: 1,
                         transport_to_service_future_wait_ms: 0,
                         service_future_to_scope_wait_ms: 1,
                         service_future_to_first_poll_wait_ms: 1,
                         first_poll_to_first_wake_wait_ms: 5,
                         transport_to_service_scope_wait_ms: 1,
                         service_scope_to_method_wait_ms: 1,
+                        slot_release_to_handler_wait_ms: 1,
+                        slot_release_to_response_wait_ms: 49,
                         transport_to_handler_wait_ms: 2,
                         server_handler_exec_ms: 48,
                     },
@@ -175,7 +179,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 16);
+        assert.strictEqual(state.version, 17);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(
@@ -185,6 +189,10 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.jsonrpc_dispatch_received_at_ms,
             1_700_000_000_040
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_slot_released_at_ms,
+            1_700_000_000_041
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_future_created_at_ms,
@@ -254,12 +262,24 @@ suite('Completion Timeline Model Test Suite', () => {
             0
         );
         assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_to_slot_release_wait_ms,
+            1
+        );
+        assert.strictEqual(
             state.traces[0].server_edge_details?.transport_to_service_scope_wait_ms,
             1
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_scope_to_method_wait_ms,
             1
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.slot_release_to_handler_wait_ms,
+            1
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.slot_release_to_response_wait_ms,
+            49
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.transport_to_handler_wait_ms,
@@ -577,6 +597,68 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.traces[0].turn_attribution?.dispatcher_resolution_latency_ms, 3);
     });
 
+    test('v16 payload should not surface v17 transport slot release detail', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 16,
+            traces: [
+                {
+                    trace_id: 'trace-v16',
+                    request_id: 'req-v16',
+                    uri: 'file:///tmp/v16.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_010,
+                    total_duration_ms: 14,
+                    dominant_stage: 'turn_wait',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_010,
+                        transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                        jsonrpc_dispatch_received_at_ms: 1_700_000_000_010,
+                        transport_slot_released_at_ms: 1_700_000_000_011,
+                        handler_entered_at_ms: 1_700_000_000_012,
+                        response_sent_at_ms: 1_700_000_000_024,
+                        transport_to_slot_release_wait_ms: 1,
+                        slot_release_to_handler_wait_ms: 1,
+                        slot_release_to_response_wait_ms: 13,
+                        transport_to_handler_wait_ms: 2,
+                        server_handler_exec_ms: 12,
+                    },
+                    stages: [
+                        {
+                            name: 'turn_wait',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            duration_ms: 14,
+                        },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_slot_released_at_ms,
+            undefined
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.transport_to_slot_release_wait_ms,
+            undefined
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.slot_release_to_handler_wait_ms,
+            undefined
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.slot_release_to_response_wait_ms,
+            undefined
+        );
+    });
+
     test('Legacy v2 payload without server edge details remains readable', () => {
         const payload = {
             version: 2,
@@ -750,7 +832,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, and v17 transport slot release detail are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

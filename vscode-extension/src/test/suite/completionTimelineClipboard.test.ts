@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 16,
+            version: 17,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -61,6 +61,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         transport_received_at_ms: 1_699_999_999_960,
                         transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                         jsonrpc_dispatch_received_at_ms: 1_699_999_999_960,
+                        transport_slot_released_at_ms: 1_699_999_999_989,
                         service_future_created_at_ms: 1_699_999_999_972,
                         service_future_first_poll_entered_at_ms: 1_699_999_999_989,
                         service_future_first_poll_outcome: 'pending',
@@ -79,6 +80,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         response_sent_at_ms: 1_700_000_000_030,
                         cancel_observed_at_ms: 1_700_000_000_021,
                         dispatch_to_request_context_wait_ms: 4,
+                        transport_to_slot_release_wait_ms: 29,
                         transport_to_service_future_wait_ms: 12,
                         service_future_to_scope_wait_ms: 16,
                         service_future_to_first_poll_wait_ms: 17,
@@ -87,6 +89,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         service_scope_to_method_wait_ms: 12,
                         transport_to_method_wait_ms: 40,
                         method_prelude_exec_ms: 2,
+                        slot_release_to_handler_wait_ms: 13,
+                        slot_release_to_response_wait_ms: 41,
                         transport_to_handler_wait_ms: 42,
                         server_handler_exec_ms: 28,
                         cancel_observed_after_handler_enter_ms: 19,
@@ -214,12 +218,13 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v16'));
+        assert.ok(text!.includes('contract=v17'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
         assert.ok(text!.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(text!.includes('jsonrpc_dispatch_received_at_ms=1699999999960'));
+        assert.ok(text!.includes('transport_slot_released_at_ms=1699999999989'));
         assert.ok(text!.includes('service_future_created_at_ms=1699999999972'));
         assert.ok(text!.includes('service_future_first_poll_entered_at_ms=1699999999989'));
         assert.ok(text!.includes('service_future_first_poll_outcome=pending'));
@@ -235,6 +240,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
         assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
         assert.ok(text!.includes('dispatch_to_request_context_wait_ms=4'));
+        assert.ok(text!.includes('transport_to_slot_release_wait_ms=29'));
         assert.ok(text!.includes('transport_to_service_future_wait_ms=12'));
         assert.ok(text!.includes('service_future_to_scope_wait_ms=16'));
         assert.ok(text!.includes('service_future_to_first_poll_wait_ms=17'));
@@ -243,6 +249,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('service_scope_to_method_wait_ms=12'));
         assert.ok(text!.includes('transport_to_method_wait_ms=40'));
         assert.ok(text!.includes('method_prelude_exec_ms=2'));
+        assert.ok(text!.includes('slot_release_to_handler_wait_ms=13'));
+        assert.ok(text!.includes('slot_release_to_response_wait_ms=41'));
         assert.ok(text!.includes('transport_to_handler_wait_ms=42'));
         assert.ok(text!.includes('server_handler_exec_ms=28'));
         assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
@@ -292,7 +300,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, and v17 transport slot release detail are unavailable by design.'
                     )
             )
         );

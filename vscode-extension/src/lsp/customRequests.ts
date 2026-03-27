@@ -653,6 +653,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     transport_received_at_ms: number;
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
+    transport_slot_released_at_ms?: number;
     service_future_created_at_ms?: number;
     service_future_first_poll_entered_at_ms?: number;
     service_future_first_poll_outcome?: CompletionTimelineServiceFutureFirstPollOutcome;
@@ -666,6 +667,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
+    transport_to_slot_release_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;
     service_future_to_first_poll_wait_ms?: number;
@@ -674,6 +676,8 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     service_scope_to_method_wait_ms?: number;
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
+    slot_release_to_handler_wait_ms?: number;
+    slot_release_to_response_wait_ms?: number;
     transport_to_handler_wait_ms: number;
     server_handler_exec_ms: number;
     cancel_observed_after_handler_enter_ms?: number;

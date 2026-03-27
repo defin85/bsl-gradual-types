@@ -10298,7 +10298,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        16
+        17
     );
     assert!(
         result
@@ -10512,6 +10512,9 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("response_sent_at_ms")
         .and_then(|value| value.as_u64())
         .expect("response_sent_at_ms");
+    let transport_slot_released_at_ms = server_edge_details
+        .get("transport_slot_released_at_ms")
+        .and_then(|value| value.as_u64());
     let transport_to_method_wait_ms = server_edge_details
         .get("transport_to_method_wait_ms")
         .and_then(|value| value.as_u64())
@@ -10888,6 +10891,56 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         handler_entered_at_ms.saturating_sub(transport_received_at_ms),
         "transport_to_handler_wait_ms must match timestamp delta"
     );
+    if let Some(transport_slot_released_at_ms) = transport_slot_released_at_ms {
+        let transport_to_slot_release_wait_ms = server_edge_details
+            .get("transport_to_slot_release_wait_ms")
+            .and_then(|value| value.as_u64())
+            .expect("transport_to_slot_release_wait_ms");
+        let slot_release_to_handler_wait_ms = server_edge_details
+            .get("slot_release_to_handler_wait_ms")
+            .and_then(|value| value.as_u64())
+            .expect("slot_release_to_handler_wait_ms");
+        let slot_release_to_response_wait_ms = server_edge_details
+            .get("slot_release_to_response_wait_ms")
+            .and_then(|value| value.as_u64())
+            .expect("slot_release_to_response_wait_ms");
+        assert!(
+            transport_received_at_ms <= transport_slot_released_at_ms,
+            "transport_slot_released_at_ms must not precede transport_received_at_ms"
+        );
+        assert!(
+            transport_slot_released_at_ms <= handler_entered_at_ms,
+            "transport_slot_released_at_ms must not exceed handler_entered_at_ms"
+        );
+        assert_eq!(
+            transport_to_slot_release_wait_ms,
+            transport_slot_released_at_ms.saturating_sub(transport_received_at_ms),
+            "transport_to_slot_release_wait_ms must match timestamp delta"
+        );
+        assert_eq!(
+            slot_release_to_handler_wait_ms,
+            handler_entered_at_ms.saturating_sub(transport_slot_released_at_ms),
+            "slot_release_to_handler_wait_ms must match timestamp delta"
+        );
+        assert_eq!(
+            slot_release_to_response_wait_ms,
+            response_sent_at_ms.saturating_sub(transport_slot_released_at_ms),
+            "slot_release_to_response_wait_ms must match timestamp delta"
+        );
+    } else {
+        assert!(
+            !server_edge_details.contains_key("transport_to_slot_release_wait_ms"),
+            "transport_to_slot_release_wait_ms must not be fabricated when transport_slot_released_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("slot_release_to_handler_wait_ms"),
+            "slot_release_to_handler_wait_ms must not be fabricated when transport_slot_released_at_ms is absent"
+        );
+        assert!(
+            !server_edge_details.contains_key("slot_release_to_response_wait_ms"),
+            "slot_release_to_response_wait_ms must not be fabricated when transport_slot_released_at_ms is absent"
+        );
+    }
     assert_eq!(
         server_handler_exec_ms,
         response_sent_at_ms.saturating_sub(handler_entered_at_ms),
@@ -10932,6 +10985,17 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         turn_attribution.contains_key("dispatcher_resolution_latency_ms"),
         "missing field `dispatcher_resolution_latency_ms` in turn_attribution"
     );
+    if let (Some(transport_slot_released_at_ms), Some(turn_wait_entered_at_ms)) = (
+        transport_slot_released_at_ms,
+        turn_attribution
+            .get("turn_wait_entered_at_ms")
+            .and_then(|value| value.as_u64()),
+    ) {
+        assert!(
+            transport_slot_released_at_ms <= turn_wait_entered_at_ms,
+            "transport_slot_released_at_ms must not exceed turn_wait_entered_at_ms"
+        );
+    }
 
     drain_task.abort();
 }
@@ -24518,11 +24582,27 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
                 "route": completion_timeline_prepare_detail_str(trace, "route"),
                 "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                 "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
+                "transport_slot_released_at_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "transport_slot_released_at_ms",
+                ),
+                "transport_to_slot_release_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "transport_to_slot_release_wait_ms",
+                ),
+                "slot_release_to_handler_wait_ms": completion_timeline_server_edge_u64(
+                    trace,
+                    "slot_release_to_handler_wait_ms",
+                ),
                 "service_future_to_first_poll_wait_ms": completion_timeline_server_edge_u64(
                     trace,
                     "service_future_to_first_poll_wait_ms",
                 ),
                 "pre_active_turn_wait_contender_age_ms": pre_active_turn_wait_contender_age_ms(trace),
+                "turn_wait_entered_at_ms": trace
+                    .get("turn_attribution")
+                    .and_then(|value| value.get("turn_wait_entered_at_ms"))
+                    .and_then(|value| value.as_u64()),
                 "turn_wait_outcome": trace
                     .get("turn_attribution")
                     .and_then(|value| value.get("turn_wait_outcome"))
@@ -24682,6 +24762,33 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
                     .is_some_and(|age_ms| age_ms > STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS)
             })
             .count();
+        let measured_second_transport_slot_released_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("second_trace")
+                    .and_then(|trace| trace.get("transport_slot_released_at_ms"))
+                    .and_then(|value| value.as_u64())
+                    .is_some()
+            })
+            .count();
+        let measured_second_slot_release_before_turn_wait_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                let second_trace = sample.get("second_trace");
+                let transport_slot_released_at_ms = second_trace
+                    .and_then(|trace| trace.get("transport_slot_released_at_ms"))
+                    .and_then(|value| value.as_u64());
+                let turn_wait_entered_at_ms = second_trace
+                    .and_then(|trace| trace.get("turn_wait_entered_at_ms"))
+                    .and_then(|value| value.as_u64());
+                matches!(
+                    (transport_slot_released_at_ms, turn_wait_entered_at_ms),
+                    (Some(slot_release_ms), Some(turn_wait_entered_ms))
+                        if slot_release_ms <= turn_wait_entered_ms
+                )
+            })
+            .count();
         let measured_second_first_poll_histogram =
             sample_histogram("service_future_to_first_poll_wait_ms");
         let measured_second_first_poll_max_ms = measured_samples
@@ -24690,6 +24797,18 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
                 sample
                     .get("second_trace")
                     .and_then(|trace| trace.get("service_future_to_first_poll_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_second_transport_to_slot_release_histogram =
+            sample_histogram("transport_to_slot_release_wait_ms");
+        let measured_second_transport_to_slot_release_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("second_trace")
+                    .and_then(|trace| trace.get("transport_to_slot_release_wait_ms"))
                     .and_then(|value| value.as_u64())
             })
             .max()
@@ -24734,6 +24853,8 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
                 "measured_head_hit_traces": measured_head_hit_traces,
                 "measured_exact_hit_traces": measured_exact_hit_traces,
                 "measured_stranded_pre_active_turn_wait_samples": measured_stranded_pre_active_turn_wait_samples,
+                "measured_second_transport_slot_released_samples": measured_second_transport_slot_released_samples,
+                "measured_second_slot_release_before_turn_wait_samples": measured_second_slot_release_before_turn_wait_samples,
                 "measured_prepare_timeout_total_delta": counter_delta(
                     "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
                 ),
@@ -24746,6 +24867,8 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
                 "measured_fail_closed_total_delta": counter_delta(
                     "intellisense_v2_completion_result_total_fail_closed"
                 ),
+                "measured_transport_to_slot_release_wait_ms": measured_second_transport_to_slot_release_histogram,
+                "measured_transport_to_slot_release_wait_max_ms": measured_second_transport_to_slot_release_max_ms,
                 "measured_service_future_to_first_poll_wait_ms": measured_second_first_poll_histogram,
                 "measured_service_future_to_first_poll_wait_max_ms": measured_second_first_poll_max_ms,
             },
@@ -24830,6 +24953,20 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
         assert!(
             measured_stranded_pre_active_turn_wait_samples == 0,
             "pre-active overlap gate must fail on stranded completion contender in phase=turn_wait beyond bounded age, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_second_transport_slot_released_samples == MEASURE_REQUESTS,
+            "pre-active overlap gate must prove that every newer same-file request recorded transport_slot_released_at_ms before passive wait, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_second_slot_release_before_turn_wait_samples == MEASURE_REQUESTS,
+            "pre-active overlap gate must fail when turn_wait starts before transport_slot_released_at_ms, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_second_transport_to_slot_release_max_ms <= OVERLAP_FIRST_POLL_BUDGET_MS,
+            "newer same-file completion must release transport slot within pre-active overlap budget, measured_second_transport_to_slot_release_max_ms={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_second_transport_to_slot_release_max_ms,
+            OVERLAP_FIRST_POLL_BUDGET_MS
         );
         assert!(
             measured_second_first_poll_max_ms <= OVERLAP_FIRST_POLL_BUDGET_MS,

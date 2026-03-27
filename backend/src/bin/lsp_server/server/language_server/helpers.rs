@@ -31,6 +31,7 @@ pub(super) struct RequestServerEdgeTraceInputs {
     pub transport_received_at_ms: Option<u64>,
     pub transport_received_at_ms_provenance: Option<String>,
     pub jsonrpc_dispatch_received_at_ms: Option<u64>,
+    pub transport_slot_released_at_ms: Option<u64>,
     pub request_context_call_entered_at_ms: Option<u64>,
     pub pre_method_attribution_provenance: Option<String>,
     pub service_future_created_at_ms: Option<u64>,
@@ -57,6 +58,7 @@ pub(super) fn build_server_edge_details_trace(
         .clone()
         .unwrap_or_else(|| "request_context_call_entry".to_string());
     let jsonrpc_dispatch_received_at_ms = inputs.jsonrpc_dispatch_received_at_ms;
+    let transport_slot_released_at_ms = inputs.transport_slot_released_at_ms;
     let request_context_call_entered_at_ms = inputs.request_context_call_entered_at_ms;
     let service_future_created_at_ms = inputs.service_future_created_at_ms;
     let service_future_first_poll_entered_at_ms = inputs.service_future_first_poll_entered_at_ms;
@@ -75,6 +77,7 @@ pub(super) fn build_server_edge_details_trace(
         transport_received_at_ms,
         transport_received_at_ms_provenance,
         jsonrpc_dispatch_received_at_ms,
+        transport_slot_released_at_ms,
         pre_method_attribution_provenance: inputs
             .pre_method_attribution_provenance
             .clone()
@@ -95,6 +98,8 @@ pub(super) fn build_server_edge_details_trace(
             .map(|(dispatch_ms, request_context_ms)| {
                 request_context_ms.saturating_sub(dispatch_ms)
             }),
+        transport_to_slot_release_wait_ms: transport_slot_released_at_ms
+            .map(|slot_release_ms| slot_release_ms.saturating_sub(transport_received_at_ms)),
         transport_to_service_future_wait_ms: service_future_created_at_ms
             .map(|service_future_ms| service_future_ms.saturating_sub(transport_received_at_ms)),
         service_future_to_scope_wait_ms: service_future_created_at_ms
@@ -119,6 +124,10 @@ pub(super) fn build_server_edge_details_trace(
             .map(|method_ms| method_ms.saturating_sub(transport_received_at_ms)),
         method_prelude_exec_ms: method_entered_at_ms
             .map(|method_ms| handler_entered_at_ms.saturating_sub(method_ms)),
+        slot_release_to_handler_wait_ms: transport_slot_released_at_ms
+            .map(|slot_release_ms| handler_entered_at_ms.saturating_sub(slot_release_ms)),
+        slot_release_to_response_wait_ms: transport_slot_released_at_ms
+            .map(|slot_release_ms| response_sent_at_ms.saturating_sub(slot_release_ms)),
         transport_to_handler_wait_ms: handler_entered_at_ms
             .saturating_sub(transport_received_at_ms),
         server_handler_exec_ms: response_sent_at_ms.saturating_sub(handler_entered_at_ms),
@@ -144,6 +153,7 @@ pub(super) fn record_current_request_server_edge_trace_for_testing(
             .map(|_| "request_context_call_entry".to_string()),
         jsonrpc_dispatch_received_at_ms:
             super::super::request_context::current_request_jsonrpc_dispatch_received_at_ms(),
+        transport_slot_released_at_ms: None,
         request_context_call_entered_at_ms,
         pre_method_attribution_provenance: Some(
             if request_id.is_some() && request_context_call_entered_at_ms.is_some() {

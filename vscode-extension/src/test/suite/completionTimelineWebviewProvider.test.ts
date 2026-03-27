@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 17,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -265,6 +265,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             transport_received_at_ms: 1_700_000_000_000,
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
+                            transport_slot_released_at_ms: 1_700_000_000_002,
                             service_future_created_at_ms: 1_700_000_000_001,
                             service_future_first_poll_entered_at_ms: 1_700_000_000_003,
                             service_future_first_poll_outcome: 'pending',
@@ -282,6 +283,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
                             dispatch_to_request_context_wait_ms: 0,
+                            transport_to_slot_release_wait_ms: 2,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
                             service_future_to_first_poll_wait_ms: 2,
@@ -290,6 +292,8 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             service_scope_to_method_wait_ms: 3,
                             transport_to_method_wait_ms: 5,
                             method_prelude_exec_ms: 4,
+                            slot_release_to_handler_wait_ms: 7,
+                            slot_release_to_response_wait_ms: 14,
                             transport_to_handler_wait_ms: 9,
                             server_handler_exec_ms: 7,
                         },
@@ -382,10 +386,11 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v16'));
+        assert.ok(clipboardPayload.includes('contract=v17'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
+        assert.ok(clipboardPayload.includes('transport_slot_released_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('service_future_created_at_ms=1700000000001'));
         assert.ok(clipboardPayload.includes('service_future_first_poll_entered_at_ms=1700000000003'));
         assert.ok(clipboardPayload.includes('service_future_first_poll_outcome=pending'));
@@ -398,6 +403,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('service_scope_entered_at_ms=1700000000002'));
         assert.ok(clipboardPayload.includes('method_entered_at_ms=1700000000005'));
         assert.ok(clipboardPayload.includes('dispatch_to_request_context_wait_ms=0'));
+        assert.ok(clipboardPayload.includes('transport_to_slot_release_wait_ms=2'));
         assert.ok(clipboardPayload.includes('transport_to_service_future_wait_ms=1'));
         assert.ok(clipboardPayload.includes('service_future_to_scope_wait_ms=1'));
         assert.ok(clipboardPayload.includes('service_future_to_first_poll_wait_ms=2'));
@@ -406,6 +412,8 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('service_scope_to_method_wait_ms=3'));
         assert.ok(clipboardPayload.includes('transport_to_method_wait_ms=5'));
         assert.ok(clipboardPayload.includes('method_prelude_exec_ms=4'));
+        assert.ok(clipboardPayload.includes('slot_release_to_handler_wait_ms=7'));
+        assert.ok(clipboardPayload.includes('slot_release_to_response_wait_ms=14'));
         assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=9'));
         assert.ok(clipboardPayload.includes('server_handler_exec_ms=7'));
         assert.ok(clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
@@ -440,7 +448,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 17,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -561,7 +569,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, and v17 transport slot release detail are unavailable by design.'
                     )
             )
         );

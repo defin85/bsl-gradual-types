@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 17,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -265,7 +265,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 16);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 17);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -709,6 +709,33 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'v16 turn-wait resolution detail is unavailable by design'
+            )
+        );
+    });
+
+    test('v16 completion timeline should mark v17 transport slot release detail as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 16;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v16')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v17 transport slot release detail')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v16')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v17 transport slot release detail')));
+        assert.ok(bundle.summaryMarkdown.includes('contract=v16'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'v17 transport slot release detail is unavailable by design'
             )
         );
     });

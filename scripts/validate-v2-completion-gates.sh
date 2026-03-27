@@ -13,6 +13,8 @@ if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
     REAL_MODULE_PROFILES="warm churn"
   elif [[ "${CHANGE_ID}" == "refactor-completion-superseded-active-turn-release" ]]; then
     REAL_MODULE_PROFILES="churn overlap"
+  elif [[ "${CHANGE_ID}" == "refactor-completion-turn-wait-slot-release" ]]; then
+    REAL_MODULE_PROFILES="churn preactive_overlap"
   elif [[ "${CHANGE_ID}" == "refactor-completion-turn-wait-lifecycle" ]]; then
     REAL_MODULE_PROFILES="churn preactive_overlap"
   elif [[ "${CHANGE_ID}" == "refactor-document-symbol-interactive-isolation" ]]; then

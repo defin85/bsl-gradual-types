@@ -202,6 +202,11 @@ function buildCompletionTimelineSource(
                 `Completion timeline contract v${completionTimeline.response.version} does not include v16 turn-wait resolution detail; exact turn_wait entered/resolved/wake timestamps are unavailable by design.`
             );
         }
+        if (completionTimeline.response.version < 17) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include v17 transport slot release detail; exact handoff boundary between ingress and off-transport wait is unavailable by design.`
+            );
+        }
         rawAttachments.push({
             path: COMPLETION_TIMELINE_RAW_PATH,
             section: 'completion_timeline',
@@ -356,6 +361,11 @@ function deriveFindings(
         if (input.completionTimeline.response.version < 16) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v16 turn-wait resolution detail is unavailable by design.`
+            );
+        }
+        if (input.completionTimeline.response.version < 17) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v17 transport slot release detail is unavailable by design.`
             );
         }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>

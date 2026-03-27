@@ -58,7 +58,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, and v16 turn-wait resolution detail are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, and v17 transport slot release detail are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -164,7 +164,23 @@ function sanitizeServerEdgeDetailsForContract(
         };
     }
 
-    return sanitizeFirstPollContentionContendersForContract(details, contractVersion);
+    const sanitizedContentionDetails = sanitizeFirstPollContentionContendersForContract(
+        details,
+        contractVersion
+    );
+
+    if (contractVersion < 17) {
+        const {
+            transport_slot_released_at_ms: _transportSlotReleasedAtMs,
+            transport_to_slot_release_wait_ms: _transportToSlotReleaseWaitMs,
+            slot_release_to_handler_wait_ms: _slotReleaseToHandlerWaitMs,
+            slot_release_to_response_wait_ms: _slotReleaseToResponseWaitMs,
+            ...legacyDetails
+        } = sanitizedContentionDetails;
+        return legacyDetails;
+    }
+
+    return sanitizedContentionDetails;
 }
 
 function sanitizeTurnAttributionForContract(

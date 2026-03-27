@@ -88,9 +88,11 @@ cargo test --workspace --locked
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
+./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-turn-wait-slot-release ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
 
@@ -101,6 +103,13 @@ the generic readiness script with the correct `CHANGE_ID`.
 canonical default entry point for the overlap supersession evidence bundle; it
 wraps the generic readiness script with the correct `CHANGE_ID` and collects
 both change-specific representative profiles (`churn` and `overlap`).
+`./scripts/validate-completion-turn-wait-slot-release.sh` is the canonical
+default entry point for the completion transport-slot-release evidence bundle;
+it wraps the generic readiness script with the correct `CHANGE_ID` and collects
+both change-specific representative profiles (`churn` and `preactive_overlap`).
+Targeted lifecycle safety for this handoff path is covered by the backend tests
+`transport_adapter_emits_single_terminal_response_for_handoff_cancel_race` and
+`transport_adapter_aborts_blocked_completion_handoff_on_transport_shutdown`.
 `./scripts/validate-completion-turn-wait-lifecycle.sh` is the canonical
 default entry point for the pre-active `turn_wait` lifecycle evidence bundle;
 it wraps the generic readiness script with the correct `CHANGE_ID` and collects

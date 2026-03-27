@@ -158,6 +158,17 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{SLOT_RELEASE_CHANGE_ID}-openspec-validate.log"
     )
+    REQUIRED_SLOT_RELEASE_CI_PATH_FILTERS = [
+        ".gitignore",
+        "backend/src/bin/lsp_server/main.rs",
+        "backend/src/bin/lsp_server/types.rs",
+        "contracts/lsp-completion-timeline/**",
+        "vscode-extension/src/commands/observability.ts",
+        "vscode-extension/src/lsp/customRequests.ts",
+        "vscode-extension/src/providers/completionTimelineClipboard.ts",
+        "vscode-extension/src/providers/completionTimelineModel.ts",
+        "vscode-extension/src/providers/observabilityIncidentBundle.ts",
+    ]
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
         (
@@ -678,6 +689,21 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         self.assertFalse(
             missing,
             f"CI workflow is missing slot-release readiness wiring: {missing}",
+        )
+
+    def test_slot_release_ci_path_filters_cover_mandatory_surfaces(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        missing = [
+            path_filter
+            for path_filter in self.REQUIRED_SLOT_RELEASE_CI_PATH_FILTERS
+            if workflow.count(path_filter) < 2
+        ]
+        self.assertFalse(
+            missing,
+            (
+                "CI path filters must watch mandatory slot-release runtime/contract/"
+                f"consumer surfaces on pull_request and push: {missing}"
+            ),
         )
 
     def test_slot_release_development_workflow_mentions_wrapper(self) -> None:

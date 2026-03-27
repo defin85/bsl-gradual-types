@@ -14,6 +14,7 @@ mod completion_dispatcher;
 mod core;
 mod language_server;
 pub(crate) mod request_context;
+pub(crate) mod transport_adapter;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -32,6 +33,7 @@ use crate::types::GetIndexStateResponse;
 
 // Re-export Url for use in submodules
 pub use tower_lsp::lsp_types::Url;
+pub(crate) use transport_adapter::serve_with_completion_handoff;
 
 use self::analysis_v2_runtime::AnalysisV2Runtime;
 

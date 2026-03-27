@@ -20,7 +20,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::Write;
 use std::sync::Arc;
-use tower_lsp::{LspService, Server};
+use tower_lsp::LspService;
 use tracing::info;
 
 use bsl_backend::system::SystemCoordinator;
@@ -138,10 +138,14 @@ async fn main() -> Result<()> {
 
     // Start server
     info!("Starting LSP server loop (listening on STDIO)...");
-    Server::new(stdin, stdout, socket)
-        .concurrency_level(DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL)
-        .serve(service)
-        .await;
+    server::serve_with_completion_handoff(
+        stdin,
+        stdout,
+        socket,
+        service,
+        DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL,
+    )
+    .await;
     info!("LSP server shut down");
 
     Ok(())

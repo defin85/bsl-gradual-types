@@ -41,7 +41,6 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::LspService;
-use tower_lsp::Server;
 
 fn init_test_tracing() {
     static INIT: std::sync::Once = std::sync::Once::new();
@@ -439,10 +438,14 @@ async fn spawn_live_lsp_transport_harness(
     let (client_read, client_write) = tokio::io::split(client_stream);
     let (server_read, server_write) = tokio::io::split(server_stream);
     let server_task = tokio::spawn(async move {
-        Server::new(server_read, server_write, socket)
-            .concurrency_level(crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL)
-            .serve(service)
-            .await;
+        crate::server::serve_with_completion_handoff(
+            server_read,
+            server_write,
+            socket,
+            service,
+            crate::DEFAULT_LSP_TRANSPORT_CONCURRENCY_LEVEL,
+        )
+        .await;
     });
     (
         LiveLspTransportHarness {
@@ -15820,8 +15823,7 @@ async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_bef
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_turn_wait_requests(
-) {
+async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_turn_wait_requests() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -15941,7 +15943,10 @@ async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_tu
     let last_completion = last_response
         .get("result")
         .cloned()
-        .map(|result| serde_json::from_value::<Option<CompletionResponse>>(result).expect("parse last completion result"))
+        .map(|result| {
+            serde_json::from_value::<Option<CompletionResponse>>(result)
+                .expect("parse last completion result")
+        })
         .flatten()
         .expect("last burst completion result present");
     let last_labels = normalize_lsp_member_labels(&last_completion);
@@ -15984,7 +15989,9 @@ async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_tu
         .and_then(|value| value.as_array())
         .and_then(|contenders| {
             contenders.iter().find_map(|contender| {
-                let request_class = contender.get("request_class").and_then(|value| value.as_str());
+                let request_class = contender
+                    .get("request_class")
+                    .and_then(|value| value.as_str());
                 let phase = contender.get("phase").and_then(|value| value.as_str());
                 if request_class == Some("completion") && phase == Some("turn_wait") {
                     contender.get("age_ms").and_then(|value| value.as_u64())

@@ -120,6 +120,9 @@ run_completion_timeline_drilldown_smoke() {
   cargo test -p bsl-backend --bin bsl-lsp-server p28_cancel_request_releases_pre_active_turn_wait_before_active_registration -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_during_response_build -- --nocapture
   cargo test -p bsl-backend --bin bsl-lsp-server p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_same_version_exact_wait_keeps_completed_task_observable_until_cleanup -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_shutdown_cleans_retained_same_version_exact_task_entry -- --nocapture
+  cargo test -p bsl-backend --bin bsl-lsp-server p33_same_version_invoked_completion_keeps_completed_task_visible_on_default_path -- --nocapture
 }
 
 run_extension_completion_observability_smoke() {

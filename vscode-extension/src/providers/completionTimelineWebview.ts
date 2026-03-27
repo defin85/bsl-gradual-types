@@ -12,6 +12,7 @@ import {
 } from './completionTimelineModel';
 import { CompletionProbe } from './completionProbe';
 import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
+import { setSharedCompletionTimelineExportCapture } from './completionTimelineExportCapture';
 
 const COMPLETION_TIMELINE_QUIET_WINDOW_MS = 1_500;
 
@@ -165,6 +166,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 completionTimeline: fetchResult,
                 clientProbes,
             };
+            setSharedCompletionTimelineExportCapture(this.latestExportCapture);
             const view = this.view;
             if (!view) {
                 return;
@@ -193,6 +195,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 },
                 clientProbes,
             };
+            setSharedCompletionTimelineExportCapture(this.latestExportCapture);
             const view = this.view;
             if (!view) {
                 return;
@@ -543,7 +546,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             </div>
             <span class="section-pill">Local-only debug data</span>
         </div>
-        <p class="section-subtitle">Client probes never replace server stages, routes, or outcomes and are not correlated to a specific server trace in this MVP.</p>
+        <p class="section-subtitle">Client probes never replace server stages, routes, or outcomes; matching server traces surface request-bound probe correlation when <code>client_probe_id</code> is available.</p>
         <div id="clientRoot" class="placeholder">No client probes recorded yet.</div>
     </section>
     <script nonce="${nonce}">
@@ -1133,6 +1136,13 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const serverEdgeDetails = renderServerEdgeDetails(trace);
             const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);
+            const correlatedProbe = trace.correlated_probe
+                ? '<div class="meta">correlated_probe=' + escapeHtml(trace.correlated_probe.probe_id) +
+                    ' | client_terminal_state=' + escapeHtml(trace.correlated_probe.client_terminal_state) +
+                    ' | client_duration=' + escapeHtml(trace.correlated_probe.client_duration_ms) + 'ms</div>'
+                : trace.client_probe_id
+                    ? '<div class="meta">correlated_probe_id=' + escapeHtml(trace.client_probe_id) + ' | local_probe=unavailable</div>'
+                    : '';
 
             return '<section class="trace">' +
                 '<div class="trace-header">' +
@@ -1148,6 +1158,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     '</div>' +
                 '</div>' +
                 '<div class="meta">request=' + escapeHtml(requestId) + ' | started=' + escapeHtml(startedAt) + '</div>' +
+                correlatedProbe +
                 '<div class="timeline-track">' + stageSegments + '</div>' +
                 (averageTraceNotice ? '<div class="placeholder">' + escapeHtml(averageTraceNotice) + '</div>' : '') +
                 overhead +

@@ -263,6 +263,11 @@ Default wrapper for overlap supersession evidence:
 ./scripts/validate-completion-superseded-active-turn-release.sh
 ```
 
+Default wrapper for completion front-edge stabilization evidence:
+```bash
+./scripts/validate-stabilize-completion-front-edge.sh
+```
+
 Default wrapper for pre-active turn_wait lifecycle evidence:
 ```bash
 ./scripts/validate-completion-turn-wait-lifecycle.sh
@@ -272,6 +277,7 @@ Default wrapper for pre-active turn_wait lifecycle evidence:
 ```bash
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
 
@@ -288,6 +294,10 @@ Wrapper `./scripts/validate-completion-superseded-active-turn-release.sh`
 служит default change-specific entry point для overlap supersession bundle и
 aggregate readiness artifacts; он собирает both `churn` and `overlap`
 representative profiles.
+Wrapper `./scripts/validate-stabilize-completion-front-edge.sh` служит default
+change-specific entry point для completion front-edge stabilization bundle и
+aggregate readiness artifacts; он собирает representative `churn` profile для
+deterministic correlation, quiet observability и trigger parity.
 Wrapper `./scripts/validate-completion-turn-wait-lifecycle.sh` служит default
 change-specific entry point для pre-active `turn_wait` lifecycle bundle и
 aggregate readiness artifacts; он собирает both `churn` and

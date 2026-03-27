@@ -10,6 +10,10 @@ import {
     getSharedCompletionProbeRecorder,
     resetSharedCompletionProbeRecorderForTests,
 } from '../../providers/completionProbeRecorder';
+import {
+    clearSharedCompletionTimelineExportCaptureForTests,
+    setSharedCompletionTimelineExportCaptureForTests,
+} from '../../providers/completionTimelineExportCapture';
 
 suite('Observability Commands Test Suite', () => {
     const registeredCommands = new Map<string, (...args: unknown[]) => Promise<unknown> | unknown>();
@@ -27,9 +31,11 @@ suite('Observability Commands Test Suite', () => {
         registeredCommands.clear();
         resetSharedCompletionProbeRecorderForTests();
         getSharedCompletionProbeRecorder().clear();
+        clearSharedCompletionTimelineExportCaptureForTests();
     });
 
     teardown(() => {
+        clearSharedCompletionTimelineExportCaptureForTests();
         resetSharedCompletionProbeRecorderForTests();
         sinon.restore();
         const cleanup = tempRootDir ? fs.rm(tempRootDir, { recursive: true, force: true }) : Promise.resolve();
@@ -135,6 +141,58 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(incident.request_window.request_count, 0);
         assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'unsupported');
+        assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
+    });
+
+    test('exportObservabilityIncidentBundle should reuse shared webview capture before refetching timeline', async () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+
+        const getCompletionTimelineStub = sinon
+            .stub(customRequestsModule, 'getCompletionTimeline')
+            .rejects(new Error('unexpected refetch'));
+        const getMetricsStub = sinon
+            .stub(customRequestsModule, 'getObservabilityMetricsFetchResult')
+            .rejects(new Error('unexpected refetch'));
+        tempRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bsl-incident-export-'));
+        sinon.stub(vscode.window, 'showOpenDialog').resolves([vscode.Uri.file(tempRootDir)]);
+        sinon.stub(vscode.window, 'showInformationMessage').resolves(undefined);
+
+        setSharedCompletionTimelineExportCaptureForTests({
+            capturedAtMs: Date.parse('2026-03-27T18:01:00.000Z'),
+            completionTimeline: {
+                kind: 'ok',
+                response: {
+                    version: 18,
+                    traces: [],
+                },
+            },
+            clientProbes: [],
+            observabilityMetrics: {
+                kind: 'unsupported',
+            },
+        });
+
+        registerObservabilityCommands(
+            {} as vscode.ExtensionContext,
+            safeRegisterCommand,
+            outputChannel
+        );
+
+        const command = registeredCommands.get('bslAnalyzer.exportObservabilityIncidentBundle');
+        assert.ok(command, 'export command should be registered');
+
+        await command!();
+
+        assert.strictEqual(getCompletionTimelineStub.callCount, 0);
+        assert.strictEqual(getMetricsStub.callCount, 0);
+
+        const bundleFolders = await fs.readdir(tempRootDir);
+        assert.strictEqual(bundleFolders.length, 1, 'export should create exactly one bundle folder');
+        const bundleRoot = path.join(tempRootDir, bundleFolders[0]);
+        const incident = JSON.parse(await fs.readFile(path.join(bundleRoot, 'incident.json'), 'utf8'));
+        assert.strictEqual(incident.sources.completion_timeline.status, 'available');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });
 });

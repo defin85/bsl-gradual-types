@@ -89,10 +89,12 @@ cargo test --workspace --locked
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
+./scripts/validate-stabilize-completion-front-edge.sh
 ./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-slot-release ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
@@ -104,6 +106,11 @@ the generic readiness script with the correct `CHANGE_ID`.
 canonical default entry point for the overlap supersession evidence bundle; it
 wraps the generic readiness script with the correct `CHANGE_ID` and collects
 both change-specific representative profiles (`churn` and `overlap`).
+`./scripts/validate-stabilize-completion-front-edge.sh` is the canonical
+default entry point for the completion front-edge stabilization evidence
+bundle; it wraps the generic readiness script with `CHANGE_ID=stabilize-completion-front-edge`
+and collects the representative `churn` profile for deterministic correlation,
+quiet observability, and trigger parity validation.
 `./scripts/validate-completion-turn-wait-slot-release.sh` is the canonical
 default entry point for the completion transport-slot-release evidence bundle;
 it wraps the generic readiness script with the correct `CHANGE_ID` and collects

@@ -440,6 +440,29 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) async fn cancel_all_type_index_precompute_v2(&self) {
+        let tasks = {
+            let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+            std::mem::take(&mut *tasks)
+        };
+
+        for (file_id, task) in tasks {
+            debug!(
+                file_id = file_id.0,
+                requested_version = task.supersession_key.requested_version,
+                reason_code =
+                    bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                        .as_str(),
+                "Event-driven type_index precompute cancelled during shutdown cleanup"
+            );
+            self.coordinator.record_intellisense_v2_type_index_reason(
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                    .as_str(),
+            );
+            task.handle.abort();
+        }
+    }
+
     pub(crate) async fn has_matching_type_index_precompute_task_v2(
         &self,
         file_id: V2FileId,

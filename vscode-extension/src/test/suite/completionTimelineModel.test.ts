@@ -47,6 +47,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 {
                     trace_id: 'trace-42',
                     request_id: 'req-42',
+                    client_probe_id: 'probe-1',
                     uri: 'file:///tmp/test.bsl',
                     trigger_mode: 'invoked',
                     outcome: 'ok_non_empty',
@@ -182,6 +183,8 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(state.version, 18);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
+        assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
+        assert.strictEqual(state.traces[0].correlated_probe?.probe_id, 'probe-1');
         assert.strictEqual(
             state.traces[0].server_edge_details?.transport_received_at_ms_provenance,
             'jsonrpc_dispatch_received'
@@ -333,6 +336,38 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.ok(state.traces[0].stages.every((stage) => stage.width_percent >= 0));
         assert.ok(state.traces[0].stages.every((stage) => stage.duration_percent >= 0));
         assert.ok(state.average_trace, 'average trace should be available for non-empty payload');
+    });
+
+    test('ready state leaves traces uncorrelated when no matching probe exists', () => {
+        const payload: CompletionTimelineResponse = {
+            version: 18,
+            traces: [
+                {
+                    trace_id: 'trace-unmatched',
+                    request_id: 'req-unmatched',
+                    client_probe_id: 'probe-missing',
+                    uri: 'file:///tmp/test.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_042,
+                    total_duration_ms: 12,
+                    stages: [
+                        { name: 'terminal', status: 'completed', started_offset_ms: 0, duration_ms: 12 },
+                    ],
+                },
+            ],
+        };
+
+        const state = mapCompletionTimelineResponseToPanelState(payload, [
+            buildClientProbe('probe-1', 7, 1_700_000_000_090),
+        ]);
+        assert.strictEqual(state.kind, 'ready');
+        if (state.kind !== 'ready') {
+            return;
+        }
+
+        assert.strictEqual(state.traces[0].client_probe_id, 'probe-missing');
+        assert.strictEqual(state.traces[0].correlated_probe, undefined);
     });
 
     test('Older contract payloads should not surface v13 contender snapshot', () => {

@@ -24,6 +24,7 @@ export interface CompletionTimelineTraceViewModel {
     trace_id: string;
     sample_count?: number;
     request_id?: string;
+    client_probe_id?: string;
     uri: string;
     trigger_mode: string;
     outcome: string;
@@ -35,6 +36,7 @@ export interface CompletionTimelineTraceViewModel {
     prepare_details?: CompletionTimelinePrepareDetailsTrace;
     server_edge_details?: CompletionTimelineServerEdgeDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
+    correlated_probe?: CompletionProbeViewModel;
     stages: CompletionTimelineStageViewModel[];
 }
 
@@ -386,23 +388,50 @@ function mapClientProbeFeed(
     };
 }
 
+function correlateTracesWithClientProbes(
+    traces: CompletionTimelineTraceViewModel[],
+    clientProbeFeed: CompletionProbeFeedViewModel,
+    contractVersion: number
+): CompletionTimelineTraceViewModel[] {
+    if (contractVersion < 18 || clientProbeFeed.probes.length === 0) {
+        return traces;
+    }
+
+    const probesById = new Map(
+        clientProbeFeed.probes.map((probe) => [probe.probe_id, probe] as const)
+    );
+
+    return traces.map((trace) => ({
+        ...trace,
+        correlated_probe: trace.client_probe_id
+            ? probesById.get(trace.client_probe_id)
+            : undefined,
+    }));
+}
+
 export function mapCompletionTimelineResponseToPanelState(
     response: CompletionTimelineResponse,
     clientProbes: CompletionProbe[] = [],
     updatedAtMs: number = Date.now()
 ): CompletionTimelinePanelState {
+    const clientProbeFeed = mapClientProbeFeed(clientProbes, updatedAtMs);
     const traces = [...response.traces]
         .sort((left, right) => right.started_at_ms - left.started_at_ms)
         .map((trace) => mapTrace(trace, response.version));
+    const correlatedTraces = correlateTracesWithClientProbes(
+        traces,
+        clientProbeFeed,
+        response.version
+    );
     const averageTrace = buildAverageTrace(traces, response.version);
 
     return {
         kind: 'ready',
         version: response.version,
         updated_at_ms: updatedAtMs,
-        traces,
+        traces: correlatedTraces,
         average_trace: averageTrace,
-        client_probe_feed: mapClientProbeFeed(clientProbes, updatedAtMs),
+        client_probe_feed: clientProbeFeed,
     };
 }
 

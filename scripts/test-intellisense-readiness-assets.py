@@ -14,6 +14,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
     CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
     DEVELOPMENT_WORKFLOW_GUIDE = (
         REPO_ROOT / "docs" / "guides" / "development-workflow.md"
     )
@@ -21,6 +22,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     OVERLAP_CHANGE_ID = "refactor-completion-superseded-active-turn-release"
     TURN_WAIT_CHANGE_ID = "refactor-completion-turn-wait-lifecycle"
     SLOT_RELEASE_CHANGE_ID = "refactor-completion-turn-wait-slot-release"
+    FRONT_EDGE_CHANGE_ID = "stabilize-completion-front-edge"
     QUALITY_GATES = (
         REPO_ROOT
         / "openspec"
@@ -158,6 +160,49 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{SLOT_RELEASE_CHANGE_ID}-openspec-validate.log"
     )
+    FRONT_EDGE_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-stabilize-completion-front-edge.sh"
+    )
+    FRONT_EDGE_READINESS_GATE_JSON = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{FRONT_EDGE_CHANGE_ID}-readiness-gate.json"
+    )
+    FRONT_EDGE_READINESS_GATE_MD = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{FRONT_EDGE_CHANGE_ID}-readiness-gate.md"
+    )
+    FRONT_EDGE_CHURN_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{FRONT_EDGE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json"
+    )
+    FRONT_EDGE_CHURN_SUMMARY = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{FRONT_EDGE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md"
+    )
+    FRONT_EDGE_OPENSPEC_LOG = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{FRONT_EDGE_CHANGE_ID}-openspec-validate.log"
+    )
     REQUIRED_SLOT_RELEASE_CI_PATH_FILTERS = [
         ".gitignore",
         "backend/src/bin/lsp_server/main.rs",
@@ -168,6 +213,36 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "vscode-extension/src/providers/completionTimelineClipboard.ts",
         "vscode-extension/src/providers/completionTimelineModel.ts",
         "vscode-extension/src/providers/observabilityIncidentBundle.ts",
+    ]
+    REQUIRED_FRONT_EDGE_DOC_SNIPPETS = [
+        "./scripts/validate-stabilize-completion-front-edge.sh",
+        "CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh",
+    ]
+    REQUIRED_FRONT_EDGE_CI_PATH_FILTERS = [
+        "vscode-extension/src/commands/observability.ts",
+        "vscode-extension/src/lsp/client/completionProbeRuntime.ts",
+        "vscode-extension/src/lsp/client/lifecycle.ts",
+        "vscode-extension/src/providers/completionProbeRecorder.ts",
+        "vscode-extension/src/providers/completionTimelineExportCapture.ts",
+        "vscode-extension/src/providers/completionTimelineModel.ts",
+        "vscode-extension/src/providers/completionTimelineWebview.ts",
+        "vscode-extension/src/providers/observabilityIncidentBundle.ts",
+        "vscode-extension/src/providers/observabilityIncidentBundleRequests.ts",
+    ]
+    REQUIRED_FRONT_EDGE_GITIGNORE_ENTRIES = [
+        "!backend/tests/perf/reports/stabilize-completion-front-edge-openspec-validate.log",
+        "!backend/tests/perf/reports/stabilize-completion-front-edge-readiness-gate.json",
+        "!backend/tests/perf/reports/stabilize-completion-front-edge-readiness-gate.md",
+        (
+            "!backend/tests/perf/reports/"
+            "stabilize-completion-front-edge-real-conf-big-revision-churn-"
+            "completion-perf-live.json"
+        ),
+        (
+            "!backend/tests/perf/reports/"
+            "stabilize-completion-front-edge-real-conf-big-revision-churn-"
+            "completion-perf-live.md"
+        ),
     ]
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
@@ -210,6 +285,18 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         (
             "backend/src/bin/lsp_server/server/core/tests.rs::"
             "p28_cancel_request_releases_pre_active_turn_wait_before_active_registration"
+        ),
+        (
+            "backend/src/bin/lsp_server/server/core/tests.rs::"
+            "p33_same_version_exact_wait_keeps_completed_task_observable_until_cleanup"
+        ),
+        (
+            "backend/src/bin/lsp_server/server/core/tests.rs::"
+            "p33_shutdown_cleans_retained_same_version_exact_task_entry"
+        ),
+        (
+            "backend/src/bin/lsp_server/server/core/tests.rs::"
+            "p33_same_version_invoked_completion_keeps_completed_task_visible_on_default_path"
         ),
         (
             "backend/tests/form_module_object_unified_contract_test.rs::"
@@ -712,6 +799,104 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             "./scripts/validate-completion-turn-wait-slot-release.sh",
             workflow_guide,
             "development workflow guide must list the canonical slot-release wrapper",
+        )
+
+    def test_front_edge_wrapper_and_assets_are_checked_in(self) -> None:
+        required_paths = [
+            self.FRONT_EDGE_WRAPPER,
+            self.FRONT_EDGE_READINESS_GATE_JSON,
+            self.FRONT_EDGE_READINESS_GATE_MD,
+            self.FRONT_EDGE_CHURN_REPORT,
+            self.FRONT_EDGE_CHURN_SUMMARY,
+            self.FRONT_EDGE_OPENSPEC_LOG,
+        ]
+        missing = [str(path.relative_to(self.REPO_ROOT)) for path in required_paths if not path.exists()]
+        self.assertFalse(
+            missing,
+            (
+                "front-edge readiness bundle is incomplete; missing checked-in assets: "
+                f"{missing}"
+            ),
+        )
+
+    def test_front_edge_docs_expose_canonical_wrapper(self) -> None:
+        docs_to_check = [
+            self.VERIFICATION_DOC,
+            self.DEVELOPMENT_WORKFLOW_GUIDE,
+            self.REPO_ROOT / "scripts" / "README.md",
+        ]
+        for doc in docs_to_check:
+            content = doc.read_text(encoding="utf-8")
+            missing = [
+                snippet
+                for snippet in self.REQUIRED_FRONT_EDGE_DOC_SNIPPETS
+                if snippet not in content
+            ]
+            self.assertFalse(
+                missing,
+                f"{doc.relative_to(self.REPO_ROOT)} is missing front-edge wrapper snippets: {missing}",
+            )
+
+    def test_front_edge_docs_reference_current_contract_versions(self) -> None:
+        manual = (self.REPO_ROOT / "vscode-extension" / "manual-lsp-test.md").read_text(encoding="utf-8")
+        test_readme = (self.REPO_ROOT / "vscode-extension" / "src" / "test" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("payload `version=18`", manual)
+        self.assertNotIn("payload `version=12`", manual)
+        self.assertIn("`response.version=18`", test_readme)
+        self.assertNotIn("`response.version=16`", test_readme)
+
+    def test_front_edge_ci_watches_wrapper(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            workflow.count("scripts/validate-stabilize-completion-front-edge.sh"),
+            2,
+            "CI path filters must watch front-edge wrapper on pull_request and push",
+        )
+
+    def test_front_edge_ci_path_filters_cover_mandatory_surfaces(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        missing = [
+            path_filter
+            for path_filter in self.REQUIRED_FRONT_EDGE_CI_PATH_FILTERS
+            if workflow.count(path_filter) < 2
+        ]
+        self.assertFalse(
+            missing,
+            (
+                "CI path filters must watch mandatory front-edge runtime/contract/"
+                f"consumer surfaces on pull_request and push: {missing}"
+            ),
+        )
+
+    def test_front_edge_ci_wiring_tracks_artifacts(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        expected_snippets = [
+            "CHANGE_ID: stabilize-completion-front-edge",
+            (
+                "BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: "
+                "${{ github.workspace }}/backend/tests/perf/reports/"
+                "stabilize-completion-front-edge-real-conf-big-revision-churn-"
+                "completion-perf-live.json"
+            ),
+            "backend/tests/perf/reports/stabilize-completion-front-edge-*.json",
+            "backend/tests/perf/reports/stabilize-completion-front-edge-*.md",
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in workflow]
+        self.assertFalse(
+            missing,
+            f"CI workflow is missing front-edge readiness wiring: {missing}",
+        )
+
+    def test_front_edge_gitignore_keeps_readiness_artifacts_trackable(self) -> None:
+        gitignore = (self.REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        missing = [
+            entry
+            for entry in self.REQUIRED_FRONT_EDGE_GITIGNORE_ENTRIES
+            if entry not in gitignore
+        ]
+        self.assertFalse(
+            missing,
+            f".gitignore must keep front-edge readiness artifacts trackable: {missing}",
         )
 
 

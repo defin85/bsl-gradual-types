@@ -19,6 +19,9 @@ class AgentReadinessValidationTest(unittest.TestCase):
     TURN_WAIT_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-completion-turn-wait-lifecycle.sh"
     )
+    FRONT_EDGE_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-stabilize-completion-front-edge.sh"
+    )
     TARGETS_FILE = REPO_ROOT / "scripts" / "doc-path-check-targets.txt"
     VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
 
@@ -69,6 +72,13 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.TURN_WAIT_WRAPPER.read_text(encoding="utf-8")
         self.assertIn(
             "CHANGE_ID=refactor-completion-turn-wait-lifecycle",
+            content,
+        )
+
+    def test_front_edge_wrapper_pins_change_id(self) -> None:
+        content = self.FRONT_EDGE_WRAPPER.read_text(encoding="utf-8")
+        self.assertIn(
+            "CHANGE_ID=stabilize-completion-front-edge",
             content,
         )
 

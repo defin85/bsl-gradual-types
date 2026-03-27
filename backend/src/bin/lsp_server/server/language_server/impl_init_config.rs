@@ -480,6 +480,7 @@ impl BslLanguageServer {
 
     pub(super) async fn lsp_shutdown(&self) -> JsonRpcResult<()> {
         info!("Shutting down BSL Language Server");
+        self.cancel_all_type_index_precompute_v2().await;
         Ok(())
     }
 

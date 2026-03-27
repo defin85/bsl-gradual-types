@@ -9,6 +9,10 @@ import {
     getObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
 import { getSharedCompletionProbeRecorder } from '../providers/completionProbeRecorder';
+import {
+    CompletionTimelineExportCapture,
+    getSharedCompletionTimelineExportCapture,
+} from '../providers/completionTimelineExportCapture';
 import { buildObservabilityIncidentBundle } from '../providers/observabilityIncidentBundle';
 import { CompletionProbe } from '../providers/completionProbe';
 
@@ -30,32 +34,44 @@ function fmtMs(value: any): string {
 const COMPLETION_TIMELINE_EXPORT_LIMIT = 50;
 const textEncoder = new TextEncoder();
 
-export interface ObservabilityIncidentBundleExportCapture {
-    capturedAtMs?: number;
-    completionTimeline?: CompletionTimelineFetchResult;
-    clientProbes?: CompletionProbe[];
-    observabilityMetrics?: ObservabilityMetricsFetchResult;
-}
-
-function asExportCapture(value: unknown): ObservabilityIncidentBundleExportCapture | undefined {
+function asExportCapture(value: unknown): CompletionTimelineExportCapture | undefined {
     if (!value || typeof value !== 'object') {
         return undefined;
     }
-    return value as ObservabilityIncidentBundleExportCapture;
+    return value as CompletionTimelineExportCapture;
+}
+
+function mergeExportCaptures(
+    sharedCapture: CompletionTimelineExportCapture | undefined,
+    explicitCapture: CompletionTimelineExportCapture
+): CompletionTimelineExportCapture {
+    return {
+        capturedAtMs: explicitCapture.capturedAtMs ?? sharedCapture?.capturedAtMs,
+        completionTimeline:
+            explicitCapture.completionTimeline ?? sharedCapture?.completionTimeline,
+        clientProbes: explicitCapture.clientProbes ?? sharedCapture?.clientProbes,
+        observabilityMetrics:
+            explicitCapture.observabilityMetrics ?? sharedCapture?.observabilityMetrics,
+    };
 }
 
 async function exportObservabilityIncidentBundleToFolder(
     targetFolder: vscode.Uri,
     outputChannel: vscode.OutputChannel,
-    capture: ObservabilityIncidentBundleExportCapture = {}
+    capture: CompletionTimelineExportCapture = {}
 ): Promise<void> {
-    const capturedAtMs = capture.capturedAtMs ?? Date.now();
-    const clientProbes = capture.clientProbes ?? getSharedCompletionProbeRecorder().snapshot();
-    const completionTimelinePromise = capture.completionTimeline
-        ? Promise.resolve(capture.completionTimeline)
+    const resolvedCapture = mergeExportCaptures(
+        getSharedCompletionTimelineExportCapture(),
+        capture
+    );
+    const capturedAtMs = resolvedCapture.capturedAtMs ?? Date.now();
+    const clientProbes =
+        resolvedCapture.clientProbes ?? getSharedCompletionProbeRecorder().snapshot();
+    const completionTimelinePromise = resolvedCapture.completionTimeline
+        ? Promise.resolve(resolvedCapture.completionTimeline)
         : getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
-    const observabilityMetricsPromise = capture.observabilityMetrics
-        ? Promise.resolve(capture.observabilityMetrics)
+    const observabilityMetricsPromise = resolvedCapture.observabilityMetrics
+        ? Promise.resolve(resolvedCapture.observabilityMetrics)
         : getObservabilityMetricsFetchResult({ shape: 'full' });
     const [completionTimeline, observabilityMetrics] = await Promise.all([
         completionTimelinePromise,

@@ -122,8 +122,10 @@ npm --prefix ./vscode-extension test
 ./scripts/run-intellisense-perf.sh
 ./scripts/validate-v2-completion-gates.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
+./scripts/validate-stabilize-completion-front-edge.sh
 ./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
+CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 ```
 
 Запускайте их только когда change действительно требует readiness/perf evidence.

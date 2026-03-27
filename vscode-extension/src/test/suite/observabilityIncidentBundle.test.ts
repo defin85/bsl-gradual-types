@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 17,
+                version: 18,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -265,7 +265,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 17);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 18);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -740,6 +740,33 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('v17 completion timeline should mark v18 client probe correlation detail as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 17;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('contract v17')));
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v18 request-bound client probe correlation detail')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('contract v17')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v18 request-bound client probe correlation detail')));
+        assert.ok(bundle.summaryMarkdown.includes('contract=v17'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'v18 request-bound client probe correlation detail is unavailable by design'
+            )
+        );
+    });
+
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
@@ -963,5 +990,54 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('ambiguous')));
         assert.ok(bundle.summaryMarkdown.includes('correlation=ambiguous:multiple_probe_candidates'));
+    });
+
+    test('echoed client_probe_id should correlate overlapping probes without ambiguity', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 18;
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                client_probe_id: 'probe-2',
+            } as typeof timeline.response.traces[number],
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-1',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_003_173,
+                    request_completed_at_ms: 1_700_000_003_174,
+                    client_duration_ms: 3174,
+                }),
+                sampleProbe({
+                    probe_id: 'probe-2',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_001,
+                    lsp_request_started_at_ms: 1_700_000_000_001,
+                    lsp_response_received_at_ms: 1_700_000_003_171,
+                    request_completed_at_ms: 1_700_000_003_175,
+                    client_duration_ms: 3174,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.requests.length, 1);
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-2');
+        assert.ok(
+            !bundle.summaryMarkdown.includes('multiple_probe_candidates'),
+            'request-bound correlation key must avoid overlap ambiguity'
+        );
     });
 });

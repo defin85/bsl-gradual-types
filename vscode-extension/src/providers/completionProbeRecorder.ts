@@ -80,6 +80,7 @@ export class CompletionProbeRecorder {
     private readonly activeSessionsByToken = new Map<vscode.CancellationToken, ActiveCompletionProbeSession>();
     private readonly activeSessionsByUri = new Map<string, ActiveCompletionProbeSession[]>();
     private nextProbeSequence = 1;
+    private lastCompletedAtMs: number | undefined;
 
     constructor(options: CompletionProbeRecorderOptions = {}) {
         this.now = options.now ?? Date.now;
@@ -94,10 +95,33 @@ export class CompletionProbeRecorder {
         this.store.clear();
         this.lastLocalEditByUri.clear();
         this.lastDidChangeSentByUri.clear();
+        this.didChangeCountByUri.clear();
+        this.cursorClockByUri.clear();
+        this.activeSessionsByToken.clear();
+        this.activeSessionsByUri.clear();
+        this.lastCompletedAtMs = undefined;
     }
 
     snapshot(): CompletionProbe[] {
         return this.store.snapshot();
+    }
+
+    getProbeIdForToken(token: vscode.CancellationToken): string | undefined {
+        return this.activeSessionsByToken.get(token)?.probeId;
+    }
+
+    hasActiveCompletionProbes(): boolean {
+        return this.activeSessionsByToken.size > 0;
+    }
+
+    isInQuietWindow(quietWindowMs: number, nowMs: number = this.now()): boolean {
+        if (this.hasActiveCompletionProbes()) {
+            return true;
+        }
+        if (this.lastCompletedAtMs === undefined) {
+            return false;
+        }
+        return Math.max(0, nowMs - this.lastCompletedAtMs) < quietWindowMs;
     }
 
     recordTextDocumentDidChange(event: vscode.TextDocumentChangeEvent): void {
@@ -307,6 +331,9 @@ export class CompletionProbeRecorder {
             }
         }
 
+        if (session) {
+            this.lastCompletedAtMs = this.now();
+        }
         this.store.add(probe);
         return probe;
     }

@@ -686,6 +686,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
 export interface CompletionTimelineTrace {
     trace_id: string;
     request_id?: string;
+    client_probe_id?: string;
     uri: string;
     trigger_mode: string;
     outcome: string;

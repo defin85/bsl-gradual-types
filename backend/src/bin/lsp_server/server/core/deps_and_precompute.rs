@@ -69,6 +69,20 @@ fn test_type_index_precompute_delay() -> Option<std::time::Duration> {
     None
 }
 
+#[cfg(test)]
+fn test_type_index_precompute_post_compute_delay() -> Option<std::time::Duration> {
+    std::env::var("BSL_TEST_TYPE_INDEX_PRECOMPUTE_POST_COMPUTE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .map(std::time::Duration::from_millis)
+}
+
+#[cfg(not(test))]
+fn test_type_index_precompute_post_compute_delay() -> Option<std::time::Duration> {
+    None
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TypeIndexPrecomputeWaiterActionV2 {
     None,
@@ -135,7 +149,7 @@ impl TypeIndexPrecomputePhaseV2 {
         self as u8
     }
 
-    fn from_atomic(value: u8) -> Self {
+    pub(super) fn from_atomic(value: u8) -> Self {
         match value {
             1 => Self::WaitingForVersion,
             2 => Self::Snapshotting,
@@ -157,6 +171,33 @@ fn type_index_precompute_debounce_duration() -> Duration {
 }
 
 impl BslLanguageServer {
+    fn is_completed_retained_type_index_task(
+        task: &super::super::TypeIndexPrecomputeTaskV2,
+    ) -> bool {
+        task.handle.is_finished()
+            && matches!(
+                TypeIndexPrecomputePhaseV2::from_atomic(task.phase.load(Ordering::Relaxed)),
+                TypeIndexPrecomputePhaseV2::Completed
+            )
+    }
+
+    pub(crate) async fn cleanup_completed_type_index_precompute_task_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: Option<i32>,
+    ) {
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        let should_remove = tasks.get(&file_id).is_some_and(|task| {
+            Self::is_completed_retained_type_index_task(task)
+                && expected_version
+                    .map(|version| task.supersession_key.requested_version == version)
+                    .unwrap_or(true)
+        });
+        if should_remove {
+            let _ = tasks.remove(&file_id);
+        }
+    }
+
     async fn snapshot_for_completion_wait_v2(&self) -> bsl_analysis_v2::AnalysisV2 {
         self.analysis_v2
             .completion_current_revision_snapshot_for_origin_and_operation(
@@ -338,10 +379,11 @@ impl BslLanguageServer {
             if task.supersession_key == supersession_key {
                 return;
             }
+            let retained_completed_task = Self::is_completed_retained_type_index_task(task);
             if matches!(
                 task.work_class,
                 bsl_runtime::application::CpuWorkClass::Background
-            ) {
+            ) && !retained_completed_task {
                 task.supersession_key = supersession_key;
                 task.scheduled_at = scheduled_at;
                 return;
@@ -430,6 +472,8 @@ impl BslLanguageServer {
             if exact_ready {
                 let matching_task_trace = self
                     .current_exact_wait_matching_task_trace_v2(file_id, expected_version)
+                    .await;
+                self.cleanup_completed_type_index_precompute_task_v2(file_id, expected_version)
                     .await;
                 if !matches!(waiter_action, TypeIndexPrecomputeWaiterActionV2::None) {
                     self.coordinator
@@ -537,6 +581,11 @@ impl BslLanguageServer {
                 head_ready: Some(head_ready),
                 exact_ready: Some(exact_ready),
             };
+
+            if version_matches && exact_ready {
+                self.cleanup_completed_type_index_precompute_task_v2(file_id, expected_version)
+                    .await;
+            }
 
             if version_matches && head_ready {
                 return CompletionArtifactWaitTraceV2 {
@@ -712,6 +761,16 @@ impl BslLanguageServer {
             .await;
             active_requested_version.store(0, Ordering::Relaxed);
 
+            let exact_ready_observed = {
+                let analysis = self.snapshot_for_completion_wait_v2().await;
+                analysis.file_version(file_id).ok().flatten()
+                    == Some(supersession_key.requested_version)
+                    && analysis
+                        .current_type_index_serve_only_ready(file_id)
+                        .ok()
+                        .unwrap_or(false)
+            };
+
             let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
             let Some(task) = tasks.get(&file_id) else {
                 return;
@@ -720,7 +779,9 @@ impl BslLanguageServer {
                 return;
             }
             if task.supersession_key == supersession_key && task.work_class == work_class {
-                tasks.remove(&file_id);
+                if exact_ready_observed {
+                    tasks.remove(&file_id);
+                }
                 return;
             }
         }
@@ -848,6 +909,9 @@ impl BslLanguageServer {
             TypeIndexPrecomputePhaseV2::Completed.as_u8(),
             Ordering::Relaxed,
         );
+        if let Some(delay) = test_type_index_precompute_post_compute_delay() {
+            tokio::time::sleep(delay).await;
+        }
 
         match precompute {
             Ok(Ok(result)) => {

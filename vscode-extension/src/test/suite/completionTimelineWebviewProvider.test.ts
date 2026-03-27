@@ -245,12 +245,143 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         onDidChangeVisibilityEmitter.dispose();
     });
 
+    test('visible webview stays quiet during active completion probes and quiet window', async () => {
+        const customRequestsModule = await import('../../lsp/customRequests');
+        const timelinePayload: CompletionTimelineFetchResult = {
+            kind: 'ok',
+            response: {
+                version: 18,
+                traces: [
+                    {
+                        trace_id: 'trace-quiet',
+                        request_id: 'req-quiet',
+                        uri: 'file:///tmp/test.bsl',
+                        trigger_mode: 'invoked',
+                        outcome: 'ok_non_empty',
+                        started_at_ms: 1_700_000_000_000,
+                        total_duration_ms: 10,
+                        dominant_stage: 'query_bundle',
+                        stages: [
+                            {
+                                name: 'query_bundle',
+                                status: 'completed',
+                                started_offset_ms: 0,
+                                duration_ms: 10,
+                            },
+                        ],
+                    },
+                ],
+            },
+        };
+        const getCompletionTimelineStub = sinon
+            .stub(customRequestsModule, 'getCompletionTimeline')
+            .resolves(timelinePayload);
+
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const recorder = getSharedCompletionProbeRecorder();
+        recorder.clear();
+        const activeToken = new vscode.CancellationTokenSource();
+        const document = {
+            uri: vscode.Uri.parse('file:///tmp/test.bsl'),
+            version: 4,
+            lineAt: () => ({ text: 'Документы.' }),
+        } as unknown as vscode.TextDocument;
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const postMessageStub = sinon.stub().resolves(true);
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: postMessageStub,
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: true,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+        await flushPromises();
+        assert.strictEqual(getCompletionTimelineStub.callCount, 1);
+
+        recorder.recordCompletionStarted({
+            document,
+            position: new vscode.Position(0, 'Документы.'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                triggerCharacter: '.',
+            },
+            token: activeToken.token,
+            requestStartedAtMs: clock.now,
+        });
+
+        clock.tick(3_100);
+        await flushPromises();
+        assert.strictEqual(
+            getCompletionTimelineStub.callCount,
+            1,
+            'auto-polling must stay quiet while an active completion probe exists'
+        );
+
+        onDidReceiveMessageEmitter.fire({ type: 'refresh' });
+        await flushPromises();
+        assert.strictEqual(
+            getCompletionTimelineStub.callCount,
+            2,
+            'manual refresh must remain explicit even while quiet auto-polling is suspended'
+        );
+
+        recorder.recordCompletionOutcome({
+            document,
+            position: new vscode.Position(0, 'Документы.'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                triggerCharacter: '.',
+            },
+            token: activeToken.token,
+            result: [{ label: 'Форма' }] as vscode.CompletionItem[],
+            requestStartedAtMs: clock.now - 10,
+            requestCompletedAtMs: clock.now,
+            wasCancelled: false,
+        });
+
+        clock.tick(1_100);
+        await flushPromises();
+        assert.strictEqual(
+            getCompletionTimelineStub.callCount,
+            2,
+            'quiet window must suppress the first post-probe auto refresh'
+        );
+
+        clock.tick(3_100);
+        await flushPromises();
+        assert.strictEqual(
+            getCompletionTimelineStub.callCount,
+            3,
+            'auto-polling must resume shortly after quiet window expires'
+        );
+
+        activeToken.dispose();
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
     test('copyVisible message should write current visible traces to clipboard', async () => {
         const customRequestsModule = await import('../../lsp/customRequests');
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 17,
+                version: 18,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -386,7 +517,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v17'));
+        assert.ok(clipboardPayload.includes('contract=v18'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -448,7 +579,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 17,
+                version: 18,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -569,7 +700,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, and v17 transport slot release detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, and v18 request-bound client probe correlation detail are unavailable by design.'
                     )
             )
         );

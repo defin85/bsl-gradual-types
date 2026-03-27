@@ -151,7 +151,12 @@ export function buildObservabilityIncidentRequestSection(
     const gaps: string[] = [];
     const unusedProbeIds = new Set(clientProbes.map((probe) => probe.probe_id));
     const requests = traces.map((trace) => {
-        const clientCorrelation = buildClientCorrelation(trace, clientProbes, unusedProbeIds);
+        const clientCorrelation = buildClientCorrelation(
+            trace,
+            clientProbes,
+            unusedProbeIds,
+            contractVersion
+        );
         if (clientCorrelation.status === 'correlated' && clientCorrelation.probe_id) {
             unusedProbeIds.delete(clientCorrelation.probe_id);
         } else if (clientCorrelation.status === 'ambiguous') {
@@ -448,12 +453,28 @@ function buildExactDeadlineSummary(
 function buildClientCorrelation(
     trace: CompletionTimelineTrace,
     probes: CompletionProbe[],
-    unusedProbeIds: Set<string>
+    unusedProbeIds: Set<string>,
+    contractVersion: number
 ): ObservabilityIncidentClientCorrelation {
     if (!trace.server_edge_details) {
         return {
             status: 'unavailable',
             reason: 'missing_server_edge',
+        };
+    }
+
+    if (contractVersion >= 18 && trace.client_probe_id) {
+        const exactProbe = probes.find(
+            (probe) =>
+                unusedProbeIds.has(probe.probe_id)
+                && probe.probe_id === trace.client_probe_id
+        );
+        if (exactProbe) {
+            return buildCorrelatedProbe(trace, exactProbe);
+        }
+        return {
+            status: 'unavailable',
+            reason: 'no_probe_candidates',
         };
     }
 
@@ -491,7 +512,20 @@ function buildClientCorrelation(
         };
     }
 
-    const probe = candidates[0];
+    return buildCorrelatedProbe(trace, candidates[0]);
+}
+
+function buildCorrelatedProbe(
+    trace: CompletionTimelineTrace,
+    probe: CompletionProbe
+): ObservabilityIncidentClientCorrelation {
+    const serverEdgeDetails = trace.server_edge_details;
+    if (!serverEdgeDetails) {
+        return {
+            status: 'unavailable',
+            reason: 'missing_server_edge',
+        };
+    }
     return {
         status: 'correlated',
         probe_id: probe.probe_id,
@@ -499,11 +533,11 @@ function buildClientCorrelation(
         client_terminal_state: probe.client_terminal_state,
         client_to_transport_wait_ms: Math.max(
             0,
-            trace.server_edge_details.transport_received_at_ms - probe.lsp_request_started_at_ms
+            serverEdgeDetails.transport_received_at_ms - probe.lsp_request_started_at_ms
         ),
         server_to_client_post_response_ms: Math.max(
             0,
-            probe.request_completed_at_ms - trace.server_edge_details.response_sent_at_ms
+            probe.request_completed_at_ms - serverEdgeDetails.response_sent_at_ms
         ),
     };
 }

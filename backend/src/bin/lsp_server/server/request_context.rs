@@ -59,6 +59,7 @@ struct PendingCompletionRequestIds {
 struct PendingCompletionRequestEntry {
     key: CompletionRequestKey,
     cancelled_before_take: bool,
+    client_probe_id: Option<String>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
     transport_slot_released_at_ms: Option<u64>,
@@ -77,6 +78,7 @@ struct PendingCompletionRequestEntry {
 pub(crate) struct PendingCompletionRequestContext {
     pub(crate) request_id: String,
     pub(crate) cancelled_before_take: bool,
+    pub(crate) client_probe_id: Option<String>,
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
     pub(crate) transport_slot_released_at_ms: Option<u64>,
@@ -540,6 +542,17 @@ fn completion_request_key_from_request(request: &Request) -> Option<CompletionRe
     Some(completion_request_key(&completion_params))
 }
 
+fn completion_probe_id_from_request(request: &Request) -> Option<String> {
+    if request.method() != "textDocument/completion" {
+        return None;
+    }
+    request
+        .params()?
+        .get("bslProbeId")
+        .and_then(|value| value.as_str())
+        .map(|value| value.to_string())
+}
+
 fn inflight_request_class_for_request(request: &Request) -> InflightRequestClass {
     match request.method() {
         "textDocument/completion" => InflightRequestClass::Completion,
@@ -866,6 +879,7 @@ fn record_pending_completion_request_id(
     let Some(key) = completion_request_key_from_request(request) else {
         return;
     };
+    let client_probe_id = completion_probe_id_from_request(request);
     let request_id = request_id.to_string();
     let mut pending = pending_completion_request_ids_cell()
         .lock()
@@ -881,6 +895,7 @@ fn record_pending_completion_request_id(
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
             entry.cancelled_before_take = false;
+            entry.client_probe_id = client_probe_id.clone();
             entry.request_received_at_ms = request_received_at_ms;
         }
     } else {
@@ -889,6 +904,7 @@ fn record_pending_completion_request_id(
             PendingCompletionRequestEntry {
                 key: key.clone(),
                 cancelled_before_take: false,
+                client_probe_id,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
                 transport_slot_released_at_ms: None,
@@ -913,6 +929,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
     let Some(key) = completion_request_key_from_request(request) else {
         return;
     };
+    let client_probe_id = completion_probe_id_from_request(request);
     let request_id = request_id.to_string();
     let mut pending = pending_completion_request_ids_cell()
         .lock()
@@ -928,6 +945,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
             entry.cancelled_before_take = false;
+            entry.client_probe_id = client_probe_id.clone();
             entry.jsonrpc_dispatch_received_at_ms = jsonrpc_dispatch_received_at_ms;
         }
     } else {
@@ -936,6 +954,7 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
             PendingCompletionRequestEntry {
                 key: key.clone(),
                 cancelled_before_take: false,
+                client_probe_id,
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
                 transport_slot_released_at_ms: None,
@@ -1101,6 +1120,7 @@ pub(crate) fn record_completion_request_id_for_testing(
         PendingCompletionRequestEntry {
             key: key.clone(),
             cancelled_before_take: false,
+            client_probe_id: None,
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
             transport_slot_released_at_ms: None,
@@ -1139,6 +1159,7 @@ pub(crate) fn take_completion_request_context_by_request_id(
     Some(PendingCompletionRequestContext {
         request_id: request_id.to_string(),
         cancelled_before_take: entry.cancelled_before_take,
+        client_probe_id: entry.client_probe_id,
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
         transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
@@ -1187,6 +1208,7 @@ pub(crate) fn take_completion_request_context(
             return Some(PendingCompletionRequestContext {
                 request_id,
                 cancelled_before_take: entry.cancelled_before_take,
+                client_probe_id: entry.client_probe_id,
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
                 transport_slot_released_at_ms: entry.transport_slot_released_at_ms,

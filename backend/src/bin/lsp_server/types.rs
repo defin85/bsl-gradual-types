@@ -346,6 +346,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
 pub struct CompletionTimelineTrace {
     pub trace_id: String,
     pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_probe_id: Option<String>,
     pub uri: String,
     pub trigger_mode: String,
     pub outcome: String,

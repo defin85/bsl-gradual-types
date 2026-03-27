@@ -13,6 +13,8 @@ import {
 import { CompletionProbe } from './completionProbe';
 import { getSharedCompletionProbeRecorder } from './completionProbeRecorder';
 
+const COMPLETION_TIMELINE_QUIET_WINDOW_MS = 1_500;
+
 type CompletionTimelineWebviewMessage =
     | { type: 'ready' | 'refresh' }
     | { type: 'exportBundle' }
@@ -104,7 +106,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
     }
 
     refresh(): void {
-        void this.refreshInternal();
+        void this.refreshInternal(true);
     }
 
     dispose(): void {
@@ -137,14 +139,19 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
     }
 
-    private async refreshInternal(): Promise<void> {
+    private async refreshInternal(force: boolean = false): Promise<void> {
         if (!this.view || this.refreshInFlight) {
+            return;
+        }
+
+        const recorder = getSharedCompletionProbeRecorder();
+        if (!force && recorder.isInQuietWindow(COMPLETION_TIMELINE_QUIET_WINDOW_MS)) {
             return;
         }
 
         this.refreshInFlight = true;
         const updatedAtMs = Date.now();
-        const clientProbes = getSharedCompletionProbeRecorder().snapshot();
+        const clientProbes = recorder.snapshot();
         try {
             const fetchResult = await getCompletionTimeline({ limit: 50 });
             const state = mapCompletionTimelineFetchResultToPanelState(
@@ -158,7 +165,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 completionTimeline: fetchResult,
                 clientProbes,
             };
-            await this.view.webview.postMessage({
+            const view = this.view;
+            if (!view) {
+                return;
+            }
+            await view.webview.postMessage({
                 type: 'timelineState',
                 state,
             });
@@ -182,7 +193,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 },
                 clientProbes,
             };
-            await this.view.webview.postMessage({
+            const view = this.view;
+            if (!view) {
+                return;
+            }
+            await view.webview.postMessage({
                 type: 'timelineState',
                 state,
             });
@@ -198,7 +213,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
 
         if (parsedMessage.type === 'ready' || parsedMessage.type === 'refresh') {
-            await this.refreshInternal();
+            await this.refreshInternal(parsedMessage.type === 'refresh');
             return;
         }
 

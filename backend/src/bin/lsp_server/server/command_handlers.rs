@@ -880,6 +880,7 @@ mod tests {
         crate::types::CompletionTimelineTrace {
             trace_id: trace_id.to_string(),
             request_id: request_id.map(ToString::to_string),
+            client_probe_id: None,
             uri: "file:///timeline.bsl".to_string(),
             trigger_mode: "trigger_character".to_string(),
             outcome: outcome.to_string(),
@@ -914,7 +915,7 @@ mod tests {
             .handle_get_completion_timeline(crate::types::CompletionTimelineRequest::default())
             .await
             .expect("timeline response");
-        assert_eq!(response.version, 17);
+        assert_eq!(response.version, 18);
         assert_eq!(response.traces.len(), 200);
         assert_eq!(
             response.traces.first().map(|trace| trace.trace_id.as_str()),

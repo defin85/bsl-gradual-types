@@ -213,6 +213,7 @@ impl CompletionPreparedSnapshot {
 #[derive(Debug, Clone)]
 struct CompletionTimelineCapture {
     request_id: Option<String>,
+    client_probe_id: Option<String>,
     uri: String,
     trigger_mode: String,
     started_at_ms: u64,
@@ -259,6 +260,7 @@ impl CompletionTimelineCapture {
     ) -> Self {
         Self {
             request_id,
+            client_probe_id: None,
             uri: uri.to_string(),
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
@@ -288,6 +290,10 @@ impl CompletionTimelineCapture {
 
     fn duration_to_ms(duration: std::time::Duration) -> u64 {
         duration.as_millis().min(u64::MAX as u128) as u64
+    }
+
+    fn set_client_probe_id(&mut self, client_probe_id: &str) {
+        self.client_probe_id = Some(client_probe_id.to_string());
     }
 
     fn push_stage_ms(
@@ -744,6 +750,7 @@ impl CompletionTimelineCapture {
         crate::types::CompletionTimelineTrace {
             trace_id,
             request_id: self.request_id,
+            client_probe_id: self.client_probe_id,
             uri: self.uri,
             trigger_mode: self.trigger_mode,
             outcome: outcome.to_string(),
@@ -1165,6 +1172,11 @@ impl BslLanguageServer {
         if let Some(request_context_call_entered_at_ms) = request_context_call_entered_at_ms {
             timeline_capture
                 .set_request_context_call_entered_at_ms(request_context_call_entered_at_ms);
+        }
+        if let Some(client_probe_id) =
+            pending_request_context.and_then(|context| context.client_probe_id.as_deref())
+        {
+            timeline_capture.set_client_probe_id(client_probe_id);
         }
         if let Some(jsonrpc_dispatch_received_at_ms) =
             current_request_jsonrpc_dispatch_received_at_ms.or_else(|| {
@@ -1961,6 +1973,13 @@ impl BslLanguageServer {
                                 .ok()
                                 .unwrap_or(false)
                         });
+                    if exact_ready_before_wait {
+                        self.cleanup_completed_type_index_precompute_task_v2(
+                            file_id,
+                            Some(expected_version),
+                        )
+                        .await;
+                    }
                     if member_access_request {
                         timeline_capture.set_exact_wait_head_ready_before_wait(head_ready);
                         timeline_capture
@@ -3641,6 +3660,20 @@ mod tests {
         assert_eq!(details.service_future_to_scope_wait_ms, Some(4));
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(9));
         assert_eq!(details.transport_to_method_wait_ms, Some(14));
+    }
+
+    #[test]
+    fn completion_timeline_trace_keeps_root_level_client_probe_id() {
+        let mut capture = sample_capture();
+        capture.set_client_probe_id("probe-42");
+
+        let trace = capture.into_trace(
+            "trace-client-probe".to_string(),
+            std::time::Duration::from_millis(30),
+            "ok_non_empty",
+        );
+
+        assert_eq!(trace.client_probe_id.as_deref(), Some("probe-42"));
     }
 
     #[test]

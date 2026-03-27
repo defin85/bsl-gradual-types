@@ -10265,15 +10265,51 @@ async fn p22_get_observability_metrics_exposes_type_index_precompute_breakdown()
 async fn p22_get_completion_timeline_exposes_versioned_contract() {
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    let (mut service, mut socket) = LspService::build({
+    let (service, mut socket) = LspService::build({
         let coordinator = coordinator.clone();
         move |client| BslLanguageServer::new(client, coordinator.clone())
     })
     .finish();
+    let mut service = crate::server::request_context::DispatchContextService::new(
+        crate::server::request_context::RequestContextService::new(service),
+    );
 
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
-    initialize_lsp_service(&mut service).await;
+    let initialize_params = InitializeParams {
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+    let initialize = Request::build("initialize")
+        .id(1)
+        .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+        .finish();
+    let initialize_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(initialize)
+        .await
+        .expect("initialize request");
+    assert!(
+        initialize_response.is_some(),
+        "initialize should return a response"
+    );
+
+    let initialized = Request::build("initialized")
+        .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+        .finish();
+    let initialized_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(initialized)
+        .await
+        .expect("initialized notification");
+    assert!(
+        initialized_response.is_none(),
+        "initialized is a notification"
+    );
 
     let execute = Request::build("workspace/executeCommand")
         .id(2)
@@ -10298,7 +10334,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        17
+        18
     );
     assert!(
         result
@@ -10318,15 +10354,51 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
 
     let coordinator = Arc::new(SystemCoordinator::new());
 
-    let (mut service, mut socket) = LspService::build({
+    let (service, mut socket) = LspService::build({
         let coordinator = coordinator.clone();
         move |client| BslLanguageServer::new(client, coordinator.clone())
     })
     .finish();
+    let mut service = crate::server::request_context::DispatchContextService::new(
+        crate::server::request_context::RequestContextService::new(service),
+    );
 
     let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
 
-    initialize_lsp_service(&mut service).await;
+    let initialize_params = InitializeParams {
+        capabilities: ClientCapabilities::default(),
+        ..Default::default()
+    };
+    let initialize = Request::build("initialize")
+        .id(1)
+        .params(serde_json::to_value(initialize_params).expect("InitializeParams"))
+        .finish();
+    let initialize_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(initialize)
+        .await
+        .expect("initialize request");
+    assert!(
+        initialize_response.is_some(),
+        "initialize should return a response"
+    );
+
+    let initialized = Request::build("initialized")
+        .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+        .finish();
+    let initialized_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(initialized)
+        .await
+        .expect("initialized notification");
+    assert!(
+        initialized_response.is_none(),
+        "initialized is a notification"
+    );
 
     let uri = Url::parse("file:///completion_timeline_fixture.bsl").expect("uri");
     let did_open = DidOpenTextDocumentParams {
@@ -10349,21 +10421,17 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .expect("didOpen notification");
     assert!(did_open_response.is_none(), "didOpen is a notification");
 
-    let completion = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position::new(2, 13),
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some(".".to_string()),
-        }),
-    };
     let completion_req = Request::build("textDocument/completion")
         .id(2)
-        .params(serde_json::to_value(completion).expect("CompletionParams"))
+        .params(serde_json::json!({
+            "textDocument": { "uri": uri.as_str() },
+            "position": { "line": 2, "character": 13 },
+            "context": {
+                "triggerKind": CompletionTriggerKind::TRIGGER_CHARACTER,
+                "triggerCharacter": "."
+            },
+            "bslProbeId": "probe-p22"
+        }))
         .finish();
     let completion_response = service
         .ready()
@@ -10406,6 +10474,12 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .last()
         .and_then(|value| value.as_object())
         .expect("trace");
+    assert_eq!(
+        trace
+            .get("client_probe_id")
+            .and_then(|value| value.as_str()),
+        Some("probe-p22")
+    );
     for field in [
         "trace_id",
         "request_id",
@@ -18462,6 +18536,168 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     assert!(
         read_u64_metric(counters.get("intellisense_v2_completion_head_to_exact_upgrade_total")) > 0,
         "background exact precompute must still record head-to-exact upgrade for the same revision, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_same_version_exact_wait_keeps_completed_task_observable_until_cleanup() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _post_compute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_POST_COMPUTE_DELAY_MS",
+        "250",
+    );
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p33_same_version_completed_exact_wait.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let requested_version = 2;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: requested_version,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    server.sync_v2_globals().await;
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Completed,
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    {
+        let tasks = server.type_index_precompute_tasks_v2.lock().await;
+        let task = tasks
+            .get(&file_id)
+            .expect("completed same-version precompute task must remain observable during bounded cleanup window");
+        assert_eq!(task.supersession_key.requested_version, requested_version);
+        assert_eq!(
+            super::deps_and_precompute::TypeIndexPrecomputePhaseV2::from_atomic(
+                task.phase.load(std::sync::atomic::Ordering::Relaxed)
+            ),
+            super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Completed
+        );
+    }
+
+    let exact_wait = server
+        .wait_for_current_type_index_serve_only_ready_v2(
+            file_id,
+            Some(requested_version),
+            Duration::from_millis(40),
+        )
+        .await;
+    assert_ne!(
+        exact_wait.outcome,
+        super::deps_and_precompute::ExactTypeIndexWaitOutcomeV2::NoMatchingTask,
+        "same-version exact wait must not regress into no_matching_task while completed producer is still inside bounded cleanup window: trace={exact_wait:?}"
+    );
+    assert_eq!(
+        exact_wait.matching_task_state,
+        Some(super::deps_and_precompute::ExactTypeIndexMatchingTaskStateV2::Matching),
+        "same-version exact wait must keep observing the completed producer entry during cleanup window: trace={exact_wait:?}"
+    );
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+    assert!(
+        !server
+            .type_index_precompute_tasks_v2
+            .lock()
+            .await
+            .contains_key(&file_id),
+        "completed same-version task must clean up after exact-ready becomes observable"
     );
 
     drain_task.abort();

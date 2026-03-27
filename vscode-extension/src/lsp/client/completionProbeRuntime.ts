@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { CompletionProbeRecorder } from '../../providers/completionProbeRecorder';
 
 const COMPLETION_METHOD = 'textDocument/completion';
+const COMPLETION_PROBE_ID_FIELD = 'bslProbeId';
 const COMPLETION_PROBE_TRANSPORT_INSTRUMENTED = Symbol('completionProbeTransportInstrumented');
 
 type SendRequestLike = {
@@ -24,13 +25,19 @@ export function instrumentCompletionProbeTransport(
     client.sendRequest = async (type: unknown, ...params: unknown[]) => {
         const token = extractCancellationToken(params);
         const isCompletionRequest = resolveMethod(type) === COMPLETION_METHOD;
+        const probeId = isCompletionRequest && token
+            ? recorder.getProbeIdForToken(token)
+            : undefined;
+        const requestParams = isCompletionRequest && probeId
+            ? injectCompletionProbeId(params, probeId)
+            : params;
 
         if (isCompletionRequest && token) {
             recorder.recordCompletionLspRequestStarted(token, now());
         }
 
         try {
-            const result = await originalSendRequest(type, ...params);
+            const result = await originalSendRequest(type, ...requestParams);
             if (isCompletionRequest && token) {
                 recorder.recordCompletionLspResponseReceived(token, now());
             }
@@ -83,4 +90,20 @@ function extractCancellationToken(params: unknown[]): vscode.CancellationToken |
     }
 
     return undefined;
+}
+
+function injectCompletionProbeId(params: unknown[], probeId: string): unknown[] {
+    const nextParams = [...params];
+    const firstParam = nextParams[0];
+
+    if (firstParam && typeof firstParam === 'object' && !Array.isArray(firstParam)) {
+        nextParams[0] = {
+            ...(firstParam as Record<string, unknown>),
+            [COMPLETION_PROBE_ID_FIELD]: probeId,
+        };
+        return nextParams;
+    }
+
+    nextParams.unshift({ [COMPLETION_PROBE_ID_FIELD]: probeId });
+    return nextParams;
 }

@@ -80,6 +80,50 @@ suite('Completion Probe Runtime Test Suite', () => {
         }
     });
 
+    test('transport observer injects request-bound bslProbeId for completion requests', async () => {
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const tokenSource = new vscode.CancellationTokenSource();
+        const document = createDocument(7, 'Документы.');
+        const originalSendRequest = sinon.stub().resolves({ items: [{ label: 'Форма' }] });
+        const client = {
+            sendRequest: originalSendRequest,
+        };
+
+        const probeId = recorder.recordCompletionStarted({
+            document,
+            position: new vscode.Position(0, 'Документы.'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                triggerCharacter: '.',
+            },
+            token: tokenSource.token,
+            requestStartedAtMs: Date.now(),
+        });
+        instrumentCompletionProbeTransport(client, recorder, () => Date.now());
+
+        try {
+            await client.sendRequest(
+                { method: 'textDocument/completion' },
+                {
+                    textDocument: { uri: document.uri.toString() },
+                    position: { line: 0, character: 'Документы.'.length },
+                },
+                tokenSource.token
+            );
+
+            assert.strictEqual(originalSendRequest.callCount, 1);
+            assert.deepStrictEqual(originalSendRequest.firstCall.args[1], {
+                textDocument: { uri: document.uri.toString() },
+                position: { line: 0, character: 'Документы.'.length },
+                bslProbeId: probeId,
+            });
+        } finally {
+            tokenSource.dispose();
+        }
+    });
+
     test('selection observer forwards only bsl editor cursor moves to recorder', () => {
         const recorder = new CompletionProbeRecorder({
             store: new CompletionProbeStore(4),

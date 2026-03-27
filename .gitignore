@@ -78,6 +78,13 @@ backend/tests/perf/reports/*
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-revision-churn-completion-perf-live.md
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.json
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.md
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-openspec-validate.log
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-readiness-gate.json
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-readiness-gate.md
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-real-conf-big-revision-churn-completion-perf-live.json
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-real-conf-big-revision-churn-completion-perf-live.md
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-real-conf-big-pre-active-overlap-completion-perf-live.json
+!backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-real-conf-big-pre-active-overlap-completion-perf-live.md
 
 # Documentation build
 docs/_build/

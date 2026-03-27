@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -11,9 +13,14 @@ from pathlib import Path
 class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
+    CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    DEVELOPMENT_WORKFLOW_GUIDE = (
+        REPO_ROOT / "docs" / "guides" / "development-workflow.md"
+    )
     DOCUMENT_SYMBOL_CHANGE_ID = "refactor-document-symbol-interactive-isolation"
     OVERLAP_CHANGE_ID = "refactor-completion-superseded-active-turn-release"
     TURN_WAIT_CHANGE_ID = "refactor-completion-turn-wait-lifecycle"
+    SLOT_RELEASE_CHANGE_ID = "refactor-completion-turn-wait-slot-release"
     QUALITY_GATES = (
         REPO_ROOT
         / "openspec"
@@ -70,6 +77,86 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "perf"
         / "reports"
         / f"{TURN_WAIT_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
+    )
+    SLOT_RELEASE_ARCHITECTURAL_REVIEW = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / SLOT_RELEASE_CHANGE_ID
+        / "validation"
+        / "architectural-review.md"
+    )
+    SLOT_RELEASE_TRACEABILITY_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / SLOT_RELEASE_CHANGE_ID
+        / "validation"
+        / "traceability.md"
+    )
+    SLOT_RELEASE_GATE_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / SLOT_RELEASE_CHANGE_ID
+        / "validation"
+        / "pre-active-overlap-gate.md"
+    )
+    SLOT_RELEASE_CHURN_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json"
+    )
+    SLOT_RELEASE_CHURN_SUMMARY = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md"
+    )
+    SLOT_RELEASE_GATE_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
+    )
+    SLOT_RELEASE_GATE_SUMMARY = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.md"
+    )
+    SLOT_RELEASE_READINESS_GATE_JSON = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-readiness-gate.json"
+    )
+    SLOT_RELEASE_READINESS_GATE_MD = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-readiness-gate.md"
+    )
+    SLOT_RELEASE_OPENSPEC_LOG = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{SLOT_RELEASE_CHANGE_ID}-openspec-validate.log"
     )
 
     REQUIRED_SHIPPED_SMOKE_ARTIFACTS = [
@@ -197,6 +284,16 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         return json.loads(self.TURN_WAIT_GATE_REPORT.read_text(encoding="utf-8"))[
             "summary"
         ]
+
+    def slot_release_gate_summary(self) -> dict:
+        return json.loads(self.SLOT_RELEASE_GATE_REPORT.read_text(encoding="utf-8"))[
+            "summary"
+        ]
+
+    def slot_release_readiness_gate(self) -> dict:
+        return json.loads(
+            self.SLOT_RELEASE_READINESS_GATE_JSON.read_text(encoding="utf-8")
+        )
 
     @staticmethod
     def format_metric(value: float | int) -> str:
@@ -396,6 +493,199 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
                 "turn-wait validation doc drifted from authoritative checked-in report, "
                 f"missing snippets: {missing}"
             ),
+        )
+
+    def test_slot_release_validation_assets_are_checked_in(self) -> None:
+        required_paths = [
+            self.SLOT_RELEASE_ARCHITECTURAL_REVIEW,
+            self.SLOT_RELEASE_TRACEABILITY_DOC,
+            self.SLOT_RELEASE_GATE_DOC,
+            self.SLOT_RELEASE_CHURN_REPORT,
+            self.SLOT_RELEASE_CHURN_SUMMARY,
+            self.SLOT_RELEASE_GATE_REPORT,
+            self.SLOT_RELEASE_GATE_SUMMARY,
+            self.SLOT_RELEASE_READINESS_GATE_JSON,
+            self.SLOT_RELEASE_READINESS_GATE_MD,
+            self.SLOT_RELEASE_OPENSPEC_LOG,
+        ]
+        missing = [str(path.relative_to(self.REPO_ROOT)) for path in required_paths if not path.exists()]
+        self.assertFalse(
+            missing,
+            (
+                "slot-release readiness bundle is incomplete; missing checked-in assets: "
+                f"{missing}"
+            ),
+        )
+
+    def test_slot_release_generated_readiness_assets_are_not_gitignored(self) -> None:
+        tracked_artifacts = [
+            self.SLOT_RELEASE_CHURN_SUMMARY,
+            self.SLOT_RELEASE_GATE_SUMMARY,
+            self.SLOT_RELEASE_READINESS_GATE_JSON,
+            self.SLOT_RELEASE_READINESS_GATE_MD,
+            self.SLOT_RELEASE_OPENSPEC_LOG,
+        ]
+        ignored = []
+        for path in tracked_artifacts:
+            relative_path = str(path.relative_to(self.REPO_ROOT))
+            result = subprocess.run(
+                ["git", "check-ignore", "-q", relative_path],
+                cwd=self.REPO_ROOT,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                ignored.append(relative_path)
+        self.assertFalse(
+            ignored,
+            (
+                "slot-release readiness assets must be commit-able, but git still ignores: "
+                f"{ignored}"
+            ),
+        )
+
+    def test_slot_release_validation_doc_matches_checked_in_report(self) -> None:
+        content = self.SLOT_RELEASE_GATE_DOC.read_text(encoding="utf-8")
+        summary = self.slot_release_gate_summary()
+        expected_snippets = [
+            "./scripts/validate-completion-turn-wait-slot-release.sh",
+            (
+                f"CHANGE_ID={self.SLOT_RELEASE_CHANGE_ID} "
+                "./scripts/validate-v2-completion-gates.sh"
+            ),
+            f"`{summary['measured_first_cancelled_or_superseded_traces']}`",
+            f"`{summary['measured_first_empty_response_samples']}`",
+            f"`{summary['measured_first_registry_cleared_samples']}`",
+            f"`{summary['measured_first_pre_active_turn_wait_ready_traces']}`",
+            f"`{summary['measured_stranded_pre_active_turn_wait_samples']}`",
+            f"`{summary['measured_second_non_empty_samples']}`",
+            f"`{summary['measured_second_transport_slot_released_samples']}`",
+            f"`{summary['measured_second_slot_release_before_turn_wait_samples']}`",
+            f"`{summary['measured_head_hit_traces']}` `head_hit`",
+            f"`{summary['measured_exact_hit_traces']}` `exact_hit`",
+            f"`prepare_timeout` delta: `{summary['measured_prepare_timeout_total_delta']}`",
+            f"`exact_deadline` delta: `{summary['measured_exact_deadline_total_delta']}`",
+            f"`cancelled` delta: `{summary['measured_cancelled_total_delta']}`",
+            f"`fail_closed` delta: `{summary['measured_fail_closed_total_delta']}`",
+            (
+                "`p95(transport_to_slot_release_wait_ms)="
+                f"{self.format_metric(summary['measured_transport_to_slot_release_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(transport_to_slot_release_wait_ms)="
+                f"{summary['measured_transport_to_slot_release_wait_max_ms']}ms`"
+            ),
+            (
+                "`p95(service_future_to_first_poll_wait_ms)="
+                f"{self.format_metric(summary['measured_service_future_to_first_poll_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(service_future_to_first_poll_wait_ms)="
+                f"{summary['measured_service_future_to_first_poll_wait_max_ms']}ms`"
+            ),
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in content]
+        self.assertFalse(
+            missing,
+            (
+                "slot-release validation doc drifted from authoritative checked-in report, "
+                f"missing snippets: {missing}"
+            ),
+        )
+
+    def test_slot_release_readiness_gate_references_checked_in_artifacts(self) -> None:
+        gate = self.slot_release_readiness_gate()
+        self.assertEqual(gate["change_id"], self.SLOT_RELEASE_CHANGE_ID)
+        self.assertTrue(gate["pass"], "slot-release readiness gate must stay green")
+        real_module_gates = gate["real_module_gates"]
+        self.assertEqual(
+            real_module_gates["churn"]["report"],
+            f"tests/perf/reports/{self.SLOT_RELEASE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.json",
+        )
+        self.assertEqual(
+            real_module_gates["churn"]["summary"],
+            f"tests/perf/reports/{self.SLOT_RELEASE_CHANGE_ID}-real-conf-big-revision-churn-completion-perf-live.md",
+        )
+        self.assertEqual(
+            real_module_gates["preactive_overlap"]["report"],
+            f"tests/perf/reports/{self.SLOT_RELEASE_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json",
+        )
+        self.assertEqual(
+            real_module_gates["preactive_overlap"]["summary"],
+            f"tests/perf/reports/{self.SLOT_RELEASE_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.md",
+        )
+
+    def test_slot_release_raw_gate_defaults_use_current_change_id(self) -> None:
+        core_tests = (
+            self.REPO_ROOT
+            / "backend"
+            / "src"
+            / "bin"
+            / "lsp_server"
+            / "server"
+            / "core"
+            / "tests.rs"
+        ).read_text(encoding="utf-8")
+        p38_pattern = re.compile(
+            r'PROFILE_NAME:\s*&str\s*=\s*"p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";'
+            r'.*?let change_id = std::env::var\("CHANGE_ID"\)\s*'
+            r'\.unwrap_or_else\(\|_\| "refactor-completion-turn-wait-slot-release"\.to_string\(\)\);',
+            re.DOTALL,
+        )
+        p41_pattern = re.compile(
+            r'PROFILE_NAME:\s*&str\s*=\s*"p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live";'
+            r'.*?let change_id = std::env::var\("CHANGE_ID"\)\s*'
+            r'\.unwrap_or_else\(\|_\| "refactor-completion-turn-wait-slot-release"\.to_string\(\)\);',
+            re.DOTALL,
+        )
+        self.assertRegex(
+            core_tests,
+            p38_pattern,
+            "p38 raw representative gate must default to slot-release change-id",
+        )
+        self.assertRegex(
+            core_tests,
+            p41_pattern,
+            "p41 raw representative gate must default to slot-release change-id",
+        )
+
+    def test_slot_release_ci_wiring_tracks_wrapper_and_artifacts(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            workflow.count("scripts/validate-completion-turn-wait-slot-release.sh"),
+            2,
+            "CI path filters must watch slot-release wrapper on pull_request and push",
+        )
+        expected_snippets = [
+            "CHANGE_ID: refactor-completion-turn-wait-slot-release",
+            (
+                "BSL_V2_REAL_CONF_BIG_REVISION_CHURN_COMPLETION_PERF_REPORT: "
+                "${{ github.workspace }}/backend/tests/perf/reports/"
+                "refactor-completion-turn-wait-slot-release-real-conf-big-"
+                "revision-churn-completion-perf-live.json"
+            ),
+            (
+                "BSL_V2_REAL_CONF_BIG_PRE_ACTIVE_OVERLAP_COMPLETION_PERF_REPORT: "
+                "${{ github.workspace }}/backend/tests/perf/reports/"
+                "refactor-completion-turn-wait-slot-release-real-conf-big-"
+                "pre-active-overlap-completion-perf-live.json"
+            ),
+            "backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-*.json",
+            "backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-*.md",
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in workflow]
+        self.assertFalse(
+            missing,
+            f"CI workflow is missing slot-release readiness wiring: {missing}",
+        )
+
+    def test_slot_release_development_workflow_mentions_wrapper(self) -> None:
+        workflow_guide = self.DEVELOPMENT_WORKFLOW_GUIDE.read_text(encoding="utf-8")
+        self.assertIn(
+            "./scripts/validate-completion-turn-wait-slot-release.sh",
+            workflow_guide,
+            "development workflow guide must list the canonical slot-release wrapper",
         )
 
 

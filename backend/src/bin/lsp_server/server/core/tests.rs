@@ -22596,7 +22596,7 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     const PROFILE_NAME: &str =
         "p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";
     let change_id = std::env::var("CHANGE_ID")
-        .unwrap_or_else(|_| "refactor-current-revision-readiness-fast-lane".to_string());
+        .unwrap_or_else(|_| "refactor-completion-turn-wait-slot-release".to_string());
     const WARMUP_REQUESTS: usize = 1;
     const MEASURE_REQUESTS: usize = 10;
     const DID_CHANGE_BURST_NOTIFICATIONS: usize = 4;
@@ -24295,7 +24295,7 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
         const STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS: u64 = 500;
         const PRE_ACTIVE_TURN_WAIT_DELAY_MS: u64 = 300;
         let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-completion-turn-wait-lifecycle".to_string());
+            .unwrap_or_else(|_| "refactor-completion-turn-wait-slot-release".to_string());
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {

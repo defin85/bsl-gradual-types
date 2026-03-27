@@ -119,6 +119,7 @@ npm --prefix ./vscode-extension test
 ./scripts/run-intellisense-perf.sh
 ./scripts/validate-v2-completion-gates.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
+./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
 ```
 

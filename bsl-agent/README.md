@@ -90,6 +90,10 @@ NO_COLOR=true trunk build --release
 
 Then build `bsl-agent` as usual.
 
+The canonical repository smoke path `./scripts/run-intellisense-tests.sh smoke`
+rebuilds `target/site/` automatically when the embedded UI assets are missing,
+as long as `trunk` and the `wasm32-unknown-unknown` target are available.
+
 ## Repo policy check
 
 CI enforces crate boundaries (no `bsl-agent` -> `bsl-backend` dependency) via `scripts/check-bsl-agent-backend-dep.sh`.

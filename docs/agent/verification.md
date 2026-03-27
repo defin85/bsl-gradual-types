@@ -5,7 +5,7 @@
 - Rust toolchain для workspace команд
 - Node.js для `vscode-extension/`
 - `cargo`, `python3`, `npm`
-- `trunk` нужен только для frontend/WASM сборок
+- `trunk` нужен для frontend/WASM сборок и для `./scripts/run-intellisense-tests.sh smoke`, если `target/site/` ещё не собран
 - Syntax Helper и config dump нужны только для сценариев, где они явно указаны
 
 ## Runtime Surface Smoke
@@ -44,6 +44,7 @@ Expected outcome:
 - shipped smoke selectors и readiness assets согласованы
 - shipped completion supersession smoke retains branch-level `p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint` proof alongside the response-build regression
 - cross-adapter smoke suite проходит без внешних фикстур
+- если `target/site/index.html` отсутствует, smoke script сам собирает embedded `bsl-agent` UI assets через `trunk build --release`
 
 ## Manual Or Broader Validation
 

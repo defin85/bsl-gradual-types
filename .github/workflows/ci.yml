@@ -175,7 +175,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install tailwindcss
+        run: npm install -g tailwindcss@3.4.0
+      - name: Install trunk
+        run: cargo install trunk --locked
       - name: Validate IntelliSense smoke contract
         run: python3 -m unittest scripts/test-intellisense-smoke-gate.py
       - name: Validate IntelliSense readiness asset sync

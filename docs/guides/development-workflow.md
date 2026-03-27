@@ -38,6 +38,9 @@ python3 -m unittest \
 ./scripts/run-intellisense-tests.sh smoke
 ```
 
+Если `target/site/index.html` отсутствует, `./scripts/run-intellisense-tests.sh smoke`
+сначала пересоберёт embedded `bsl-agent` UI assets через `trunk build --release`.
+
 ## Rust verification
 
 ```bash

@@ -24,6 +24,28 @@ report_m8() {
   fi
 }
 
+ensure_embedded_ui_assets() {
+  local site_index="${ROOT_DIR}/target/site/index.html"
+  if [[ -f "${site_index}" ]]; then
+    return 0
+  fi
+
+  if ! command -v trunk >/dev/null 2>&1; then
+    echo "default smoke path requires embedded bsl-agent UI assets, but trunk is not available." >&2
+    echo "Install trunk and build the frontend, e.g.:" >&2
+    echo "  cargo install trunk --locked" >&2
+    echo "  rustup target add wasm32-unknown-unknown" >&2
+    echo "  (cd frontend && NO_COLOR=true trunk build --release)" >&2
+    exit 1
+  fi
+
+  echo "target/site/index.html is missing; rebuilding embedded bsl-agent UI assets via trunk..."
+  (
+    cd "${ROOT_DIR}/frontend"
+    NO_COLOR=true trunk build --release
+  )
+}
+
 run_cross_adapter_smoke() {
   # Default-path acceptance slices that exercise shipped runtime wiring across adapters.
   cargo test -p bsl-backend --bin bsl-lsp-server p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics -- --nocapture
@@ -113,6 +135,7 @@ run_extension_completion_observability_smoke() {
 }
 
 run_smoke() {
+  ensure_embedded_ui_assets
   cargo test -p bsl-backend --lib completion_ranking
   cargo test -p bsl-backend --lib completion_service
   cargo test -p bsl-backend --test intellisense_testkit_smoke_test

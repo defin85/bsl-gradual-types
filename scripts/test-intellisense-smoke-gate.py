@@ -83,6 +83,19 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             ),
         )
 
+    def test_smoke_script_builds_embedded_ui_assets_when_missing(self) -> None:
+        content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            "target/site/index.html",
+            content,
+            "default smoke path must check for embedded bsl-agent UI assets",
+        )
+        self.assertIn(
+            "trunk build --release",
+            content,
+            "default smoke path must rebuild embedded UI assets when target/site is absent",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

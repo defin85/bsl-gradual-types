@@ -157,22 +157,22 @@ jobs:
             change_root="openspec/changes/${change_id}"
             governance_root="${change_root}/governance"
             if [[ ! -f "${governance_root}/change_criticality.json" ]]; then
-              echo "Skipping ${change_id}: governance artifacts are missing."
-              continue
+              echo "Missing ${change_id}: governance artifacts are required."
+              exit 1
             fi
             python3 scripts/check-openspec-change-governance.py \
               --change-id "${change_id}"
             manifest="${governance_root}/protected_assets_manifest.txt"
             override="${governance_root}/protected_assets_override.json"
-            if [[ -f "${manifest}" ]]; then
-              python3 scripts/check-protected-assets-gate.py \
-                --change-id "${change_id}" \
-                --manifest "${manifest}" \
-                --override "${override}" \
-                --base-ref "${{ steps.protected_base_ref.outputs.value }}"
-            else
-              echo "Skipping protected-assets gate for ${change_id}: manifest missing."
+            if [[ ! -f "${manifest}" ]]; then
+              echo "Missing protected-assets manifest for ${change_id}."
+              exit 1
             fi
+            python3 scripts/check-protected-assets-gate.py \
+              --change-id "${change_id}" \
+              --manifest "${manifest}" \
+              --override "${override}" \
+              --base-ref "${{ steps.protected_base_ref.outputs.value }}"
           done
 
   agent_readiness_docs_gate:

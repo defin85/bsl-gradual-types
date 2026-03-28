@@ -60,6 +60,18 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
         ):
             self.assertIn(required_snippet, self.content)
 
+    def test_active_ci_workflow_fails_closed_when_governance_artifacts_are_missing(self) -> None:
+        for required_snippet in (
+            'if [[ ! -f "${governance_root}/change_criticality.json" ]]; then',
+            'echo "Missing ${change_id}: governance artifacts are required."',
+            'exit 1',
+            'if [[ ! -f "${manifest}" ]]; then',
+            'echo "Missing protected-assets manifest for ${change_id}."',
+        ):
+            self.assertIn(required_snippet, self.content)
+        self.assertNotIn("Skipping ${change_id}: governance artifacts are missing.", self.content)
+        self.assertNotIn("Skipping protected-assets gate for ${change_id}: manifest missing.", self.content)
+
     def test_active_ci_workflow_runs_agent_readiness_docs_gate(self) -> None:
         for required_snippet in (
             "agent_readiness_docs_gate:",

@@ -71,6 +71,10 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
             "role review evidence\n",
             encoding="utf-8",
         )
+        (validation_root / "traceability.md").write_text(
+            "Status: `covered`\n",
+            encoding="utf-8",
+        )
 
         (governance_root / "change_criticality.json").write_text(
             json.dumps(
@@ -131,6 +135,12 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
                 {
                     "schema_version": "v1",
                     "change_id": self.CHANGE_ID,
+                    "traceability_ref": (
+                        f"openspec/changes/{self.CHANGE_ID}/validation/traceability.md"
+                    ),
+                    "protected_assets_manifest_ref": (
+                        f"openspec/changes/{self.CHANGE_ID}/governance/protected_assets_manifest.txt"
+                    ),
                     "dependencies": [
                         {"id": "D1", "requires": ["2.1", "2.2"], "blocked": ["3.1"]},
                         {
@@ -371,6 +381,36 @@ class OpenSpecGovernanceScriptTest(unittest.TestCase):
             (change_root / "validation" / "acceptance_matrix.md").unlink()
             completed = self.run_gate(repo_root, expected_exit=1)
             self.assertIn("doc_first_contract_missing", completed.stderr)
+
+    def test_fails_when_dependency_checks_missing_traceability_ref(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-deps-traceability-missing-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            deps_path = change_root / "governance" / "dependency_checks.json"
+            payload = json.loads(deps_path.read_text(encoding="utf-8"))
+            payload.pop("traceability_ref", None)
+            deps_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            completed = self.run_gate(repo_root, expected_exit=1)
+            self.assertIn("doc_first_contract_missing", completed.stderr)
+            self.assertIn("traceability_ref", completed.stderr)
+
+    def test_fails_when_dependency_checks_missing_protected_assets_manifest_ref(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="governance-deps-manifest-missing-") as tmp_dir:
+            repo_root = Path(tmp_dir)
+            change_root = self.seed_valid_change(repo_root)
+            deps_path = change_root / "governance" / "dependency_checks.json"
+            payload = json.loads(deps_path.read_text(encoding="utf-8"))
+            payload.pop("protected_assets_manifest_ref", None)
+            deps_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            completed = self.run_gate(repo_root, expected_exit=1)
+            self.assertIn("doc_first_contract_missing", completed.stderr)
+            self.assertIn("protected_assets_manifest_ref", completed.stderr)
 
     def test_fails_when_adr_not_accepted(self) -> None:
         with tempfile.TemporaryDirectory(prefix="governance-adr-status-") as tmp_dir:

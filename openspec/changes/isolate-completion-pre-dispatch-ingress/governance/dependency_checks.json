@@ -1,6 +1,8 @@
 {
   "schema_version": "v1",
   "change_id": "isolate-completion-pre-dispatch-ingress",
+  "traceability_ref": "openspec/changes/isolate-completion-pre-dispatch-ingress/validation/traceability.md",
+  "protected_assets_manifest_ref": "openspec/changes/isolate-completion-pre-dispatch-ingress/governance/protected_assets_manifest.txt",
   "dependencies": [
     {
       "id": "D1",

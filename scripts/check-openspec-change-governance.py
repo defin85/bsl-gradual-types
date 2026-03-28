@@ -238,6 +238,16 @@ def validate_evidence_ref(
     return resolved
 
 
+def repo_root_from_artifact_path(path: Path) -> Path:
+    for candidate in (path.resolve(), *path.resolve().parents):
+        if (candidate / "openspec").exists():
+            return candidate
+    raise GateError(
+        "doc_first_contract_missing: "
+        f"unable to resolve repository root for {path}"
+    )
+
+
 def normalize_readiness_token(value: str) -> str:
     normalized = value.strip().strip("`'\"").lower()
     normalized = re.sub(r"[^a-z0-9]+", "_", normalized).strip("_")
@@ -538,6 +548,31 @@ def validate_dependency_checks(path: Path, expected_change_id: str, tasks_path: 
         payload.get("change_id") == expected_change_id,
         f"doc_first_contract_missing: {path} change_id mismatch",
     )
+    repo_root = repo_root_from_artifact_path(path)
+    change_root = path.parent.parent
+    for field_name in ("traceability_ref", "protected_assets_manifest_ref"):
+        raw_ref = payload.get(field_name)
+        ensure(
+            isinstance(raw_ref, str) and raw_ref.strip(),
+            f"doc_first_contract_missing: {path} {field_name} is required",
+        )
+        evidence_path = validate_evidence_ref(
+            repo_root,
+            raw_ref,
+            field_name=field_name,
+            reason_code="doc_first_contract_missing",
+            source_path=path,
+        )
+        ensure(
+            evidence_path is not None,
+            f"doc_first_contract_missing: {path} {field_name} must point to a repository file",
+        )
+        ensure_path_within(
+            evidence_path,
+            change_root,
+            reason_code="doc_first_contract_missing",
+            message=f"{path} {field_name} must point inside change root",
+        )
     dependencies = payload.get("dependencies")
     ensure(
         isinstance(dependencies, list) and dependencies,

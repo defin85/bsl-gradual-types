@@ -826,6 +826,56 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('legacy payload without adapter boundary should fall back to transport_received_at_ms for client correlation', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                server_edge_details: {
+                    transport_received_at_ms: 1_700_000_000_120,
+                    transport_received_at_ms_provenance: 'request_context_call_entry',
+                    pre_method_attribution_provenance: 'same_request_authoritative',
+                    method_entered_at_ms: 1_700_000_000_160,
+                    handler_entered_at_ms: 1_700_000_000_160,
+                    response_sent_at_ms: 1_700_000_000_240,
+                    transport_to_method_wait_ms: 40,
+                    method_prelude_exec_ms: 0,
+                    transport_to_handler_wait_ms: 40,
+                    server_handler_exec_ms: 80,
+                },
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-legacy-fallback',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_response_received_at_ms: 1_700_000_000_241,
+                    request_completed_at_ms: 1_700_000_000_242,
+                    client_duration_ms: 242,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.requests[0].adapter_read_at_ms, undefined);
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-legacy-fallback');
+        assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 120);
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('adapter_before_dispatch_dominant'));
+        assert.ok(bundle.summaryMarkdown.includes('correlation=correlated:probe-legacy-fallback'));
+    });
+
     test('pre-dispatch adapter backlog should not be published as client ingress verdict', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {

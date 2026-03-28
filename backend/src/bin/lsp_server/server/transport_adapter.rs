@@ -13,19 +13,17 @@ use tokio::io::{
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 use tower::Service;
-use tower_lsp::jsonrpc::{Error, Id, Request, Response};
+use tower_lsp::jsonrpc::{Error, ErrorCode, Id, Request, Response};
 use tower_lsp::Loopback;
 use tracing::error;
 
 const MESSAGE_QUEUE_SIZE: usize = 100;
 const CONTROL_QUEUE_SIZE: usize = 16;
 const COMPLETION_METHOD: &str = "textDocument/completion";
-const EXECUTE_COMMAND_METHOD: &str = "workspace/executeCommand";
 const CANCEL_REQUEST_METHOD: &str = "$/cancelRequest";
 const SHUTDOWN_METHOD: &str = "shutdown";
 const EXIT_METHOD: &str = "exit";
-const COMPLETION_TIMELINE_COMMAND: &str = "bsl.getCompletionTimeline";
-const OBSERVABILITY_METRICS_COMMAND: &str = "bsl.getObservabilityMetrics";
+const GENERAL_BACKPRESSURE_ERROR_CODE: i64 = -32001;
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 #[serde(untagged)]
@@ -202,23 +200,63 @@ impl AdmissionQueues {
         !(state.control.is_empty() && state.completion.is_empty() && state.general.is_empty())
     }
 
+    fn queue_for_lane(
+        state: &AdmissionQueuesState,
+        lane: AdmissionLane,
+    ) -> &std::collections::VecDeque<ScheduledRequest> {
+        match lane {
+            AdmissionLane::Control => &state.control,
+            AdmissionLane::Completion => &state.completion,
+            AdmissionLane::General => &state.general,
+        }
+    }
+
     async fn enqueue(&self, scheduled_request: ScheduledRequest) -> bool {
-        let lane = scheduled_request.lane;
         let mut scheduled_request = Some(scheduled_request);
         loop {
+            match self.try_enqueue(scheduled_request.take().expect("scheduled request")) {
+                Ok(()) => return true,
+                Err(TryEnqueueError::Closed) => return false,
+                Err(TryEnqueueError::Full(request)) => {
+                    scheduled_request = Some(request);
+                    let notified = self.space_notify.notified();
+                    notified.await;
+                }
+            }
+        }
+    }
+
+    fn try_enqueue(&self, scheduled_request: ScheduledRequest) -> Result<(), TryEnqueueError> {
+        let lane = scheduled_request.lane;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.closed {
+            return Err(TryEnqueueError::Closed);
+        }
+        let lane_capacity = self.lane_capacity(lane);
+        let queue = Self::queue_for_lane_mut(&mut state, lane);
+        if queue.len() < lane_capacity {
+            queue.push_back(scheduled_request);
+            self.item_notify.notify_waiters();
+            Ok(())
+        } else {
+            Err(TryEnqueueError::Full(scheduled_request))
+        }
+    }
+
+    async fn wait_for_space_in_lane_or_closed(&self, lane: AdmissionLane) -> bool {
+        loop {
             let notified = {
-                let mut state = self
+                let state = self
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if state.closed {
                     return false;
                 }
-                let lane_capacity = self.lane_capacity(lane);
-                let queue = Self::queue_for_lane_mut(&mut state, lane);
-                if queue.len() < lane_capacity {
-                    queue.push_back(scheduled_request.take().expect("scheduled request"));
-                    self.item_notify.notify_waiters();
+                if Self::queue_for_lane(&state, lane).len() < self.lane_capacity(lane) {
                     return true;
                 }
                 self.space_notify.notified()
@@ -296,14 +334,83 @@ impl AdmissionQueues {
         self.item_notify.notify_waiters();
         self.space_notify.notify_waiters();
     }
+
+    #[cfg(test)]
+    fn lane_depth(&self, lane: AdmissionLane) -> usize {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self::queue_for_lane(&state, lane).len()
+    }
+}
+
+enum TryEnqueueError {
+    Closed,
+    Full(ScheduledRequest),
 }
 
 pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     stdin: I,
     stdout: O,
     socket: L,
+    service: S,
+    concurrency_level: usize,
+) where
+    I: AsyncRead + Unpin,
+    O: AsyncWrite + Unpin,
+    L: Loopback,
+    <L::ResponseSink as Sink<Response>>::Error: std::error::Error + Send + Sync + 'static,
+    S: Service<Request, Response = Option<Response>> + Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Future: Send + 'static,
+{
+    serve_with_completion_handoff_with_capacities(
+        stdin,
+        stdout,
+        socket,
+        service,
+        concurrency_level,
+        AdmissionQueueCapacities::default(),
+    )
+    .await;
+}
+
+async fn serve_with_completion_handoff_with_capacities<I, O, L, S>(
+    stdin: I,
+    stdout: O,
+    socket: L,
+    service: S,
+    concurrency_level: usize,
+    admission_queue_capacities: AdmissionQueueCapacities,
+) where
+    I: AsyncRead + Unpin,
+    O: AsyncWrite + Unpin,
+    L: Loopback,
+    <L::ResponseSink as Sink<Response>>::Error: std::error::Error + Send + Sync + 'static,
+    S: Service<Request, Response = Option<Response>> + Send + 'static,
+    S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
+    S::Future: Send + 'static,
+{
+    let admission_queues = AdmissionQueues::new(admission_queue_capacities);
+    serve_with_completion_handoff_with_admission_queues(
+        stdin,
+        stdout,
+        socket,
+        service,
+        concurrency_level,
+        admission_queues,
+    )
+    .await;
+}
+
+async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
+    stdin: I,
+    stdout: O,
+    socket: L,
     mut service: S,
     concurrency_level: usize,
+    admission_queues: AdmissionQueues,
 ) where
     I: AsyncRead + Unpin,
     O: AsyncWrite + Unpin,
@@ -321,7 +428,6 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     let (mut completion_tasks_tx, completion_tasks_rx) =
         mpsc::channel::<CompletionHandoffTask>(MESSAGE_QUEUE_SIZE);
     let transport_shutdown = std::sync::Arc::new(Notify::new());
-    let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities::default());
 
     let responses_tx_for_server_tasks = responses_tx.clone();
     let process_server_tasks = async move {
@@ -479,10 +585,31 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     let client_abort_for_input = client_abort;
     let read_input = async move {
         let mut stdin = BufReader::new(stdin);
+        let mut pending_general_request = None;
 
         loop {
+            if let Some(staged_general_request) = pending_general_request.take() {
+                match admission_queues_for_input.try_enqueue(staged_general_request) {
+                    Ok(()) => {}
+                    Err(TryEnqueueError::Closed) => {
+                        error!("transport admission queue closed unexpectedly");
+                        break;
+                    }
+                    Err(TryEnqueueError::Full(request)) => {
+                        pending_general_request = Some(request);
+                    }
+                }
+            }
+
             let read_result = tokio::select! {
                 _ = transport_shutdown_for_input.notified() => break,
+                lane_has_space = admission_queues_for_input.wait_for_space_in_lane_or_closed(AdmissionLane::General), if pending_general_request.is_some() => {
+                    if !lane_has_space {
+                        error!("transport admission queue closed unexpectedly");
+                        break;
+                    }
+                    continue;
+                }
                 read_result = read_transport_message(&mut stdin) => read_result,
             };
             match read_result {
@@ -496,14 +623,35 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
                             Some(adapter_read_at_ms),
                         );
                     }
-                    if !admission_queues_for_input
-                        .enqueue(ScheduledRequest {
-                            lane: classify_admission_lane(&request),
-                            request_id,
-                            request,
-                        })
-                        .await
-                    {
+                    let scheduled_request = ScheduledRequest {
+                        lane: classify_admission_lane(&request),
+                        request_id,
+                        request,
+                    };
+                    if matches!(scheduled_request.lane, AdmissionLane::General) {
+                        if pending_general_request.is_some() {
+                            if reject_saturated_general_request(
+                                &mut responses_tx,
+                                scheduled_request,
+                            )
+                            .await
+                            .is_err()
+                            {
+                                break;
+                            }
+                            continue;
+                        }
+                        match admission_queues_for_input.try_enqueue(scheduled_request) {
+                            Ok(()) => {}
+                            Err(TryEnqueueError::Closed) => {
+                                error!("transport admission queue closed unexpectedly");
+                                break;
+                            }
+                            Err(TryEnqueueError::Full(request)) => {
+                                pending_general_request = Some(request);
+                            }
+                        }
+                    } else if !admission_queues_for_input.enqueue(scheduled_request).await {
                         error!("transport admission queue closed unexpectedly");
                         break;
                     }
@@ -546,7 +694,7 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
 fn classify_admission_lane(request: &Request) -> AdmissionLane {
     if is_control_request(request) {
         AdmissionLane::Control
-    } else if is_completion_request(request) || is_completion_observability_request(request) {
+    } else if is_completion_request(request) {
         AdmissionLane::Completion
     } else {
         AdmissionLane::General
@@ -555,21 +703,6 @@ fn classify_admission_lane(request: &Request) -> AdmissionLane {
 
 fn is_completion_request(request: &Request) -> bool {
     request.method() == COMPLETION_METHOD && request.id().is_some()
-}
-
-fn is_completion_observability_request(request: &Request) -> bool {
-    request.method() == EXECUTE_COMMAND_METHOD
-        && request.id().is_some()
-        && request
-            .params()
-            .and_then(|params| params.get("command"))
-            .and_then(|command| command.as_str())
-            .is_some_and(|command| {
-                matches!(
-                    command,
-                    COMPLETION_TIMELINE_COMMAND | OBSERVABILITY_METRICS_COMMAND
-                )
-            })
 }
 
 fn is_control_request(request: &Request) -> bool {
@@ -627,6 +760,40 @@ async fn cancel_queued_completion_before_dispatch(
         .is_err()
     {
         error!("failed to forward queued pre-dispatch cancellation response: transport closed");
+        return Err(());
+    }
+    Ok(())
+}
+
+fn general_backpressure_error(method: &str) -> Error {
+    Error {
+        code: ErrorCode::ServerError(GENERAL_BACKPRESSURE_ERROR_CODE),
+        message: format!("General admission queue saturated before dispatch for {method}").into(),
+        data: None,
+    }
+}
+
+async fn reject_saturated_general_request(
+    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    scheduled_request: ScheduledRequest,
+) -> Result<(), ()> {
+    let Some(id) = scheduled_request.request.id().cloned() else {
+        error!(
+            "general admission queue saturated before dispatch for notification {}",
+            scheduled_request.request.method()
+        );
+        return Err(());
+    };
+    let response = Response::from_error(
+        id,
+        general_backpressure_error(scheduled_request.request.method()),
+    );
+    if responses_tx
+        .send(TransportMessage::Response(response))
+        .await
+        .is_err()
+    {
+        error!("failed to forward general backpressure response: transport closed");
         return Err(());
     }
     Ok(())
@@ -1042,6 +1209,75 @@ mod tests {
                         )))
                     }
                     CANCEL_REQUEST_METHOD => Ok(None),
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct GeneralBackpressureState {
+        ready_release: AtomicBool,
+        ready_blocked: Notify,
+        ready_waker: Mutex<Option<std::task::Waker>>,
+        call_order: Mutex<Vec<i64>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct GeneralBackpressureService {
+        state: Arc<GeneralBackpressureState>,
+    }
+
+    impl Service<Request> for GeneralBackpressureService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.state.ready_release.load(Ordering::SeqCst) {
+                Poll::Ready(Ok(()))
+            } else {
+                let mut ready_waker = self
+                    .state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *ready_waker = Some(cx.waker().clone());
+                self.state.ready_blocked.notify_waiters();
+                Poll::Pending
+            }
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let state = self.state.clone();
+            let numeric_request_id = request_id
+                .as_ref()
+                .and_then(|id| match id {
+                    Id::Number(value) => Some(*value),
+                    _ => None,
+                })
+                .expect("numeric request id");
+            state
+                .call_order
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push(numeric_request_id);
+            Box::pin(async move {
+                match method.as_str() {
+                    "textDocument/completion" => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("completion request id"),
+                        json!({ "items": [{ "label": "priority" }], "isIncomplete": false }),
+                    ))),
+                    "textDocument/documentSymbol" => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("documentSymbol request id"),
+                        json!({ "kind": "general" }),
+                    ))),
                     _ => Ok(Some(JsonRpcResponse::from_ok(
                         request_id.expect("request id"),
                         json!({ "capabilities": {} }),
@@ -1565,7 +1801,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_prioritises_completion_observability_execute_commands() {
+    async fn transport_adapter_keeps_completion_observability_execute_commands_in_general_lane() {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -1599,9 +1835,10 @@ mod tests {
             json!({
                 "jsonrpc": "2.0",
                 "id": 2,
-                "method": "textDocument/documentSymbol",
+                "method": "textDocument/completion",
                 "params": {
-                    "textDocument": { "uri": "file:///priority-general-2.bsl" }
+                    "textDocument": { "uri": "file:///priority-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
                 }
             }),
             json!({
@@ -1611,15 +1848,6 @@ mod tests {
                 "params": {
                     "command": "bsl.getCompletionTimeline",
                     "arguments": [{ "limit": 10 }]
-                }
-            }),
-            json!({
-                "jsonrpc": "2.0",
-                "id": 4,
-                "method": "workspace/executeCommand",
-                "params": {
-                    "command": "bsl.getObservabilityMetrics",
-                    "arguments": [{ "shape": "full" }]
                 }
             }),
         ] {
@@ -1666,28 +1894,225 @@ mod tests {
         .await
         .expect("third response timeout");
 
-        let first_three_ids = [
+        let first_two_ids = [
             first_response.get("id").and_then(|value| value.as_i64()),
             second_response.get("id").and_then(|value| value.as_i64()),
-            third_response.get("id").and_then(|value| value.as_i64()),
         ];
         assert!(
-            first_three_ids.contains(&Some(1))
-                && first_three_ids.contains(&Some(3))
-                && first_three_ids.contains(&Some(4)),
-            "completion observability executeCommand requests must outrun queued general backlog, first={first_response:?}, second={second_response:?}, third={third_response:?}"
+            first_two_ids.contains(&Some(1)) && first_two_ids.contains(&Some(2)),
+            "completion must outrun queued general executeCommand backlog, first={first_response:?}, second={second_response:?}"
+        );
+        assert_eq!(
+            third_response.get("id").and_then(|value| value.as_i64()),
+            Some(3)
         );
 
-        priority_state.general_release.notify_waiters();
-        let fourth_response = tokio::time::timeout(
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_preserves_completion_progress_when_general_lane_is_saturated() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let backpressure_state = Arc::new(GeneralBackpressureState::default());
+        let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities {
+            control: 2,
+            completion: 2,
+            general: 1,
+        });
+
+        let server_task = tokio::spawn({
+            let backpressure_state = backpressure_state.clone();
+            let admission_queues = admission_queues.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    GeneralBackpressureService {
+                        state: backpressure_state,
+                    },
+                    1,
+                    admission_queues,
+                )
+                .await;
+            }
+        });
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-1.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-2.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-3.bsl" }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while backpressure_state
+                .ready_waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+            {
+                backpressure_state.ready_blocked.notified().await;
+            }
+        })
+        .await
+        .expect("scheduler must block on general readiness gate");
+
+        let mut reader = BufReader::new(client_read);
+        let saturated_general_response = tokio::time::timeout(
             std::time::Duration::from_millis(150),
             read_framed_message(&mut reader),
         )
         .await
-        .expect("fourth response timeout");
+        .expect(
+            "bounded general backpressure must respond without waiting for scheduler readiness",
+        );
         assert_eq!(
-            fourth_response.get("id").and_then(|value| value.as_i64()),
-            Some(2)
+            saturated_general_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            Some(3)
+        );
+        assert_eq!(
+            saturated_general_response
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_i64()),
+            Some(GENERAL_BACKPRESSURE_ERROR_CODE)
+        );
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                if admission_queues.lane_depth(AdmissionLane::Completion) == 1
+                    && admission_queues.lane_depth(AdmissionLane::General) == 1
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("completion request must be read and staged before releasing scheduler readiness");
+
+        backpressure_state
+            .ready_release
+            .store(true, Ordering::SeqCst);
+        if let Some(waker) = backpressure_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                if backpressure_state
+                    .call_order
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+                    >= 2
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("completion and oldest queued general request must both reach dispatch");
+
+        let dispatch_order = backpressure_state
+            .call_order
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(
+            dispatch_order.first().copied(),
+            Some(4),
+            "completion must reach dispatch before queued general backlog once readiness is released, dispatch_order={dispatch_order:?}"
+        );
+
+        let first_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first post-release response timeout");
+        let second_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second post-release response timeout");
+        let third_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("third post-release response timeout");
+        let trailing_ids = [
+            first_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            second_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            third_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+        ];
+        assert!(
+            trailing_ids.contains(&Some(1))
+                && trailing_ids.contains(&Some(2))
+                && trailing_ids.contains(&Some(4)),
+            "bounded backpressure and interactive completion must still yield terminal responses for ids 1, 2 and 4, responses={trailing_ids:?}"
         );
 
         drop(client_write);

@@ -20,3 +20,9 @@
 
 - [x] 4.1 Обновить contracts/changelog, operator docs и readiness traceability для нового pre-dispatch split, additive semantics `adapter_read_at_ms` vs `transport_received_at_ms` и version bump `19/v16`.
 - [x] 4.2 Зафиксировать `Requirement -> Code -> Test` evidence для truthful attribution, scheduler ownership, pre-dispatch isolation и queued cancellation terminal outcome на default path.
+
+## 5. Governance dependencies
+
+- [x] D1 Зафиксировать change-local governance package и acceptance matrix как обязательный fail-closed слой перед merge.
+- [x] D2 Связать `test_first` и ownership sign-off с отдельными validation markdown refs внутри change-root.
+- [x] D3 Отразить protected assets и traceability evidence в machine-readable dependency checks.

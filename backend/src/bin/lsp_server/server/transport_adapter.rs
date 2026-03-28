@@ -20,9 +20,12 @@ use tracing::error;
 const MESSAGE_QUEUE_SIZE: usize = 100;
 const CONTROL_QUEUE_SIZE: usize = 16;
 const COMPLETION_METHOD: &str = "textDocument/completion";
+const EXECUTE_COMMAND_METHOD: &str = "workspace/executeCommand";
 const CANCEL_REQUEST_METHOD: &str = "$/cancelRequest";
 const SHUTDOWN_METHOD: &str = "shutdown";
 const EXIT_METHOD: &str = "exit";
+const COMPLETION_TIMELINE_COMMAND: &str = "bsl.getCompletionTimeline";
+const OBSERVABILITY_METRICS_COMMAND: &str = "bsl.getObservabilityMetrics";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 #[serde(untagged)]
@@ -543,7 +546,7 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
 fn classify_admission_lane(request: &Request) -> AdmissionLane {
     if is_control_request(request) {
         AdmissionLane::Control
-    } else if is_completion_request(request) {
+    } else if is_completion_request(request) || is_completion_observability_request(request) {
         AdmissionLane::Completion
     } else {
         AdmissionLane::General
@@ -552,6 +555,21 @@ fn classify_admission_lane(request: &Request) -> AdmissionLane {
 
 fn is_completion_request(request: &Request) -> bool {
     request.method() == COMPLETION_METHOD && request.id().is_some()
+}
+
+fn is_completion_observability_request(request: &Request) -> bool {
+    request.method() == EXECUTE_COMMAND_METHOD
+        && request.id().is_some()
+        && request
+            .params()
+            .and_then(|params| params.get("command"))
+            .and_then(|command| command.as_str())
+            .is_some_and(|command| {
+                matches!(
+                    command,
+                    COMPLETION_TIMELINE_COMMAND | OBSERVABILITY_METRICS_COMMAND
+                )
+            })
 }
 
 fn is_control_request(request: &Request) -> bool {
@@ -1538,6 +1556,137 @@ mod tests {
         .expect("second general response timeout");
         assert_eq!(
             third_response.get("id").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_prioritises_completion_observability_execute_commands() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let priority_state = Arc::new(PrioritySchedulerState::default());
+
+        let server_task = tokio::spawn({
+            let priority_state = priority_state.clone();
+            async move {
+                serve_with_completion_handoff(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    PrioritySchedulerService {
+                        state: priority_state,
+                    },
+                    1,
+                )
+                .await;
+            }
+        });
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-1.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-2.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "workspace/executeCommand",
+                "params": {
+                    "command": "bsl.getCompletionTimeline",
+                    "arguments": [{ "limit": 10 }]
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "workspace/executeCommand",
+                "params": {
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [{ "shape": "full" }]
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while !priority_state.general_inflight.load(Ordering::SeqCst) {
+                priority_state.general_started.notified().await;
+            }
+        })
+        .await
+        .expect("first general request must hold service readiness");
+
+        priority_state.general_release.notify_waiters();
+
+        let mut reader = BufReader::new(client_read);
+        let first_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first response timeout");
+        let second_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second response timeout");
+        let third_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("third response timeout");
+
+        let first_three_ids = [
+            first_response.get("id").and_then(|value| value.as_i64()),
+            second_response.get("id").and_then(|value| value.as_i64()),
+            third_response.get("id").and_then(|value| value.as_i64()),
+        ];
+        assert!(
+            first_three_ids.contains(&Some(1))
+                && first_three_ids.contains(&Some(3))
+                && first_three_ids.contains(&Some(4)),
+            "completion observability executeCommand requests must outrun queued general backlog, first={first_response:?}, second={second_response:?}, third={third_response:?}"
+        );
+
+        priority_state.general_release.notify_waiters();
+        let fourth_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("fourth response timeout");
+        assert_eq!(
+            fourth_response.get("id").and_then(|value| value.as_i64()),
             Some(2)
         );
 

@@ -1,0 +1,7 @@
+{
+  "schema_version": "v1",
+  "change_id": "isolate-completion-pre-dispatch-ingress",
+  "change_criticality": "architectural",
+  "rule_id": "criticality.rules.v1/reader_scheduler_and_truthful_pre_dispatch_split",
+  "reason": "Change вводит новый scheduler boundary, truthful pre-dispatch split и change-specific governance gate, поэтому это architectural change, а не routine."
+}

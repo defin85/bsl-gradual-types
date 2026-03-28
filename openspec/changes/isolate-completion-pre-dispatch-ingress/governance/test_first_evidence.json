@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "change_id": "isolate-completion-pre-dispatch-ingress",
+  "scope": "governance package",
+  "rule_id": "test_first.rules.v1/governance_package_gate",
+  "failing_ref": "openspec/changes/isolate-completion-pre-dispatch-ingress/validation/governance-before.md",
+  "passing_ref": "openspec/changes/isolate-completion-pre-dispatch-ingress/validation/governance-after.md",
+  "reason_codes": [
+    "missing_governance_artifacts",
+    "optimistic_skip_path"
+  ]
+}

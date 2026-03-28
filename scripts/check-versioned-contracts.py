@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 15,
+    "lsp-completion-timeline": 16,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }

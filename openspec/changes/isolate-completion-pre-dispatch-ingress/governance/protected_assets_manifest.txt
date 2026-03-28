@@ -1,0 +1,8 @@
+# Защищённые acceptance-assets (v1)
+openspec/changes/isolate-completion-pre-dispatch-ingress/proposal.md
+openspec/changes/isolate-completion-pre-dispatch-ingress/design.md
+openspec/changes/isolate-completion-pre-dispatch-ingress/specs/bsl-intellisense-v2/spec.md
+openspec/changes/isolate-completion-pre-dispatch-ingress/validation/traceability.md
+openspec/changes/isolate-completion-pre-dispatch-ingress/validation/mixed-load-gate.md
+contracts/lsp-completion-timeline/v16/contract.json
+contracts/lsp-completion-timeline/v16/changelog.md

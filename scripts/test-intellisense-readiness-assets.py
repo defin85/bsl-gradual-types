@@ -68,6 +68,14 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "validation"
         / "traceability.md"
     )
+    PRE_DISPATCH_INGRESS_PROTECTED_ASSETS_OVERRIDE = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / PRE_DISPATCH_INGRESS_CHANGE_ID
+        / "governance"
+        / "protected_assets_override.json"
+    )
     PRE_DISPATCH_INGRESS_READINESS_GATE_JSON = (
         REPO_ROOT
         / "backend"
@@ -470,6 +478,13 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             self.PRE_DISPATCH_INGRESS_READINESS_GATE_JSON.read_text(encoding="utf-8")
         )
 
+    def pre_dispatch_ingress_protected_assets_override(self) -> dict:
+        return json.loads(
+            self.PRE_DISPATCH_INGRESS_PROTECTED_ASSETS_OVERRIDE.read_text(
+                encoding="utf-8"
+            )
+        )
+
     def turn_wait_gate_summary(self) -> dict:
         return json.loads(self.TURN_WAIT_GATE_REPORT.read_text(encoding="utf-8"))[
             "summary"
@@ -614,6 +629,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             self.PRE_DISPATCH_INGRESS_WRAPPER,
             self.PRE_DISPATCH_INGRESS_GATE_DOC,
             self.PRE_DISPATCH_INGRESS_TRACEABILITY_DOC,
+            self.PRE_DISPATCH_INGRESS_PROTECTED_ASSETS_OVERRIDE,
             self.PRE_DISPATCH_INGRESS_READINESS_GATE_JSON,
             self.PRE_DISPATCH_INGRESS_READINESS_GATE_MD,
             self.PRE_DISPATCH_INGRESS_MIXED_LOAD_REPORT,
@@ -631,6 +647,29 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
                 "pre-dispatch ingress readiness bundle is incomplete; missing "
                 f"checked-in assets: {missing}"
             ),
+        )
+
+    def test_pre_dispatch_ingress_protected_assets_override_is_self_contained(self) -> None:
+        override = self.pre_dispatch_ingress_protected_assets_override()
+        self.assertEqual(override["schema_version"], "v1")
+        self.assertEqual(override["change_id"], self.PRE_DISPATCH_INGRESS_CHANGE_ID)
+        self.assertTrue(
+            isinstance(override.get("reason"), str) and override["reason"].strip()
+        )
+        self.assertTrue(
+            isinstance(override.get("approved_by"), str)
+            and override["approved_by"].strip()
+        )
+        self.assertTrue(
+            isinstance(override.get("approved_change_id"), str)
+            and override["approved_change_id"].strip()
+        )
+        self.assertNotEqual(
+            override["approved_change_id"], self.PRE_DISPATCH_INGRESS_CHANGE_ID
+        )
+        self.assertTrue(
+            isinstance(override.get("migration_note"), str)
+            and override["migration_note"].strip()
         )
 
     def test_pre_dispatch_ingress_docs_expose_canonical_wrapper(self) -> None:

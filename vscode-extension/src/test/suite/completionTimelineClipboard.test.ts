@@ -294,6 +294,27 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         );
     });
 
+    test('formatVisibleCompletionTimelineForClipboard should keep adapter bottleneck verdicts when prepare details are absent', () => {
+        const state = buildReadyState();
+        if (state.kind !== 'ready') {
+            throw new Error('expected ready state fixture');
+        }
+        state.traces[0].server_edge_details = {
+            ...state.traces[0].server_edge_details!,
+            transport_to_method_wait_ms: undefined,
+            method_prelude_exec_ms: undefined,
+        };
+        state.traces[0].prepare_details = undefined;
+
+        const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('adapter_read_at_ms=1699999999956'));
+        assert.ok(text!.includes('adapter_to_dispatch_wait_ms=4'));
+        assert.ok(text!.includes('bottleneck_verdict=adapter_before_dispatch_dominant'));
+        assert.ok(!text!.includes('prepare_wait_budget_ms='));
+        assert.ok(!text!.includes('prepare_outcome='));
+    });
+
     test('formatVisibleCompletionTimelineForClipboard should use average trace in average mode', () => {
         const text = formatVisibleCompletionTimelineForClipboard(buildReadyState(), 'average');
         assert.ok(text);

@@ -1,0 +1,8 @@
+{
+  "schema_version": "v1",
+  "change_id": "isolate-completion-pre-dispatch-ingress",
+  "reason": "Checked-in OpenSpec readiness artifacts and their protected acceptance bundle are part of the delivered change surface and need a self-contained replayable gate path.",
+  "approved_by": "Codex",
+  "approved_change_id": "refactor-document-symbol-interactive-isolation",
+  "migration_note": "This override exists so the change-local protected-assets gate can be replayed from the repository without external handoff state."
+}

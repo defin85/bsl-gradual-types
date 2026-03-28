@@ -195,6 +195,12 @@ export function formatCompletionTimelineTraceForClipboard(
         }
         lines.push(detailsBits.join(' | '));
     }
+    const bottleneckVerdicts = buildCompletionTraceBottleneckVerdicts(trace);
+    if (bottleneckVerdicts.length > 0) {
+        for (const verdict of bottleneckVerdicts) {
+            lines.push(`bottleneck_verdict=${verdict}`);
+        }
+    }
     if (trace.prepare_details) {
         const detailsBits: string[] = [];
         if (typeof trace.prepare_details.wait_budget_ms === 'number') {
@@ -245,10 +251,6 @@ export function formatCompletionTimelineTraceForClipboard(
         }
         if (detailsBits.length > 0) {
             lines.push(detailsBits.join(' | '));
-        }
-        const bottleneckVerdicts = buildCompletionTraceBottleneckVerdicts(trace);
-        for (const verdict of bottleneckVerdicts) {
-            lines.push(`bottleneck_verdict=${verdict}`);
         }
         const progressTrace = formatPrepareProgressTrace(trace.prepare_details.progress);
         if (progressTrace) {

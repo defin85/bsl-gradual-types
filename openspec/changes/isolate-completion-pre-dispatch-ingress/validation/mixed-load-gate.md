@@ -43,10 +43,10 @@
 - Pre-dispatch ingress budget сохранён:
   `p95(adapter_to_dispatch_wait_ms)=1ms`,
   `max(adapter_to_dispatch_wait_ms)=1ms`,
-  `p95(service_future_to_first_poll_wait_ms)=3ms`,
-  `max(service_future_to_first_poll_wait_ms)=3ms`,
-  `p95(transport_to_handler_wait_ms)=3ms`,
-  `max(transport_to_handler_wait_ms)=3ms`,
+  `p95(service_future_to_first_poll_wait_ms)=7ms`,
+  `max(service_future_to_first_poll_wait_ms)=7ms`,
+  `p95(transport_to_handler_wait_ms)=8ms`,
+  `max(transport_to_handler_wait_ms)=8ms`,
   runtime budget `intellisense_v2_interactive_wait_budget_ms=120`.
 - Отчёт теперь отделяет server-side pre-dispatch backlog от post-dispatch first-poll/handler wait и больше не описывает этот класс задержки как client-side ingress.
 - Trace summaries прямо показывают `adapter_read_at_ms`, `adapter_to_dispatch_wait_ms`, `jsonrpc_dispatch_received_at_ms` и legacy `transport_received_at_ms`, поэтому расследование не требует ручного вычитания timestamp'ов.

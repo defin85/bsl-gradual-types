@@ -15,7 +15,7 @@ use tokio::task::JoinSet;
 use tower::Service;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Id, Request, Response};
 use tower_lsp::Loopback;
-use tracing::error;
+use tracing::{error, warn};
 
 const MESSAGE_QUEUE_SIZE: usize = 100;
 const CONTROL_QUEUE_SIZE: usize = 16;
@@ -778,11 +778,11 @@ async fn reject_saturated_general_request(
     scheduled_request: ScheduledRequest,
 ) -> Result<(), ()> {
     let Some(id) = scheduled_request.request.id().cloned() else {
-        error!(
+        warn!(
             "general admission queue saturated before dispatch for notification {}",
             scheduled_request.request.method()
         );
-        return Err(());
+        return Ok(());
     };
     let response = Response::from_error(
         id,
@@ -2113,6 +2113,230 @@ mod tests {
                 && trailing_ids.contains(&Some(2))
                 && trailing_ids.contains(&Some(4)),
             "bounded backpressure and interactive completion must still yield terminal responses for ids 1, 2 and 4, responses={trailing_ids:?}"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_keeps_running_when_saturated_general_notification_is_dropped() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let backpressure_state = Arc::new(GeneralBackpressureState::default());
+        let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities {
+            control: 2,
+            completion: 2,
+            general: 1,
+        });
+
+        let server_task = tokio::spawn({
+            let backpressure_state = backpressure_state.clone();
+            let admission_queues = admission_queues.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    GeneralBackpressureService {
+                        state: backpressure_state,
+                    },
+                    1,
+                    admission_queues,
+                )
+                .await;
+            }
+        });
+
+        for message in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-1.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-2.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": "file:///overflow-change.bsl", "version": 2 },
+                    "contentChanges": [{ "text": "// overflow" }]
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///saturated-general-3.bsl" }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&message).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while backpressure_state
+                .ready_waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+            {
+                backpressure_state.ready_blocked.notified().await;
+            }
+        })
+        .await
+        .expect("scheduler must block on general readiness gate");
+
+        let mut reader = BufReader::new(client_read);
+        let overflow_request_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("transport must stay alive long enough to reject the next overflow request");
+        assert_eq!(
+            overflow_request_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            Some(5)
+        );
+        assert_eq!(
+            overflow_request_response
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_i64()),
+            Some(GENERAL_BACKPRESSURE_ERROR_CODE)
+        );
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                if admission_queues.lane_depth(AdmissionLane::Completion) == 1
+                    && admission_queues.lane_depth(AdmissionLane::General) == 1
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("completion request must remain queued after dropping saturated notification");
+
+        backpressure_state
+            .ready_release
+            .store(true, Ordering::SeqCst);
+        if let Some(waker) = backpressure_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                if backpressure_state
+                    .call_order
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .len()
+                    >= 2
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("completion and oldest queued general request must both reach dispatch");
+
+        let dispatch_order = backpressure_state
+            .call_order
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert_eq!(
+            dispatch_order.first().copied(),
+            Some(4),
+            "completion must still reach dispatch before queued general backlog, dispatch_order={dispatch_order:?}"
+        );
+
+        let first_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first post-release response timeout");
+        let second_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second post-release response timeout");
+        let third_remaining_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("third post-release response timeout");
+        let trailing_ids = [
+            first_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            second_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            third_remaining_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+        ];
+        assert!(
+            trailing_ids.contains(&Some(1))
+                && trailing_ids.contains(&Some(2))
+                && trailing_ids.contains(&Some(4)),
+            "bounded notification drop must preserve terminal responses for ids 1, 2 and 4, responses={trailing_ids:?}"
+        );
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                read_framed_message(&mut reader),
+            )
+            .await
+            .is_err(),
+            "dropped general notifications must not fabricate transport responses"
         );
 
         drop(client_write);

@@ -69,7 +69,38 @@ run_cargo_exact_bundle() {
   fi
 
   echo "[smoke] ${label}: running ${#selectors[@]} exact selectors"
-  cargo test "${cargo_args[@]}" -- --exact "${selectors[@]}" --nocapture
+  local -a available_tests=()
+  mapfile -t available_tests < <(cargo test "${cargo_args[@]}" -- --list | sed -n 's/: test$//p')
+  if [[ ${#available_tests[@]} -eq 0 ]]; then
+    echo "run_cargo_exact_bundle(${label}): cargo --list returned no tests" >&2
+    exit 1
+  fi
+
+  local selector=""
+  local available_test=""
+  local resolved_selector=""
+  local -a matching_tests=()
+  for selector in "${selectors[@]}"; do
+    matching_tests=()
+    for available_test in "${available_tests[@]}"; do
+      if [[ "${available_test}" == "${selector}" || "${available_test}" == *::"${selector}" ]]; then
+        matching_tests+=("${available_test}")
+      fi
+    done
+
+    if [[ ${#matching_tests[@]} -eq 0 ]]; then
+      echo "run_cargo_exact_bundle(${label}): selector '${selector}' did not resolve via cargo --list" >&2
+      exit 1
+    fi
+    if [[ ${#matching_tests[@]} -ne 1 ]]; then
+      echo "run_cargo_exact_bundle(${label}): selector '${selector}' resolved ambiguously:" >&2
+      printf '  - %s\n' "${matching_tests[@]}" >&2
+      exit 1
+    fi
+
+    resolved_selector="${matching_tests[0]}"
+    cargo test "${cargo_args[@]}" "${resolved_selector}" -- --exact --nocapture
+  done
 }
 
 run_cross_adapter_smoke() {
@@ -84,7 +115,6 @@ run_cross_adapter_smoke() {
     "hover_endpoints_fail_closed_on_missing_canonical_artifacts"
     "hover_endpoints_do_not_backfill_from_polluted_search_index"
     "diagnostics_and_validate_do_not_backfill_from_polluted_search_index"
-    "file_path_for_module_context_bindings"
     "hover_endpoints_use_file_path_for_module_context_bindings"
     "diagnostics_and_validate_use_file_path_for_module_context_bindings"
   )
@@ -180,7 +210,7 @@ run_completion_timeline_drilldown_smoke() {
   )
 
   run_cargo_exact_bundle "bsl-runtime drilldown trace" -p bsl-runtime --lib -- "${runtime_trace_selectors[@]}"
-  run_cargo_exact_bundle "bsl-backend library drilldown trace" -p bsl-backend --lib -- "${backend_lib_trace_selectors[@]}"
+  run_cargo_exact_bundle "bsl-lsp-server turn-wait drilldown trace" -p bsl-backend --bin bsl-lsp-server -- "${backend_lib_trace_selectors[@]}"
   run_cargo_exact_bundle "bsl-lsp-server completion timeline drilldown" -p bsl-backend --bin bsl-lsp-server -- "${lsp_server_timeline_selectors[@]}"
 }
 

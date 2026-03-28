@@ -45,9 +45,12 @@
   `max(adapter_to_dispatch_wait_ms)=1ms`,
   `p95(service_future_to_first_poll_wait_ms)=3ms`,
   `max(service_future_to_first_poll_wait_ms)=3ms`,
-  `p95(transport_to_handler_wait_ms)=4ms`,
-  `max(transport_to_handler_wait_ms)=4ms`,
+  `p95(transport_to_handler_wait_ms)=3ms`,
+  `max(transport_to_handler_wait_ms)=3ms`,
   runtime budget `intellisense_v2_interactive_wait_budget_ms=120`.
+- Default smoke wrapper теперь fail-closed резолвит short selectors в полный
+  `cargo -- --list` test name до `--exact`, поэтому cross-adapter acceptance
+  больше не может позеленеть на zero-test bundle.
 - Отчёт теперь отделяет server-side pre-dispatch backlog от post-dispatch first-poll/handler wait и больше не описывает этот класс задержки как client-side ingress.
 - Trace summaries прямо показывают `adapter_read_at_ms`, `adapter_to_dispatch_wait_ms`, `jsonrpc_dispatch_received_at_ms` и legacy `transport_received_at_ms`, поэтому расследование не требует ручного вычитания timestamp'ов.
 
@@ -60,9 +63,11 @@
 - Requirement: change-specific readiness wrapper публикует truthful pre-dispatch split и aggregate evidence bundle
   Code: `scripts/validate-isolate-completion-pre-dispatch-ingress.sh`
   `scripts/validate-v2-completion-gates.sh`
+  `scripts/run-intellisense-tests.sh`
   `scripts/README.md`
   `docs/agent/verification.md`
   Test:
   `./scripts/validate-isolate-completion-pre-dispatch-ingress.sh`
+  `python3 -m unittest scripts/test-intellisense-smoke-gate.py`
   `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.json`
   `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.md`

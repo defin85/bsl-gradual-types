@@ -99,6 +99,47 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             "default smoke path must rebuild embedded UI assets when target/site is absent",
         )
 
+    def test_smoke_script_executes_each_exact_selector_individually(self) -> None:
+        content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'for selector in "${selectors[@]}"; do',
+            content,
+            (
+                "smoke gate exact-selector helper must iterate selectors one by one so "
+                "cargo exact filters do not degrade into zero-test no-op bundles"
+            ),
+        )
+        self.assertIn(
+            'mapfile -t available_tests < <(cargo test "${cargo_args[@]}" -- --list | sed -n \'s/: test$//p\')',
+            content,
+            (
+                "smoke gate exact-selector helper must resolve short selectors against "
+                "cargo --list output before running exact tests"
+            ),
+        )
+        self.assertNotIn(
+            'cargo test "${cargo_args[@]}" -- --exact "${selectors[@]}" --nocapture',
+            content,
+            (
+                "smoke gate exact-selector helper must not batch multiple selectors into "
+                "a single cargo exact invocation"
+            ),
+        )
+        self.assertIn(
+            'resolved_selector="${matching_tests[0]}"',
+            content,
+            "smoke gate exact-selector helper must fail-closed to one resolved full test name",
+        )
+        self.assertIn(
+            'cargo test "${cargo_args[@]}" "${resolved_selector}" -- --exact --nocapture',
+            content,
+            (
+                "smoke gate exact-selector helper must pass the resolved full test name "
+                "to cargo before `-- --exact`"
+            ),
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

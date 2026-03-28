@@ -22,5 +22,5 @@
 `max(adapter_to_dispatch_wait_ms)=1ms`
 `p95(service_future_to_first_poll_wait_ms)=3ms`
 `max(service_future_to_first_poll_wait_ms)=3ms`
-`p95(transport_to_handler_wait_ms)=4ms`
-`max(transport_to_handler_wait_ms)=4ms`
+`p95(transport_to_handler_wait_ms)=3ms`
+`max(transport_to_handler_wait_ms)=3ms`

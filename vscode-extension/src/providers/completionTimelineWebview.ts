@@ -883,10 +883,25 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
 
         function buildBottleneckVerdicts(trace) {
             const verdicts = [];
+            const adapterToDispatchWait = trace.server_edge_details?.adapter_to_dispatch_wait_ms;
             const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
             const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
             const strongPreMethodAttribution =
                 trace.server_edge_details?.pre_method_attribution_provenance === 'same_request_authoritative';
+            if (
+                typeof adapterToDispatchWait === 'number' &&
+                adapterToDispatchWait > 0 &&
+                (
+                    typeof transportToMethodWait !== 'number' ||
+                    adapterToDispatchWait > transportToMethodWait
+                ) &&
+                (
+                    typeof methodPreludeExec !== 'number' ||
+                    adapterToDispatchWait > methodPreludeExec
+                )
+            ) {
+                verdicts.push('adapter_before_dispatch_dominant');
+            }
             if (
                 typeof transportToMethodWait === 'number' &&
                 typeof methodPreludeExec === 'number'
@@ -894,10 +909,21 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 if (
                     strongPreMethodAttribution &&
                     transportToMethodWait > 0 &&
-                    transportToMethodWait > methodPreludeExec
+                    transportToMethodWait > methodPreludeExec &&
+                    (
+                        typeof adapterToDispatchWait !== 'number' ||
+                        transportToMethodWait > adapterToDispatchWait
+                    )
                 ) {
                     verdicts.push('server_before_method_entry_dominant');
-                } else if (methodPreludeExec > 0 && methodPreludeExec > transportToMethodWait) {
+                } else if (
+                    methodPreludeExec > 0 &&
+                    methodPreludeExec > transportToMethodWait &&
+                    (
+                        typeof adapterToDispatchWait !== 'number' ||
+                        methodPreludeExec > adapterToDispatchWait
+                    )
+                ) {
                     verdicts.push('handler_prelude_dominant');
                 }
             }

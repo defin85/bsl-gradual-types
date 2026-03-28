@@ -1,0 +1,61 @@
+{
+  "change_id": "isolate-completion-pre-dispatch-ingress",
+  "authoritative_perf_gate": true,
+  "cross_adapter_smoke": {
+    "command": "./scripts/run-intellisense-tests.sh smoke",
+    "pass": true
+  },
+  "perf_gate": {
+    "command": "CHANGE_ID=isolate-completion-pre-dispatch-ingress BSL_V2_PERF_GATE_BLOCKING=1 ./scripts/run-intellisense-perf.sh",
+    "profiles": {
+      "small": {
+        "report": "tests/perf/reports/intellisense_small.json",
+        "pass": true,
+        "verdict": "pass",
+        "reason_codes": [],
+        "reported_matrix_entries": 21,
+        "failing_entries": 0,
+        "fail_closed_budget_failures": 0
+      },
+      "large": {
+        "report": "tests/perf/reports/intellisense_large.json",
+        "pass": true,
+        "verdict": "pass",
+        "reason_codes": [],
+        "reported_matrix_entries": 21,
+        "failing_entries": 0,
+        "fail_closed_budget_failures": 0
+      },
+      "churn": {
+        "report": "tests/perf/reports/intellisense_churn.json",
+        "pass": true,
+        "verdict": "pass",
+        "reason_codes": [],
+        "reported_matrix_entries": 21,
+        "failing_entries": 0,
+        "fail_closed_budget_failures": 0
+      }
+    }
+  },
+  "real_module_gates": {
+    "outline": {
+      "profile_title": "documentSymbol mixed-load isolation",
+      "test_name": "p39_real_conf_big_document_symbol_mixed_load_gate_live",
+      "report": "tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.json",
+      "summary": "tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.md",
+      "pass": true,
+      "report_change_id": "isolate-completion-pre-dispatch-ingress",
+      "measured_samples": 10,
+      "head_hit_traces": 10,
+      "exact_hit_traces": 0,
+      "prepare_timeout_delta": 0,
+      "exact_deadline_delta": 0
+    }
+  },
+  "openspec_validation": {
+    "command": "openspec validate isolate-completion-pre-dispatch-ingress --strict --no-interactive",
+    "log": "backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-openspec-validate.log",
+    "pass": true
+  },
+  "pass": true
+}

@@ -60,7 +60,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, and v18 request-bound client probe correlation detail are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -166,7 +166,7 @@ function sanitizeServerEdgeDetailsForContract(
         };
     }
 
-    const sanitizedContentionDetails = sanitizeFirstPollContentionContendersForContract(
+    let sanitizedDetails = sanitizeFirstPollContentionContendersForContract(
         details,
         contractVersion
     );
@@ -178,11 +178,20 @@ function sanitizeServerEdgeDetailsForContract(
             slot_release_to_handler_wait_ms: _slotReleaseToHandlerWaitMs,
             slot_release_to_response_wait_ms: _slotReleaseToResponseWaitMs,
             ...legacyDetails
-        } = sanitizedContentionDetails;
-        return legacyDetails;
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
     }
 
-    return sanitizedContentionDetails;
+    if (contractVersion < 19) {
+        const {
+            adapter_read_at_ms: _adapterReadAtMs,
+            adapter_to_dispatch_wait_ms: _adapterToDispatchWaitMs,
+            ...legacyDetails
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
+    }
+
+    return sanitizedDetails;
 }
 
 function sanitizeTurnAttributionForContract(

@@ -383,7 +383,8 @@ impl BslLanguageServer {
             if matches!(
                 task.work_class,
                 bsl_runtime::application::CpuWorkClass::Background
-            ) && !retained_completed_task {
+            ) && !retained_completed_task
+            {
                 task.supersession_key = supersession_key;
                 task.scheduled_at = scheduled_at;
                 return;

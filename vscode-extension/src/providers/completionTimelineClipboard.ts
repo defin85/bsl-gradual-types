@@ -92,6 +92,9 @@ export function formatCompletionTimelineTraceForClipboard(
 
     if (trace.server_edge_details) {
         const detailsBits = [
+            ...(typeof trace.server_edge_details.adapter_read_at_ms === 'number'
+                ? [`adapter_read_at_ms=${trace.server_edge_details.adapter_read_at_ms}`]
+                : []),
             `transport_received_at_ms=${trace.server_edge_details.transport_received_at_ms}`,
             ...(trace.server_edge_details.transport_received_at_ms_provenance
                 ? [`transport_received_at_ms_provenance=${trace.server_edge_details.transport_received_at_ms_provenance}`]
@@ -130,6 +133,9 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             ...(typeof trace.server_edge_details.dispatch_to_request_context_wait_ms === 'number'
                 ? [`dispatch_to_request_context_wait_ms=${trace.server_edge_details.dispatch_to_request_context_wait_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.adapter_to_dispatch_wait_ms === 'number'
+                ? [`adapter_to_dispatch_wait_ms=${trace.server_edge_details.adapter_to_dispatch_wait_ms}`]
                 : []),
             ...(typeof trace.server_edge_details.transport_to_slot_release_wait_ms === 'number'
                 ? [`transport_to_slot_release_wait_ms=${trace.server_edge_details.transport_to_slot_release_wait_ms}`]

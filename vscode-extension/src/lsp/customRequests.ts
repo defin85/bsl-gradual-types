@@ -650,6 +650,7 @@ export interface CompletionTimelinePrepareDetailsTrace {
 }
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
+    adapter_read_at_ms?: number;
     transport_received_at_ms: number;
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
@@ -667,6 +668,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     response_sent_at_ms: number;
     cancel_observed_at_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
+    adapter_to_dispatch_wait_ms?: number;
     transport_to_slot_release_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;

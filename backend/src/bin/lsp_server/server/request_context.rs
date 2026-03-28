@@ -7,8 +7,9 @@ use std::task::{Context, Poll, Wake, Waker};
 use tower::Service;
 use tower_lsp::jsonrpc::{Id, Request};
 use tower_lsp::lsp_types::{
-    CancelParams, CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DidSaveTextDocumentParams, NumberOrString, Position, Url,
+    CancelParams, CompletionParams, CompletionTriggerKind, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
+    NumberOrString, Position, Url,
 };
 
 tokio::task_local! {
@@ -36,9 +37,18 @@ tokio::task_local! {
 }
 
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
+type PreDispatchCompletionCancelledHook =
+    Arc<dyn Fn(PreDispatchCompletionCancelledTraceInput) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<CancelRequestHook>>> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+fn pre_dispatch_completion_cancelled_hook_cell(
+) -> &'static Mutex<Option<PreDispatchCompletionCancelledHook>> {
+    static CELL: std::sync::OnceLock<Mutex<Option<PreDispatchCompletionCancelledHook>>> =
+        std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
 }
 
@@ -58,8 +68,11 @@ struct PendingCompletionRequestIds {
 #[derive(Debug)]
 struct PendingCompletionRequestEntry {
     key: CompletionRequestKey,
+    uri: String,
+    trigger_mode: String,
     cancelled_before_take: bool,
     client_probe_id: Option<String>,
+    adapter_read_at_ms: Option<u64>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
     transport_slot_released_at_ms: Option<u64>,
@@ -77,8 +90,11 @@ struct PendingCompletionRequestEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PendingCompletionRequestContext {
     pub(crate) request_id: String,
+    pub(crate) uri: String,
+    pub(crate) trigger_mode: String,
     pub(crate) cancelled_before_take: bool,
     pub(crate) client_probe_id: Option<String>,
+    pub(crate) adapter_read_at_ms: Option<u64>,
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
     pub(crate) transport_slot_released_at_ms: Option<u64>,
@@ -91,6 +107,16 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) first_poll_contention_contenders:
         Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>>,
     pub(crate) service_scope_entered_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreDispatchCompletionCancelledTraceInput {
+    pub(crate) request_id: String,
+    pub(crate) uri: String,
+    pub(crate) trigger_mode: String,
+    pub(crate) client_probe_id: Option<String>,
+    pub(crate) adapter_read_at_ms: Option<u64>,
+    pub(crate) cancelled_at_ms: u64,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -533,13 +559,42 @@ fn completion_request_key(params: &CompletionParams) -> CompletionRequestKey {
     }
 }
 
-fn completion_request_key_from_request(request: &Request) -> Option<CompletionRequestKey> {
+fn completion_trigger_mode_from_params(params: &CompletionParams) -> String {
+    match params.context.as_ref().map(|context| context.trigger_kind) {
+        Some(CompletionTriggerKind::TRIGGER_CHARACTER) => "trigger_character",
+        Some(CompletionTriggerKind::INVOKED) => "invoked",
+        Some(CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS) => "trigger_for_incomplete",
+        Some(_) => "other",
+        None => "none",
+    }
+    .to_string()
+}
+
+fn completion_request_params_from_request(request: &Request) -> Option<CompletionParams> {
     if request.method() != "textDocument/completion" {
         return None;
     }
     let params = request.params()?.clone();
-    let completion_params = serde_json::from_value::<CompletionParams>(params).ok()?;
+    serde_json::from_value::<CompletionParams>(params).ok()
+}
+
+fn completion_request_key_from_request(request: &Request) -> Option<CompletionRequestKey> {
+    let completion_params = completion_request_params_from_request(request)?;
     Some(completion_request_key(&completion_params))
+}
+
+fn completion_request_uri_and_trigger_mode_from_request(
+    request: &Request,
+) -> Option<(String, String)> {
+    let completion_params = completion_request_params_from_request(request)?;
+    Some((
+        completion_params
+            .text_document_position
+            .text_document
+            .uri
+            .to_string(),
+        completion_trigger_mode_from_params(&completion_params),
+    ))
 }
 
 fn completion_probe_id_from_request(request: &Request) -> Option<String> {
@@ -879,6 +934,10 @@ fn record_pending_completion_request_id(
     let Some(key) = completion_request_key_from_request(request) else {
         return;
     };
+    let Some((uri, trigger_mode)) = completion_request_uri_and_trigger_mode_from_request(request)
+    else {
+        return;
+    };
     let client_probe_id = completion_probe_id_from_request(request);
     let request_id = request_id.to_string();
     let mut pending = pending_completion_request_ids_cell()
@@ -894,6 +953,8 @@ fn record_pending_completion_request_id(
         }
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
+            entry.uri = uri.clone();
+            entry.trigger_mode = trigger_mode.clone();
             entry.cancelled_before_take = false;
             entry.client_probe_id = client_probe_id.clone();
             entry.request_received_at_ms = request_received_at_ms;
@@ -903,10 +964,74 @@ fn record_pending_completion_request_id(
             request_id.clone(),
             PendingCompletionRequestEntry {
                 key: key.clone(),
+                uri,
+                trigger_mode,
                 cancelled_before_take: false,
                 client_probe_id,
+                adapter_read_at_ms: None,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
+                transport_slot_released_at_ms: None,
+                service_future_created_at_ms: None,
+                service_future_first_poll_entered_at_ms: None,
+                service_future_first_poll_outcome: None,
+                service_future_first_wake_scheduled_at_ms: None,
+                first_poll_contention_attribution: None,
+                first_poll_contention_contenders: None,
+                service_scope_entered_at_ms: None,
+            },
+        );
+    }
+    ensure_request_id_enqueued(&mut pending, &key, &request_id);
+}
+
+pub(crate) fn record_pending_completion_adapter_read_at_ms(
+    request: &Request,
+    request_id: &str,
+    adapter_read_at_ms: Option<u64>,
+) {
+    let Some(key) = completion_request_key_from_request(request) else {
+        return;
+    };
+    let Some((uri, trigger_mode)) = completion_request_uri_and_trigger_mode_from_request(request)
+    else {
+        return;
+    };
+    let client_probe_id = completion_probe_id_from_request(request);
+    let request_id = request_id.to_string();
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(old_key) = pending
+        .by_request_id
+        .get(&request_id)
+        .map(|entry| entry.key.clone())
+    {
+        if old_key != key {
+            remove_request_id_from_key_queue(&mut pending, &old_key, &request_id);
+        }
+        if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
+            entry.key = key.clone();
+            entry.uri = uri.clone();
+            entry.trigger_mode = trigger_mode.clone();
+            entry.cancelled_before_take = false;
+            entry.client_probe_id = client_probe_id.clone();
+            if entry.adapter_read_at_ms.is_none() {
+                entry.adapter_read_at_ms = adapter_read_at_ms;
+            }
+        }
+    } else {
+        pending.by_request_id.insert(
+            request_id.clone(),
+            PendingCompletionRequestEntry {
+                key: key.clone(),
+                uri,
+                trigger_mode,
+                cancelled_before_take: false,
+                client_probe_id,
+                adapter_read_at_ms,
+                jsonrpc_dispatch_received_at_ms: None,
+                request_received_at_ms: None,
                 transport_slot_released_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
@@ -929,6 +1054,10 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
     let Some(key) = completion_request_key_from_request(request) else {
         return;
     };
+    let Some((uri, trigger_mode)) = completion_request_uri_and_trigger_mode_from_request(request)
+    else {
+        return;
+    };
     let client_probe_id = completion_probe_id_from_request(request);
     let request_id = request_id.to_string();
     let mut pending = pending_completion_request_ids_cell()
@@ -944,6 +1073,8 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
         }
         if let Some(entry) = pending.by_request_id.get_mut(&request_id) {
             entry.key = key.clone();
+            entry.uri = uri.clone();
+            entry.trigger_mode = trigger_mode.clone();
             entry.cancelled_before_take = false;
             entry.client_probe_id = client_probe_id.clone();
             entry.jsonrpc_dispatch_received_at_ms = jsonrpc_dispatch_received_at_ms;
@@ -953,8 +1084,11 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
             request_id.clone(),
             PendingCompletionRequestEntry {
                 key: key.clone(),
+                uri,
+                trigger_mode,
                 cancelled_before_take: false,
                 client_probe_id,
+                adapter_read_at_ms: None,
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
                 transport_slot_released_at_ms: None,
@@ -1119,8 +1253,11 @@ pub(crate) fn record_completion_request_id_for_testing(
         request_id.clone(),
         PendingCompletionRequestEntry {
             key: key.clone(),
+            uri: uri.to_string(),
+            trigger_mode: "none".to_string(),
             cancelled_before_take: false,
             client_probe_id: None,
+            adapter_read_at_ms: None,
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
             transport_slot_released_at_ms: None,
@@ -1158,8 +1295,11 @@ pub(crate) fn take_completion_request_context_by_request_id(
     }
     Some(PendingCompletionRequestContext {
         request_id: request_id.to_string(),
+        uri: entry.uri,
+        trigger_mode: entry.trigger_mode,
         cancelled_before_take: entry.cancelled_before_take,
         client_probe_id: entry.client_probe_id,
+        adapter_read_at_ms: entry.adapter_read_at_ms,
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
         transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
@@ -1207,8 +1347,11 @@ pub(crate) fn take_completion_request_context(
             }
             return Some(PendingCompletionRequestContext {
                 request_id,
+                uri: entry.uri,
+                trigger_mode: entry.trigger_mode,
                 cancelled_before_take: entry.cancelled_before_take,
                 client_probe_id: entry.client_probe_id,
+                adapter_read_at_ms: entry.adapter_read_at_ms,
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
                 transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
@@ -1386,6 +1529,38 @@ pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     *slot = hook;
 }
 
+pub(crate) fn set_pre_dispatch_completion_cancelled_hook(
+    hook: Option<PreDispatchCompletionCancelledHook>,
+) {
+    let mut slot = pre_dispatch_completion_cancelled_hook_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *slot = hook;
+}
+
+pub(crate) fn notify_pre_dispatch_completion_cancelled(
+    context: PendingCompletionRequestContext,
+    cancelled_at_ms: u64,
+) {
+    let hook = {
+        let slot = pre_dispatch_completion_cancelled_hook_cell()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        slot.clone()
+    };
+    let Some(hook) = hook else {
+        return;
+    };
+    hook(PreDispatchCompletionCancelledTraceInput {
+        request_id: context.request_id,
+        uri: context.uri,
+        trigger_mode: context.trigger_mode,
+        client_probe_id: context.client_probe_id,
+        adapter_read_at_ms: context.adapter_read_at_ms,
+        cancelled_at_ms,
+    });
+}
+
 async fn with_request_context<F, T>(
     request_id: Option<String>,
     request_received_at_ms: Option<u64>,
@@ -1496,10 +1671,16 @@ where
 
     fn call(&mut self, request: Request) -> Self::Future {
         if let Some(request_id) = request_id_from_request(&request) {
+            let dispatch_received_at_ms = super::unix_timestamp_ms();
+            record_pending_completion_adapter_read_at_ms(
+                &request,
+                &request_id,
+                Some(dispatch_received_at_ms),
+            );
             record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 &request,
                 &request_id,
-                Some(super::unix_timestamp_ms()),
+                Some(dispatch_received_at_ms),
             );
         }
         self.inner.call(request)

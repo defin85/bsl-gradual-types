@@ -28,6 +28,7 @@ pub(super) fn record_lsp_interactive_fail_closed_reason(
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RequestServerEdgeTraceInputs {
+    pub adapter_read_at_ms: Option<u64>,
     pub transport_received_at_ms: Option<u64>,
     pub transport_received_at_ms_provenance: Option<String>,
     pub jsonrpc_dispatch_received_at_ms: Option<u64>,
@@ -52,6 +53,7 @@ pub(super) struct RequestServerEdgeTraceInputs {
 pub(super) fn build_server_edge_details_trace(
     inputs: &RequestServerEdgeTraceInputs,
 ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
+    let adapter_read_at_ms = inputs.adapter_read_at_ms;
     let transport_received_at_ms = inputs.transport_received_at_ms?;
     let transport_received_at_ms_provenance = inputs
         .transport_received_at_ms_provenance
@@ -74,6 +76,7 @@ pub(super) fn build_server_edge_details_trace(
     let cancel_observed_at_ms = inputs.cancel_observed_at_ms;
 
     Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
+        adapter_read_at_ms,
         transport_received_at_ms,
         transport_received_at_ms_provenance,
         jsonrpc_dispatch_received_at_ms,
@@ -98,6 +101,9 @@ pub(super) fn build_server_edge_details_trace(
             .map(|(dispatch_ms, request_context_ms)| {
                 request_context_ms.saturating_sub(dispatch_ms)
             }),
+        adapter_to_dispatch_wait_ms: adapter_read_at_ms
+            .zip(jsonrpc_dispatch_received_at_ms)
+            .map(|(adapter_read_ms, dispatch_ms)| dispatch_ms.saturating_sub(adapter_read_ms)),
         transport_to_slot_release_wait_ms: transport_slot_released_at_ms
             .map(|slot_release_ms| slot_release_ms.saturating_sub(transport_received_at_ms)),
         transport_to_service_future_wait_ms: service_future_created_at_ms
@@ -148,6 +154,7 @@ pub(super) fn record_current_request_server_edge_trace_for_testing(
     let request_context_call_entered_at_ms =
         super::super::request_context::current_request_received_at_ms();
     let inputs = RequestServerEdgeTraceInputs {
+        adapter_read_at_ms: None,
         transport_received_at_ms: request_context_call_entered_at_ms,
         transport_received_at_ms_provenance: request_context_call_entered_at_ms
             .map(|_| "request_context_call_entry".to_string()),

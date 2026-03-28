@@ -11,10 +11,7 @@ static DID_CHANGE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 static DID_SAVE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
-async fn maybe_inject_parse_delay(
-    env_key: &'static str,
-    active_counter: &'static AtomicUsize,
-) {
+async fn maybe_inject_parse_delay(env_key: &'static str, active_counter: &'static AtomicUsize) {
     if let Some(delay_ms) = std::env::var(env_key)
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
@@ -40,8 +37,11 @@ async fn maybe_inject_did_change_parse_delay() {}
 
 #[cfg(test)]
 async fn maybe_inject_did_save_parse_delay() {
-    maybe_inject_parse_delay("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", &DID_SAVE_PARSE_DELAY_ACTIVE)
-        .await;
+    maybe_inject_parse_delay(
+        "BSL_TEST_DID_SAVE_PARSE_DELAY_MS",
+        &DID_SAVE_PARSE_DELAY_ACTIVE,
+    )
+    .await;
 }
 
 #[cfg(not(test))]

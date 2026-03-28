@@ -62,8 +62,10 @@ export interface ObservabilityIncidentRequestSummary {
     outcome: string;
     total_duration_ms: number;
     dominant_stage?: string;
+    adapter_read_at_ms?: number;
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
+    adapter_to_dispatch_wait_ms?: number;
     service_future_created_at_ms?: number;
     service_future_first_poll_entered_at_ms?: number;
     service_future_first_poll_outcome?: string;
@@ -173,10 +175,13 @@ export function buildObservabilityIncidentRequestSection(
             outcome: trace.outcome,
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
+            adapter_read_at_ms: trace.server_edge_details?.adapter_read_at_ms,
             transport_received_at_ms_provenance:
                 trace.server_edge_details?.transport_received_at_ms_provenance,
             jsonrpc_dispatch_received_at_ms:
                 trace.server_edge_details?.jsonrpc_dispatch_received_at_ms,
+            adapter_to_dispatch_wait_ms:
+                trace.server_edge_details?.adapter_to_dispatch_wait_ms,
             service_future_created_at_ms:
                 trace.server_edge_details?.service_future_created_at_ms,
             service_future_first_poll_entered_at_ms:
@@ -277,11 +282,17 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             request.bottleneck_verdicts.length > 0
                 ? `verdicts=${request.bottleneck_verdicts.join(',')}`
                 : undefined,
+            typeof request.adapter_read_at_ms === 'number'
+                ? `adapter_read_at_ms=${request.adapter_read_at_ms}`
+                : undefined,
             request.transport_received_at_ms_provenance
                 ? `transport_received_at_ms_provenance=${request.transport_received_at_ms_provenance}`
                 : undefined,
             typeof request.jsonrpc_dispatch_received_at_ms === 'number'
                 ? `jsonrpc_dispatch_received_at_ms=${request.jsonrpc_dispatch_received_at_ms}`
+                : undefined,
+            typeof request.adapter_to_dispatch_wait_ms === 'number'
+                ? `adapter_to_dispatch_wait_ms=${request.adapter_to_dispatch_wait_ms}`
                 : undefined,
             typeof request.service_future_created_at_ms === 'number'
                 ? `service_future_created_at_ms=${request.service_future_created_at_ms}`
@@ -526,6 +537,9 @@ function buildCorrelatedProbe(
             reason: 'missing_server_edge',
         };
     }
+    const serverIngressAtMs = typeof serverEdgeDetails.adapter_read_at_ms === 'number'
+        ? serverEdgeDetails.adapter_read_at_ms
+        : serverEdgeDetails.transport_received_at_ms;
     return {
         status: 'correlated',
         probe_id: probe.probe_id,
@@ -533,7 +547,7 @@ function buildCorrelatedProbe(
         client_terminal_state: probe.client_terminal_state,
         client_to_transport_wait_ms: Math.max(
             0,
-            serverEdgeDetails.transport_received_at_ms - probe.lsp_request_started_at_ms
+            serverIngressAtMs - probe.lsp_request_started_at_ms
         ),
         server_to_client_post_response_ms: Math.max(
             0,

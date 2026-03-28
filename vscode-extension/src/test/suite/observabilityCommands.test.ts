@@ -164,7 +164,7 @@ suite('Observability Commands Test Suite', () => {
             completionTimeline: {
                 kind: 'ok',
                 response: {
-                    version: 18,
+                    version: 19,
                     traces: [],
                 },
             },

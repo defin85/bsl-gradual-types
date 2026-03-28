@@ -258,6 +258,11 @@ Default wrapper для documentSymbol mixed-load evidence:
 ./scripts/validate-document-symbol-interactive-isolation.sh
 ```
 
+Default wrapper for truthful pre-dispatch ingress evidence:
+```bash
+./scripts/validate-isolate-completion-pre-dispatch-ingress.sh
+```
+
 Default wrapper for overlap supersession evidence:
 ```bash
 ./scripts/validate-completion-superseded-active-turn-release.sh
@@ -276,6 +281,7 @@ Default wrapper for pre-active turn_wait lifecycle evidence:
 Нижележащий generic script можно вызвать и через явный override:
 ```bash
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
@@ -283,13 +289,19 @@ CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completi
 
 При override для split-prepare script автоматически расширяет `REAL_MODULE_PROFILES`
 до `warm churn`; для documentSymbol isolation используется `outline`; для
-overlap supersession используется `churn overlap`; для pre-active `turn_wait`
+truthful pre-dispatch ingress тоже используется `outline`; для overlap
+supersession используется `churn overlap`; для pre-active `turn_wait`
 lifecycle используется `churn preactive_overlap`.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
 Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
 wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит
 default change-specific entry point для representative report и aggregate
 readiness artifacts.
+Wrapper `./scripts/validate-isolate-completion-pre-dispatch-ingress.sh` служит
+default change-specific entry point для truthful pre-dispatch ingress bundle и
+aggregate readiness artifacts; он использует тот же `outline` representative
+profile, но fail-ит по `adapter_to_dispatch_wait_ms` budget и отдельно
+репортит pre-dispatch split.
 Wrapper `./scripts/validate-completion-superseded-active-turn-release.sh`
 служит default change-specific entry point для overlap supersession bundle и
 aggregate readiness artifacts; он собирает both `churn` and `overlap`
@@ -323,6 +335,11 @@ aggregate readiness artifacts; он собирает both `churn` and
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.json`
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-real-conf-big-document-symbol-mixed-load-live.md`
 - `backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-openspec-validate.log`
+- `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.json`
+- `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.md`
+- `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.json`
+- `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.md`
+- `backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-openspec-validate.log`
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.json`
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.md`
 - `backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-real-conf-big-overlap-completion-perf-live.json`
@@ -474,7 +491,7 @@ uv run --with tiktoken python3 scripts/check-rust-file-llm-budget.py --report ar
 ```
 
 **Состав:**
-- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass), current-revision stale proofs для `hover` / `definition` / `type_at_position`, exact-index representative slices для `hover` / `signatureHelp` / `definition`, path-aware module-context/facet slices для Web и CLI, отдельный authoritative `Completion Timeline v18` drilldown contract slice (`transport_received_at_ms_provenance`, `jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `service_future_created_at_ms`, `service_future_first_poll_entered_at_ms`, `service_future_to_first_poll_wait_ms`, `service_future_first_poll_outcome`, `service_future_first_wake_scheduled_at_ms`, `first_poll_to_first_wake_wait_ms`, bounded `first_poll_contention_attribution`, bounded-length `first_poll_contention_contenders` с optional `command` для `workspace/executeCommand` и optional `phase` для inflight completion stage, `transport_to_service_future_wait_ms`, `service_future_to_scope_wait_ms`, существующие `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`, bounded `pre_method_attribution_provenance`, request-id-safe overlap handling с echoed `client_probe_id` и отдельной fail-closed provenance regression, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `snapshot_with_deps_timeout_runtime`, bounded `timeout_attribution`, bounded `artifact_poll`, `dispatcher_resolution_latency_ms`, `turn_wait_entered_at_ms`, `turn_wait_resolved_at_ms`, `wake_after_turn_resolution_at_ms`, fail-open bounded serialization) и focused extension-host slice для `Completion Timeline` / `Client Probe Feed` / `Observability Incident Bundle` (`Completion Probe*`, включая `Completion Probe Runtime` transport hook/selection observer, `Completion Timeline*`, `Client Options`, `Observability Incident Bundle Test Suite`, `Observability Commands Test Suite`, `getCompletionTimeline` fail-closed/executeCommand, truthful observability-metrics capability semantics), который также проверяет `response.version=18` bounded contention attribution plus contender snapshot with executeCommand detail, completion phase, turn-wait resolution detail и request-bound probe correlation, human-readable verdict projection (`server_before_method_entry_dominant` только при `same_request_authoritative`, `client_before_transport_dominant`, `handler_prelude_dominant`, `prepare_timeout@prepare_guard`, `exact_deadline@artifact_poll`), synthetic average trace notice для `v8` provenance, `v9` pre-service-scope split, `v10` dispatch split, `v11` first-poll / first-wake split, `v12` first-poll contention attribution, `v13` contender snapshot, `v14` executeCommand command detail, `v15` completion phase detail, `v16` turn-wait resolution detail, `v17` transport slot release detail и `v18` request-bound probe correlation, request-centric incident handoff (`capture_scope`, `request_count`, bounded request list, deterministic probe correlation), явную деградацию для `v17`/`v16`/`v15`/`v14`/`v13`/`v12`/`v11`/`v10`/`v9`/`v8`/`v7` payload и actual file export path для incident bundle. Для `refactor-completion-superseded-active-turn-release` smoke additionally includes branch-level proof `p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint` alongside `p33_same_file_completion_supersession_releases_active_turn_during_response_build`.
+- `smoke`: completion/golden baseline + cross-adapter default-path selectors для LSP/runtime/web/MCP/CLI, включая anti-rescue invariants (no polluted-search backfill, no MCP parse-result semantic bypass), current-revision stale proofs для `hover` / `definition` / `type_at_position`, exact-index representative slices для `hover` / `signatureHelp` / `definition`, path-aware module-context/facet slices для Web и CLI, отдельный authoritative `Completion Timeline v19` drilldown contract slice (`adapter_read_at_ms`, `adapter_to_dispatch_wait_ms`, legacy `transport_received_at_ms_provenance`, `jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `service_future_created_at_ms`, `service_future_first_poll_entered_at_ms`, `service_future_to_first_poll_wait_ms`, `service_future_first_poll_outcome`, `service_future_first_wake_scheduled_at_ms`, `first_poll_to_first_wake_wait_ms`, bounded `first_poll_contention_attribution`, bounded-length `first_poll_contention_contenders` с optional `command` для `workspace/executeCommand` и optional `phase` для inflight completion stage, `transport_to_service_future_wait_ms`, `service_future_to_scope_wait_ms`, существующие `transport_to_service_scope_wait_ms`, `service_scope_to_method_wait_ms`, bounded `pre_method_attribution_provenance`, request-id-safe overlap handling с echoed `client_probe_id` и отдельной fail-closed provenance regression, `wait_for_file_version_runtime`, `snapshot_with_deps_runtime`, `snapshot_with_deps_timeout_runtime`, bounded `timeout_attribution`, bounded `artifact_poll`, `dispatcher_resolution_latency_ms`, `turn_wait_entered_at_ms`, `turn_wait_resolved_at_ms`, `wake_after_turn_resolution_at_ms`, fail-open bounded serialization) и focused extension-host slice для `Completion Timeline` / `Client Probe Feed` / `Observability Incident Bundle` (`Completion Probe*`, включая `Completion Probe Runtime` transport hook/selection observer, `Completion Timeline*`, `Client Options`, `Observability Incident Bundle Test Suite`, `Observability Commands Test Suite`, `getCompletionTimeline` fail-closed/executeCommand, truthful observability-metrics capability semantics), который также проверяет `response.version=19`, truthful pre-dispatch split, request-bound probe correlation, human-readable verdict projection (`adapter_before_dispatch_dominant`, `server_before_method_entry_dominant` только при `same_request_authoritative`, `client_before_transport_dominant`, `handler_prelude_dominant`, `prepare_timeout@prepare_guard`, `exact_deadline@artifact_poll`), synthetic average trace notice для `v8` provenance, `v9` pre-service-scope split, `v10` dispatch split, `v11` first-poll / first-wake split, `v12` first-poll contention attribution, `v13` contender snapshot, `v14` executeCommand command detail, `v15` completion phase detail, `v16` turn-wait resolution detail, `v17` transport slot release detail, `v18` request-bound probe correlation и `v19` adapter ingress pre-dispatch split, request-centric incident handoff (`capture_scope`, `request_count`, bounded request list, deterministic probe correlation), явную деградацию для `v18`/`v17`/`v16`/`v15`/`v14`/`v13`/`v12`/`v11`/`v10`/`v9`/`v8`/`v7` payload и actual file export path для incident bundle. Для `refactor-completion-superseded-active-turn-release` smoke additionally includes branch-level proof `p33_same_file_completion_supersession_releases_active_turn_at_format_checkpoint` alongside `p33_same_file_completion_supersession_releases_active_turn_during_response_build`.
 - `full`: smoke + интеграционные тесты, которые загружают fixture конфигурации (например, `examples/conf/conf_test`).
 
 ---

@@ -67,6 +67,59 @@ fn duration_from_millis_u128(value_ms: u128) -> Duration {
     Duration::from_millis(value_ms.min(u64::MAX as u128) as u64)
 }
 
+fn next_completion_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64) -> String {
+    let id = counter.fetch_add(1, Ordering::Relaxed);
+    format!("completion-trace-{id}")
+}
+
+async fn record_completion_timeline_trace_inner(
+    traces: &Mutex<VecDeque<crate::types::CompletionTimelineTrace>>,
+    trace: crate::types::CompletionTimelineTrace,
+) {
+    let mut traces = traces.lock().await;
+    traces.push_back(trace);
+    while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
+        let _ = traces.pop_front();
+    }
+}
+
+fn build_pre_dispatch_cancelled_completion_trace(
+    input: super::request_context::PreDispatchCompletionCancelledTraceInput,
+    trace_id: String,
+) -> crate::types::CompletionTimelineTrace {
+    let started_at_ms = input.adapter_read_at_ms.unwrap_or(input.cancelled_at_ms);
+    let queued_before_dispatch_ms = input.cancelled_at_ms.saturating_sub(started_at_ms);
+
+    crate::types::CompletionTimelineTrace {
+        trace_id,
+        request_id: Some(input.request_id),
+        client_probe_id: input.client_probe_id,
+        uri: input.uri,
+        trigger_mode: input.trigger_mode,
+        outcome: "cancelled".to_string(),
+        started_at_ms,
+        total_duration_ms: queued_before_dispatch_ms,
+        dominant_stage: Some("queued_before_dispatch".to_string()),
+        prepare_details: None,
+        server_edge_details: None,
+        turn_attribution: None,
+        stages: vec![
+            crate::types::CompletionTimelineStageTrace {
+                name: "queued_before_dispatch".to_string(),
+                status: "cancelled".to_string(),
+                started_offset_ms: 0,
+                duration_ms: queued_before_dispatch_ms,
+            },
+            crate::types::CompletionTimelineStageTrace {
+                name: "terminal".to_string(),
+                status: "cancelled".to_string(),
+                started_offset_ms: queued_before_dispatch_ms,
+                duration_ms: 0,
+            },
+        ],
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn validate_scale_aware_baseline_schema_for_acceptance(
     baseline_report: &serde_json::Value,
@@ -144,45 +197,10 @@ impl BslLanguageServer {
         );
         let completion_cancellation_registry_v2 =
             Arc::new(super::completion_cancellation::CompletionCancellationRegistry::default());
+        let completion_timeline_traces = Arc::new(Mutex::new(VecDeque::new()));
+        let next_completion_timeline_trace_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
 
-        let cancellation_registry_weak = Arc::downgrade(&completion_cancellation_registry_v2);
-        let dispatcher_weak = Arc::downgrade(&completion_dispatcher_v2);
-        super::request_context::set_cancel_request_hook(Some(Arc::new(move |request_id| {
-            let Some(registry) = cancellation_registry_weak.upgrade() else {
-                return;
-            };
-            let Some(dispatcher) = dispatcher_weak.upgrade() else {
-                return;
-            };
-            let Some(entry) = registry.cancel_request(&request_id) else {
-                return;
-            };
-            tokio::spawn(async move {
-                let file_id = entry.file_id;
-                let cancelled_request_epoch = entry.request_epoch;
-                let _ = dispatcher
-                    .cancel_pre_active_completion(file_id, cancelled_request_epoch)
-                    .await;
-                let ticket = dispatcher.emit_cancel(file_id, request_id.clone()).await;
-                if matches!(
-                    ticket.queue_outcome,
-                    super::completion_dispatcher::QueueEnqueueOutcome::Full
-                        | super::completion_dispatcher::QueueEnqueueOutcome::Closed
-                ) {
-                    debug!(
-                        file_id = file_id.0,
-                        file_seq = ticket.file_seq,
-                        request_epoch = ticket.request_epoch,
-                        cancelled_request_epoch,
-                        request_id = %request_id,
-                        queue_outcome = ?ticket.queue_outcome,
-                        "completion dispatcher dropped cancel event"
-                    );
-                }
-            });
-        })));
-
-        Self {
+        let server = Self {
             client,
             diagnostics_counts: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(None)),
@@ -219,29 +237,89 @@ impl BslLanguageServer {
             full_index_state: Arc::new(Mutex::new(super::FullIndexRuntimeState::default())),
             next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
-            completion_timeline_traces: Arc::new(Mutex::new(VecDeque::new())),
-            next_completion_timeline_trace_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            completion_timeline_traces: completion_timeline_traces.clone(),
+            next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
             next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             next_type_index_precompute_task_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
-        }
+        };
+
+        let cancellation_registry_weak =
+            Arc::downgrade(&server.completion_cancellation_registry_v2);
+        let dispatcher_weak = Arc::downgrade(&server.completion_dispatcher_v2);
+        super::request_context::set_cancel_request_hook(Some(Arc::new(move |request_id| {
+            let Some(registry) = cancellation_registry_weak.upgrade() else {
+                return;
+            };
+            let Some(dispatcher) = dispatcher_weak.upgrade() else {
+                return;
+            };
+            let Some(entry) = registry.cancel_request(&request_id) else {
+                return;
+            };
+            tokio::spawn(async move {
+                let file_id = entry.file_id;
+                let cancelled_request_epoch = entry.request_epoch;
+                let _ = dispatcher
+                    .cancel_pre_active_completion(file_id, cancelled_request_epoch)
+                    .await;
+                let ticket = dispatcher.emit_cancel(file_id, request_id.clone()).await;
+                if matches!(
+                    ticket.queue_outcome,
+                    super::completion_dispatcher::QueueEnqueueOutcome::Full
+                        | super::completion_dispatcher::QueueEnqueueOutcome::Closed
+                ) {
+                    debug!(
+                        file_id = file_id.0,
+                        file_seq = ticket.file_seq,
+                        request_epoch = ticket.request_epoch,
+                        cancelled_request_epoch,
+                        request_id = %request_id,
+                        queue_outcome = ?ticket.queue_outcome,
+                        "completion dispatcher dropped cancel event"
+                    );
+                }
+            });
+        })));
+
+        let completion_timeline_traces_for_hook = completion_timeline_traces.clone();
+        let next_completion_timeline_trace_id_for_hook = next_completion_timeline_trace_id.clone();
+        let coordinator_for_hook = server.coordinator.clone();
+        super::request_context::set_pre_dispatch_completion_cancelled_hook(Some(Arc::new(
+            move |input| {
+                let completion_timeline_traces = completion_timeline_traces_for_hook.clone();
+                let next_completion_timeline_trace_id =
+                    next_completion_timeline_trace_id_for_hook.clone();
+                let coordinator = coordinator_for_hook.clone();
+                tokio::spawn(async move {
+                    let trace = build_pre_dispatch_cancelled_completion_trace(
+                        input,
+                        next_completion_timeline_trace_id_from(
+                            next_completion_timeline_trace_id.as_ref(),
+                        ),
+                    );
+                    record_completion_timeline_trace_inner(
+                        completion_timeline_traces.as_ref(),
+                        trace,
+                    )
+                    .await;
+                    coordinator.record_intellisense_v2_completion_outcome("cancelled");
+                });
+            },
+        )));
+
+        server
     }
 
     pub(crate) fn next_completion_timeline_trace_id(&self) -> String {
-        let id = self
-            .next_completion_timeline_trace_id
-            .fetch_add(1, Ordering::Relaxed);
-        format!("completion-trace-{id}")
+        next_completion_timeline_trace_id_from(self.next_completion_timeline_trace_id.as_ref())
     }
 
     pub(crate) async fn record_completion_timeline_trace(
         &self,
         trace: crate::types::CompletionTimelineTrace,
     ) {
-        let mut traces = self.completion_timeline_traces.lock().await;
-        traces.push_back(trace);
-        while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
-            let _ = traces.pop_front();
-        }
+        record_completion_timeline_trace_inner(self.completion_timeline_traces.as_ref(), trace)
+            .await;
     }
 
     pub(crate) async fn record_completion_head_hit_v2(

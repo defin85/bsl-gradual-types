@@ -217,6 +217,7 @@ struct CompletionTimelineCapture {
     uri: String,
     trigger_mode: String,
     started_at_ms: u64,
+    adapter_read_at_ms: Option<u64>,
     transport_received_at_ms: Option<u64>,
     transport_received_at_ms_provenance: Option<String>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
@@ -264,6 +265,7 @@ impl CompletionTimelineCapture {
             uri: uri.to_string(),
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
+            adapter_read_at_ms: None,
             transport_received_at_ms: None,
             transport_received_at_ms_provenance: None,
             jsonrpc_dispatch_received_at_ms: None,
@@ -393,6 +395,10 @@ impl CompletionTimelineCapture {
         self.transport_received_at_ms = Some(transport_received_at_ms);
     }
 
+    fn set_adapter_read_at_ms(&mut self, adapter_read_at_ms: u64) {
+        self.adapter_read_at_ms = Some(adapter_read_at_ms);
+    }
+
     fn set_transport_received_at_ms_provenance(&mut self, provenance: impl Into<String>) {
         self.transport_received_at_ms_provenance = Some(provenance.into());
     }
@@ -486,6 +492,7 @@ impl CompletionTimelineCapture {
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
         super::helpers::build_server_edge_details_trace(
             &super::helpers::RequestServerEdgeTraceInputs {
+                adapter_read_at_ms: self.adapter_read_at_ms,
                 transport_received_at_ms: self.transport_received_at_ms,
                 transport_received_at_ms_provenance: self
                     .transport_received_at_ms_provenance
@@ -1177,6 +1184,11 @@ impl BslLanguageServer {
             pending_request_context.and_then(|context| context.client_probe_id.as_deref())
         {
             timeline_capture.set_client_probe_id(client_probe_id);
+        }
+        if let Some(adapter_read_at_ms) =
+            pending_request_context.and_then(|context| context.adapter_read_at_ms)
+        {
+            timeline_capture.set_adapter_read_at_ms(adapter_read_at_ms);
         }
         if let Some(jsonrpc_dispatch_received_at_ms) =
             current_request_jsonrpc_dispatch_received_at_ms.or_else(|| {
@@ -3283,12 +3295,14 @@ mod tests {
         let details = trace
             .server_edge_details
             .expect("server_edge_details must be present");
+        assert_eq!(details.adapter_read_at_ms, None);
         assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
         assert_eq!(
             details.transport_received_at_ms_provenance,
             "request_context_call_entry"
         );
         assert_eq!(details.jsonrpc_dispatch_received_at_ms, None);
+        assert_eq!(details.adapter_to_dispatch_wait_ms, None);
         assert_eq!(details.dispatch_to_request_context_wait_ms, None);
         assert_eq!(
             details.service_future_created_at_ms,
@@ -3628,6 +3642,7 @@ mod tests {
     #[test]
     fn server_edge_details_use_outer_dispatch_timestamp_as_transport_anchor_when_available() {
         let mut capture = sample_capture();
+        capture.set_adapter_read_at_ms(1_699_999_999_984);
         capture.set_transport_received_at_ms(1_699_999_999_990);
         capture.set_transport_received_at_ms_provenance("jsonrpc_dispatch_received");
         capture.set_jsonrpc_dispatch_received_at_ms(1_699_999_999_990);
@@ -3646,6 +3661,7 @@ mod tests {
         let details = trace
             .server_edge_details
             .expect("server_edge_details must be present");
+        assert_eq!(details.adapter_read_at_ms, Some(1_699_999_999_984));
         assert_eq!(details.transport_received_at_ms, 1_699_999_999_990);
         assert_eq!(
             details.transport_received_at_ms_provenance,
@@ -3655,6 +3671,7 @@ mod tests {
             details.jsonrpc_dispatch_received_at_ms,
             Some(1_699_999_999_990)
         );
+        assert_eq!(details.adapter_to_dispatch_wait_ms, Some(6));
         assert_eq!(details.dispatch_to_request_context_wait_ms, Some(2));
         assert_eq!(details.transport_to_service_future_wait_ms, Some(5));
         assert_eq!(details.service_future_to_scope_wait_ms, Some(4));

@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 18,
+            version: 19,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -55,6 +55,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     total_duration_ms: 48,
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
+                        adapter_read_at_ms: 1_700_000_000_036,
                         transport_received_at_ms: 1_700_000_000_040,
                         transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                         jsonrpc_dispatch_received_at_ms: 1_700_000_000_040,
@@ -84,6 +85,7 @@ suite('Completion Timeline Model Test Suite', () => {
                         handler_entered_at_ms: 1_700_000_000_042,
                         response_sent_at_ms: 1_700_000_000_090,
                         dispatch_to_request_context_wait_ms: 0,
+                        adapter_to_dispatch_wait_ms: 4,
                         transport_to_slot_release_wait_ms: 1,
                         transport_to_service_future_wait_ms: 0,
                         service_future_to_scope_wait_ms: 1,
@@ -180,7 +182,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 18);
+        assert.strictEqual(state.version, 19);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
@@ -340,7 +342,7 @@ suite('Completion Timeline Model Test Suite', () => {
 
     test('ready state leaves traces uncorrelated when no matching probe exists', () => {
         const payload: CompletionTimelineResponse = {
-            version: 18,
+            version: 19,
             traces: [
                 {
                     trace_id: 'trace-unmatched',
@@ -867,7 +869,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, and v18 request-bound client probe correlation detail are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

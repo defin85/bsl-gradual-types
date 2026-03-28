@@ -19,6 +19,8 @@ if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
     REAL_MODULE_PROFILES="churn preactive_overlap"
   elif [[ "${CHANGE_ID}" == "refactor-document-symbol-interactive-isolation" ]]; then
     REAL_MODULE_PROFILES="outline"
+  elif [[ "${CHANGE_ID}" == "isolate-completion-pre-dispatch-ingress" ]]; then
+    REAL_MODULE_PROFILES="outline"
   else
     REAL_MODULE_PROFILES="churn"
   fi
@@ -236,7 +238,44 @@ for profile in real_module_profiles:
                 f"- documentSymbol superseded delta: `{summary.get('measured_document_symbol_superseded_total_delta', 0)}`",
                 f"- documentSymbol present responses: `{summary.get('measured_document_symbol_present_responses_total', 0)}`",
                 f"- documentSymbol null responses: `{summary.get('measured_document_symbol_null_responses_total', 0)}`",
-                f"- ingress regression samples: `{summary.get('measured_ingress_regression_samples', 0)}`",
+                f"- legacy ingress-regression samples: `{summary.get('measured_ingress_regression_samples', 0)}`",
+            ]
+        )
+    if "measured_adapter_to_dispatch_wait_ms" in summary:
+        profile_lines.extend(
+            [
+                (
+                    "- pre-dispatch samples over budget: "
+                    f"`{summary.get('measured_pre_dispatch_wait_over_budget_samples', 0)}`"
+                ),
+                (
+                    "- pre-dispatch samples over hard cap: "
+                    f"`{summary.get('measured_pre_dispatch_wait_over_hard_cap_samples', 0)}`"
+                ),
+                (
+                    "`p95(adapter_to_dispatch_wait_ms)="
+                    f"{summary.get('measured_adapter_to_dispatch_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(adapter_to_dispatch_wait_ms)="
+                    f"{summary.get('measured_adapter_to_dispatch_wait_max_ms', 0)}ms`"
+                ),
+                (
+                    "`p95(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_max_ms', 0)}ms`"
+                ),
+                (
+                    "`p95(transport_to_handler_wait_ms)="
+                    f"{summary.get('measured_transport_to_handler_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(transport_to_handler_wait_ms)="
+                    f"{summary.get('measured_transport_to_handler_wait_max_ms', 0)}ms`"
+                ),
             ]
         )
     if "measured_first_cancelled_or_superseded_traces" in summary:

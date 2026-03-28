@@ -19,6 +19,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         REPO_ROOT / "docs" / "guides" / "development-workflow.md"
     )
     DOCUMENT_SYMBOL_CHANGE_ID = "refactor-document-symbol-interactive-isolation"
+    PRE_DISPATCH_INGRESS_CHANGE_ID = "isolate-completion-pre-dispatch-ingress"
     OVERLAP_CHANGE_ID = "refactor-completion-superseded-active-turn-release"
     TURN_WAIT_CHANGE_ID = "refactor-completion-turn-wait-lifecycle"
     SLOT_RELEASE_CHANGE_ID = "refactor-completion-turn-wait-slot-release"
@@ -47,6 +48,65 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "perf"
         / "reports"
         / f"{DOCUMENT_SYMBOL_CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
+    )
+    PRE_DISPATCH_INGRESS_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-isolate-completion-pre-dispatch-ingress.sh"
+    )
+    PRE_DISPATCH_INGRESS_GATE_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / PRE_DISPATCH_INGRESS_CHANGE_ID
+        / "validation"
+        / "mixed-load-gate.md"
+    )
+    PRE_DISPATCH_INGRESS_TRACEABILITY_DOC = (
+        REPO_ROOT
+        / "openspec"
+        / "changes"
+        / PRE_DISPATCH_INGRESS_CHANGE_ID
+        / "validation"
+        / "traceability.md"
+    )
+    PRE_DISPATCH_INGRESS_READINESS_GATE_JSON = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-readiness-gate.json"
+    )
+    PRE_DISPATCH_INGRESS_READINESS_GATE_MD = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-readiness-gate.md"
+    )
+    PRE_DISPATCH_INGRESS_MIXED_LOAD_REPORT = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.json"
+    )
+    PRE_DISPATCH_INGRESS_MIXED_LOAD_SUMMARY = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-real-conf-big-document-symbol-mixed-load-live.md"
+    )
+    PRE_DISPATCH_INGRESS_OPENSPEC_LOG = (
+        REPO_ROOT
+        / "backend"
+        / "tests"
+        / "perf"
+        / "reports"
+        / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-openspec-validate.log"
     )
     OVERLAP_GATE_DOC = (
         REPO_ROOT
@@ -218,6 +278,13 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         "./scripts/validate-stabilize-completion-front-edge.sh",
         "CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh",
     ]
+    REQUIRED_PRE_DISPATCH_INGRESS_DOC_SNIPPETS = [
+        "./scripts/validate-isolate-completion-pre-dispatch-ingress.sh",
+        (
+            "CHANGE_ID=isolate-completion-pre-dispatch-ingress "
+            "./scripts/validate-v2-completion-gates.sh"
+        ),
+    ]
     REQUIRED_FRONT_EDGE_CI_PATH_FILTERS = [
         "vscode-extension/src/commands/observability.ts",
         "vscode-extension/src/lsp/client/completionProbeRuntime.ts",
@@ -242,6 +309,21 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             "!backend/tests/perf/reports/"
             "stabilize-completion-front-edge-real-conf-big-revision-churn-"
             "completion-perf-live.md"
+        ),
+    ]
+    REQUIRED_PRE_DISPATCH_INGRESS_GITIGNORE_ENTRIES = [
+        "!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-openspec-validate.log",
+        "!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.json",
+        "!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.md",
+        (
+            "!backend/tests/perf/reports/"
+            "isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-"
+            "mixed-load-live.json"
+        ),
+        (
+            "!backend/tests/perf/reports/"
+            "isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-"
+            "mixed-load-live.md"
         ),
     ]
 
@@ -377,6 +459,16 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         return json.loads(self.OVERLAP_GATE_REPORT.read_text(encoding="utf-8"))[
             "summary"
         ]
+
+    def pre_dispatch_ingress_gate_summary(self) -> dict:
+        return json.loads(
+            self.PRE_DISPATCH_INGRESS_MIXED_LOAD_REPORT.read_text(encoding="utf-8")
+        )["summary"]
+
+    def pre_dispatch_ingress_readiness_gate(self) -> dict:
+        return json.loads(
+            self.PRE_DISPATCH_INGRESS_READINESS_GATE_JSON.read_text(encoding="utf-8")
+        )
 
     def turn_wait_gate_summary(self) -> dict:
         return json.loads(self.TURN_WAIT_GATE_REPORT.read_text(encoding="utf-8"))[
@@ -514,6 +606,167 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             (
                 "documentSymbol mixed-load validation doc drifted from authoritative "
                 f"checked-in report, missing snippets: {missing}"
+            ),
+        )
+
+    def test_pre_dispatch_ingress_wrapper_and_assets_are_checked_in(self) -> None:
+        required_paths = [
+            self.PRE_DISPATCH_INGRESS_WRAPPER,
+            self.PRE_DISPATCH_INGRESS_GATE_DOC,
+            self.PRE_DISPATCH_INGRESS_TRACEABILITY_DOC,
+            self.PRE_DISPATCH_INGRESS_READINESS_GATE_JSON,
+            self.PRE_DISPATCH_INGRESS_READINESS_GATE_MD,
+            self.PRE_DISPATCH_INGRESS_MIXED_LOAD_REPORT,
+            self.PRE_DISPATCH_INGRESS_MIXED_LOAD_SUMMARY,
+            self.PRE_DISPATCH_INGRESS_OPENSPEC_LOG,
+        ]
+        missing = [
+            str(path.relative_to(self.REPO_ROOT))
+            for path in required_paths
+            if not path.exists()
+        ]
+        self.assertFalse(
+            missing,
+            (
+                "pre-dispatch ingress readiness bundle is incomplete; missing "
+                f"checked-in assets: {missing}"
+            ),
+        )
+
+    def test_pre_dispatch_ingress_docs_expose_canonical_wrapper(self) -> None:
+        docs_to_check = [
+            self.VERIFICATION_DOC,
+            self.DEVELOPMENT_WORKFLOW_GUIDE,
+            self.REPO_ROOT / "scripts" / "README.md",
+        ]
+        for doc in docs_to_check:
+            content = doc.read_text(encoding="utf-8")
+            missing = [
+                snippet
+                for snippet in self.REQUIRED_PRE_DISPATCH_INGRESS_DOC_SNIPPETS
+                if snippet not in content
+            ]
+            self.assertFalse(
+                missing,
+                (
+                    f"{doc.relative_to(self.REPO_ROOT)} is missing pre-dispatch "
+                    f"ingress wrapper snippets: {missing}"
+                ),
+            )
+
+    def test_pre_dispatch_ingress_validation_doc_matches_checked_in_report(self) -> None:
+        content = self.PRE_DISPATCH_INGRESS_GATE_DOC.read_text(encoding="utf-8")
+        summary = self.pre_dispatch_ingress_gate_summary()
+        expected_snippets = [
+            "./scripts/validate-isolate-completion-pre-dispatch-ingress.sh",
+            (
+                f"CHANGE_ID={self.PRE_DISPATCH_INGRESS_CHANGE_ID} "
+                "./scripts/validate-v2-completion-gates.sh"
+            ),
+            f"`{summary['measured_completion_total_delta']}` completion samples",
+            f"`{summary['measured_head_hit_traces']}` `head_hit`",
+            f"`{summary['measured_exact_hit_traces']}` `exact_hit`",
+            f"`{summary['measured_prepare_timeout_total_delta']}` `prepare_timeout`",
+            f"`{summary['measured_exact_deadline_total_delta']}` `exact_deadline`",
+            f"`{summary['measured_pre_dispatch_wait_over_budget_samples']}` pre-dispatch samples over budget",
+            f"`{summary['measured_pre_dispatch_wait_over_hard_cap_samples']}` pre-dispatch samples over hard cap",
+            f"`{summary['measured_document_symbol_latest_ready_total_delta']}` `latest_ready`",
+            f"`{summary['measured_document_symbol_current_ready_total_delta']}` `current_ready`",
+            f"`{summary['measured_document_symbol_unavailable_total_delta']}` `unavailable`",
+            f"`{summary['measured_document_symbol_superseded_total_delta']}` `superseded`",
+            (
+                "`p95(adapter_to_dispatch_wait_ms)="
+                f"{self.format_metric(summary['measured_adapter_to_dispatch_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(adapter_to_dispatch_wait_ms)="
+                f"{summary['measured_adapter_to_dispatch_wait_max_ms']}ms`"
+            ),
+            (
+                "`p95(service_future_to_first_poll_wait_ms)="
+                f"{self.format_metric(summary['measured_service_future_to_first_poll_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(service_future_to_first_poll_wait_ms)="
+                f"{summary['measured_service_future_to_first_poll_wait_max_ms']}ms`"
+            ),
+            (
+                "`p95(transport_to_handler_wait_ms)="
+                f"{self.format_metric(summary['measured_transport_to_handler_wait_ms']['p95'])}ms`"
+            ),
+            (
+                "`max(transport_to_handler_wait_ms)="
+                f"{summary['measured_transport_to_handler_wait_max_ms']}ms`"
+            ),
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in content]
+        self.assertFalse(
+            missing,
+            (
+                "pre-dispatch ingress validation doc drifted from authoritative "
+                f"checked-in report, missing snippets: {missing}"
+            ),
+        )
+
+    def test_pre_dispatch_ingress_readiness_gate_references_checked_in_artifacts(self) -> None:
+        gate = self.pre_dispatch_ingress_readiness_gate()
+        self.assertEqual(gate["change_id"], self.PRE_DISPATCH_INGRESS_CHANGE_ID)
+        self.assertTrue(
+            gate["pass"], "pre-dispatch ingress readiness gate must stay green"
+        )
+        outline_gate = gate["real_module_gates"]["outline"]
+        self.assertEqual(
+            outline_gate["report"],
+            "tests/perf/reports/"
+            "isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-"
+            "mixed-load-live.json",
+        )
+        self.assertEqual(
+            outline_gate["summary"],
+            "tests/perf/reports/"
+            "isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-"
+            "mixed-load-live.md",
+        )
+
+    def test_pre_dispatch_ingress_ci_watches_wrapper(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertGreaterEqual(
+            workflow.count("scripts/validate-isolate-completion-pre-dispatch-ingress.sh"),
+            2,
+            "CI path filters must watch pre-dispatch ingress wrapper on pull_request and push",
+        )
+
+    def test_pre_dispatch_ingress_ci_wiring_tracks_artifacts(self) -> None:
+        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        expected_snippets = [
+            "CHANGE_ID: isolate-completion-pre-dispatch-ingress",
+            (
+                "BSL_V2_REAL_CONF_BIG_DOCUMENT_SYMBOL_MIXED_LOAD_REPORT: "
+                "${{ github.workspace }}/backend/tests/perf/reports/"
+                "isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-"
+                "mixed-load-live.json"
+            ),
+            "backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-*.json",
+            "backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-*.md",
+        ]
+        missing = [snippet for snippet in expected_snippets if snippet not in workflow]
+        self.assertFalse(
+            missing,
+            f"CI workflow is missing pre-dispatch ingress readiness wiring: {missing}",
+        )
+
+    def test_pre_dispatch_ingress_gitignore_keeps_readiness_artifacts_trackable(self) -> None:
+        gitignore = (self.REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+        missing = [
+            entry
+            for entry in self.REQUIRED_PRE_DISPATCH_INGRESS_GITIGNORE_ENTRIES
+            if entry not in gitignore
+        ]
+        self.assertFalse(
+            missing,
+            (
+                ".gitignore must keep pre-dispatch ingress readiness artifacts "
+                f"trackable: {missing}"
             ),
         )
 
@@ -840,9 +1093,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     def test_front_edge_docs_reference_current_contract_versions(self) -> None:
         manual = (self.REPO_ROOT / "vscode-extension" / "manual-lsp-test.md").read_text(encoding="utf-8")
         test_readme = (self.REPO_ROOT / "vscode-extension" / "src" / "test" / "README.md").read_text(encoding="utf-8")
-        self.assertIn("payload `version=18`", manual)
+        self.assertIn("payload `version=19`", manual)
         self.assertNotIn("payload `version=12`", manual)
-        self.assertIn("`response.version=18`", test_readme)
+        self.assertIn("`response.version=19`", test_readme)
         self.assertNotIn("`response.version=16`", test_readme)
 
     def test_front_edge_ci_watches_wrapper(self) -> None:

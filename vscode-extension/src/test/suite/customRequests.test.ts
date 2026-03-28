@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 18,
+                        version: 19,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -215,6 +215,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                     },
                                 },
                                 server_edge_details: {
+                                    adapter_read_at_ms: 1_699_999_999_995,
                                     transport_received_at_ms: 1_700_000_000_000,
                                     transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                                     jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
@@ -256,6 +257,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                     handler_entered_at_ms: 1_700_000_000_003,
                                     response_sent_at_ms: 1_700_000_000_018,
                                     dispatch_to_request_context_wait_ms: 0,
+                                    adapter_to_dispatch_wait_ms: 5,
                                     transport_to_service_future_wait_ms: 1,
                                     service_future_to_scope_wait_ms: 1,
                                     service_future_to_first_poll_wait_ms: 2,
@@ -456,10 +458,14 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 18);
+        assert.strictEqual(result.response.version, 19);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.adapter_read_at_ms,
+            1_699_999_999_995
+        );
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.transport_received_at_ms_provenance,
             'jsonrpc_dispatch_received'
@@ -467,6 +473,10 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.jsonrpc_dispatch_received_at_ms,
             1_700_000_000_000
+        );
+        assert.strictEqual(
+            result.response.traces[0].server_edge_details?.adapter_to_dispatch_wait_ms,
+            5
         );
         assert.strictEqual(
             result.response.traces[0].server_edge_details?.service_future_created_at_ms,

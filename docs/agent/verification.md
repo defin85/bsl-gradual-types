@@ -88,11 +88,13 @@ cargo test --workspace --locked
 
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
+./scripts/validate-isolate-completion-pre-dispatch-ingress.sh
 ./scripts/validate-completion-superseded-active-turn-release.sh
 ./scripts/validate-stabilize-completion-front-edge.sh
 ./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-slot-release ./scripts/validate-v2-completion-gates.sh
@@ -102,6 +104,11 @@ CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completi
 `./scripts/validate-document-symbol-interactive-isolation.sh` is the canonical
 default entry point for the document-symbol isolation evidence bundle; it wraps
 the generic readiness script with the correct `CHANGE_ID`.
+`./scripts/validate-isolate-completion-pre-dispatch-ingress.sh` is the
+canonical default entry point for the truthful pre-dispatch ingress evidence
+bundle; it wraps the generic readiness script with the correct `CHANGE_ID` and
+forces the representative `outline` profile that fails on
+`adapter_to_dispatch_wait_ms` budgets.
 `./scripts/validate-completion-superseded-active-turn-release.sh` is the
 canonical default entry point for the overlap supersession evidence bundle; it
 wraps the generic readiness script with the correct `CHANGE_ID` and collects

@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 18,
+                version: 19,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -68,6 +68,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             },
                         },
                         server_edge_details: {
+                            adapter_read_at_ms: 1_699_999_999_800,
                             transport_received_at_ms: 1_700_000_000_000,
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
@@ -109,6 +110,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
                             dispatch_to_request_context_wait_ms: 200,
+                            adapter_to_dispatch_wait_ms: 200,
                             transport_to_service_future_wait_ms: 1200,
                             service_future_to_scope_wait_ms: 800,
                             service_future_to_first_poll_wait_ms: 300,
@@ -265,7 +267,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 18);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 19);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -776,9 +778,11 @@ suite('Observability Incident Bundle Test Suite', () => {
             {
                 ...timeline.response.traces[0],
                 server_edge_details: {
+                    adapter_read_at_ms: 1_700_000_000_100,
                     transport_received_at_ms: 1_700_000_000_100,
                     transport_received_at_ms_provenance: 'request_context_call_entry',
                     pre_method_attribution_provenance: 'same_request_authoritative',
+                    adapter_to_dispatch_wait_ms: 10,
                     method_entered_at_ms: 1_700_000_000_140,
                     handler_entered_at_ms: 1_700_000_000_140,
                     response_sent_at_ms: 1_700_000_000_220,
@@ -822,6 +826,60 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('pre-dispatch adapter backlog should not be published as client ingress verdict', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                server_edge_details: {
+                    adapter_read_at_ms: 1_700_000_000_100,
+                    transport_received_at_ms: 1_700_000_000_220,
+                    transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                    jsonrpc_dispatch_received_at_ms: 1_700_000_000_220,
+                    pre_method_attribution_provenance: 'same_request_authoritative',
+                    adapter_to_dispatch_wait_ms: 120,
+                    method_entered_at_ms: 1_700_000_000_260,
+                    handler_entered_at_ms: 1_700_000_000_260,
+                    response_sent_at_ms: 1_700_000_000_330,
+                    dispatch_to_request_context_wait_ms: 0,
+                    transport_to_method_wait_ms: 40,
+                    method_prelude_exec_ms: 0,
+                    transport_to_handler_wait_ms: 40,
+                    server_handler_exec_ms: 70,
+                },
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-server-pre-dispatch',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_095,
+                    lsp_request_started_at_ms: 1_700_000_000_100,
+                    lsp_response_received_at_ms: 1_700_000_000_331,
+                    request_completed_at_ms: 1_700_000_000_332,
+                    client_duration_ms: 237,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('adapter_before_dispatch_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('server-side pre-dispatch adapter backlog dominated 1 completion trace(s)')
+            )
+        );
+    });
+
     test('best-effort pre-method provenance should stay visible but not aggregate as strong ingress finding', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
@@ -854,7 +912,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                     probe_id: 'probe-best-effort',
                     trigger_mode: 'invoked',
                     request_started_at_ms: 1_700_000_000_000,
-                    lsp_request_started_at_ms: 1_700_000_000_000,
+                    lsp_request_started_at_ms: 1_700_000_000_100,
                     lsp_response_received_at_ms: 1_700_000_000_221,
                     request_completed_at_ms: 1_700_000_000_222,
                     client_duration_ms: 222,

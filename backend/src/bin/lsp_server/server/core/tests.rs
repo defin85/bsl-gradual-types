@@ -10334,7 +10334,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        18
+        19
     );
     assert!(
         result
@@ -10345,6 +10345,53 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
     );
 
     drain_task.abort();
+}
+
+#[test]
+fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields(
+) {
+    let trace = super::build_pre_dispatch_cancelled_completion_trace(
+        crate::server::request_context::PreDispatchCompletionCancelledTraceInput {
+            request_id: "req-pre-dispatch-cancel".to_string(),
+            uri: "file:///pre-dispatch-cancel.bsl".to_string(),
+            trigger_mode: "trigger_character".to_string(),
+            client_probe_id: Some("probe-pre-dispatch-cancel".to_string()),
+            adapter_read_at_ms: Some(1_700_000_000_100),
+            cancelled_at_ms: 1_700_000_000_148,
+        },
+        "completion-trace-test".to_string(),
+    );
+
+    assert_eq!(trace.trace_id, "completion-trace-test");
+    assert_eq!(trace.request_id.as_deref(), Some("req-pre-dispatch-cancel"));
+    assert_eq!(
+        trace.client_probe_id.as_deref(),
+        Some("probe-pre-dispatch-cancel")
+    );
+    assert_eq!(trace.uri, "file:///pre-dispatch-cancel.bsl");
+    assert_eq!(trace.trigger_mode, "trigger_character");
+    assert_eq!(trace.outcome, "cancelled");
+    assert_eq!(trace.started_at_ms, 1_700_000_000_100);
+    assert_eq!(trace.total_duration_ms, 48);
+    assert_eq!(
+        trace.dominant_stage.as_deref(),
+        Some("queued_before_dispatch")
+    );
+    assert!(
+        trace.server_edge_details.is_none(),
+        "pre-dispatch cancelled trace must not fabricate post-dispatch server_edge_details, trace={trace:?}"
+    );
+    assert!(trace.turn_attribution.is_none());
+    assert!(trace.prepare_details.is_none());
+    assert_eq!(trace.stages.len(), 2);
+    assert_eq!(trace.stages[0].name, "queued_before_dispatch");
+    assert_eq!(trace.stages[0].status, "cancelled");
+    assert_eq!(trace.stages[0].started_offset_ms, 0);
+    assert_eq!(trace.stages[0].duration_ms, 48);
+    assert_eq!(trace.stages[1].name, "terminal");
+    assert_eq!(trace.stages[1].status, "cancelled");
+    assert_eq!(trace.stages[1].started_offset_ms, 48);
+    assert_eq!(trace.stages[1].duration_ms, 0);
 }
 
 #[tokio::test]
@@ -10548,6 +10595,8 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "prepare_details must expose timeout attribution details in v6 contract"
     );
     for field in [
+        "adapter_read_at_ms",
+        "adapter_to_dispatch_wait_ms",
         "transport_received_at_ms",
         "transport_received_at_ms_provenance",
         "pre_method_attribution_provenance",
@@ -10567,6 +10616,14 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         .get("transport_received_at_ms")
         .and_then(|value| value.as_u64())
         .expect("transport_received_at_ms");
+    let adapter_read_at_ms = server_edge_details
+        .get("adapter_read_at_ms")
+        .and_then(|value| value.as_u64())
+        .expect("adapter_read_at_ms");
+    let adapter_to_dispatch_wait_ms = server_edge_details
+        .get("adapter_to_dispatch_wait_ms")
+        .and_then(|value| value.as_u64())
+        .expect("adapter_to_dispatch_wait_ms");
     let transport_received_at_ms_provenance = server_edge_details
         .get("transport_received_at_ms_provenance")
         .and_then(|value| value.as_str())
@@ -10620,6 +10677,10 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
         "unexpected pre_method_attribution_provenance={pre_method_attribution_provenance}"
     );
     assert!(
+        adapter_read_at_ms <= transport_received_at_ms,
+        "adapter_read_at_ms must not exceed transport_received_at_ms"
+    );
+    assert!(
         transport_received_at_ms <= handler_entered_at_ms,
         "transport_received_at_ms must not exceed handler_entered_at_ms"
     );
@@ -10657,6 +10718,11 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             assert!(
                 transport_received_at_ms <= method_entered_at_ms,
                 "jsonrpc dispatch timestamp must not exceed method_entered_at_ms"
+            );
+            assert_eq!(
+                adapter_to_dispatch_wait_ms,
+                jsonrpc_dispatch_received_at_ms.saturating_sub(adapter_read_at_ms),
+                "adapter_to_dispatch_wait_ms must match adapter-read to dispatch delta"
             );
             assert_eq!(
                 dispatch_to_request_context_wait_ms <= transport_to_method_wait_ms,
@@ -18836,7 +18902,10 @@ async fn p33_shutdown_cleans_retained_same_version_exact_task_entry() {
         .call(Request::build("shutdown").id(9001).finish())
         .await
         .expect("shutdown request");
-    assert!(shutdown_response.is_some(), "shutdown should return a response");
+    assert!(
+        shutdown_response.is_some(),
+        "shutdown should return a response"
+    );
 
     assert!(
         !server
@@ -25558,8 +25627,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         const WARMUP_REQUESTS: usize = 1;
         const MEASURE_REQUESTS: usize = 10;
         const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 4;
-        const FIRST_POLL_MAX_FACTOR: u64 = 4;
-        const TRANSPORT_TO_HANDLER_MAX_FACTOR: u64 = 4;
+        const ADAPTER_TO_DISPATCH_MAX_FACTOR: u64 = 4;
         let interactive_wait_budget_ms = bsl_runtime::system::global_runtime_config()
             .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
             .unwrap_or(120);
@@ -25967,12 +26035,28 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                             "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                             "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
                             "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
-                            "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
-                            "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
-                            "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
-                            "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
-                                trace,
-                                "dispatch_to_request_context_wait_ms",
+                    "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
+                    "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
+                    "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                    "adapter_read_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "adapter_read_at_ms",
+                    ),
+                    "transport_received_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "transport_received_at_ms",
+                    ),
+                    "jsonrpc_dispatch_received_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "jsonrpc_dispatch_received_at_ms",
+                    ),
+                    "adapter_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "adapter_to_dispatch_wait_ms",
+                    ),
+                    "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "dispatch_to_request_context_wait_ms",
                             ),
                             "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
                                 trace,
@@ -26027,6 +26111,22 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
                     "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
                     "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
+                    "adapter_read_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "adapter_read_at_ms",
+                    ),
+                    "transport_received_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "transport_received_at_ms",
+                    ),
+                    "jsonrpc_dispatch_received_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "jsonrpc_dispatch_received_at_ms",
+                    ),
+                    "adapter_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "adapter_to_dispatch_wait_ms",
+                    ),
                     "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
                         trace,
                         "transport_to_handler_wait_ms",
@@ -26198,12 +26298,49 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
         let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
         let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
+        let measured_adapter_to_dispatch_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "adapter_to_dispatch_wait_ms",
+        );
+        let measured_adapter_to_dispatch_p95_ms =
+            read_numeric_metric(measured_adapter_to_dispatch_histogram.get("p95"));
+        let measured_adapter_to_dispatch_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_pre_dispatch_wait_over_budget_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > interactive_wait_budget_ms
+            })
+            .count();
+        let measured_pre_dispatch_wait_over_hard_cap_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > interactive_wait_budget_ms
+                        .saturating_mul(ADAPTER_TO_DISPATCH_MAX_FACTOR)
+            })
+            .count();
         let measured_service_future_first_poll_histogram = sample_trace_server_edge_histogram(
             &measured_samples,
             "service_future_to_first_poll_wait_ms",
         );
-        let measured_service_future_first_poll_p95_ms =
-            read_numeric_metric(measured_service_future_first_poll_histogram.get("p95"));
         let measured_service_future_first_poll_max_ms = measured_samples
             .iter()
             .filter_map(|sample| {
@@ -26218,8 +26355,6 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             &measured_samples,
             "transport_to_handler_wait_ms",
         );
-        let measured_transport_to_handler_p95_ms =
-            read_numeric_metric(measured_transport_to_handler_histogram.get("p95"));
         let measured_transport_to_handler_max_ms = measured_samples
             .iter()
             .filter_map(|sample| {
@@ -26304,9 +26439,13 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_document_symbol_superseded_total_delta": measured_document_symbol_superseded_total_delta,
                 "measured_document_symbol_total_outcome_delta": measured_document_symbol_total_outcome_delta,
                 "measured_ingress_regression_samples": measured_ingress_regression_samples,
+                "measured_pre_dispatch_wait_over_budget_samples": measured_pre_dispatch_wait_over_budget_samples,
+                "measured_pre_dispatch_wait_over_hard_cap_samples": measured_pre_dispatch_wait_over_hard_cap_samples,
                 "interactive_wait_budget_ms": interactive_wait_budget_ms,
                 "warmup_latency_ms": warmup_latency_histogram,
                 "measured_latency_ms": measured_latency_histogram,
+                "measured_adapter_to_dispatch_wait_ms": measured_adapter_to_dispatch_histogram,
+                "measured_adapter_to_dispatch_wait_max_ms": measured_adapter_to_dispatch_max_ms,
                 "measured_service_future_to_first_poll_wait_ms": measured_service_future_first_poll_histogram,
                 "measured_service_future_to_first_poll_wait_max_ms": measured_service_future_first_poll_max_ms,
                 "measured_transport_to_handler_wait_ms": measured_transport_to_handler_histogram,
@@ -26455,35 +26594,24 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             interactive_wait_budget_ms
         );
         assert!(
-            measured_service_future_first_poll_p95_ms <= interactive_wait_budget_ms as f64,
-            "mixed-load pre-poll p95 regression: measured_service_future_to_first_poll_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
-            measured_service_future_first_poll_p95_ms,
+            measured_adapter_to_dispatch_p95_ms <= interactive_wait_budget_ms as f64,
+            "mixed-load pre-dispatch p95 regression: measured_adapter_to_dispatch_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_adapter_to_dispatch_p95_ms,
             interactive_wait_budget_ms
         );
         assert!(
-            measured_service_future_first_poll_max_ms
-                <= interactive_wait_budget_ms.saturating_mul(FIRST_POLL_MAX_FACTOR),
-            "mixed-load pre-poll max regression: measured_service_future_to_first_poll_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
-            measured_service_future_first_poll_max_ms,
-            interactive_wait_budget_ms.saturating_mul(FIRST_POLL_MAX_FACTOR)
-        );
-        assert!(
-            measured_transport_to_handler_p95_ms <= interactive_wait_budget_ms as f64,
-            "mixed-load transport-to-handler p95 regression: measured_transport_to_handler_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
-            measured_transport_to_handler_p95_ms,
+            measured_adapter_to_dispatch_max_ms
+                <= interactive_wait_budget_ms
+                    .saturating_mul(ADAPTER_TO_DISPATCH_MAX_FACTOR),
+            "mixed-load pre-dispatch max regression: measured_adapter_to_dispatch_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_adapter_to_dispatch_max_ms,
             interactive_wait_budget_ms
+                .saturating_mul(ADAPTER_TO_DISPATCH_MAX_FACTOR)
         );
         assert!(
-            measured_transport_to_handler_max_ms
-                <= interactive_wait_budget_ms.saturating_mul(TRANSPORT_TO_HANDLER_MAX_FACTOR),
-            "mixed-load transport-to-handler max regression: measured_transport_to_handler_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
-            measured_transport_to_handler_max_ms,
-            interactive_wait_budget_ms.saturating_mul(TRANSPORT_TO_HANDLER_MAX_FACTOR)
-        );
-        assert!(
-            measured_ingress_regression_samples == 0,
-            "mixed-load gate must fail on ingress-dominant completion samples under concurrent outline load, ingress_regression_samples={}, measured_samples={measured_samples:?}",
-            measured_ingress_regression_samples
+            measured_pre_dispatch_wait_over_hard_cap_samples == 0,
+            "mixed-load gate must fail on seconds-scale pre-dispatch backlog under concurrent outline load, measured_pre_dispatch_wait_over_hard_cap_samples={}, measured_samples={measured_samples:?}",
+            measured_pre_dispatch_wait_over_hard_cap_samples
         );
         assert!(
             measured_document_symbol_total_outcome_delta

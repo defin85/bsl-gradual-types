@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 18,
+            version: 19,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -58,6 +58,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     unattributed_overhead_ms: 2,
                     dominant_stage: 'query_bundle',
                     server_edge_details: {
+                        adapter_read_at_ms: 1_699_999_999_956,
                         transport_received_at_ms: 1_699_999_999_960,
                         transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                         jsonrpc_dispatch_received_at_ms: 1_699_999_999_960,
@@ -80,6 +81,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         response_sent_at_ms: 1_700_000_000_030,
                         cancel_observed_at_ms: 1_700_000_000_021,
                         dispatch_to_request_context_wait_ms: 4,
+                        adapter_to_dispatch_wait_ms: 4,
                         transport_to_slot_release_wait_ms: 29,
                         transport_to_service_future_wait_ms: 12,
                         service_future_to_scope_wait_ms: 16,
@@ -218,11 +220,13 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v18'));
+        assert.ok(text!.includes('contract=v19'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
         assert.ok(text!.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
+        assert.ok(text!.includes('adapter_read_at_ms=1699999999956'));
+        assert.ok(text!.includes('adapter_to_dispatch_wait_ms=4'));
         assert.ok(text!.includes('jsonrpc_dispatch_received_at_ms=1699999999960'));
         assert.ok(text!.includes('transport_slot_released_at_ms=1699999999989'));
         assert.ok(text!.includes('service_future_created_at_ms=1699999999972'));
@@ -300,7 +304,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, and v18 request-bound client probe correlation detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.'
                     )
             )
         );

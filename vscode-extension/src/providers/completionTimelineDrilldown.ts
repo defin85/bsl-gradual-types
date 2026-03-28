@@ -60,9 +60,24 @@ export function buildCompletionTraceBottleneckVerdicts(
     clientIngress?: CompletionTraceClientIngressSupplement
 ): string[] {
     const verdicts: string[] = [];
+    const adapterToDispatchWait = trace.server_edge_details?.adapter_to_dispatch_wait_ms;
     const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
     const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
     const strongPreMethodAttribution = hasStrongPreMethodAttribution(trace);
+    if (
+        typeof adapterToDispatchWait === 'number' &&
+        adapterToDispatchWait > 0 &&
+        (
+            typeof transportToMethodWait !== 'number' ||
+            adapterToDispatchWait > transportToMethodWait
+        ) &&
+        (
+            typeof methodPreludeExec !== 'number' ||
+            adapterToDispatchWait > methodPreludeExec
+        )
+    ) {
+        verdicts.push('adapter_before_dispatch_dominant');
+    }
     if (
         typeof transportToMethodWait === 'number' &&
         typeof methodPreludeExec === 'number'
@@ -70,22 +85,33 @@ export function buildCompletionTraceBottleneckVerdicts(
         if (
             strongPreMethodAttribution &&
             transportToMethodWait > 0 &&
-            transportToMethodWait > methodPreludeExec
+            transportToMethodWait > methodPreludeExec &&
+            (
+                typeof adapterToDispatchWait !== 'number' ||
+                transportToMethodWait > adapterToDispatchWait
+            )
         ) {
             verdicts.push('server_before_method_entry_dominant');
         } else if (
             methodPreludeExec > 0 &&
-            methodPreludeExec > transportToMethodWait
+            methodPreludeExec > transportToMethodWait &&
+            (
+                typeof adapterToDispatchWait !== 'number' ||
+                methodPreludeExec > adapterToDispatchWait
+            )
         ) {
             verdicts.push('handler_prelude_dominant');
         }
     }
 
     if (
-        strongPreMethodAttribution &&
         clientIngress?.correlation_status === 'correlated' &&
         typeof clientIngress.client_to_transport_wait_ms === 'number' &&
         clientIngress.client_to_transport_wait_ms > 0 &&
+        (
+            typeof adapterToDispatchWait !== 'number' ||
+            clientIngress.client_to_transport_wait_ms > adapterToDispatchWait
+        ) &&
         (
             typeof transportToMethodWait !== 'number' ||
             clientIngress.client_to_transport_wait_ms > transportToMethodWait

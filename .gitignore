@@ -71,6 +71,11 @@ backend/tests/perf/reports/*
 !backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-readiness-gate.md
 !backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.json
 !backend/tests/perf/reports/refactor-current-revision-readiness-fast-lane-real-conf-big-revision-churn-completion-perf-live.md
+!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-openspec-validate.log
+!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.json
+!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-readiness-gate.md
+!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.json
+!backend/tests/perf/reports/isolate-completion-pre-dispatch-ingress-real-conf-big-document-symbol-mixed-load-live.md
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-openspec-validate.log
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.json
 !backend/tests/perf/reports/refactor-completion-superseded-active-turn-release-readiness-gate.md

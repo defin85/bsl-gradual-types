@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 18,
+                version: 19,
                 traces: [
                     {
                         trace_id: 'trace-quiet',
@@ -381,7 +381,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 18,
+                version: 19,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -393,6 +393,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         total_duration_ms: 10,
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
+                            adapter_read_at_ms: 1_699_999_999_996,
                             transport_received_at_ms: 1_700_000_000_000,
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
@@ -414,6 +415,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
                             dispatch_to_request_context_wait_ms: 0,
+                            adapter_to_dispatch_wait_ms: 4,
                             transport_to_slot_release_wait_ms: 2,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
@@ -517,7 +519,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v18'));
+        assert.ok(clipboardPayload.includes('contract=v19'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -579,7 +581,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 18,
+                version: 19,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -591,6 +593,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         total_duration_ms: 10,
                         dominant_stage: 'query_bundle',
                         server_edge_details: {
+                            adapter_read_at_ms: 1_699_999_999_996,
                             transport_received_at_ms: 1_700_000_000_000,
                             transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
                             jsonrpc_dispatch_received_at_ms: 1_700_000_000_000,
@@ -601,6 +604,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                             handler_entered_at_ms: 1_700_000_000_009,
                             response_sent_at_ms: 1_700_000_000_016,
                             dispatch_to_request_context_wait_ms: 0,
+                            adapter_to_dispatch_wait_ms: 4,
                             transport_to_service_future_wait_ms: 1,
                             service_future_to_scope_wait_ms: 1,
                             transport_to_service_scope_wait_ms: 2,
@@ -700,7 +704,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, and v18 request-bound client probe correlation detail are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.'
                     )
             )
         );

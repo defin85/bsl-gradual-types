@@ -16,6 +16,9 @@ class AgentReadinessValidationTest(unittest.TestCase):
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
+    PRE_DISPATCH_INGRESS_WRAPPER = (
+        REPO_ROOT / "scripts" / "validate-isolate-completion-pre-dispatch-ingress.sh"
+    )
     TURN_WAIT_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-completion-turn-wait-lifecycle.sh"
     )
@@ -54,6 +57,13 @@ class AgentReadinessValidationTest(unittest.TestCase):
             content,
         )
 
+    def test_verification_doc_exposes_pre_dispatch_ingress_readiness_wrapper(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn(
+            "./scripts/validate-isolate-completion-pre-dispatch-ingress.sh",
+            content,
+        )
+
     def test_verification_doc_exposes_turn_wait_readiness_wrapper(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn(
@@ -74,6 +84,14 @@ class AgentReadinessValidationTest(unittest.TestCase):
             "CHANGE_ID=refactor-completion-turn-wait-lifecycle",
             content,
         )
+
+    def test_pre_dispatch_ingress_wrapper_pins_change_id(self) -> None:
+        content = self.PRE_DISPATCH_INGRESS_WRAPPER.read_text(encoding="utf-8")
+        self.assertIn(
+            "CHANGE_ID=isolate-completion-pre-dispatch-ingress",
+            content,
+        )
+        self.assertIn('REAL_MODULE_PROFILES="outline"', content)
 
     def test_front_edge_wrapper_pins_change_id(self) -> None:
         content = self.FRONT_EDGE_WRAPPER.read_text(encoding="utf-8")

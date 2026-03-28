@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::num::ParseIntError;
 use std::str::Utf8Error;
+use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
 use futures::future::BoxFuture;
@@ -17,7 +18,11 @@ use tower_lsp::Loopback;
 use tracing::error;
 
 const MESSAGE_QUEUE_SIZE: usize = 100;
+const CONTROL_QUEUE_SIZE: usize = 16;
 const COMPLETION_METHOD: &str = "textDocument/completion";
+const CANCEL_REQUEST_METHOD: &str = "$/cancelRequest";
+const SHUTDOWN_METHOD: &str = "shutdown";
+const EXIT_METHOD: &str = "exit";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 #[serde(untagged)]
@@ -114,6 +119,182 @@ impl CompletionHandoffTask {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AdmissionLane {
+    Control,
+    Completion,
+    General,
+}
+
+#[derive(Debug)]
+struct ScheduledRequest {
+    lane: AdmissionLane,
+    request_id: Option<String>,
+    request: Request,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdmissionQueueCapacities {
+    control: usize,
+    completion: usize,
+    general: usize,
+}
+
+impl Default for AdmissionQueueCapacities {
+    fn default() -> Self {
+        Self {
+            control: CONTROL_QUEUE_SIZE.max(1),
+            completion: MESSAGE_QUEUE_SIZE.max(1),
+            general: MESSAGE_QUEUE_SIZE.max(1),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct AdmissionQueuesState {
+    control: std::collections::VecDeque<ScheduledRequest>,
+    completion: std::collections::VecDeque<ScheduledRequest>,
+    general: std::collections::VecDeque<ScheduledRequest>,
+    closed: bool,
+}
+
+#[derive(Debug, Clone)]
+struct AdmissionQueues {
+    capacities: AdmissionQueueCapacities,
+    state: Arc<Mutex<AdmissionQueuesState>>,
+    item_notify: Arc<Notify>,
+    space_notify: Arc<Notify>,
+}
+
+impl AdmissionQueues {
+    fn new(capacities: AdmissionQueueCapacities) -> Self {
+        Self {
+            capacities,
+            state: Arc::new(Mutex::new(AdmissionQueuesState::default())),
+            item_notify: Arc::new(Notify::new()),
+            space_notify: Arc::new(Notify::new()),
+        }
+    }
+
+    fn lane_capacity(&self, lane: AdmissionLane) -> usize {
+        match lane {
+            AdmissionLane::Control => self.capacities.control,
+            AdmissionLane::Completion => self.capacities.completion,
+            AdmissionLane::General => self.capacities.general,
+        }
+    }
+
+    fn queue_for_lane_mut(
+        state: &mut AdmissionQueuesState,
+        lane: AdmissionLane,
+    ) -> &mut std::collections::VecDeque<ScheduledRequest> {
+        match lane {
+            AdmissionLane::Control => &mut state.control,
+            AdmissionLane::Completion => &mut state.completion,
+            AdmissionLane::General => &mut state.general,
+        }
+    }
+
+    fn has_any(state: &AdmissionQueuesState) -> bool {
+        !(state.control.is_empty() && state.completion.is_empty() && state.general.is_empty())
+    }
+
+    async fn enqueue(&self, scheduled_request: ScheduledRequest) -> bool {
+        let lane = scheduled_request.lane;
+        let mut scheduled_request = Some(scheduled_request);
+        loop {
+            let notified = {
+                let mut state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if state.closed {
+                    return false;
+                }
+                let lane_capacity = self.lane_capacity(lane);
+                let queue = Self::queue_for_lane_mut(&mut state, lane);
+                if queue.len() < lane_capacity {
+                    queue.push_back(scheduled_request.take().expect("scheduled request"));
+                    self.item_notify.notify_waiters();
+                    return true;
+                }
+                self.space_notify.notified()
+            };
+            notified.await;
+        }
+    }
+
+    async fn wait_until_non_empty_or_closed(&self) -> bool {
+        loop {
+            let notified = {
+                let state = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if Self::has_any(&state) {
+                    return true;
+                }
+                if state.closed {
+                    return false;
+                }
+                self.item_notify.notified()
+            };
+            notified.await;
+        }
+    }
+
+    async fn pop_next(&self) -> Option<ScheduledRequest> {
+        let next = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state
+                .control
+                .pop_front()
+                .or_else(|| state.completion.pop_front())
+                .or_else(|| state.general.pop_front())
+        };
+        if next.is_some() {
+            self.space_notify.notify_waiters();
+        }
+        next
+    }
+
+    async fn remove_queued_completion_by_request_id(
+        &self,
+        request_id: &str,
+    ) -> Option<ScheduledRequest> {
+        let removed = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let position = state
+                .completion
+                .iter()
+                .position(|scheduled| scheduled.request_id.as_deref() == Some(request_id))?;
+            state.completion.remove(position)
+        };
+        if removed.is_some() {
+            self.space_notify.notify_waiters();
+        }
+        removed
+    }
+
+    fn close(&self) {
+        {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.closed = true;
+        }
+        self.item_notify.notify_waiters();
+        self.space_notify.notify_waiters();
+    }
+}
+
 pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     stdin: I,
     stdout: O,
@@ -137,6 +318,7 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     let (mut completion_tasks_tx, completion_tasks_rx) =
         mpsc::channel::<CompletionHandoffTask>(MESSAGE_QUEUE_SIZE);
     let transport_shutdown = std::sync::Arc::new(Notify::new());
+    let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities::default());
 
     let responses_tx_for_server_tasks = responses_tx.clone();
     let process_server_tasks = async move {
@@ -155,6 +337,75 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
                 break;
             }
         }
+    };
+
+    let transport_shutdown_for_scheduler = transport_shutdown.clone();
+    let admission_queues_for_scheduler = admission_queues.clone();
+    let client_abort_for_scheduler = client_abort.clone();
+    let responses_tx_for_scheduler = responses_tx.clone();
+    let process_scheduler = async move {
+        let mut responses_tx = responses_tx_for_scheduler;
+        loop {
+            if !admission_queues_for_scheduler
+                .wait_until_non_empty_or_closed()
+                .await
+            {
+                break;
+            }
+            if let Err(err) = future::poll_fn(|cx| service.poll_ready(cx)).await {
+                error!("{}", display_sources(err.into().as_ref()));
+                break;
+            }
+            let Some(scheduled_request) = admission_queues_for_scheduler.pop_next().await else {
+                continue;
+            };
+
+            if let Some(cancelled_request_id) =
+                cancelled_request_id_from_request(&scheduled_request.request)
+            {
+                if cancel_queued_completion_before_dispatch(
+                    &admission_queues_for_scheduler,
+                    &cancelled_request_id,
+                    &mut responses_tx,
+                )
+                .await
+                .is_err()
+                {
+                    break;
+                }
+            }
+
+            let request_id = scheduled_request.request_id.clone();
+            let is_completion = matches!(scheduled_request.lane, AdmissionLane::Completion);
+            let future = service
+                .call(scheduled_request.request)
+                .unwrap_or_else(|err| {
+                    error!("{}", display_sources(err.into().as_ref()));
+                    None
+                })
+                .boxed();
+
+            if is_completion {
+                let task = CompletionHandoffTask::new(request_id.clone(), future);
+                if completion_tasks_tx.send(task).await.is_err() {
+                    error!("completion handoff queue closed unexpectedly");
+                    break;
+                }
+                if let Some(request_id) = request_id.as_deref() {
+                    super::request_context::record_pending_completion_transport_slot_released_at_ms(
+                        request_id,
+                        super::unix_timestamp_ms(),
+                    );
+                }
+            } else if server_tasks_tx.send(future).await.is_err() {
+                error!("server task queue closed unexpectedly");
+                break;
+            }
+        }
+
+        admission_queues_for_scheduler.close();
+        transport_shutdown_for_scheduler.notify_waiters();
+        client_abort_for_scheduler.abort();
     };
 
     let responses_tx_for_completion = responses_tx.clone();
@@ -220,41 +471,37 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
         }
     };
 
+    let transport_shutdown_for_input = transport_shutdown.clone();
+    let admission_queues_for_input = admission_queues.clone();
+    let client_abort_for_input = client_abort;
     let read_input = async move {
         let mut stdin = BufReader::new(stdin);
 
         loop {
-            match read_transport_message(&mut stdin).await {
+            let read_result = tokio::select! {
+                _ = transport_shutdown_for_input.notified() => break,
+                read_result = read_transport_message(&mut stdin) => read_result,
+            };
+            match read_result {
                 Ok(Some(TransportMessage::Request(request))) => {
-                    if let Err(err) = future::poll_fn(|cx| service.poll_ready(cx)).await {
-                        error!("{}", display_sources(err.into().as_ref()));
-                        break;
-                    }
-
+                    let adapter_read_at_ms = super::unix_timestamp_ms();
                     let request_id = request.id().map(ToString::to_string);
-                    let is_completion = is_completion_request(&request);
-                    let future = service
-                        .call(request)
-                        .unwrap_or_else(|err| {
-                            error!("{}", display_sources(err.into().as_ref()));
-                            None
+                    if let Some(request_id) = request_id.as_deref() {
+                        super::request_context::record_pending_completion_adapter_read_at_ms(
+                            &request,
+                            request_id,
+                            Some(adapter_read_at_ms),
+                        );
+                    }
+                    if !admission_queues_for_input
+                        .enqueue(ScheduledRequest {
+                            lane: classify_admission_lane(&request),
+                            request_id,
+                            request,
                         })
-                        .boxed();
-
-                    if is_completion {
-                        let task = CompletionHandoffTask::new(request_id.clone(), future);
-                        if completion_tasks_tx.send(task).await.is_err() {
-                            error!("completion handoff queue closed unexpectedly");
-                            break;
-                        }
-                        if let Some(request_id) = request_id.as_deref() {
-                            super::request_context::record_pending_completion_transport_slot_released_at_ms(
-                                request_id,
-                                super::unix_timestamp_ms(),
-                            );
-                        }
-                    } else if server_tasks_tx.send(future).await.is_err() {
-                        error!("server task queue closed unexpectedly");
+                        .await
+                    {
+                        error!("transport admission queue closed unexpectedly");
                         break;
                     }
                 }
@@ -279,23 +526,92 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
             }
         }
 
-        transport_shutdown.notify_waiters();
-        server_tasks_tx.disconnect();
-        completion_tasks_tx.disconnect();
-        responses_tx.disconnect();
-        client_abort.abort();
+        admission_queues_for_input.close();
+        transport_shutdown_for_input.notify_waiters();
+        client_abort_for_input.abort();
     };
 
     futures::join!(
         print_output,
         read_input,
+        process_scheduler,
         process_server_tasks,
         process_completion_tasks
     );
 }
 
+fn classify_admission_lane(request: &Request) -> AdmissionLane {
+    if is_control_request(request) {
+        AdmissionLane::Control
+    } else if is_completion_request(request) {
+        AdmissionLane::Completion
+    } else {
+        AdmissionLane::General
+    }
+}
+
 fn is_completion_request(request: &Request) -> bool {
     request.method() == COMPLETION_METHOD && request.id().is_some()
+}
+
+fn is_control_request(request: &Request) -> bool {
+    matches!(
+        request.method(),
+        CANCEL_REQUEST_METHOD | SHUTDOWN_METHOD | EXIT_METHOD
+    )
+}
+
+fn cancelled_request_id_from_request(request: &Request) -> Option<String> {
+    if request.method() != CANCEL_REQUEST_METHOD {
+        return None;
+    }
+    request.params()?.get("id").and_then(|value| {
+        value
+            .as_i64()
+            .map(|id| id.to_string())
+            .or_else(|| value.as_str().map(ToString::to_string))
+    })
+}
+
+async fn cancel_queued_completion_before_dispatch(
+    admission_queues: &AdmissionQueues,
+    request_id: &str,
+    responses_tx: &mut mpsc::Sender<TransportMessage>,
+) -> Result<(), ()> {
+    let Some(cancelled_request) = admission_queues
+        .remove_queued_completion_by_request_id(request_id)
+        .await
+    else {
+        return Ok(());
+    };
+
+    if let Some(context) =
+        super::request_context::take_completion_request_context_by_request_id(request_id)
+    {
+        super::request_context::notify_pre_dispatch_completion_cancelled(
+            context,
+            super::unix_timestamp_ms(),
+        );
+    }
+
+    let Some(response) = cancelled_request
+        .request
+        .id()
+        .cloned()
+        .map(|id| Response::from_error(id, Error::request_cancelled()))
+    else {
+        return Ok(());
+    };
+
+    if responses_tx
+        .send(TransportMessage::Response(response))
+        .await
+        .is_err()
+    {
+        error!("failed to forward queued pre-dispatch cancellation response: transport closed");
+        return Err(());
+    }
+    Ok(())
 }
 
 async fn read_transport_message<I>(
@@ -395,6 +711,7 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::pin::Pin;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::task::{Context, Poll};
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -638,6 +955,81 @@ mod tests {
 
         fn split(self) -> (Self::RequestStream, Self::ResponseSink) {
             (futures::stream::pending(), futures::sink::drain())
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct PrioritySchedulerState {
+        general_release: Notify,
+        general_started: Notify,
+        ready_waker: Mutex<Option<std::task::Waker>>,
+        general_inflight: AtomicBool,
+        completion_call_count: AtomicUsize,
+    }
+
+    #[derive(Debug, Clone)]
+    struct PrioritySchedulerService {
+        state: Arc<PrioritySchedulerState>,
+    }
+
+    impl Service<Request> for PrioritySchedulerService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.state.general_inflight.load(Ordering::SeqCst) {
+                let mut ready_waker = self
+                    .state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *ready_waker = Some(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let state = self.state.clone();
+            Box::pin(async move {
+                match method.as_str() {
+                    "textDocument/documentSymbol" => {
+                        state.general_inflight.store(true, Ordering::SeqCst);
+                        state.general_started.notify_waiters();
+                        state.general_release.notified().await;
+                        state.general_inflight.store(false, Ordering::SeqCst);
+                        if let Some(waker) = state
+                            .ready_waker
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .take()
+                        {
+                            waker.wake();
+                        }
+                        Ok(Some(JsonRpcResponse::from_ok(
+                            request_id.expect("documentSymbol request id"),
+                            json!({ "kind": "general" }),
+                        )))
+                    }
+                    "textDocument/completion" => {
+                        state.completion_call_count.fetch_add(1, Ordering::SeqCst);
+                        Ok(Some(JsonRpcResponse::from_ok(
+                            request_id.expect("completion request id"),
+                            json!({ "items": [{ "label": "priority" }], "isIncomplete": false }),
+                        )))
+                    }
+                    CANCEL_REQUEST_METHOD => Ok(None),
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
         }
     }
 
@@ -1038,5 +1430,253 @@ mod tests {
             .await
             .expect("transport shutdown must abort blocked completion handoff")
             .expect("server task must exit cleanly");
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_prioritises_completion_over_general_backlog_after_read() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let priority_state = Arc::new(PrioritySchedulerState::default());
+
+        let server_task = tokio::spawn({
+            let priority_state = priority_state.clone();
+            async move {
+                serve_with_completion_handoff(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    PrioritySchedulerService {
+                        state: priority_state,
+                    },
+                    1,
+                )
+                .await;
+            }
+        });
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-1.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-2.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while !priority_state.general_inflight.load(Ordering::SeqCst) {
+                priority_state.general_started.notified().await;
+            }
+        })
+        .await
+        .expect("first general request must hold service readiness");
+
+        priority_state.general_release.notify_waiters();
+
+        let mut reader = BufReader::new(client_read);
+        let first_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first priority response timeout");
+
+        let second_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second priority response timeout");
+
+        let first_two_ids = [
+            first_response.get("id").and_then(|value| value.as_i64()),
+            second_response.get("id").and_then(|value| value.as_i64()),
+        ];
+        assert!(
+            first_two_ids.contains(&Some(1)) && first_two_ids.contains(&Some(3)),
+            "completion must outrun queued general backlog, first_response={first_response:?}, second_response={second_response:?}"
+        );
+
+        priority_state.general_release.notify_waiters();
+        let third_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second general response timeout");
+        assert_eq!(
+            third_response.get("id").and_then(|value| value.as_i64()),
+            Some(2)
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_cancels_queued_completion_before_dispatch() {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let priority_state = Arc::new(PrioritySchedulerState::default());
+
+        let server_task = tokio::spawn({
+            let priority_state = priority_state.clone();
+            async move {
+                serve_with_completion_handoff(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    PrioritySchedulerService {
+                        state: priority_state,
+                    },
+                    1,
+                )
+                .await;
+            }
+        });
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///cancel-general.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///queued-cancel.bsl" },
+                    "position": { "line": 0, "character": 0 },
+                    "context": {
+                        "triggerKind": 2,
+                        "triggerCharacter": "."
+                    },
+                    "bslProbeId": "probe-queued-cancel"
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancelRequest",
+                "params": { "id": 2 }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while !priority_state.general_inflight.load(Ordering::SeqCst) {
+                priority_state.general_started.notified().await;
+            }
+        })
+        .await
+        .expect("general request must hold service readiness");
+
+        priority_state.general_release.notify_waiters();
+
+        let mut reader = BufReader::new(client_read);
+        let first_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first response timeout");
+
+        let second_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second response timeout");
+
+        let (general_response, cancelled_response) =
+            if first_response.get("id").and_then(|value| value.as_i64()) == Some(2) {
+                (&second_response, &first_response)
+            } else {
+                (&first_response, &second_response)
+            };
+        assert_eq!(
+            general_response.get("id").and_then(|value| value.as_i64()),
+            Some(1),
+            "general request must still finish exactly once, first_response={first_response:?}, second_response={second_response:?}"
+        );
+        assert_eq!(
+            cancelled_response.get("id").and_then(|value| value.as_i64()),
+            Some(2),
+            "queued completion cancel must publish exactly one terminal response, first_response={first_response:?}, second_response={second_response:?}"
+        );
+        assert_eq!(
+            cancelled_response
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_i64()),
+            Some(-32800)
+        );
+        assert_eq!(
+            priority_state.completion_call_count.load(Ordering::SeqCst),
+            0,
+            "queued pre-dispatch completion must not reach service.call()"
+        );
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                read_framed_message(&mut reader),
+            )
+            .await
+            .is_err(),
+            "queued pre-dispatch cancel must remain exactly-once"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
     }
 }

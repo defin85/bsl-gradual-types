@@ -641,6 +641,10 @@ fn completion_request_id_is_recorded_and_taken_by_position_key() {
         .params(json!({
             "textDocument": { "uri": uri },
             "position": { "line": 3, "character": 7 },
+            "context": {
+                "triggerKind": 2,
+                "triggerCharacter": "."
+            },
             "bslProbeId": "probe-42",
         }))
         .finish();
@@ -652,6 +656,8 @@ fn completion_request_id_is_recorded_and_taken_by_position_key() {
     )
     .expect("request context");
     assert_eq!(taken.request_id, request_id.to_string());
+    assert_eq!(taken.uri, uri.to_string());
+    assert_eq!(taken.trigger_mode, "trigger_character");
     assert_eq!(taken.client_probe_id.as_deref(), Some("probe-42"));
     assert_eq!(
         take_completion_request_id(
@@ -713,6 +719,8 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     let second = take_completion_request_context_by_request_id(second_request_id)
         .expect("second request should be taken by request id");
     assert_eq!(second.request_id, second_request_id);
+    assert_eq!(second.uri, uri.to_string());
+    assert_eq!(second.trigger_mode, "none");
     assert!(!second.cancelled_before_take);
     assert_eq!(second.client_probe_id.as_deref(), Some("probe-2"));
     assert_eq!(second.request_received_at_ms, Some(1_700_000_000_020));
@@ -734,6 +742,8 @@ fn overlapping_completion_request_context_can_be_taken_by_request_id_out_of_orde
     let first = take_completion_request_context(&uri, position)
         .expect("first request should remain available by position");
     assert_eq!(first.request_id, first_request_id);
+    assert_eq!(first.uri, uri.to_string());
+    assert_eq!(first.trigger_mode, "none");
     assert!(!first.cancelled_before_take);
     assert_eq!(first.client_probe_id.as_deref(), Some("probe-1"));
     assert_eq!(first.request_received_at_ms, Some(1_700_000_000_010));

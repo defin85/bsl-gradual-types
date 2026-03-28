@@ -378,6 +378,19 @@ function deriveFindings(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v18 request-bound client probe correlation detail is unavailable by design.`
             );
         }
+        if (input.completionTimeline.response.version < 19) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but v19 adapter ingress pre-dispatch split is unavailable by design.`
+            );
+        }
+        const adapterBeforeDispatchCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('adapter_before_dispatch_dominant')
+        ).length;
+        if (adapterBeforeDispatchCount > 0) {
+            findings.push(
+                `server-side pre-dispatch adapter backlog dominated ${adapterBeforeDispatchCount} completion trace(s).`
+            );
+        }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>
             request.bottleneck_verdicts.includes('server_before_method_entry_dominant')
         ).length;

@@ -20,6 +20,10 @@ use tracing::{error, warn};
 const MESSAGE_QUEUE_SIZE: usize = 100;
 const CONTROL_QUEUE_SIZE: usize = 16;
 const COMPLETION_METHOD: &str = "textDocument/completion";
+const DID_OPEN_METHOD: &str = "textDocument/didOpen";
+const DID_CHANGE_METHOD: &str = "textDocument/didChange";
+const DID_SAVE_METHOD: &str = "textDocument/didSave";
+const DID_CLOSE_METHOD: &str = "textDocument/didClose";
 const CANCEL_REQUEST_METHOD: &str = "$/cancelRequest";
 const SHUTDOWN_METHOD: &str = "shutdown";
 const EXIT_METHOD: &str = "exit";
@@ -486,6 +490,8 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
 
             let request_id = scheduled_request.request_id.clone();
             let is_completion = matches!(scheduled_request.lane, AdmissionLane::Completion);
+            let is_completion_handoff_barrier =
+                is_completion_supporting_document_sync_notification(&scheduled_request.request);
             let future = service
                 .call(scheduled_request.request)
                 .unwrap_or_else(|err| {
@@ -494,7 +500,18 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                 })
                 .boxed();
 
-            if is_completion {
+            if is_completion_handoff_barrier {
+                if let Some(response) = future.await {
+                    if responses_tx
+                        .send(TransportMessage::Response(response))
+                        .await
+                        .is_err()
+                    {
+                        error!("failed to forward completion handoff barrier response: transport closed");
+                        break;
+                    }
+                }
+            } else if is_completion {
                 let task = CompletionHandoffTask::new(request_id.clone(), future);
                 if completion_tasks_tx.send(task).await.is_err() {
                     error!("completion handoff queue closed unexpectedly");
@@ -694,15 +711,27 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
 fn classify_admission_lane(request: &Request) -> AdmissionLane {
     if is_control_request(request) {
         AdmissionLane::Control
-    } else if is_completion_request(request) {
+    } else if is_completion_priority_request(request) {
         AdmissionLane::Completion
     } else {
         AdmissionLane::General
     }
 }
 
+fn is_completion_priority_request(request: &Request) -> bool {
+    is_completion_request(request) || is_completion_supporting_document_sync_notification(request)
+}
+
 fn is_completion_request(request: &Request) -> bool {
     request.method() == COMPLETION_METHOD && request.id().is_some()
+}
+
+fn is_completion_supporting_document_sync_notification(request: &Request) -> bool {
+    request.id().is_none()
+        && matches!(
+            request.method(),
+            DID_OPEN_METHOD | DID_CHANGE_METHOD | DID_SAVE_METHOD | DID_CLOSE_METHOD
+        )
 }
 
 fn is_control_request(request: &Request) -> bool {
@@ -1278,6 +1307,93 @@ mod tests {
                         request_id.expect("documentSymbol request id"),
                         json!({ "kind": "general" }),
                     ))),
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct DocumentSyncPriorityState {
+        ready_release: AtomicBool,
+        ready_blocked: Notify,
+        ready_waker: Mutex<Option<std::task::Waker>>,
+        latest_version: Mutex<i64>,
+        call_order: Mutex<Vec<String>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct DocumentSyncPriorityService {
+        state: Arc<DocumentSyncPriorityState>,
+    }
+
+    impl Service<Request> for DocumentSyncPriorityService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.state.ready_release.load(Ordering::SeqCst) {
+                Poll::Ready(Ok(()))
+            } else {
+                let mut ready_waker = self
+                    .state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *ready_waker = Some(cx.waker().clone());
+                self.state.ready_blocked.notify_waiters();
+                Poll::Pending
+            }
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let params = request.params().cloned();
+            let state = self.state.clone();
+            Box::pin(async move {
+                state
+                    .call_order
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(method.clone());
+                match method.as_str() {
+                    "textDocument/documentSymbol" => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("documentSymbol request id"),
+                        json!({ "kind": "general" }),
+                    ))),
+                    "textDocument/didChange" => {
+                        let version = params
+                            .as_ref()
+                            .and_then(|value| value.get("textDocument"))
+                            .and_then(|value| value.get("version"))
+                            .and_then(|value| value.as_i64())
+                            .expect("didChange version");
+                        *state
+                            .latest_version
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = version;
+                        Ok(None)
+                    }
+                    "textDocument/completion" => {
+                        let latest_version = *state
+                            .latest_version
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        Ok(Some(JsonRpcResponse::from_ok(
+                            request_id.expect("completion request id"),
+                            json!({
+                                "items": [{ "label": format!("version-{latest_version}") }],
+                                "isIncomplete": false,
+                                "version": latest_version,
+                            }),
+                        )))
+                    }
                     _ => Ok(Some(JsonRpcResponse::from_ok(
                         request_id.expect("request id"),
                         json!({ "capabilities": {} }),
@@ -2121,7 +2237,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_keeps_running_when_saturated_general_notification_is_dropped() {
+    async fn transport_adapter_keeps_running_when_saturated_unrelated_general_notification_is_dropped(
+    ) {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -2178,10 +2295,11 @@ mod tests {
             }),
             json!({
                 "jsonrpc": "2.0",
-                "method": "textDocument/didChange",
+                "method": "workspace/didChangeConfiguration",
                 "params": {
-                    "textDocument": { "uri": "file:///overflow-change.bsl", "version": 2 },
-                    "contentChanges": [{ "text": "// overflow" }]
+                    "settings": {
+                        "bsl": { "serverTrace": "verbose" }
+                    }
                 }
             }),
             json!({
@@ -2337,6 +2455,170 @@ mod tests {
             .await
             .is_err(),
             "dropped general notifications must not fabricate transport responses"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_prioritises_did_change_handoff_before_completion_under_general_backlog()
+    {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let priority_state = Arc::new(DocumentSyncPriorityState::default());
+        *priority_state
+            .latest_version
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = 1;
+
+        let server_task = tokio::spawn({
+            let priority_state = priority_state.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    DocumentSyncPriorityService {
+                        state: priority_state,
+                    },
+                    1,
+                    AdmissionQueues::new(AdmissionQueueCapacities {
+                        control: 2,
+                        completion: 2,
+                        general: 1,
+                    }),
+                )
+                .await;
+            }
+        });
+
+        for message in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-1.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/documentSymbol",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-general-2.bsl" }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-completion.bsl", "version": 2 },
+                    "contentChanges": [{ "text": "// v2" }]
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///priority-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&message).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while priority_state
+                .ready_waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+            {
+                priority_state.ready_blocked.notified().await;
+            }
+        })
+        .await
+        .expect("scheduler must block on the first queued general request");
+
+        priority_state.ready_release.store(true, Ordering::SeqCst);
+        if let Some(waker) = priority_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        let mut reader = BufReader::new(client_read);
+        let first_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("first response timeout");
+        let second_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("second response timeout");
+        let third_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("third response timeout");
+
+        let completion_response = [first_response, second_response, third_response]
+            .into_iter()
+            .find(|response| response.get("id").and_then(|value| value.as_i64()) == Some(4))
+            .expect("completion response");
+        assert_eq!(
+            completion_response
+                .get("result")
+                .and_then(|value| value.get("version"))
+                .and_then(|value| value.as_i64()),
+            Some(2),
+            "completion must observe the latest didChange handed off before it on the same saturated transport path, response={completion_response:?}"
+        );
+
+        let call_order = priority_state
+            .call_order
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            call_order.len() >= 3,
+            "service must observe general request, didChange and completion dispatches, call_order={call_order:?}"
+        );
+        let did_change_position = call_order
+            .iter()
+            .position(|method| method == "textDocument/didChange")
+            .expect("didChange dispatch position");
+        let completion_position = call_order
+            .iter()
+            .position(|method| method == "textDocument/completion")
+            .expect("completion dispatch position");
+        assert!(
+            did_change_position < completion_position,
+            "didChange handoff must dispatch before completion on the same backlog-affected transport path, call_order={call_order:?}"
         );
 
         drop(client_write);

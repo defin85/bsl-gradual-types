@@ -1795,12 +1795,14 @@ fn semantic_operation_contract_values_are_stable() {
 }
 
 #[test]
-fn runtime_queue_priority_aligns_definition_with_interactive_operations() {
+fn runtime_queue_priority_aligns_user_facing_member_access_with_interactive_operations() {
     for operation in [
         SemanticOperation::Completion,
         SemanticOperation::Hover,
         SemanticOperation::SignatureHelp,
         SemanticOperation::Definition,
+        SemanticOperation::Members,
+        SemanticOperation::TypeAtPosition,
     ] {
         assert_eq!(
             RuntimeQueuePriority::for_operation(operation),

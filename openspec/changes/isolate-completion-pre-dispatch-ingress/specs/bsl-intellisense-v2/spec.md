@@ -216,6 +216,7 @@ Acceptance для архитектурных изменений completion MUST 
 - shared readiness/admission state MUST принадлежать одному scheduler owner; reader/producers MUST NOT вызывать `poll_ready()/call()` напрямую;
 - completion request классифицируется и попадает в interactive admission queue до shared `poll_ready()` blocking для general traffic;
 - general requests MUST NOT удерживать freshly-read completion request вне interactive admission queue только из-за общего readiness wait;
+- completion-supporting document-sync notifications (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, `textDocument/didClose`), прочитанные transport adapter'ом до completion на том же transport path, MUST NOT теряться или застревать за unrelated general backlog так, чтобы последующий completion видел stale current revision;
 - control traffic (`$/cancelRequest`, shutdown-related flow) MAY preempt queued completion admission;
 - queued completion cancellation MUST сохранять existing exactly-once terminal semantics, MUST возвращать ровно один terminal response и MUST NOT допускать late publish после признанного cancel.
 
@@ -225,6 +226,14 @@ Acceptance для архитектурных изменений completion MUST 
 - **WHEN** сервер выбирает, что dispatch-ить дальше
 - **THEN** completion попадает в interactive admission queue без ожидания завершения general readiness path
 - **AND** authoritative trace не показывает seconds-scale `adapter_to_dispatch_wait_ms` только из-за concurrent general backlog
+
+#### Scenario: `didChange` handoff не теряется за unrelated general backlog на default path
+- **GIVEN** transport adapter уже держит unrelated `textDocument/documentSymbol` backlog
+- **AND** затем на том же transport path приходит `textDocument/didChange`, публикующий новую current revision
+- **AND** после этого приходит completion request для того же документа
+- **WHEN** сервер формирует first response для completion
+- **THEN** `didChange` current-revision handoff достигает interactive admission path раньше completion result
+- **AND** completion first response видит latest current revision, а не stale текст до `didChange`
 
 #### Scenario: Queued completion отменяется до dispatch без late publish
 - **GIVEN** completion request уже стоит в pre-dispatch queue

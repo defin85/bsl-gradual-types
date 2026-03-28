@@ -17358,6 +17358,158 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_live_transport_changed_text_current_revision_survives_document_symbol_backlog() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const DOCUMENT_SYMBOL_DELAY_MS: u64 = 300;
+    const DOCUMENT_SYMBOL_BURST_REQUESTS: i64 = 48;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _document_symbol_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DOCUMENT_SYMBOL_DELAY_MS",
+        &DOCUMENT_SYMBOL_DELAY_MS.to_string(),
+    );
+    let _blocking_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri =
+        Url::parse("file:///test_p33_live_transport_changed_text_backlog_priority.bsl").expect("uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: V1_FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must publish latest received version on live transport");
+
+    for request_id in 0..DOCUMENT_SYMBOL_BURST_REQUESTS {
+        live_transport_write_document_symbol_request(&mut harness, 50_520 + request_id, &uri).await;
+    }
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: V2_FIXTURE.to_string(),
+                }],
+            },
+        )
+        .await;
+
+    let completion_labels = live_transport_completion_labels_with_request(
+        &mut harness,
+        50_620,
+        &uri,
+        find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = S."),
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Описание"),
+        "changed-text completion on the default transport path must still see the latest didChange before unrelated documentSymbol backlog, labels={completion_labels:?}"
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(2)
+                && server
+                    .analysis_v2
+                    .file_revision_state(file_id)
+                    .await
+                    .map(|state| state.version)
+                    == Some(2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange under documentSymbol backlog must still publish changed current revision on the live transport path");
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap(
 ) {
     struct EnvVarGuard {

@@ -90,7 +90,7 @@
 Первый шаг намеренно остаётся минимальным и недвусмысленным:
 
 - `$/cancelRequest` и shutdown/control traffic получают наивысший приоритет;
-- `textDocument/completion` получает следующий приоритет;
+- `textDocument/completion` и completion-supporting document-sync notifications (`didOpen`/`didChange`/`didSave`/`didClose`) получают следующий приоритет, когда нужно сохранить current-revision handoff до последующего completion на том же transport path;
 - весь остальной трафик идёт в `general` lane.
 
 Почему так:
@@ -112,8 +112,8 @@ Trade-off:
 Queue/backpressure policy для этого change фиксируется так:
 
 - `control` lane имеет выделенную bounded capacity и MUST NOT вытесняться lower-priority traffic, пока transport остаётся жив;
-- `completion` lane bounded и может вытеснять только stale/superseded completion work по уже существующим rules, но MUST NOT деградировать в silent drop или перекидывание в `general`;
-- `general` lane bounded и принимает на себя основной backpressure/блокировку admission, не забирая reserved progress у `control` и `completion`;
+- `completion` lane bounded и может вытеснять только stale/superseded completion work по уже существующим rules, но MUST NOT деградировать в silent drop или перекидывание в `general`; current-revision handoff для `didOpen`/`didChange`/`didSave`/`didClose`, уже прочитанных transport adapter'ом до completion на том же path, MUST оставаться в этом interactive admission path;
+- `general` lane bounded и принимает на себя основной backpressure/блокировку admission для unrelated traffic, не забирая reserved progress у `control` и `completion`; unrelated id-less notifications MAY получать bounded traceable drop только после того, как completion-supporting handoff уже вынесен из этого lane;
 - policy обязана быть явной и наблюдаемой: enqueue rejection/coalescing/supersession должны оставаться bounded, deterministic и traceable.
 
 ### 4. Queued cancellation должна оставаться first-class и exactly-once

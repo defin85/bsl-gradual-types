@@ -166,8 +166,8 @@ SystemCoordinator / DepsBundleV2
 
 Фактический runtime priority сейчас такой:
 
-- `interactive`: `completion`, `hover`, `signatureHelp`, `definition`
-- `background`: `diagnostics`, `members`, `type_at_position`, `symbol_search`, `references`, и др.
+- `interactive`: `completion`, `hover`, `signatureHelp`, `definition`, `members`, `type_at_position`
+- `background`: `diagnostics`, `symbol_search`, `references`, и др.
 
 Это важно для docs/perf interpretation: не все semantic операции считаются interactive в scheduler,
 но все они обязаны читать один и тот же canonical semantic contract.

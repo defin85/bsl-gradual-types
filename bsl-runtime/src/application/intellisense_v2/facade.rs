@@ -65,7 +65,9 @@ impl RuntimeQueuePriority {
             SemanticOperation::Completion
             | SemanticOperation::Hover
             | SemanticOperation::SignatureHelp
-            | SemanticOperation::Definition => RuntimeQueuePriority::Interactive,
+            | SemanticOperation::Definition
+            | SemanticOperation::Members
+            | SemanticOperation::TypeAtPosition => RuntimeQueuePriority::Interactive,
             _ => RuntimeQueuePriority::Background,
         }
     }

@@ -257,6 +257,14 @@ REQUIRED_V14_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
     }
 )
 
+REQUIRED_V16_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
+    REQUIRED_V14_TIMELINE_SERVER_EDGE_DETAILS_FIELDS
+    | {
+        "adapter_read_at_ms",
+        "adapter_to_dispatch_wait_ms",
+    }
+)
+
 REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_FIELDS = {
     "contender_class",
     "uri_scope",
@@ -552,6 +560,123 @@ def validate_schema_like(value: Any, schema: dict[str, Any], where: str) -> None
         if item_schema is not None:
             for idx, item in enumerate(value):
                 validate_schema_like(item, item_schema, f"{where}[{idx}]")
+
+
+def validate_lsp_completion_timeline_response_fields(
+    contract_path: Path,
+    response: dict[str, Any],
+    expected_version: int,
+    expected_server_edge_details_fields: set[str],
+) -> None:
+    ensure(
+        response.get("version") == expected_version,
+        f"{contract_path}: response.version must equal {expected_version}",
+    )
+    outcomes = set(response.get("outcomes", []))
+    trace_fields = set(response.get("trace_fields", []))
+    prepare_details_fields = set(response.get("prepare_details_fields", []))
+    prepare_progress_fields = set(response.get("prepare_progress_fields", []))
+    prepare_runtime_fields = set(response.get("prepare_runtime_fields", []))
+    prepare_timeout_attribution_fields = set(
+        response.get("prepare_timeout_attribution_fields", [])
+    )
+    exact_wait_fields = set(response.get("exact_wait_fields", []))
+    exact_artifact_poll_fields = set(response.get("exact_artifact_poll_fields", []))
+    server_edge_details_fields = set(response.get("server_edge_details_fields", []))
+    first_poll_contention_fields = set(
+        response.get("first_poll_contention_attribution_fields", [])
+    )
+    first_poll_contention_contender_fields = set(
+        response.get("first_poll_contention_contender_fields", [])
+    )
+    first_poll_contention_classes = set(
+        response.get("first_poll_contention_contender_classes", [])
+    )
+    first_poll_contention_request_classes = set(
+        response.get("first_poll_contention_request_classes", [])
+    )
+    first_poll_contention_uri_scopes = set(
+        response.get("first_poll_contention_uri_scopes", [])
+    )
+    turn_attribution_fields = set(response.get("turn_attribution_fields", []))
+    turn_holder_fields = set(response.get("turn_holder_fields", []))
+    prepare_routes = set(response.get("prepare_routes", []))
+    prepare_fail_closed_causes = set(response.get("prepare_fail_closed_causes", []))
+    ensure(
+        outcomes == REQUIRED_V3_TIMELINE_OUTCOMES,
+        f"{contract_path}: response.outcomes must equal {sorted(REQUIRED_V3_TIMELINE_OUTCOMES)}",
+    )
+    ensure(
+        trace_fields == REQUIRED_V15_TIMELINE_TRACE_FIELDS,
+        f"{contract_path}: response.trace_fields must equal {sorted(REQUIRED_V15_TIMELINE_TRACE_FIELDS)}",
+    )
+    ensure(
+        prepare_details_fields == REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS,
+        f"{contract_path}: response.prepare_details_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS)}",
+    )
+    ensure(
+        prepare_progress_fields == REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS,
+        f"{contract_path}: response.prepare_progress_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS)}",
+    )
+    ensure(
+        prepare_runtime_fields == REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS,
+        f"{contract_path}: response.prepare_runtime_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS)}",
+    )
+    ensure(
+        prepare_timeout_attribution_fields
+        == REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS,
+        f"{contract_path}: response.prepare_timeout_attribution_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS)}",
+    )
+    ensure(
+        exact_wait_fields == REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS,
+        f"{contract_path}: response.exact_wait_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS)}",
+    )
+    ensure(
+        exact_artifact_poll_fields == REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS,
+        f"{contract_path}: response.exact_artifact_poll_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS)}",
+    )
+    ensure(
+        server_edge_details_fields == expected_server_edge_details_fields,
+        f"{contract_path}: response.server_edge_details_fields must equal {sorted(expected_server_edge_details_fields)}",
+    )
+    ensure(
+        first_poll_contention_fields == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_FIELDS,
+        f"{contract_path}: response.first_poll_contention_attribution_fields must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_FIELDS)}",
+    )
+    ensure(
+        first_poll_contention_contender_fields
+        == REQUIRED_V12_TIMELINE_FIRST_POLL_CONTENDER_FIELDS,
+        f"{contract_path}: response.first_poll_contention_contender_fields must equal {sorted(REQUIRED_V12_TIMELINE_FIRST_POLL_CONTENDER_FIELDS)}",
+    )
+    ensure(
+        first_poll_contention_classes == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_CLASSES,
+        f"{contract_path}: response.first_poll_contention_contender_classes must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_CLASSES)}",
+    )
+    ensure(
+        first_poll_contention_request_classes
+        == REQUIRED_V10_TIMELINE_CONTENDER_REQUEST_CLASSES,
+        f"{contract_path}: response.first_poll_contention_request_classes must equal {sorted(REQUIRED_V10_TIMELINE_CONTENDER_REQUEST_CLASSES)}",
+    )
+    ensure(
+        first_poll_contention_uri_scopes == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_URI_SCOPES,
+        f"{contract_path}: response.first_poll_contention_uri_scopes must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_URI_SCOPES)}",
+    )
+    ensure(
+        turn_attribution_fields == REQUIRED_V13_TIMELINE_TURN_ATTRIBUTION_FIELDS,
+        f"{contract_path}: response.turn_attribution_fields must equal {sorted(REQUIRED_V13_TIMELINE_TURN_ATTRIBUTION_FIELDS)}",
+    )
+    ensure(
+        turn_holder_fields == REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS,
+        f"{contract_path}: response.turn_holder_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS)}",
+    )
+    ensure(
+        prepare_routes == REQUIRED_V4_COMPLETION_ROUTES,
+        f"{contract_path}: response.prepare_routes must equal {sorted(REQUIRED_V4_COMPLETION_ROUTES)}",
+    )
+    ensure(
+        prepare_fail_closed_causes == REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES,
+        f"{contract_path}: response.prepare_fail_closed_causes must equal {sorted(REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES)}",
+    )
 
 
 def parse_major(version_dir_name: str, where: Path) -> int:
@@ -2191,117 +2316,21 @@ def validate_surface_contract(surface_dir: Path) -> None:
         if surface_dir.name == "lsp-completion-timeline" and major == 15:
             response = contract.get("response")
             ensure(isinstance(response, dict), f"{contract_path}: response must be object")
-            ensure(
-                response.get("version") == 18,
-                f"{contract_path}: response.version must equal 18",
+            validate_lsp_completion_timeline_response_fields(
+                contract_path,
+                response,
+                expected_version=18,
+                expected_server_edge_details_fields=REQUIRED_V14_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
             )
-            outcomes = set(response.get("outcomes", []))
-            trace_fields = set(response.get("trace_fields", []))
-            prepare_details_fields = set(response.get("prepare_details_fields", []))
-            prepare_progress_fields = set(response.get("prepare_progress_fields", []))
-            prepare_runtime_fields = set(response.get("prepare_runtime_fields", []))
-            prepare_timeout_attribution_fields = set(
-                response.get("prepare_timeout_attribution_fields", [])
-            )
-            exact_wait_fields = set(response.get("exact_wait_fields", []))
-            exact_artifact_poll_fields = set(response.get("exact_artifact_poll_fields", []))
-            server_edge_details_fields = set(response.get("server_edge_details_fields", []))
-            first_poll_contention_fields = set(
-                response.get("first_poll_contention_attribution_fields", [])
-            )
-            first_poll_contention_contender_fields = set(
-                response.get("first_poll_contention_contender_fields", [])
-            )
-            first_poll_contention_classes = set(
-                response.get("first_poll_contention_contender_classes", [])
-            )
-            first_poll_contention_request_classes = set(
-                response.get("first_poll_contention_request_classes", [])
-            )
-            first_poll_contention_uri_scopes = set(
-                response.get("first_poll_contention_uri_scopes", [])
-            )
-            turn_attribution_fields = set(response.get("turn_attribution_fields", []))
-            turn_holder_fields = set(response.get("turn_holder_fields", []))
-            prepare_routes = set(response.get("prepare_routes", []))
-            prepare_fail_closed_causes = set(response.get("prepare_fail_closed_causes", []))
-            ensure(
-                outcomes == REQUIRED_V3_TIMELINE_OUTCOMES,
-                f"{contract_path}: response.outcomes must equal {sorted(REQUIRED_V3_TIMELINE_OUTCOMES)}",
-            )
-            ensure(
-                trace_fields == REQUIRED_V15_TIMELINE_TRACE_FIELDS,
-                f"{contract_path}: response.trace_fields must equal {sorted(REQUIRED_V15_TIMELINE_TRACE_FIELDS)}",
-            )
-            ensure(
-                prepare_details_fields == REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS,
-                f"{contract_path}: response.prepare_details_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_DETAILS_FIELDS)}",
-            )
-            ensure(
-                prepare_progress_fields == REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS,
-                f"{contract_path}: response.prepare_progress_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_PROGRESS_FIELDS)}",
-            )
-            ensure(
-                prepare_runtime_fields == REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS,
-                f"{contract_path}: response.prepare_runtime_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_RUNTIME_FIELDS)}",
-            )
-            ensure(
-                prepare_timeout_attribution_fields
-                == REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS,
-                f"{contract_path}: response.prepare_timeout_attribution_fields must equal {sorted(REQUIRED_V6_TIMELINE_PREPARE_TIMEOUT_ATTRIBUTION_FIELDS)}",
-            )
-            ensure(
-                exact_wait_fields == REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS,
-                f"{contract_path}: response.exact_wait_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_WAIT_FIELDS)}",
-            )
-            ensure(
-                exact_artifact_poll_fields == REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS,
-                f"{contract_path}: response.exact_artifact_poll_fields must equal {sorted(REQUIRED_V6_TIMELINE_EXACT_ARTIFACT_POLL_FIELDS)}",
-            )
-            ensure(
-                server_edge_details_fields
-                == REQUIRED_V14_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
-                f"{contract_path}: response.server_edge_details_fields must equal {sorted(REQUIRED_V14_TIMELINE_SERVER_EDGE_DETAILS_FIELDS)}",
-            )
-            ensure(
-                first_poll_contention_fields == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_FIELDS,
-                f"{contract_path}: response.first_poll_contention_attribution_fields must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_FIELDS)}",
-            )
-            ensure(
-                first_poll_contention_contender_fields
-                == REQUIRED_V12_TIMELINE_FIRST_POLL_CONTENDER_FIELDS,
-                f"{contract_path}: response.first_poll_contention_contender_fields must equal {sorted(REQUIRED_V12_TIMELINE_FIRST_POLL_CONTENDER_FIELDS)}",
-            )
-            ensure(
-                first_poll_contention_classes
-                == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_CLASSES,
-                f"{contract_path}: response.first_poll_contention_contender_classes must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_CLASSES)}",
-            )
-            ensure(
-                first_poll_contention_request_classes
-                == REQUIRED_V10_TIMELINE_CONTENDER_REQUEST_CLASSES,
-                f"{contract_path}: response.first_poll_contention_request_classes must equal {sorted(REQUIRED_V10_TIMELINE_CONTENDER_REQUEST_CLASSES)}",
-            )
-            ensure(
-                first_poll_contention_uri_scopes
-                == REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_URI_SCOPES,
-                f"{contract_path}: response.first_poll_contention_uri_scopes must equal {sorted(REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_URI_SCOPES)}",
-            )
-            ensure(
-                turn_attribution_fields == REQUIRED_V13_TIMELINE_TURN_ATTRIBUTION_FIELDS,
-                f"{contract_path}: response.turn_attribution_fields must equal {sorted(REQUIRED_V13_TIMELINE_TURN_ATTRIBUTION_FIELDS)}",
-            )
-            ensure(
-                turn_holder_fields == REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS,
-                f"{contract_path}: response.turn_holder_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS)}",
-            )
-            ensure(
-                prepare_routes == REQUIRED_V4_COMPLETION_ROUTES,
-                f"{contract_path}: response.prepare_routes must equal {sorted(REQUIRED_V4_COMPLETION_ROUTES)}",
-            )
-            ensure(
-                prepare_fail_closed_causes == REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES,
-                f"{contract_path}: response.prepare_fail_closed_causes must equal {sorted(REQUIRED_V4_COMPLETION_FAIL_CLOSED_CAUSES)}",
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 16:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            validate_lsp_completion_timeline_response_fields(
+                contract_path,
+                response,
+                expected_version=19,
+                expected_server_edge_details_fields=REQUIRED_V16_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
             )
 
 

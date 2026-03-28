@@ -78,31 +78,56 @@ class VersionedContractsScriptTest(unittest.TestCase):
                 "validate_surface_contract() must reject v16 contract with wrong response.version",
             )
 
-    def test_completion_timeline_v16_rejects_missing_pre_dispatch_fields(self) -> None:
+    def test_completion_timeline_v16_rejects_non_exact_server_edge_field_sets(self) -> None:
         module = self.load_script_module()
-        with tempfile.TemporaryDirectory(prefix="versioned-contracts-v16-fields-") as tmp_dir:
-            surface_dir = Path(tmp_dir) / "lsp-completion-timeline"
-            shutil.copytree(
-                self.REPO_ROOT / "contracts" / "lsp-completion-timeline",
-                surface_dir,
-            )
-            contract_path = surface_dir / "v16" / "contract.json"
-            payload = json.loads(contract_path.read_text(encoding="utf-8"))
-            payload["response"]["server_edge_details_fields"] = [
-                field
-                for field in payload["response"]["server_edge_details_fields"]
-                if field not in {"adapter_read_at_ms", "adapter_to_dispatch_wait_ms"}
-            ]
-            contract_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-            )
 
-            failure = self.validate_surface_failure_message(module, surface_dir)
-            self.assertIsNotNone(
-                failure,
-                "validate_surface_contract() must reject v16 contract without adapter pre-dispatch fields",
-            )
+        def mutate_contract(payload: dict[str, object], mutation: str) -> None:
+            response = payload["response"]
+            assert isinstance(response, dict)
+            server_edge_fields = response["server_edge_details_fields"]
+            assert isinstance(server_edge_fields, list)
+
+            if mutation == "rename":
+                server_edge_fields[:] = [
+                    "adapter_read_at_ms" if field == "adapter_read_at_ms" else field
+                    for field in server_edge_fields
+                    if field != "adapter_read_at_ms"
+                ]
+                server_edge_fields.insert(0, "adapter_ingress_at_ms")
+            elif mutation == "extra":
+                server_edge_fields.append("unexpected_server_edge_field")
+            elif mutation == "missing":
+                response["server_edge_details_fields"] = [
+                    field
+                    for field in server_edge_fields
+                    if field not in {"adapter_read_at_ms", "adapter_to_dispatch_wait_ms"}
+                ]
+            else:  # pragma: no cover - defensive guard for test data
+                raise AssertionError(f"unknown mutation {mutation!r}")
+
+        for mutation in ("rename", "extra", "missing"):
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory(
+                    prefix=f"versioned-contracts-v16-fields-{mutation}-"
+                ) as tmp_dir:
+                    surface_dir = Path(tmp_dir) / "lsp-completion-timeline"
+                    shutil.copytree(
+                        self.REPO_ROOT / "contracts" / "lsp-completion-timeline",
+                        surface_dir,
+                    )
+                    contract_path = surface_dir / "v16" / "contract.json"
+                    payload = json.loads(contract_path.read_text(encoding="utf-8"))
+                    mutate_contract(payload, mutation)
+                    contract_path.write_text(
+                        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                        encoding="utf-8",
+                    )
+
+                    failure = self.validate_surface_failure_message(module, surface_dir)
+                    self.assertIsNotNone(
+                        failure,
+                        "validate_surface_contract() must reject non-exact v16 server edge field sets",
+                    )
 
 
 if __name__ == "__main__":

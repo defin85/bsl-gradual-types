@@ -112,7 +112,7 @@ Trade-off:
 Queue/backpressure policy для этого change фиксируется так:
 
 - `control` lane имеет выделенную bounded capacity и MUST NOT вытесняться lower-priority traffic, пока transport остаётся жив;
-- `completion` lane bounded и может вытеснять только stale/superseded completion work по уже существующим rules, но MUST NOT деградировать в silent drop или перекидывание в `general`; current-revision handoff для `didOpen`/`didChange`/`didSave`/`didClose`, уже прочитанных transport adapter'ом до completion на том же path, MUST оставаться в этом interactive admission path;
+- `completion` lane bounded и может вытеснять только stale/superseded completion work по уже существующим rules, но MUST NOT деградировать в silent drop или перекидывание в `general`; reader использует bounded spillover того же класса, а после его насыщения обязан сохранять control reserved progress через fail-closed pre-dispatch `queue_rejected` для older queued completion вместо блокировки single reader; current-revision handoff для `didOpen`/`didChange`/`didSave`/`didClose`, уже прочитанных transport adapter'ом до completion на том же path, MUST оставаться в этом interactive admission path;
 - `general` lane bounded и принимает на себя основной backpressure/блокировку admission для unrelated traffic, не забирая reserved progress у `control` и `completion`; unrelated id-less notifications MAY получать bounded traceable drop только после того, как completion-supporting handoff уже вынесен из этого lane;
 - policy обязана быть явной и наблюдаемой: enqueue rejection/coalescing/supersession должны оставаться bounded, deterministic и traceable.
 
@@ -148,6 +148,7 @@ Terminal contract для pre-dispatch cancellation фиксируется явн
 - fail-ить, если completion pre-dispatch wait снова становится dominant из-за concurrent general traffic;
 - fail-ить, если queued cancel до dispatch нарушает exactly-once terminal response или публикует fabricated post-dispatch fields;
 - не маскировать regression как purely client-side ingress, когда authoritative adapter split уже доказывает server backlog.
+- так как shipped change-specific wrapper также запускает blocking representative-matrix perf gate, delivery обязан сохранять согласованность с текущей shared runtime latency policy для соседних user-facing semantic queries (`members`, `type_at_position`), а не оставлять drift между transport-side remediation и общим interactive runtime contract.
 
 ## Alternatives Considered
 

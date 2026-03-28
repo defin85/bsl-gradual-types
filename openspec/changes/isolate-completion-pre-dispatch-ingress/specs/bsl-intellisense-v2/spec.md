@@ -218,6 +218,7 @@ Acceptance для архитектурных изменений completion MUST 
 - general requests MUST NOT удерживать freshly-read completion request вне interactive admission queue только из-за общего readiness wait;
 - completion-supporting document-sync notifications (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, `textDocument/didClose`), прочитанные transport adapter'ом до completion на том же transport path, MUST NOT теряться или застревать за unrelated general backlog так, чтобы последующий completion видел stale current revision;
 - control traffic (`$/cancelRequest`, shutdown-related flow) MAY preempt queued completion admission;
+- saturated completion spillover MUST оставаться bounded и fail-closed: older queued completion MAY завершаться pre-dispatch outcome `queue_rejected`, но single reader MUST NOT останавливаться так, чтобы поздний control traffic не был даже классифицирован;
 - queued completion cancellation MUST сохранять existing exactly-once terminal semantics, MUST возвращать ровно один terminal response и MUST NOT допускать late publish после признанного cancel.
 
 #### Scenario: General request burst не блокирует completion до dispatch
@@ -243,3 +244,12 @@ Acceptance для архитектурных изменений completion MUST 
 - **AND** сервер возвращает ровно один terminal response с cancellation semantics `RequestCancelled`
 - **AND** authoritative trace публикует outcome `cancelled` без выдуманных post-dispatch timestamps
 - **AND** система сохраняет exactly-once terminal semantics без поздней публикации completion result
+
+#### Scenario: Saturated completion spillover не прячет late cancel за reader stall
+- **GIVEN** completion lane уже заполнен queued completion work
+- **AND** bounded completion spillover тоже исчерпан
+- **AND** затем на том же transport path приходит ещё один completion request, а сразу после него matching `$/cancelRequest`
+- **WHEN** transport adapter применяет overflow policy до dispatch
+- **THEN** older queued completion fail-closed завершается pre-dispatch outcome `queue_rejected` вместо блокировки single reader
+- **AND** late `$/cancelRequest` всё ещё классифицируется и отменяет самый новый queued completion до dispatch
+- **AND** transport path сохраняет exactly-once terminal semantics без late publish

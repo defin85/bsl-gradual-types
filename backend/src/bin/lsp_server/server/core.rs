@@ -83,12 +83,17 @@ async fn record_completion_timeline_trace_inner(
     }
 }
 
-fn build_pre_dispatch_cancelled_completion_trace(
-    input: super::request_context::PreDispatchCompletionCancelledTraceInput,
+fn build_pre_dispatch_terminal_completion_trace(
+    input: super::request_context::PreDispatchCompletionTerminalTraceInput,
     trace_id: String,
 ) -> crate::types::CompletionTimelineTrace {
-    let started_at_ms = input.adapter_read_at_ms.unwrap_or(input.cancelled_at_ms);
-    let queued_before_dispatch_ms = input.cancelled_at_ms.saturating_sub(started_at_ms);
+    let started_at_ms = input.adapter_read_at_ms.unwrap_or(input.resolved_at_ms);
+    let queued_before_dispatch_ms = input.resolved_at_ms.saturating_sub(started_at_ms);
+    let terminal_status = if input.outcome == "cancelled" {
+        "cancelled"
+    } else {
+        "failed"
+    };
 
     crate::types::CompletionTimelineTrace {
         trace_id,
@@ -96,7 +101,7 @@ fn build_pre_dispatch_cancelled_completion_trace(
         client_probe_id: input.client_probe_id,
         uri: input.uri,
         trigger_mode: input.trigger_mode,
-        outcome: "cancelled".to_string(),
+        outcome: input.outcome,
         started_at_ms,
         total_duration_ms: queued_before_dispatch_ms,
         dominant_stage: Some("queued_before_dispatch".to_string()),
@@ -106,13 +111,13 @@ fn build_pre_dispatch_cancelled_completion_trace(
         stages: vec![
             crate::types::CompletionTimelineStageTrace {
                 name: "queued_before_dispatch".to_string(),
-                status: "cancelled".to_string(),
+                status: terminal_status.to_string(),
                 started_offset_ms: 0,
                 duration_ms: queued_before_dispatch_ms,
             },
             crate::types::CompletionTimelineStageTrace {
                 name: "terminal".to_string(),
-                status: "cancelled".to_string(),
+                status: terminal_status.to_string(),
                 started_offset_ms: queued_before_dispatch_ms,
                 duration_ms: 0,
             },
@@ -284,25 +289,29 @@ impl BslLanguageServer {
         let completion_timeline_traces_for_hook = completion_timeline_traces.clone();
         let next_completion_timeline_trace_id_for_hook = next_completion_timeline_trace_id.clone();
         let coordinator_for_hook = server.coordinator.clone();
-        super::request_context::set_pre_dispatch_completion_cancelled_hook(Some(Arc::new(
+        super::request_context::set_pre_dispatch_completion_terminal_hook(Some(Arc::new(
             move |input| {
                 let completion_timeline_traces = completion_timeline_traces_for_hook.clone();
                 let next_completion_timeline_trace_id =
                     next_completion_timeline_trace_id_for_hook.clone();
                 let coordinator = coordinator_for_hook.clone();
                 tokio::spawn(async move {
-                    let trace = build_pre_dispatch_cancelled_completion_trace(
+                    let trace = build_pre_dispatch_terminal_completion_trace(
                         input,
                         next_completion_timeline_trace_id_from(
                             next_completion_timeline_trace_id.as_ref(),
                         ),
                     );
+                    let public_outcome = match trace.outcome.as_str() {
+                        "queue_rejected" => "fail_closed".to_string(),
+                        other => other.to_string(),
+                    };
                     record_completion_timeline_trace_inner(
                         completion_timeline_traces.as_ref(),
                         trace,
                     )
                     .await;
-                    coordinator.record_intellisense_v2_completion_outcome("cancelled");
+                    coordinator.record_intellisense_v2_completion_outcome(&public_outcome);
                 });
             },
         )));

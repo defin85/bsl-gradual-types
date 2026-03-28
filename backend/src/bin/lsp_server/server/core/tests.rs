@@ -10350,14 +10350,15 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
 #[test]
 fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields(
 ) {
-    let trace = super::build_pre_dispatch_cancelled_completion_trace(
-        crate::server::request_context::PreDispatchCompletionCancelledTraceInput {
+    let trace = super::build_pre_dispatch_terminal_completion_trace(
+        crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
             request_id: "req-pre-dispatch-cancel".to_string(),
             uri: "file:///pre-dispatch-cancel.bsl".to_string(),
             trigger_mode: "trigger_character".to_string(),
             client_probe_id: Some("probe-pre-dispatch-cancel".to_string()),
             adapter_read_at_ms: Some(1_700_000_000_100),
-            cancelled_at_ms: 1_700_000_000_148,
+            resolved_at_ms: 1_700_000_000_148,
+            outcome: "cancelled".to_string(),
         },
         "completion-trace-test".to_string(),
     );
@@ -10391,6 +10392,57 @@ fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricat
     assert_eq!(trace.stages[1].name, "terminal");
     assert_eq!(trace.stages[1].status, "cancelled");
     assert_eq!(trace.stages[1].started_offset_ms, 48);
+    assert_eq!(trace.stages[1].duration_ms, 0);
+}
+
+#[test]
+fn pre_dispatch_queue_rejected_completion_trace_is_fail_closed_and_has_no_fabricated_post_dispatch_fields(
+) {
+    let trace = super::build_pre_dispatch_terminal_completion_trace(
+        crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
+            request_id: "req-pre-dispatch-rejected".to_string(),
+            uri: "file:///pre-dispatch-rejected.bsl".to_string(),
+            trigger_mode: "invoked".to_string(),
+            client_probe_id: Some("probe-pre-dispatch-rejected".to_string()),
+            adapter_read_at_ms: Some(1_700_000_000_200),
+            resolved_at_ms: 1_700_000_000_239,
+            outcome: "queue_rejected".to_string(),
+        },
+        "completion-trace-test-rejected".to_string(),
+    );
+
+    assert_eq!(trace.trace_id, "completion-trace-test-rejected");
+    assert_eq!(
+        trace.request_id.as_deref(),
+        Some("req-pre-dispatch-rejected")
+    );
+    assert_eq!(
+        trace.client_probe_id.as_deref(),
+        Some("probe-pre-dispatch-rejected")
+    );
+    assert_eq!(trace.uri, "file:///pre-dispatch-rejected.bsl");
+    assert_eq!(trace.trigger_mode, "invoked");
+    assert_eq!(trace.outcome, "queue_rejected");
+    assert_eq!(trace.started_at_ms, 1_700_000_000_200);
+    assert_eq!(trace.total_duration_ms, 39);
+    assert_eq!(
+        trace.dominant_stage.as_deref(),
+        Some("queued_before_dispatch")
+    );
+    assert!(
+        trace.server_edge_details.is_none(),
+        "pre-dispatch queue-rejected trace must not fabricate post-dispatch server_edge_details, trace={trace:?}"
+    );
+    assert!(trace.turn_attribution.is_none());
+    assert!(trace.prepare_details.is_none());
+    assert_eq!(trace.stages.len(), 2);
+    assert_eq!(trace.stages[0].name, "queued_before_dispatch");
+    assert_eq!(trace.stages[0].status, "failed");
+    assert_eq!(trace.stages[0].started_offset_ms, 0);
+    assert_eq!(trace.stages[0].duration_ms, 39);
+    assert_eq!(trace.stages[1].name, "terminal");
+    assert_eq!(trace.stages[1].status, "failed");
+    assert_eq!(trace.stages[1].started_offset_ms, 39);
     assert_eq!(trace.stages[1].duration_ms, 0);
 }
 
@@ -17406,8 +17458,8 @@ async fn p33_live_transport_changed_text_current_revision_survives_document_symb
     initialize_live_lsp_transport(&mut harness).await;
     prime_server_with_syntax_helper_deps(&server).await;
 
-    let uri =
-        Url::parse("file:///test_p33_live_transport_changed_text_backlog_priority.bsl").expect("uri");
+    let uri = Url::parse("file:///test_p33_live_transport_changed_text_backlog_priority.bsl")
+        .expect("uri");
     harness
         .send_notification(
             "textDocument/didOpen",

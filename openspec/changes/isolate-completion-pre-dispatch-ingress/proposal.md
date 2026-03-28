@@ -22,6 +22,8 @@
   - queued cancellation сохраняет exactly-once terminal semantics;
   - weighted/fair scheduler и `instrumentation-only` вариант не входят в scope этого change;
 - representative mixed-load gate и traceability docs расширяются так, чтобы ловить именно pre-dispatch starvation, а не только post-dispatch first-poll delay.
+- saturated completion admission больше не имеет права останавливать single reader: после bounded spillover overflow older queued completion fail-closed завершается как pre-dispatch `queue_rejected`, что сохраняет control reserved progress и late `$/cancelRequest` classification на default path.
+- change-specific readiness wrapper остаётся blocking не только для mixed-load transport path, но и для authoritative representative-matrix perf gate; поэтому delivery обязан не оставлять drift между transport-side fix и уже shipped shared runtime latency policy для соседних user-facing semantic queries (`members`, `type_at_position`).
 
 ## Impact
 

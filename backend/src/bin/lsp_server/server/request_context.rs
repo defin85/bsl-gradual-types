@@ -37,17 +37,17 @@ tokio::task_local! {
 }
 
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
-type PreDispatchCompletionCancelledHook =
-    Arc<dyn Fn(PreDispatchCompletionCancelledTraceInput) + Send + Sync + 'static>;
+type PreDispatchCompletionTerminalHook =
+    Arc<dyn Fn(PreDispatchCompletionTerminalTraceInput) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<CancelRequestHook>>> = std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
 }
 
-fn pre_dispatch_completion_cancelled_hook_cell(
-) -> &'static Mutex<Option<PreDispatchCompletionCancelledHook>> {
-    static CELL: std::sync::OnceLock<Mutex<Option<PreDispatchCompletionCancelledHook>>> =
+fn pre_dispatch_completion_terminal_hook_cell(
+) -> &'static Mutex<Option<PreDispatchCompletionTerminalHook>> {
+    static CELL: std::sync::OnceLock<Mutex<Option<PreDispatchCompletionTerminalHook>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
 }
@@ -110,13 +110,14 @@ pub(crate) struct PendingCompletionRequestContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PreDispatchCompletionCancelledTraceInput {
+pub(crate) struct PreDispatchCompletionTerminalTraceInput {
     pub(crate) request_id: String,
     pub(crate) uri: String,
     pub(crate) trigger_mode: String,
     pub(crate) client_probe_id: Option<String>,
     pub(crate) adapter_read_at_ms: Option<u64>,
-    pub(crate) cancelled_at_ms: u64,
+    pub(crate) resolved_at_ms: u64,
+    pub(crate) outcome: String,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1529,21 +1530,22 @@ pub(crate) fn set_cancel_request_hook(hook: Option<CancelRequestHook>) {
     *slot = hook;
 }
 
-pub(crate) fn set_pre_dispatch_completion_cancelled_hook(
-    hook: Option<PreDispatchCompletionCancelledHook>,
+pub(crate) fn set_pre_dispatch_completion_terminal_hook(
+    hook: Option<PreDispatchCompletionTerminalHook>,
 ) {
-    let mut slot = pre_dispatch_completion_cancelled_hook_cell()
+    let mut slot = pre_dispatch_completion_terminal_hook_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *slot = hook;
 }
 
-pub(crate) fn notify_pre_dispatch_completion_cancelled(
+pub(crate) fn notify_pre_dispatch_completion_terminal_outcome(
     context: PendingCompletionRequestContext,
-    cancelled_at_ms: u64,
+    resolved_at_ms: u64,
+    outcome: &'static str,
 ) {
     let hook = {
-        let slot = pre_dispatch_completion_cancelled_hook_cell()
+        let slot = pre_dispatch_completion_terminal_hook_cell()
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         slot.clone()
@@ -1551,14 +1553,22 @@ pub(crate) fn notify_pre_dispatch_completion_cancelled(
     let Some(hook) = hook else {
         return;
     };
-    hook(PreDispatchCompletionCancelledTraceInput {
+    hook(PreDispatchCompletionTerminalTraceInput {
         request_id: context.request_id,
         uri: context.uri,
         trigger_mode: context.trigger_mode,
         client_probe_id: context.client_probe_id,
         adapter_read_at_ms: context.adapter_read_at_ms,
-        cancelled_at_ms,
+        resolved_at_ms,
+        outcome: outcome.to_string(),
     });
+}
+
+pub(crate) fn notify_pre_dispatch_completion_cancelled(
+    context: PendingCompletionRequestContext,
+    cancelled_at_ms: u64,
+) {
+    notify_pre_dispatch_completion_terminal_outcome(context, cancelled_at_ms, "cancelled");
 }
 
 async fn with_request_context<F, T>(

@@ -99,6 +99,35 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             "default smoke path must rebuild embedded UI assets when target/site is absent",
         )
 
+    def test_smoke_script_builds_release_lsp_binary_before_extension_compile_fast(
+        self,
+    ) -> None:
+        content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")
+
+        self.assertIn(
+            'cargo build -p bsl-backend --release --bin bsl-lsp-server',
+            content,
+            (
+                "extension smoke slice must ensure the release bsl-lsp-server binary is "
+                "current before compile:fast copies it into the extension bundle"
+            ),
+        )
+
+        release_build_index = content.index(
+            'cargo build -p bsl-backend --release --bin bsl-lsp-server'
+        )
+        compile_fast_index = content.index(
+            'npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast'
+        )
+        self.assertLess(
+            release_build_index,
+            compile_fast_index,
+            (
+                "extension smoke slice must build/update the release lsp binary before "
+                "compile:fast runs copy-binaries:release:skip-build"
+            ),
+        )
+
     def test_smoke_script_executes_each_exact_selector_individually(self) -> None:
         content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")
 
@@ -111,11 +140,19 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             ),
         )
         self.assertIn(
-            'mapfile -t available_tests < <(cargo test "${cargo_args[@]}" -- --list | sed -n \'s/: test$//p\')',
+            'cargo test "${cargo_args[@]}" --no-run --message-format=json >"${build_output}"',
+            content,
+            (
+                "smoke gate exact-selector helper must build the target once and capture "
+                "the emitted executable before running exact selectors"
+            ),
+        )
+        self.assertIn(
+            'mapfile -t available_tests < <("${test_binary}" --list | sed -n \'s/: test$//p\')',
             content,
             (
                 "smoke gate exact-selector helper must resolve short selectors against "
-                "cargo --list output before running exact tests"
+                "the authoritative built test binary listing before exact execution"
             ),
         )
         self.assertNotIn(
@@ -132,11 +169,19 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             "smoke gate exact-selector helper must fail-closed to one resolved full test name",
         )
         self.assertIn(
+            '"${test_binary}" "${resolved_selector}" --exact --nocapture',
+            content,
+            (
+                "smoke gate exact-selector helper must execute the resolved full test "
+                "name via the already-built test binary"
+            ),
+        )
+        self.assertNotIn(
             'cargo test "${cargo_args[@]}" "${resolved_selector}" -- --exact --nocapture',
             content,
             (
-                "smoke gate exact-selector helper must pass the resolved full test name "
-                "to cargo before `-- --exact`"
+                "smoke gate exact-selector helper must not re-enter cargo for every "
+                "resolved selector once the bundle binary has been built"
             ),
         )
 

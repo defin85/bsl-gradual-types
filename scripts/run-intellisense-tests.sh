@@ -46,6 +46,65 @@ ensure_embedded_ui_assets() {
   )
 }
 
+resolve_cargo_test_binary() {
+  local build_output="$1"
+  local target_kind="$2"
+  local target_name="${3:-}"
+
+  python3 - "${build_output}" "${target_kind}" "${target_name}" <<'PY'
+import json
+import sys
+
+build_output, target_kind, target_name = sys.argv[1:4]
+matches = []
+
+with open(build_output, encoding="utf-8") as handle:
+    for raw_line in handle:
+        raw_line = raw_line.strip()
+        if not raw_line or not raw_line.startswith("{"):
+            continue
+        try:
+            payload = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+
+        if payload.get("reason") != "compiler-artifact":
+            continue
+
+        executable = payload.get("executable")
+        if not executable:
+            continue
+
+        target = payload.get("target") or {}
+        kinds = target.get("kind") or []
+        name = target.get("name") or ""
+
+        if target_kind == "lib":
+            if "lib" not in kinds:
+                continue
+        else:
+            if target_kind not in kinds or name != target_name:
+                continue
+
+        matches.append(executable)
+
+if not matches:
+    raise SystemExit(
+        f"resolve_cargo_test_binary: no executable matched target_kind={target_kind!r} "
+        f"target_name={target_name!r}"
+    )
+
+unique_matches = sorted(set(matches))
+if len(unique_matches) != 1:
+    raise SystemExit(
+        "resolve_cargo_test_binary: executable resolution was ambiguous: "
+        + ", ".join(unique_matches)
+    )
+
+print(unique_matches[0])
+PY
+}
+
 run_cargo_exact_bundle() {
   local label="$1"
   shift
@@ -69,10 +128,54 @@ run_cargo_exact_bundle() {
   fi
 
   echo "[smoke] ${label}: running ${#selectors[@]} exact selectors"
+  local target_kind=""
+  local target_name=""
+  local arg_index=0
+  while [[ ${arg_index} -lt ${#cargo_args[@]} ]]; do
+    case "${cargo_args[${arg_index}]}" in
+      --lib)
+        target_kind="lib"
+        ;;
+      --bin)
+        arg_index=$((arg_index + 1))
+        if [[ ${arg_index} -ge ${#cargo_args[@]} ]]; then
+          echo "run_cargo_exact_bundle(${label}): --bin is missing a target name" >&2
+          exit 1
+        fi
+        target_kind="bin"
+        target_name="${cargo_args[${arg_index}]}"
+        ;;
+      --test)
+        arg_index=$((arg_index + 1))
+        if [[ ${arg_index} -ge ${#cargo_args[@]} ]]; then
+          echo "run_cargo_exact_bundle(${label}): --test is missing a target name" >&2
+          exit 1
+        fi
+        target_kind="test"
+        target_name="${cargo_args[${arg_index}]}"
+        ;;
+    esac
+    arg_index=$((arg_index + 1))
+  done
+
+  if [[ -z "${target_kind}" ]]; then
+    echo "run_cargo_exact_bundle(${label}): unsupported target spec ${cargo_args[*]}" >&2
+    exit 1
+  fi
+
+  # Build once per bundle, then reuse the emitted test binary for exact selectors.
+  local build_output=""
+  build_output="$(mktemp)"
+  cargo test "${cargo_args[@]}" --no-run --message-format=json >"${build_output}"
+
+  local test_binary=""
+  test_binary="$(resolve_cargo_test_binary "${build_output}" "${target_kind}" "${target_name}")"
+  rm -f "${build_output}"
+
   local -a available_tests=()
-  mapfile -t available_tests < <(cargo test "${cargo_args[@]}" -- --list | sed -n 's/: test$//p')
+  mapfile -t available_tests < <("${test_binary}" --list | sed -n 's/: test$//p')
   if [[ ${#available_tests[@]} -eq 0 ]]; then
-    echo "run_cargo_exact_bundle(${label}): cargo --list returned no tests" >&2
+    echo "run_cargo_exact_bundle(${label}): test binary --list returned no tests" >&2
     exit 1
   fi
 
@@ -99,7 +202,7 @@ run_cargo_exact_bundle() {
     fi
 
     resolved_selector="${matching_tests[0]}"
-    cargo test "${cargo_args[@]}" "${resolved_selector}" -- --exact --nocapture
+    "${test_binary}" "${resolved_selector}" --exact --nocapture
   done
 }
 
@@ -214,11 +317,18 @@ run_completion_timeline_drilldown_smoke() {
   run_cargo_exact_bundle "bsl-lsp-server completion timeline drilldown" -p bsl-backend --bin bsl-lsp-server -- "${lsp_server_timeline_selectors[@]}"
 }
 
+ensure_extension_release_lsp_binary() {
+  # compile:fast uses copy-binaries:release:skip-build, so the release server
+  # binary must already exist and be current on a fresh CI runner.
+  cargo build -p bsl-backend --release --bin bsl-lsp-server
+}
+
 run_extension_completion_observability_smoke() {
   # Focused extension-host slice for completion observability, including
   # request-centric incident bundle summary over authoritative timeline + probes.
   local grep_pattern='Completion Probe (Schema|Recorder|Runtime|Store) Test Suite|Completion Timeline (Clipboard|Drilldown|Model|Webview Provider) Test Suite|Client Options Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found|getObservabilityMetricsFetchResult should preserve unsupported capability until reset|getObservabilityMetricsFetchResult should return unavailable error on timeout'
 
+  ensure_extension_release_lsp_binary
   npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast
   (
     cd "${ROOT_DIR}/vscode-extension"

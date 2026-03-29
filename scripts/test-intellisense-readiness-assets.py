@@ -406,6 +406,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         ),
     ]
     REQUIRED_EXTENSION_SMOKE_SNIPPETS = [
+        'cargo build -p bsl-backend --release --bin bsl-lsp-server',
         'npm --prefix "${ROOT_DIR}/vscode-extension" run compile:fast',
         "BSL_TEST_GREP=",
         "Completion Probe (Schema|Recorder|Runtime|Store) Test Suite",

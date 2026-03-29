@@ -32,6 +32,10 @@ class AgentReadinessValidationTest(unittest.TestCase):
     )
     TARGETS_FILE = REPO_ROOT / "scripts" / "doc-path-check-targets.txt"
     VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
+    CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    REAL_MODULE_WORKFLOW = (
+        REPO_ROOT / ".github" / "workflows" / "intellisense-real-module-gates.yml"
+    )
 
     def test_required_targets_cover_primary_onboarding_and_agent_docs(self) -> None:
         content = self.TARGETS_FILE.read_text(encoding="utf-8")
@@ -58,6 +62,11 @@ class AgentReadinessValidationTest(unittest.TestCase):
     def test_verification_doc_exposes_local_act_wrapper(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn("./scripts/run-local-ci-with-act.sh", content)
+
+    def test_verification_doc_exposes_self_hosted_real_module_workflow(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("intellisense-real-module-gates.yml", content)
+        self.assertIn("BSL_TEST_CONF_BIG_ROOT", content)
 
     def test_verification_doc_exposes_document_symbol_readiness_wrapper(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
@@ -229,6 +238,27 @@ class AgentReadinessValidationTest(unittest.TestCase):
                 f"backend/: {missing}"
             ),
         )
+
+    def test_ci_workflow_keeps_hosted_perf_gate_generic_only(self) -> None:
+        content = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("Run IntelliSense perf gate (small|large|churn)", content)
+        self.assertNotIn("Run real-module post-handoff readiness gate", content)
+        self.assertNotIn("Build frontend (target/site) for representative gates", content)
+
+    def test_self_hosted_real_module_workflow_requires_conf_big_fixture(self) -> None:
+        content = self.REAL_MODULE_WORKFLOW.read_text(encoding="utf-8")
+        for required_snippet in (
+            "name: IntelliSense Real-Module Gates",
+            "workflow_dispatch:",
+            "runs-on: [self-hosted, linux, x64, conf-big]",
+            "BSL_TEST_CONF_BIG_ROOT",
+            "Validate self-hosted conf_big fixture",
+            "Configuration.xml",
+            "Build frontend (target/site) for representative gates",
+            "Run real-module post-handoff readiness gate",
+            "Run front-edge revision-churn representative gate",
+        ):
+            self.assertIn(required_snippet, content)
 
     def test_agent_readiness_checker_passes_for_repository_state(self) -> None:
         result = subprocess.run(

@@ -49,6 +49,11 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
             "./scripts/run-intellisense-perf.sh",
         ):
             self.assertIn(required_snippet, self.content)
+        self.assertNotIn("Run real-module post-handoff readiness gate", self.content)
+        self.assertNotIn(
+            "Build frontend (target/site) for representative gates",
+            self.content,
+        )
 
     def test_active_ci_workflow_runs_governance_scripts_for_touched_changes(self) -> None:
         for required_snippet in (

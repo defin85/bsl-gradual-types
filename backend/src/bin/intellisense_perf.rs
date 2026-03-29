@@ -443,8 +443,9 @@ fn requires_authoritative_evidence_context(
     baseline_present: bool,
     update_baseline: bool,
     blocking_mode: bool,
+    expected_change_id_present: bool,
 ) -> bool {
-    blocking_mode || (baseline_present && !update_baseline)
+    expected_change_id_present && (blocking_mode || (baseline_present && !update_baseline))
 }
 
 fn should_compare_against_existing_baseline(baseline_present: bool, update_baseline: bool) -> bool {
@@ -515,6 +516,7 @@ async fn main() -> Result<()> {
         args.baseline.is_some(),
         args.update_baseline,
         args.blocking_mode,
+        expected_change_id.is_some(),
     );
 
     let syntax_helper_path = resolve_override(

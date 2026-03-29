@@ -334,12 +334,17 @@ fn resolve_expected_change_id_prefers_cli_over_env() {
 }
 
 #[test]
-fn cutover_context_requires_authoritative_change_id_unless_updating_baseline() {
-    assert!(requires_authoritative_evidence_context(true, false, false));
-    assert!(requires_authoritative_evidence_context(false, false, true));
-    assert!(!requires_authoritative_evidence_context(true, true, false));
+fn authoritative_evidence_is_required_only_for_change_scoped_runs() {
+    assert!(requires_authoritative_evidence_context(true, false, false, true));
+    assert!(requires_authoritative_evidence_context(false, false, true, true));
     assert!(!requires_authoritative_evidence_context(
-        false, false, false
+        true, false, true, false
+    ));
+    assert!(!requires_authoritative_evidence_context(
+        true, true, false, true
+    ));
+    assert!(!requires_authoritative_evidence_context(
+        false, false, false, false
     ));
 }
 

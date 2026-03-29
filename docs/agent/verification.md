@@ -61,6 +61,7 @@ repo-local wrapper над `act`:
 Expected outcome:
 
 - workflow `./.github/workflows/ci.yml` исполняется через `workflow_dispatch`
+- replica покрывает hosted CI path; self-hosted `conf_big` representative gates живут отдельно в `./.github/workflows/intellisense-real-module-gates.yml`
 - тяжёлые Rust/npm caches, `CARGO_TARGET_DIR`, `vscode-extension/node_modules` и `.vscode-test` уходят в Docker named volumes
 - IntelliSense smoke автоматически использует локальный act runner image с Linux runtime libs и `xvfb` для VS Code
 - extension-host tail сам переключается на `xvfb-run` в headless окружении и не требует ручного `DISPLAY`
@@ -99,6 +100,19 @@ cargo test --workspace --locked
 ```bash
 ./scripts/run-intellisense-perf.sh
 ```
+
+- Manual self-hosted representative gates for `conf_big` fixtures:
+
+```bash
+# GitHub Actions -> IntelliSense Real-Module Gates
+# workflow input: conf_big_root=/absolute/path/to/conf_big
+```
+
+Expected outcome:
+
+- workflow `./.github/workflows/intellisense-real-module-gates.yml` запускается только вручную на self-hosted runner с label `conf-big`
+- runner передаёт absolute fixture path через `BSL_TEST_CONF_BIG_ROOT`
+- hosted `./.github/workflows/ci.yml` не зависит от `examples/conf_big`
 
 - Active checked-in readiness bundle for current-revision completion changes:
 

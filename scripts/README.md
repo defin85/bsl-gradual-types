@@ -178,6 +178,10 @@ Representative matrix:
 
 При `BSL_V2_PERF_GATE_BLOCKING=1` и валидном `CHANGE_ID`/`OPENSPEC_CHANGE_ID`
 этот script является checked-in authoritative perf gate для cutover acceptance.
+Hosted CI использует его только для generic representative matrix (`small`,
+`large`, `churn`). Real-module `conf_big` representative gates вынесены в
+manual self-hosted workflow `./.github/workflows/intellisense-real-module-gates.yml`
+и получают fixture path через `BSL_TEST_CONF_BIG_ROOT`.
 
 ---
 

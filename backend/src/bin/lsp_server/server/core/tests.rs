@@ -13420,19 +13420,38 @@ fn syntax_helper_path_for_tests() -> std::path::PathBuf {
     syntax_helper_path
 }
 
+fn conf_big_candidate_roots_for_tests(
+    workspace_root: &std::path::Path,
+    explicit_root: Option<std::path::PathBuf>,
+) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(root) = explicit_root.filter(|path| !path.as_os_str().is_empty()) {
+        candidates.push(root);
+    }
+    candidates.push(workspace_root.join("examples").join("conf_big"));
+    candidates.push(std::path::PathBuf::from("examples/conf_big"));
+    candidates.push(std::path::PathBuf::from("../examples/conf_big"));
+    candidates
+}
+
+fn conf_big_root_from_candidates(
+    candidates: impl IntoIterator<Item = std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    candidates
+        .into_iter()
+        .find(|path| path.join("Configuration.xml").exists())
+}
+
 fn conf_big_root_for_tests() -> Option<std::path::PathBuf> {
     let workspace_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("workspace root")
         .to_path_buf();
-    let candidates = [
-        workspace_root.join("examples").join("conf_big"),
-        std::path::PathBuf::from("examples/conf_big"),
-        std::path::PathBuf::from("../examples/conf_big"),
-    ];
-    candidates
-        .into_iter()
-        .find(|path| path.join("Configuration.xml").exists())
+    let explicit_root = std::env::var_os("BSL_TEST_CONF_BIG_ROOT").map(std::path::PathBuf::from);
+    conf_big_root_from_candidates(conf_big_candidate_roots_for_tests(
+        &workspace_root,
+        explicit_root,
+    ))
 }
 
 fn conf_big_large_module_path_for_tests(root: &std::path::Path) -> std::path::PathBuf {
@@ -13443,6 +13462,42 @@ fn conf_big_large_module_path_for_tests(root: &std::path::Path) -> std::path::Pa
         .join("Ext")
         .join("Form")
         .join("Module.bsl")
+}
+
+#[test]
+fn conf_big_root_resolution_prefers_explicit_override() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace_root = temp.path().join("workspace");
+    let default_root = workspace_root.join("examples").join("conf_big");
+    let explicit_root = temp.path().join("external-conf-big");
+    std::fs::create_dir_all(&default_root).expect("create default root");
+    std::fs::create_dir_all(&explicit_root).expect("create explicit root");
+    std::fs::write(default_root.join("Configuration.xml"), "<default />")
+        .expect("write default config");
+    std::fs::write(explicit_root.join("Configuration.xml"), "<explicit />")
+        .expect("write explicit config");
+
+    let resolved = conf_big_root_from_candidates(conf_big_candidate_roots_for_tests(
+        &workspace_root,
+        Some(explicit_root.clone()),
+    ));
+
+    assert_eq!(resolved.as_deref(), Some(explicit_root.as_path()));
+}
+
+#[test]
+fn conf_big_root_resolution_falls_back_to_workspace_fixture() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let workspace_root = temp.path().join("workspace");
+    let default_root = workspace_root.join("examples").join("conf_big");
+    std::fs::create_dir_all(&default_root).expect("create default root");
+    std::fs::write(default_root.join("Configuration.xml"), "<default />")
+        .expect("write default config");
+
+    let resolved =
+        conf_big_root_from_candidates(conf_big_candidate_roots_for_tests(&workspace_root, None));
+
+    assert_eq!(resolved.as_deref(), Some(default_root.as_path()));
 }
 
 async fn prime_server_with_syntax_helper_deps(server: &BslLanguageServer) {

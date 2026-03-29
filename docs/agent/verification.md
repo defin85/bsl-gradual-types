@@ -46,6 +46,26 @@ Expected outcome:
 - cross-adapter smoke suite проходит без внешних фикстур
 - если `target/site/index.html` отсутствует, smoke script сам собирает embedded `bsl-agent` UI assets через `trunk build --release`
 
+## Local GitHub Actions Replica
+
+Когда нужно прогнать тот же workflow локально до облачного runner, используй
+repo-local wrapper над `act`:
+
+```bash
+./scripts/run-local-ci-with-act.sh list
+./scripts/run-local-ci-with-act.sh agent_readiness_docs_gate
+./scripts/run-local-ci-with-act.sh intellisense_smoke_gate --offline
+./scripts/run-local-ci-with-act.sh du
+```
+
+Expected outcome:
+
+- workflow `./.github/workflows/ci.yml` исполняется через `workflow_dispatch`
+- тяжёлые Rust/npm caches и `CARGO_TARGET_DIR` уходят в Docker named volumes
+- логи и uploaded artifacts складываются в repo-local ignored cache directory и
+  автоматически подчищаются по retention policy, чтобы локальное хранилище не
+  раздувалось
+
 ## Manual Or Broader Validation
 
 - VS Code extension compile/lint/tests:

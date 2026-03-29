@@ -401,6 +401,15 @@ python3 scripts/check-openspec-change-governance.py \
 
 **Default automation path:** workflow `../.github/workflows/ci.yml` остаётся canonical readiness workflow для репозитория, но автоматические `push`/`pull_request` триггеры временно поставлены на паузу. Пока действует manual-only режим, тот же набор governance/smoke/perf gate'ов запускается через `workflow_dispatch` на выбранном ref.
 
+**Локальный эквивалент GitHub Actions:** `./scripts/run-local-ci-with-act.sh` запускает jobs из `../.github/workflows/ci.yml` через `act`, сохраняет тяжёлые Rust/npm caches в Docker named volumes с префиксом `bsl-gradual-types-act`, складывает logs/artifacts в repo-local ignored cache directory и автоматически чистит старые записи по retention policy. Базовые команды:
+
+```bash
+./scripts/run-local-ci-with-act.sh list
+./scripts/run-local-ci-with-act.sh agent_readiness_docs_gate
+./scripts/run-local-ci-with-act.sh intellisense_smoke_gate --offline
+./scripts/run-local-ci-with-act.sh du
+```
+
 ---
 
 ### `check-protected-assets-gate.py` - Fail-closed protected assets gate

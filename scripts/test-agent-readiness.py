@@ -14,6 +14,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     CHECK_SCRIPT = REPO_ROOT / "scripts" / "check-agent-readiness.py"
     WRAPPER_SCRIPT = REPO_ROOT / "scripts" / "run-agent-readiness-checks.sh"
+    LOCAL_ACT_WRAPPER = REPO_ROOT / "scripts" / "run-local-ci-with-act.sh"
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
@@ -51,6 +52,10 @@ class AgentReadinessValidationTest(unittest.TestCase):
     def test_verification_doc_exposes_local_agent_readiness_command(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
         self.assertIn("./scripts/run-agent-readiness-checks.sh", content)
+
+    def test_verification_doc_exposes_local_act_wrapper(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("./scripts/run-local-ci-with-act.sh", content)
 
     def test_verification_doc_exposes_document_symbol_readiness_wrapper(self) -> None:
         content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
@@ -106,6 +111,24 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.WRAPPER_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("check-doc-paths.py", content)
         self.assertIn("check-agent-readiness.py", content)
+
+    def test_local_act_wrapper_uses_named_volumes_and_bounded_storage(self) -> None:
+        content = self.LOCAL_ACT_WRAPPER.read_text(encoding="utf-8")
+        for required_snippet in (
+            "docker volume create",
+            "bsl-gradual-types-act",
+            "--artifact-server-path",
+            "--cache-server-path",
+            "--container-options",
+            "CARGO_HOME=/var/cache/cargo",
+            "RUSTUP_HOME=/var/cache/rustup",
+            "npm_config_cache=/var/cache/npm",
+            "CARGO_TARGET_DIR=/var/cache/target",
+            "prune_storage",
+            "KEEP_LOGS",
+            "KEEP_ARTIFACT_RUNS",
+        ):
+            self.assertIn(required_snippet, content)
 
     def test_backend_build_script_rerun_if_changed_targets_exist(self) -> None:
         content = self.BACKEND_BUILD_SCRIPT.read_text(encoding="utf-8")

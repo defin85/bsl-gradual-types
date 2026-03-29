@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import unittest
@@ -19,6 +20,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
     PRE_DISPATCH_INGRESS_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-isolate-completion-pre-dispatch-ingress.sh"
     )
+    BACKEND_BUILD_SCRIPT = REPO_ROOT / "backend" / "build.rs"
     TURN_WAIT_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-completion-turn-wait-lifecycle.sh"
     )
@@ -104,6 +106,29 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.WRAPPER_SCRIPT.read_text(encoding="utf-8")
         self.assertIn("check-doc-paths.py", content)
         self.assertIn("check-agent-readiness.py", content)
+
+    def test_backend_build_script_rerun_if_changed_targets_exist(self) -> None:
+        content = self.BACKEND_BUILD_SCRIPT.read_text(encoding="utf-8")
+        watched_paths = re.findall(r'rerun_if_changed\("([^"]+)"\)', content)
+
+        self.assertTrue(
+            watched_paths,
+            "backend/build.rs must declare at least one rerun-if-changed target",
+        )
+
+        missing = [
+            relative_path
+            for relative_path in watched_paths
+            if not (self.BACKEND_BUILD_SCRIPT.parent / relative_path).exists()
+        ]
+
+        self.assertFalse(
+            missing,
+            (
+                "backend/build.rs rerun-if-changed targets must exist relative to "
+                f"backend/: {missing}"
+            ),
+        )
 
     def test_agent_readiness_checker_passes_for_repository_state(self) -> None:
         result = subprocess.run(

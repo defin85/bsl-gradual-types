@@ -1,5 +1,14 @@
 use chrono::Local;
+use std::path::Path;
 use std::process::Command;
+
+fn rerun_if_changed(path: &str) {
+    assert!(
+        Path::new(path).exists(),
+        "backend/build.rs rerun-if-changed target is missing: {path}"
+    );
+    println!("cargo:rerun-if-changed={}", path);
+}
 
 fn main() {
     // Генерируем timestamp сборки
@@ -16,9 +25,9 @@ fn main() {
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=GIT_HASH={}", git_hash);
 
-    // ВАЖНО: Принудительная перекомпиляция при каждой сборке
-    // Это гарантирует актуальный BUILD_TIMESTAMP
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=src/bin/lsp_server.rs");
+    // Обновляем build metadata при реальных изменениях backend source tree, но
+    // не dirty-им пакет на каждом no-op build ссылкой на отсутствующий путь.
+    rerun_if_changed("build.rs");
+    rerun_if_changed("src");
     println!("cargo:rerun-if-env-changed=FORCE_REBUILD");
 }

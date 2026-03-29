@@ -15,6 +15,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
     CHECK_SCRIPT = REPO_ROOT / "scripts" / "check-agent-readiness.py"
     WRAPPER_SCRIPT = REPO_ROOT / "scripts" / "run-agent-readiness-checks.sh"
     LOCAL_ACT_WRAPPER = REPO_ROOT / "scripts" / "run-local-ci-with-act.sh"
+    LOCAL_ACT_VSCODE_DOCKERFILE = REPO_ROOT / "scripts" / "act-vscode-runner.Dockerfile"
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
@@ -123,10 +124,56 @@ class AgentReadinessValidationTest(unittest.TestCase):
             "CARGO_HOME=/var/cache/cargo",
             "RUSTUP_HOME=/var/cache/rustup",
             "npm_config_cache=/var/cache/npm",
-            "CARGO_TARGET_DIR=/var/cache/target",
+            'readonly CONTAINER_TARGET_DIR="${REPO_ROOT}/target"',
+            'readonly BASE_RUNNER_IMAGE="${ACT_RUNNER_IMAGE:-catthehacker/ubuntu:act-latest}"',
+            'readonly ACT_VSCODE_RUNNER_IMAGE="${ACT_VSCODE_RUNNER_IMAGE:-bsl-gradual-types-act-vscode:ubuntu-24.04}"',
+            'readonly ACT_VSCODE_RUNNER_DOCKERFILE="${REPO_ROOT}/scripts/act-vscode-runner.Dockerfile"',
+            'readonly EXTENSION_NODE_MODULES_DIR="${REPO_ROOT}/vscode-extension/node_modules"',
+            'readonly EXTENSION_NODE_MODULES_VOLUME="${VOLUME_PREFIX}-vscode-extension-node-modules"',
+            'readonly VSCODE_TEST_VOLUME="${VOLUME_PREFIX}-vscode-test"',
+            'readonly VSCODE_TEST_DIR="${REPO_ROOT}/vscode-extension/.vscode-test"',
+            "dst=${CONTAINER_TARGET_DIR}",
+            "job_requires_vscode_runtime",
+            "runner_image_for_job",
+            "ensure_vscode_runner_image",
+            "com.defin85.dockerfile-sha",
+            "job_requires_extension_node_modules",
+            "job_requires_vscode_test_volume",
+            "container_options_for_job",
+            "ensure_extension_node_modules",
+            "npm --prefix ./vscode-extension ci",
+            "type=volume,src=${EXTENSION_NODE_MODULES_VOLUME},dst=${EXTENSION_NODE_MODULES_DIR}",
+            "type=volume,src=${VSCODE_TEST_VOLUME},dst=${VSCODE_TEST_DIR}",
+            "prune_vscode_test_volume",
+            "KEEP_VSCODE_TEST_LOGS",
+            "KEEP_VSCODE_TEST_BUILDS",
             "prune_storage",
             "KEEP_LOGS",
             "KEEP_ARTIFACT_RUNS",
+        ):
+            self.assertIn(required_snippet, content)
+        self.assertNotIn("CARGO_TARGET_DIR=/var/cache/target", content)
+
+    def test_local_act_vscode_runner_installs_linux_runtime_dependencies(self) -> None:
+        content = self.LOCAL_ACT_VSCODE_DOCKERFILE.read_text(encoding="utf-8")
+        for required_snippet in (
+            "FROM ${BASE_IMAGE}",
+            "libasound2t64",
+            "libatk-bridge2.0-0",
+            "libatspi2.0-0",
+            "libdrm2",
+            "libgbm1",
+            "libgtk-3-0",
+            "libnspr4",
+            "libnss3",
+            "libx11-xcb1",
+            "libxcb-dri3-0",
+            "libxcomposite1",
+            "libxdamage1",
+            "libxfixes3",
+            "libxrandr2",
+            "libxshmfence1",
+            "libxss1",
         ):
             self.assertIn(required_snippet, content)
 

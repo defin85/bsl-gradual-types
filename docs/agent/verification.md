@@ -61,7 +61,8 @@ repo-local wrapper над `act`:
 Expected outcome:
 
 - workflow `./.github/workflows/ci.yml` исполняется через `workflow_dispatch`
-- тяжёлые Rust/npm caches и `CARGO_TARGET_DIR` уходят в Docker named volumes
+- тяжёлые Rust/npm caches, `CARGO_TARGET_DIR`, `vscode-extension/node_modules` и `.vscode-test` уходят в Docker named volumes
+- IntelliSense smoke автоматически использует локальный act runner image с Linux runtime libs для VS Code
 - логи и uploaded artifacts складываются в repo-local ignored cache directory и
   автоматически подчищаются по retention policy, чтобы локальное хранилище не
   раздувалось

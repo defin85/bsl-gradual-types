@@ -5,6 +5,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
+        dbus-x11 \
         libasound2t64 \
         libatk-bridge2.0-0 \
         libatspi2.0-0 \
@@ -21,4 +22,6 @@ RUN apt-get update \
         libxrandr2 \
         libxshmfence1 \
         libxss1 \
+        xauth \
+        xvfb \
     && rm -rf /var/lib/apt/lists/*

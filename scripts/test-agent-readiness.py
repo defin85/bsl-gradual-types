@@ -16,6 +16,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
     WRAPPER_SCRIPT = REPO_ROOT / "scripts" / "run-agent-readiness-checks.sh"
     LOCAL_ACT_WRAPPER = REPO_ROOT / "scripts" / "run-local-ci-with-act.sh"
     LOCAL_ACT_VSCODE_DOCKERFILE = REPO_ROOT / "scripts" / "act-vscode-runner.Dockerfile"
+    VSCODE_TEST_RUNNER = REPO_ROOT / "vscode-extension" / "src" / "test" / "runTest.ts"
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
@@ -158,6 +159,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
         content = self.LOCAL_ACT_VSCODE_DOCKERFILE.read_text(encoding="utf-8")
         for required_snippet in (
             "FROM ${BASE_IMAGE}",
+            "dbus-x11",
             "libasound2t64",
             "libatk-bridge2.0-0",
             "libatspi2.0-0",
@@ -174,6 +176,19 @@ class AgentReadinessValidationTest(unittest.TestCase):
             "libxrandr2",
             "libxshmfence1",
             "libxss1",
+            "xauth",
+            "xvfb",
+        ):
+            self.assertIn(required_snippet, content)
+
+    def test_vscode_test_runner_accepts_headless_electron_launch_args(self) -> None:
+        content = self.VSCODE_TEST_RUNNER.read_text(encoding="utf-8")
+        for required_snippet in (
+            "BSL_TEST_ELECTRON_LAUNCH_ARGS",
+            "process.getuid() === 0",
+            "--no-sandbox",
+            "launchArgs",
+            "runTests({ extensionDevelopmentPath, extensionTestsPath, launchArgs })",
         ):
             self.assertIn(required_snippet, content)
 

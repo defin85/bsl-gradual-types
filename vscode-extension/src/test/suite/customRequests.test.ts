@@ -378,8 +378,9 @@ suite('LSP Custom Requests Test Suite', () => {
             state: 2 // Running
         };
 
-        // Stub getLanguageClient
-        const clientModule = await import('../../lsp/client');
+        // customRequests.ts does dynamic CommonJS imports, so the tests must stub
+        // the real module export object rather than an ephemeral import namespace wrapper.
+        const clientModule = require('../../lsp/client') as typeof import('../../lsp/client');
         getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns(mockClient as any);
 

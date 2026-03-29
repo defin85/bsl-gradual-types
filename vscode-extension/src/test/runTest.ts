@@ -2,6 +2,25 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { runTests } from '@vscode/test-electron';
 
+function addLaunchArgIfMissing(launchArgs: string[], flag: string): void {
+    if (!launchArgs.includes(flag)) {
+        launchArgs.push(flag);
+    }
+}
+
+function collectLaunchArgs(): string[] {
+    const launchArgs = (process.env.BSL_TEST_ELECTRON_LAUNCH_ARGS ?? '')
+        .split(/\s+/)
+        .filter(Boolean);
+
+    // act/docker jobs run the VS Code test host as root, so Electron must disable sandboxing.
+    if (typeof process.getuid === 'function' && process.getuid() === 0) {
+        addLaunchArgIfMissing(launchArgs, '--no-sandbox');
+    }
+
+    return launchArgs;
+}
+
 function ensureTestSettings(
     extensionDevelopmentPath: string,
 ): void {
@@ -54,9 +73,10 @@ async function main() {
         // The path to test runner
         // Passed to --extensionTestsPath
         const extensionTestsPath = path.resolve(__dirname, './suite/index');
+        const launchArgs = collectLaunchArgs();
 
         // Download VS Code, unzip it and run the integration test
-        await runTests({ extensionDevelopmentPath, extensionTestsPath });
+        await runTests({ extensionDevelopmentPath, extensionTestsPath, launchArgs });
     } catch (err) {
         console.error('Failed to run tests');
         process.exit(1);

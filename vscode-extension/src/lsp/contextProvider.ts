@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getLanguageClient } from './client';
+import { getLanguageClient } from './client/index';
 import { State } from 'vscode-languageclient/node';
 import { logger } from './logger';
 

@@ -192,6 +192,21 @@ class AgentReadinessValidationTest(unittest.TestCase):
         ):
             self.assertIn(required_snippet, content)
 
+    def test_lsp_sources_use_explicit_client_index_imports(self) -> None:
+        source_files = (
+            self.REPO_ROOT / "vscode-extension" / "src" / "lsp" / "index.ts",
+            self.REPO_ROOT / "vscode-extension" / "src" / "lsp" / "statsProvider.ts",
+            self.REPO_ROOT / "vscode-extension" / "src" / "lsp" / "contextProvider.ts",
+            self.REPO_ROOT / "vscode-extension" / "src" / "lsp" / "customRequests.ts",
+            self.REPO_ROOT / "vscode-extension" / "src" / "test" / "suite" / "customRequests.test.ts",
+        )
+        for source_file in source_files:
+            content = source_file.read_text(encoding="utf-8")
+            self.assertNotIn("'./client'", content, source_file.as_posix())
+            self.assertNotIn('"./client"', content, source_file.as_posix())
+            self.assertNotIn("'../../lsp/client'", content, source_file.as_posix())
+            self.assertNotIn('"../../lsp/client"', content, source_file.as_posix())
+
     def test_backend_build_script_rerun_if_changed_targets_exist(self) -> None:
         content = self.BACKEND_BUILD_SCRIPT.read_text(encoding="utf-8")
         watched_paths = re.findall(r'rerun_if_changed\("([^"]+)"\)', content)

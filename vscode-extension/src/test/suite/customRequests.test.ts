@@ -378,9 +378,10 @@ suite('LSP Custom Requests Test Suite', () => {
             state: 2 // Running
         };
 
-        // customRequests.ts does dynamic CommonJS imports, so the tests must stub
-        // the real module export object rather than an ephemeral import namespace wrapper.
-        const clientModule = require('../../lsp/client') as typeof import('../../lsp/client');
+        // customRequests.ts imports the public client facade, which re-exports
+        // lifecycle functions via accessors. Stub the lifecycle module directly
+        // so the facade keeps returning the patched implementations.
+        const clientModule = require('../../lsp/client/lifecycle') as typeof import('../../lsp/client/lifecycle');
         getLanguageClientStub = sinon.stub(clientModule, 'getLanguageClient');
         getLanguageClientStub.returns(mockClient as any);
 

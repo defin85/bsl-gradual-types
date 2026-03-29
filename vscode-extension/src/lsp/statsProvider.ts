@@ -3,7 +3,7 @@
 import * as vscode from 'vscode';
 import { getTypeRepositoryStats, TypeRepositoryStats } from './customRequests';
 import { State } from 'vscode-languageclient/node';
-import { getLanguageClient } from './client';
+import { getLanguageClient } from './client/index';
 import { logger } from './logger';
 
 let statusBarItem: vscode.StatusBarItem | undefined;

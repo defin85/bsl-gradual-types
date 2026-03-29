@@ -223,7 +223,7 @@ export interface SearchTypesResponse {
  * Заменяет: executeBslCommand('query_type', ...)
  */
 export async function queryType(typeName: string): Promise<QueryTypeResponse> {
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         throw new Error('LSP client not available');
     }
@@ -247,7 +247,7 @@ export async function queryType(typeName: string): Promise<QueryTypeResponse> {
  * Заменяет: executeBslCommand('build_unified_index', ...)
  */
 export async function buildIndex(params: BuildIndexParams): Promise<BuildIndexResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<BuildIndexResponse>('bsl/buildIndex', params);
 }
 
@@ -257,7 +257,7 @@ export async function buildIndex(params: BuildIndexParams): Promise<BuildIndexRe
 export async function getIndexState(
     params: GetIndexStateParams = {}
 ): Promise<GetIndexStateResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<GetIndexStateResponse>('bsl/getIndexState', params);
 }
 
@@ -332,7 +332,7 @@ export async function validateMethod(
     methodName: string,
     args: string[]
 ): Promise<ValidateMethodResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<ValidateMethodResponse>('bsl/validateMethod', {
         object_type: objectType,
         method_name: methodName,
@@ -348,7 +348,7 @@ export async function checkTypeCompatibility(
     sourceType: string,
     targetType: string
 ): Promise<CheckCompatibilityResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<CheckCompatibilityResponse>('bsl/checkTypeCompatibility', {
         source_type: sourceType,
         target_type: targetType
@@ -375,7 +375,7 @@ export async function incrementalUpdate(
     changedPaths?: string[],
     isAuto?: boolean
 ): Promise<IncrementalUpdateResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     const params: IncrementalUpdateParams = {
         config_path: configPath,
         platform_version: platformVersion,
@@ -391,7 +391,7 @@ export async function incrementalUpdate(
  * Пауза авто-реиндексации через LSP
  */
 export async function pauseAutoReindex(): Promise<AutoReindexStateResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<AutoReindexStateResponse>('bsl/pauseAutoReindex', {});
 }
 
@@ -399,7 +399,7 @@ export async function pauseAutoReindex(): Promise<AutoReindexStateResponse> {
  * Возобновление авто-реиндексации через LSP
  */
 export async function resumeAutoReindex(): Promise<AutoReindexStateResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<AutoReindexStateResponse>('bsl/resumeAutoReindex', {});
 }
 
@@ -412,7 +412,7 @@ export async function extractPlatformDocs(
     platformVersion: string,
     force: boolean = false
 ): Promise<ExtractPlatformDocsResponse> {
-    const { sendCustomRequest } = await import('./client');
+    const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<ExtractPlatformDocsResponse>('bsl/extractPlatformDocs', {
         archive_path: archivePath,
         platform_version: platformVersion,
@@ -432,7 +432,7 @@ export async function searchTypes(
     query: string,
     limit?: number
 ): Promise<SearchTypesResponse> {
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         throw new Error('LSP client not available');
     }
@@ -787,7 +787,7 @@ export interface GetAllTypesResponse {
  * @returns Статистика или null если LSP недоступен
  */
 export async function getTypeRepositoryStats(): Promise<TypeRepositoryStats | null> {
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         logger.warn('[Type Stats] LSP client not available');
         return null;
@@ -816,7 +816,7 @@ export async function getWorkspaceStats(): Promise<WorkspaceStatsResponse | null
         return null;
     }
 
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         logger.warn('[Workspace Stats] LSP client not available');
         return null;
@@ -875,7 +875,7 @@ export async function getObservabilityMetricsFetchResult(
         return { kind: 'unsupported' };
     }
 
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         logger.warn('[Observability] LSP client not available');
         return { kind: 'error', message: 'LSP client not available' };
@@ -949,7 +949,7 @@ export async function getCompletionTimeline(
         return { kind: 'unsupported' };
     }
 
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         return { kind: 'error', message: 'LSP client not available' };
     }
@@ -979,7 +979,7 @@ export async function getCompletionTimeline(
 export async function getCacheStats(
     configurationPath: string
 ): Promise<CacheStatsResponse | null> {
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         logger.warn('[Cache Stats] LSP client not available');
         return null;
@@ -1004,7 +1004,7 @@ export async function getCacheStats(
  * @returns Список типов с метаданными или null если LSP недоступен
  */
 export async function getAllTypes(params?: GetAllTypesRequest): Promise<GetAllTypesResponse | null> {
-    const client = (await import('./client')).getLanguageClient();
+    const client = (await import('./client/index')).getLanguageClient();
     if (!client) {
         logger.warn('[Get All Types] LSP client not available');
         return null;

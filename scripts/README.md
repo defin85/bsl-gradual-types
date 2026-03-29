@@ -399,7 +399,7 @@ python3 scripts/check-openspec-change-governance.py \
   --change-id add-performance-first-ai-engineering-guardrails
 ```
 
-**Default automation path:** workflow `../.github/workflows/ci.yml` остаётся active readiness workflow для репозитория: он определяет затронутые `openspec/changes/<id>` и запускает governance gate fail-closed, а при релевантных source/runtime/contracts/docs изменениях дополнительно прогоняет shipped `./scripts/run-intellisense-tests.sh smoke` и active perf gate.
+**Default automation path:** workflow `../.github/workflows/ci.yml` остаётся canonical readiness workflow для репозитория, но автоматические `push`/`pull_request` триггеры временно поставлены на паузу. Пока действует manual-only режим, тот же набор governance/smoke/perf gate'ов запускается через `workflow_dispatch` на выбранном ref.
 
 ---
 

@@ -231,6 +231,21 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     FRONT_EDGE_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-stabilize-completion-front-edge.sh"
     )
+
+    def ci_workflow_content(self) -> str:
+        return self.CI_WORKFLOW.read_text(encoding="utf-8")
+
+    def ci_auto_triggers_enabled(self, workflow: str) -> bool:
+        return "pull_request:" in workflow and "\npush:\n" in workflow
+
+    def assert_ci_workflow_manual_only(self, workflow: str) -> None:
+        self.assertIn("workflow_dispatch:", workflow)
+        self.assertIn(
+            "Temporary pause of automatic CI runs for this repository.",
+            workflow,
+        )
+        self.assertNotIn("pull_request:", workflow)
+        self.assertNotIn("\npush:\n", workflow)
     FRONT_EDGE_READINESS_GATE_JSON = (
         REPO_ROOT
         / "backend"
@@ -769,12 +784,18 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         )
 
     def test_pre_dispatch_ingress_ci_watches_wrapper(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
-        self.assertGreaterEqual(
-            workflow.count("scripts/validate-isolate-completion-pre-dispatch-ingress.sh"),
-            2,
-            "CI path filters must watch pre-dispatch ingress wrapper on pull_request and push",
+        workflow = self.ci_workflow_content()
+        wrapper_mentions = workflow.count(
+            "scripts/validate-isolate-completion-pre-dispatch-ingress.sh"
         )
+        if self.ci_auto_triggers_enabled(workflow):
+            self.assertGreaterEqual(
+                wrapper_mentions,
+                2,
+                "CI path filters must watch pre-dispatch ingress wrapper on pull_request and push",
+            )
+            return
+        self.assert_ci_workflow_manual_only(workflow)
 
     def test_pre_dispatch_ingress_ci_wiring_tracks_artifacts(self) -> None:
         workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
@@ -1042,12 +1063,18 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         )
 
     def test_slot_release_ci_wiring_tracks_wrapper_and_artifacts(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
-        self.assertGreaterEqual(
-            workflow.count("scripts/validate-completion-turn-wait-slot-release.sh"),
-            2,
-            "CI path filters must watch slot-release wrapper on pull_request and push",
+        workflow = self.ci_workflow_content()
+        wrapper_mentions = workflow.count(
+            "scripts/validate-completion-turn-wait-slot-release.sh"
         )
+        if self.ci_auto_triggers_enabled(workflow):
+            self.assertGreaterEqual(
+                wrapper_mentions,
+                2,
+                "CI path filters must watch slot-release wrapper on pull_request and push",
+            )
+        else:
+            self.assert_ci_workflow_manual_only(workflow)
         expected_snippets = [
             "CHANGE_ID: refactor-completion-turn-wait-slot-release",
             (
@@ -1072,7 +1099,10 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         )
 
     def test_slot_release_ci_path_filters_cover_mandatory_surfaces(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        workflow = self.ci_workflow_content()
+        if not self.ci_auto_triggers_enabled(workflow):
+            self.assert_ci_workflow_manual_only(workflow)
+            return
         missing = [
             path_filter
             for path_filter in self.REQUIRED_SLOT_RELEASE_CI_PATH_FILTERS
@@ -1139,15 +1169,24 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         self.assertNotIn("`response.version=16`", test_readme)
 
     def test_front_edge_ci_watches_wrapper(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
-        self.assertGreaterEqual(
-            workflow.count("scripts/validate-stabilize-completion-front-edge.sh"),
-            2,
-            "CI path filters must watch front-edge wrapper on pull_request and push",
+        workflow = self.ci_workflow_content()
+        wrapper_mentions = workflow.count(
+            "scripts/validate-stabilize-completion-front-edge.sh"
         )
+        if self.ci_auto_triggers_enabled(workflow):
+            self.assertGreaterEqual(
+                wrapper_mentions,
+                2,
+                "CI path filters must watch front-edge wrapper on pull_request and push",
+            )
+            return
+        self.assert_ci_workflow_manual_only(workflow)
 
     def test_front_edge_ci_path_filters_cover_mandatory_surfaces(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        workflow = self.ci_workflow_content()
+        if not self.ci_auto_triggers_enabled(workflow):
+            self.assert_ci_workflow_manual_only(workflow)
+            return
         missing = [
             path_filter
             for path_filter in self.REQUIRED_FRONT_EDGE_CI_PATH_FILTERS

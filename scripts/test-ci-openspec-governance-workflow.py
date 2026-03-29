@@ -26,27 +26,27 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
             self.content,
         )
 
-    def test_active_ci_workflow_triggers_for_default_operational_paths(self) -> None:
+    def test_active_ci_workflow_is_temporarily_manual_only(self) -> None:
         for required_snippet in (
             "workflow_dispatch:",
-            "pull_request:",
-            "push:",
-            'branches:\n      - master',
-            '      - "openspec/changes/**"',
-            '      - ".github/workflows/ci.yml"',
+            "Temporary pause of automatic CI runs for this repository.",
         ):
             self.assertIn(required_snippet, self.content)
+        self.assertNotIn("pull_request:", self.content)
+        self.assertNotIn("\npush:\n", self.content)
 
-    def test_active_ci_workflow_triggers_for_intellisense_runtime_and_evidence_surfaces(
+    def test_active_ci_workflow_keeps_intellisense_runtime_and_evidence_jobs(
         self,
     ) -> None:
         for required_snippet in (
-            '      - "backend/src/bin/lsp_server/server/**"',
-            '      - "bsl-runtime/src/system/basic_observability/**"',
-            '      - "backend/tests/perf/reports/**"',
-            '      - "scripts/validate-v2-completion-gates.sh"',
-            '      - "scripts/README.md"',
-            '      - "scripts/run-intellisense-tests.sh"',
+            "Validate IntelliSense smoke contract",
+            "python3 -m unittest scripts/test-intellisense-smoke-gate.py",
+            "Validate IntelliSense readiness asset sync",
+            "python3 -m unittest scripts/test-intellisense-readiness-assets.py",
+            "Run IntelliSense smoke gate",
+            "./scripts/run-intellisense-tests.sh smoke",
+            "Run IntelliSense perf gate (small|large|churn)",
+            "./scripts/run-intellisense-perf.sh",
         ):
             self.assertIn(required_snippet, self.content)
 
@@ -78,8 +78,6 @@ class OpenSpecGovernanceWorkflowTest(unittest.TestCase):
             "Agent readiness docs gate",
             "./scripts/run-agent-readiness-checks.sh",
             "python3 -m unittest scripts/test-agent-readiness.py",
-            '      - "docs/agent/**"',
-            '      - "scripts/run-agent-readiness-checks.sh"',
         ):
             self.assertIn(required_snippet, self.content)
 

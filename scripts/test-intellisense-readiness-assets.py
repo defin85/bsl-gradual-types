@@ -14,6 +14,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
     CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+    REAL_MODULE_WORKFLOW = (
+        REPO_ROOT / ".github" / "workflows" / "intellisense-real-module-gates.yml"
+    )
     VERIFICATION_DOC = REPO_ROOT / "docs" / "agent" / "verification.md"
     DEVELOPMENT_WORKFLOW_GUIDE = (
         REPO_ROOT / "docs" / "guides" / "development-workflow.md"
@@ -234,6 +237,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
 
     def ci_workflow_content(self) -> str:
         return self.CI_WORKFLOW.read_text(encoding="utf-8")
+
+    def real_module_workflow_content(self) -> str:
+        return self.REAL_MODULE_WORKFLOW.read_text(encoding="utf-8")
 
     def ci_auto_triggers_enabled(self, workflow: str) -> bool:
         return "pull_request:" in workflow and "\npush:\n" in workflow
@@ -798,7 +804,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         self.assert_ci_workflow_manual_only(workflow)
 
     def test_pre_dispatch_ingress_ci_wiring_tracks_artifacts(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        workflow = self.real_module_workflow_content()
         expected_snippets = [
             "CHANGE_ID: isolate-completion-pre-dispatch-ingress",
             (
@@ -813,7 +819,10 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         missing = [snippet for snippet in expected_snippets if snippet not in workflow]
         self.assertFalse(
             missing,
-            f"CI workflow is missing pre-dispatch ingress readiness wiring: {missing}",
+            (
+                "self-hosted representative-gates workflow is missing "
+                f"pre-dispatch ingress readiness wiring: {missing}"
+            ),
         )
 
     def test_pre_dispatch_ingress_gitignore_keeps_readiness_artifacts_trackable(self) -> None:
@@ -1075,6 +1084,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             )
         else:
             self.assert_ci_workflow_manual_only(workflow)
+        real_module_workflow = self.real_module_workflow_content()
         expected_snippets = [
             "CHANGE_ID: refactor-completion-turn-wait-slot-release",
             (
@@ -1092,10 +1102,15 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             "backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-*.json",
             "backend/tests/perf/reports/refactor-completion-turn-wait-slot-release-*.md",
         ]
-        missing = [snippet for snippet in expected_snippets if snippet not in workflow]
+        missing = [
+            snippet for snippet in expected_snippets if snippet not in real_module_workflow
+        ]
         self.assertFalse(
             missing,
-            f"CI workflow is missing slot-release readiness wiring: {missing}",
+            (
+                "self-hosted representative-gates workflow is missing "
+                f"slot-release readiness wiring: {missing}"
+            ),
         )
 
     def test_slot_release_ci_path_filters_cover_mandatory_surfaces(self) -> None:
@@ -1201,7 +1216,7 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         )
 
     def test_front_edge_ci_wiring_tracks_artifacts(self) -> None:
-        workflow = self.CI_WORKFLOW.read_text(encoding="utf-8")
+        workflow = self.real_module_workflow_content()
         expected_snippets = [
             "CHANGE_ID: stabilize-completion-front-edge",
             (
@@ -1216,7 +1231,10 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         missing = [snippet for snippet in expected_snippets if snippet not in workflow]
         self.assertFalse(
             missing,
-            f"CI workflow is missing front-edge readiness wiring: {missing}",
+            (
+                "self-hosted representative-gates workflow is missing "
+                f"front-edge readiness wiring: {missing}"
+            ),
         )
 
     def test_front_edge_gitignore_keeps_readiness_artifacts_trackable(self) -> None:

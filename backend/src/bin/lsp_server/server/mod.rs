@@ -217,6 +217,8 @@ pub struct BslLanguageServer {
         Arc<Mutex<CurrentRevisionHeadPrecomputeTasksV2>>,
     pub(crate) background_parse_snapshot_apply_tasks_v2:
         Arc<Mutex<BackgroundParseSnapshotApplyTasksV2>>,
+    pub(crate) document_symbol_bootstrap_tasks_v2:
+        Arc<Mutex<DocumentSymbolBootstrapTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
@@ -380,6 +382,13 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
 }
 
 type BackgroundParseSnapshotApplyTasksV2 = HashMap<V2FileId, BackgroundParseSnapshotApplyTaskV2>;
+
+pub(crate) struct DocumentSymbolBootstrapTaskV2 {
+    pub requested_version: Arc<AtomicI32>,
+    pub handle: JoinHandle<()>,
+}
+
+type DocumentSymbolBootstrapTasksV2 = HashMap<V2FileId, DocumentSymbolBootstrapTaskV2>;
 
 pub(crate) fn intellisense_v2_slow_wait_warn_threshold() -> Option<Duration> {
     bsl_runtime::application::RuntimePerfKnobs::from_runtime_config().slow_wait_warn_threshold

@@ -750,6 +750,165 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) async fn schedule_document_symbol_bootstrap_from_request_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+    ) {
+        let mut tasks = self.document_symbol_bootstrap_tasks_v2.lock().await;
+        if tasks
+            .get(&file_id)
+            .is_some_and(|task| task.requested_version.load(Ordering::Relaxed) == requested_version)
+        {
+            return;
+        }
+        if let Some(previous) = tasks.remove(&file_id) {
+            previous.requested_version.store(0, Ordering::Relaxed);
+            previous.handle.abort();
+        }
+
+        let requested_version_state = Arc::new(std::sync::atomic::AtomicI32::new(requested_version));
+        let server = self.clone();
+        let worker_requested_version_state = Arc::clone(&requested_version_state);
+        let handle = tokio::spawn(async move {
+            server
+                .run_document_symbol_request_bootstrap_worker_v2(
+                    file_id,
+                    worker_requested_version_state,
+                )
+                .await;
+        });
+        tasks.insert(
+            file_id,
+            super::super::DocumentSymbolBootstrapTaskV2 {
+                requested_version: requested_version_state,
+                handle,
+            },
+        );
+    }
+
+    async fn build_document_symbol_response_from_shadow_state_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+    ) -> Option<DocumentSymbolResponse> {
+        if self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            != Some(requested_version)
+        {
+            return None;
+        }
+        let shadow_state = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()?;
+        if shadow_state.version != requested_version {
+            return None;
+        }
+        let text = shadow_state.text;
+        bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(self.coordinator.as_ref()),
+            move || {
+                let parse_result = bsl_syntax::parse_fast(text.as_ref()).ok()?;
+                build_document_symbols(text.as_ref(), &parse_result).ok()
+            },
+        )
+        .await
+        .ok()
+        .flatten()
+    }
+
+    async fn run_document_symbol_request_bootstrap_worker_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version_state: Arc<std::sync::atomic::AtomicI32>,
+    ) {
+        let requested_version = requested_version_state.load(Ordering::Relaxed);
+        let run = async {
+            tokio::task::yield_now().await;
+            if requested_version <= 0 {
+                return;
+            }
+            if self
+                .latest_document_symbol_ready_v2(file_id)
+                .await
+                .is_some_and(|ready| ready.file_version >= requested_version)
+            {
+                return;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                != Some(requested_version)
+            {
+                return;
+            }
+            if requested_version_state.load(Ordering::Relaxed) != requested_version {
+                return;
+            }
+            if self
+                .latest_document_symbol_ready_v2(file_id)
+                .await
+                .is_some_and(|ready| ready.file_version >= requested_version)
+            {
+                return;
+            }
+            let response = self
+                .build_document_symbol_response_from_shadow_state_v2(file_id, requested_version)
+                .await;
+            let Some(response) = response else {
+                return;
+            };
+            if requested_version_state.load(Ordering::Relaxed) != requested_version {
+                return;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                .is_none()
+            {
+                return;
+            }
+            self.record_document_symbol_ready_v2(file_id, requested_version, response)
+                .await;
+        };
+        run.await;
+
+        let mut tasks = self.document_symbol_bootstrap_tasks_v2.lock().await;
+        if tasks
+            .get(&file_id)
+            .is_some_and(|task| Arc::ptr_eq(&task.requested_version, &requested_version_state))
+        {
+            tasks.remove(&file_id);
+        }
+    }
+
+    async fn cancel_document_symbol_bootstrap_v2(&self, file_id: bsl_analysis_v2::FileId) {
+        let task = self
+            .document_symbol_bootstrap_tasks_v2
+            .lock()
+            .await
+            .remove(&file_id);
+        if let Some(task) = task {
+            task.requested_version.store(0, Ordering::Relaxed);
+            task.handle.abort();
+        }
+    }
+
     fn spawn_large_churn_completion_head_reuse_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -1369,6 +1528,7 @@ impl BslLanguageServer {
                 .await;
             self.cancel_background_parse_snapshot_apply_v2(file_id)
                 .await;
+            self.cancel_document_symbol_bootstrap_v2(file_id).await;
             self.latest_received_file_versions_v2
                 .write()
                 .await

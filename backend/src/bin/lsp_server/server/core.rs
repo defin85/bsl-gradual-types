@@ -225,6 +225,7 @@ impl BslLanguageServer {
             type_index_precompute_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             current_revision_head_precompute_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             background_parse_snapshot_apply_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
+            document_symbol_bootstrap_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),

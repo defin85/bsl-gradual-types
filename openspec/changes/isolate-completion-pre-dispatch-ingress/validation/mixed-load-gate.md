@@ -8,7 +8,7 @@
 ## Поставляемые пути
 - Default smoke:
   `./scripts/run-intellisense-tests.sh smoke`
-- Workflow: `.github/workflows/ci.yml`
+- Workflow: `.github/workflows/intellisense-real-module-gates.yml`
 - Локальный script:
   `./scripts/validate-isolate-completion-pre-dispatch-ingress.sh`
 - Generic override path:
@@ -30,6 +30,10 @@
 - `./scripts/run-intellisense-tests.sh smoke`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p39_real_conf_big_document_symbol_mixed_load_gate_live -- --nocapture`
 - `openspec validate isolate-completion-pre-dispatch-ingress --strict --no-interactive`
+- Self-hosted representative workflow runs the same `conf_big` gate through
+  `.github/workflows/intellisense-real-module-gates.yml`; hosted
+  `.github/workflows/ci.yml` remains smoke/perf-only and intentionally does not
+  depend on the fixture.
 
 ## Результат
 - На 28 марта 2026 года checked-in mixed-load gate для `isolate-completion-pre-dispatch-ingress` зелёный в текущем workspace.

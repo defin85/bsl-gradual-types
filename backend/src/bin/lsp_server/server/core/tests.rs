@@ -17060,6 +17060,260 @@ async fn p33_document_symbol_returns_unavailable_before_ready_outline_from_did_o
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 5_000;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let uri =
+        Url::parse("file:///test_p33_document_symbol_request_bootstrap_did_open_gap.bsl")
+            .expect("test uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let initial = tokio::time::timeout(
+        Duration::from_millis(250),
+        lsp_document_symbol_with_request(&mut service, 50_332, &uri),
+    )
+    .await
+    .expect("initial documentSymbol request must stay bounded");
+    assert!(
+        initial.is_none(),
+        "initial request must still fail closed while no ready outline exists during didOpen parse gap"
+    );
+
+    let seeded = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut request_id = 50_333;
+        loop {
+            if let Some(response) = lsp_document_symbol_with_request(&mut service, request_id, &uri)
+                .await
+            {
+                break response;
+            }
+            request_id += 1;
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("request-triggered bootstrap must materialize ready outline before slow didOpen parse snapshot finishes");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "OnlyProc"),
+        "bootstrap response must expose initial outline, names={seeded_names:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE: &str =
+        "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
+    const PARSE_DELAY_MS: u64 = 5_000;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let _parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
+        &PARSE_DELAY_MS.to_string(),
+    );
+    let uri =
+        Url::parse("file:///test_p33_live_transport_document_symbol_request_bootstrap.bsl")
+            .expect("test uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: FIXTURE.to_string(),
+                },
+            },
+        )
+        .await;
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must publish latest received version on live transport");
+
+    let initial = tokio::time::timeout(
+        Duration::from_millis(250),
+        harness.send_request(
+            50_334,
+            "textDocument/documentSymbol",
+            DocumentSymbolParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+            },
+        ),
+    )
+    .await
+    .expect("initial live transport documentSymbol request must stay bounded");
+    assert!(
+        document_symbol_response_from_jsonrpc_response(&initial).is_none(),
+        "initial live transport request must still fail closed while no ready outline exists during didOpen parse gap"
+    );
+
+    let seeded = tokio::time::timeout(Duration::from_secs(2), async {
+        let mut request_id = 50_335;
+        loop {
+            let response = harness
+                .send_request(
+                    request_id,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                )
+                .await;
+            if let Some(parsed) = document_symbol_response_from_jsonrpc_response(&response) {
+                break parsed;
+            }
+            request_id += 1;
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("live transport request-triggered bootstrap must materialize ready outline before slow didOpen parse snapshot finishes");
+    let seeded_names = document_symbol_names(&seeded);
+    assert!(
+        seeded_names.iter().any(|name| name == "OnlyProc"),
+        "live transport bootstrap response must expose initial outline, names={seeded_names:?}"
+    );
+
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_document_symbol_supersedes_older_outstanding_refresh() {
     struct EnvVarGuard {
         key: &'static str,

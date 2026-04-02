@@ -138,6 +138,8 @@ impl BslLanguageServer {
         }
 
         let Some(ready_state) = latest_ready else {
+            self.schedule_document_symbol_bootstrap_from_request_v2(file_id, requested_version)
+                .await;
             self.coordinator
                 .record_intellisense_v2_document_symbol_outcome("unavailable");
             return Ok(None);

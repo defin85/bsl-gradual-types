@@ -647,33 +647,26 @@ Runtime knob MUST валидироваться и приводиться к ди
 Snapshot с несовпадающими `deps_id` или `settings_id`, а также snapshot предыдущей revision, MUST NOT использоваться как semantic substitute для interactive ответа.
 
 Дополнительно для completion:
-- completion MUST ждать bounded время current-revision `CompletionHeadArtifact` или `ExactSemanticArtifact`;
-- readiness/publish path для current-revision `CompletionHeadArtifact` MUST NOT блокироваться ожиданием ready exact semantic artifact той же revision;
-- если `CompletionHeadArtifact` ready внутри wait budget, completion MAY вернуть current-revision semantic response из него;
+- completion MUST иметь head-first current-revision prepare path для first response;
+- member-access completion MUST NOT требовать generic full `snapshot_with_deps` как обязательный prereq для `head_hit`, если current-revision head truth уже доступен;
+- `prepare_stateful_operation` MAY использоваться для completion exact route и exact upgrade, но MUST NOT оставаться обязательной первой ступенью каждого member-access completion после нового `didChange`;
+- если `CompletionHeadArtifact` ready внутри wait budget, completion MAY вернуть current-revision semantic response из lightweight head path;
 - если `ExactSemanticArtifact` ready внутри wait budget, completion MAY использовать exact semantic response напрямую;
-- если внутри wait budget не ready ни один current-revision completion artifact, completion MUST завершиться fail-closed;
-- exact precompute MAY продолжаться после first response, но MUST NOT менять revision ответа задним числом, MUST NOT маскировать stale semantic path как acceptable substitute и MUST NOT превращать completion под `revision-churn` обратно в `exact-only` wait path, если head artifact уже ready.
+- если внутри wait budget не ready ни один current-revision completion artifact, completion MUST завершиться fail-closed.
 
-#### Scenario: Completion после правки использует current-revision head artifact без stale substitute
-- **GIVEN** пользователь ввёл новую строку и `received_version=V+1`, но exact semantic artifact для `V+1` ещё не ready
-- **AND** current-revision `CompletionHeadArtifact` для `V+1` успел построиться в wait budget
-- **WHEN** IDE запрашивает completion
-- **THEN** сервер возвращает non-empty semantic completion response для версии `V+1`
-- **AND** не возвращает semantic payload версии `V` под видом текущего результата
+#### Scenario: Head-first completion не застревает за heavy generic prepare
+- **GIVEN** пользователь только что создал новую requested revision
+- **AND** current-revision `CompletionHeadArtifact` уже ready
+- **AND** exact semantic path еще не готов
+- **WHEN** IDE запрашивает member-access completion
+- **THEN** сервер возвращает current-revision first response из head-first path
+- **AND** не делает heavy exact prepare обязательной ступенью перед этим ответом
 
-#### Scenario: Последовательные didChange не возвращают completion к exact-only зависимости
-- **GIVEN** пользователь последовательно создаёт новые requested revisions `V+1` и `V+2`
-- **AND** для `V+2` current-revision `CompletionHeadArtifact` ready внутри wait budget
-- **AND** `ExactSemanticArtifact` для `V+2` ещё не ready
-- **WHEN** IDE запрашивает completion на `V+2`
-- **THEN** сервер возвращает current-revision completion response из `CompletionHeadArtifact` для `V+2`
-- **AND** не продолжает ждать exact artifact только потому, что completion выполняется после очередного `didChange`
-
-#### Scenario: Нет current-revision completion artifacts в пределах wait budget
-- **GIVEN** requested версия ещё не ready ни по `CompletionHeadArtifact`, ни по exact semantic artifact
-- **WHEN** IDE запрашивает completion
-- **THEN** сервер не блокируется дольше wait budget
-- **AND** сервер не использует snapshot предыдущей revision как semantic substitute
+#### Scenario: Exact-only операции остаются на heavy prepare
+- **GIVEN** exact semantic artifact текущей revision нужен для `hover`, `definition` или `signatureHelp`
+- **WHEN** IDE выполняет такую операцию
+- **THEN** сервер использует exact stateful prepare
+- **AND** не заменяет его lightweight completion path
 
 ### Requirement: Diagnostics publish остаётся strict latest-version и monotonic по ревизии (MUST)
 Система MUST публиковать `diagnostics` только для актуальной requested version документа.
@@ -1440,9 +1433,10 @@ Completion и diagnostics MUST использовать один и тот же 
 
 Completion under churn MUST NOT блокироваться секундными хвостами ожидания latest-path.
 Интерактивный request path MUST NOT запускать sync parse/index compute, даже если exact artifact еще недоступен.
-Completion under churn MUST NOT накапливать second-scale `service_future_created -> first poll` wait только потому, что более ранние `didOpen/didChange` notifications продолжают slow background стадии после current-revision handoff.
+Completion under churn MUST NOT исчерпывать bounded wait на фазе `wait_for_file_version` только потому, что latest same-file apply после document-sync handoff остаётся в очереди позади slow background work.
+Completion under churn MUST NOT завершаться `exact_deadline`, если `observed_file_version` уже достиг requested current revision, но `CompletionHeadArtifact` всё ещё отсутствует только потому, что head publish сериализован позади `ExactSemanticArtifact`, `type_index_precompute` или deferred diagnostics.
 
-Для этого change `second-scale` pre-poll backlog operationally означает regression, если representative `didChange-burst` gate нарушает budgets, определённые требованием про representative real-module gate.
+Для этого change и `prepare_timeout@wait_for_file_version`, и post-apply `head_ready=false` `exact_deadline` считаются regressions current-revision readiness fast lane, а не допустимым bounded fail-closed поведением.
 
 #### Scenario: Under churn completion отдаёт bounded fail-closed ответ без sync parse/index
 - **GIVEN** большой модуль находится в активном churn режиме
@@ -1451,11 +1445,19 @@ Completion under churn MUST NOT накапливать second-scale `service_fut
 - **THEN** сервер возвращает bounded fail-closed response для текущей revision
 - **AND** sync parse/index compute не выполняется в интерактивном request path
 
-#### Scenario: Burst document-sync не превращает completion в pre-poll backlog
-- **GIVEN** несколько changed-text `didChange` уже перевели файл на новую revision и зарегистрировали slow background работу
-- **WHEN** IDE запрашивает member-access completion через live LSP transport path
-- **THEN** completion future не проводит seconds-scale время в состоянии "created but not first-polled" только из-за pending document-sync service futures
-- **AND** дальнейшая latency атрибуция остаётся отделимой от handler execution
+#### Scenario: Post-handoff apply backlog считается regression, а не acceptable miss
+- **GIVEN** `didChange` уже зарегистрировал handoff для requested revision `V`
+- **AND** completion запрашивается для той же revision `V`
+- **WHEN** bounded wait истекает на фазе `wait_for_file_version`, потому что latest same-file apply всё ещё стоит позади background backlog
+- **THEN** такой исход считается regression readiness scheduler
+- **AND** не считается допустимым fail-closed поведением under churn
+
+#### Scenario: Post-apply отсутствие head считается regression, а не normal exact latency
+- **GIVEN** completion уже наблюдает `observed_file_version >= requested current revision`
+- **AND** `head_ready=false`, потому что publish `CompletionHeadArtifact` ждёт exact/type-index/deferred diagnostics path
+- **WHEN** completion завершает exact wait по deadline
+- **THEN** такой исход считается regression head-readiness fast lane
+- **AND** не считается допустимой exact-upgrade latency
 
 ### Requirement: После fail-closed miss система выполняет асинхронный latest refresh без user-facing блокировки (MUST)
 После bounded fail-closed completion miss система MUST продолжать или запускать background refresh latest snapshot.
@@ -1750,19 +1752,22 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `11`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `19`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов, incident summary или агрегированных observability-метрик.
 
-Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v8`, синхронизированный с текущим authoritative payload и его bounded field-set.
+Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v16`, синхронизированный с текущим authoritative payload и его bounded field-set.
+
+В этом change `transport_received_at_ms` сохраняет существующую legacy semantics и MUST NOT ретроактивно переосмысляться как ранняя adapter boundary.
+Новый earliest server-side ingress split MUST публиковаться только через additive поля `adapter_read_at_ms` и `adapter_to_dispatch_wait_ms`.
 
 VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, и такой local-only debug stream MAY включать bounded cancellation hints, transport-phase diagnostics, result-shape diagnostics и overlap/drift diagnostics, но такой stream:
 - MUST NOT менять contract version или shape server-generated payload;
 - MUST NOT подменять server-generated stages, routes, causes, waiter states или outcomes;
 - MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
 
-Контракт `v11` MUST включать:
+Контракт `v19` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
 
@@ -1787,25 +1792,6 @@ VS Code extension MAY отображать отдельно captured local clien
 - optional bounded `timeout_attribution`;
 - optional `exact_wait`.
 
-Если `timeout_attribution` присутствует, объект MUST оставаться bounded и MUST включать:
-- `source`;
-- `phase`;
-- `budget_ms`;
-- `elapsed_ms`;
-- `overshoot_ms`.
-
-Runtime drilldown внутри `prepare_details` MUST использовать только bounded numeric/state fields и MUST NOT требовать свободного текста для интерпретации queue wait, wake path или snapshot execution.
-Если timeout attribution присутствует без runtime reply details, payload MUST оставаться валидным и MUST NOT выдумывать отсутствующий runtime split.
-
-Если `exact_wait` присутствует, объект MUST оставаться bounded и MUST включать существующие readiness/outcome поля, а также MAY включать bounded waiter/task-state поля и optional bounded `artifact_poll`.
-
-Если `artifact_poll` присутствует, объект MUST оставаться bounded и MAY включать только:
-- `poll_count`;
-- `poll_elapsed_ms`;
-- `observed_file_version`;
-- `head_ready`;
-- `exact_ready`.
-
 Если `server_edge_details` присутствует, объект MUST оставаться bounded и MUST включать:
 - `transport_received_at_ms`;
 - `transport_received_at_ms_provenance`;
@@ -1816,6 +1802,8 @@ Runtime drilldown внутри `prepare_details` MUST использовать �
 - `transport_to_handler_wait_ms`;
 - `server_handler_exec_ms`;
 - optional `cancel_observed_after_handler_enter_ms`;
+- optional `adapter_read_at_ms`;
+- optional `adapter_to_dispatch_wait_ms`;
 - optional `jsonrpc_dispatch_received_at_ms`;
 - optional `dispatch_to_request_context_wait_ms`;
 - optional `method_entered_at_ms`;
@@ -1841,6 +1829,12 @@ Runtime drilldown внутри `prepare_details` MUST использовать �
 - `ready`;
 - `pending`.
 
+Если `adapter_read_at_ms` присутствует, это поле MUST обозначать earliest server-side adapter ingress boundary, записанную сразу после успешного read/decode transport message и до shared readiness/admission blocking.
+
+Если `adapter_read_at_ms` присутствует, payload MUST включать и `adapter_to_dispatch_wait_ms`, чтобы pre-dispatch split не требовал ручного вычитания timestamp'ов.
+
+Если `adapter_to_dispatch_wait_ms` присутствует, это поле MUST описывать только server-side wait между `adapter_read_at_ms` и earliest dispatch boundary и MUST NOT включать client-side ingress или post-dispatch wait.
+
 Если `method_entered_at_ms` присутствует, payload MUST включать и `transport_to_method_wait_ms`, и `method_prelude_exec_ms`, чтобы ingress attribution можно было прочитать без ручного вычитания timestamp'ов.
 
 Если `service_scope_entered_at_ms` присутствует, payload MUST включать и `transport_to_service_scope_wait_ms`, и `service_scope_to_method_wait_ms`, чтобы pre-method split оставался self-contained.
@@ -1857,6 +1851,8 @@ Runtime drilldown внутри `prepare_details` MUST использовать �
 
 Если `transport_received_at_ms_provenance=request_context_call_entry`, payload MUST NOT выдумывать `jsonrpc_dispatch_received_at_ms` и `dispatch_to_request_context_wait_ms`.
 
+Если request завершился до dispatch, payload MUST NOT выдумывать `jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `transport_to_method_wait_ms` или `method_prelude_exec_ms`.
+
 Если `service_future_first_poll_outcome=ready`, payload MUST NOT выдумывать `service_future_first_wake_scheduled_at_ms` и `first_poll_to_first_wake_wait_ms`.
 
 Каждый stage entry MUST включать:
@@ -1868,26 +1864,26 @@ Runtime drilldown внутри `prepare_details` MUST использовать �
 #### Scenario: VS Code клиент получает server-generated payload без reconstruction
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v11` с server-generated traces
+- **THEN** LSP возвращает response контракта `v19` с server-generated traces
 - **AND** клиент не строит authoritative server trace из raw logs, incident summary или p95/p99 агрегатов
 
-#### Scenario: Ingress-dominant trace различает delay до first poll и delay после первого `Pending`
-- **GIVEN** completion request пользователю ощущается как "долгий" ещё до основной completion-логики
-- **WHEN** клиент вызывает `bsl.getCompletionTimeline`
-- **THEN** authoritative payload содержит bounded данные, чтобы отделить `service_future_created -> first_poll` от `first_poll(Pending) -> first_wake`
-- **AND** existing `service_future_to_scope_wait_ms`, `transport_to_handler_wait_ms` и `server_handler_exec_ms` остаются доступны для backward-compatible чтения
-
-#### Scenario: Первый poll сразу `Ready`
-- **GIVEN** returned service future завершает первый poll без pending path
-- **WHEN** сервер сериализует completion timeline `v11`
-- **THEN** payload включает bounded first-poll timestamp и outcome `ready`
-- **AND** payload не выдумывает first-wake fields
+#### Scenario: Pre-dispatch backlog виден отдельно от dispatch/request-context split
+- **GIVEN** completion request был прочитан transport adapter, но dispatch в service задержался
+- **WHEN** клиент читает `server_edge_details`
+- **THEN** payload содержит `adapter_read_at_ms` и `adapter_to_dispatch_wait_ms`
+- **AND** post-dispatch поля (`jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `transport_to_method_wait_ms`) остаются отдельными bounded срезами
 
 #### Scenario: Versioned contract baseline синхронизирован с shipped payload
-- **GIVEN** authoritative completion timeline уже публикует contract `v11`
+- **GIVEN** authoritative completion timeline уже публикует contract `v19`
 - **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
-- **THEN** в `contracts/lsp-completion-timeline/v8/` существует новый contiguous baseline для текущего bounded payload
-- **AND** older `v7` остаётся compatibility baseline для предыдущего `response.version=10` surface
+- **THEN** `contracts/lsp-completion-timeline/v16` совпадает по bounded field-set с runtime payload
+- **AND** policy/verification scripts валидируют именно `v19/v16`, а не более старую версию
+
+#### Scenario: Legacy transport ingress field не переосмысляется задним числом
+- **GIVEN** authoritative payload содержит новый adapter boundary split
+- **WHEN** downstream consumer читает `server_edge_details`
+- **THEN** `transport_received_at_ms` сохраняет legacy semantics
+- **AND** earliest adapter ingress публикуется отдельно через `adapter_read_at_ms`
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -2288,49 +2284,53 @@ Object MUST оставаться bounded и MAY включать только:
 Derived verdicts для `Completion Timeline` panel, clipboard и связанных extension projections MUST строиться только из уже имеющихся bounded latency fields и MUST NOT маркировать trace как ingress-bottleneck, если соответствующая ingress задержка отсутствует.
 
 Derived verdict layer MUST:
-- использовать только существующие bounded waits (`transport_to_method_wait_ms`, `method_prelude_exec_ms` и, при наличии deterministic correlation в downstream consumer, `client_to_transport_wait_ms`);
+- использовать только существующие bounded waits (`adapter_to_dispatch_wait_ms`, `transport_to_method_wait_ms`, `method_prelude_exec_ms` и, при наличии deterministic correlation в downstream consumer, `client_to_transport_wait_ms`);
 - строить ingress verdict только при положительной доминирующей задержке;
-- различать как минимум `server_before_method_entry_dominant` и `handler_prelude_dominant`;
-- MAY различать `client_before_transport_dominant`, если downstream projection уже имеет deterministic probe correlation;
+- различать как минимум `adapter_before_dispatch_dominant`, `server_before_method_entry_dominant` и `handler_prelude_dominant`;
+- MAY различать `client_before_transport_dominant`, если downstream projection уже имеет deterministic probe correlation и authoritative earliest server ingress boundary;
 - не выводить generic ingress verdict только потому, что `0 >= 0` или потому что одна из задержек отсутствует.
 
+#### Scenario: Adapter wait доминирует над dispatch-to-method и handler prelude
+- **GIVEN** completion trace имеет положительный `adapter_to_dispatch_wait_ms`, который доминирует над `transport_to_method_wait_ms` и `method_prelude_exec_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `adapter_before_dispatch_dominant`
+- **AND** trace не получает `client_before_transport_dominant` только из-за позднего dispatch timestamp
+
 #### Scenario: Hot trace без положительного ingress wait не получает ingress verdict
-- **GIVEN** completion trace имеет `transport_to_method_wait_ms=0` и `method_prelude_exec_ms=0`
+- **GIVEN** completion trace имеет `adapter_to_dispatch_wait_ms=0`, `transport_to_method_wait_ms=0` и `method_prelude_exec_ms=0`
 - **WHEN** extension строит human-readable verdicts
 - **THEN** trace не получает ingress verdict
 - **AND** trace не маркируется как `handler_prelude_dominant`
 
-#### Scenario: Server-side wait до method entry доминирует над prelude
-- **GIVEN** completion trace имеет положительный `transport_to_method_wait_ms`, который доминирует над `method_prelude_exec_ms`
-- **WHEN** extension строит human-readable verdicts
-- **THEN** trace получает verdict `server_before_method_entry_dominant`
-- **AND** trace не получает `handler_prelude_dominant`
-
-#### Scenario: Handler prelude доминирует над wait до method entry
-- **GIVEN** completion trace имеет положительный `method_prelude_exec_ms`, который доминирует над `transport_to_method_wait_ms`
+#### Scenario: Handler prelude доминирует над server-side waits
+- **GIVEN** completion trace имеет положительный `method_prelude_exec_ms`, который доминирует над `adapter_to_dispatch_wait_ms` и `transport_to_method_wait_ms`
 - **WHEN** extension строит human-readable verdicts
 - **THEN** trace получает verdict `handler_prelude_dominant`
-- **AND** trace не получает server-side ingress verdict
+- **AND** trace не получает `adapter_before_dispatch_dominant`
 
 ### Requirement: Client-side ingress supplement остаётся fail-closed и deterministic (MUST)
-Если extension-projection добавляет human-readable client-side ingress verdict поверх authoritative completion trace, такой verdict MUST появляться только при deterministic probe correlation и положительном доминирующем `client_to_transport_wait_ms`.
+Если extension-projection добавляет human-readable client-side ingress verdict поверх authoritative completion trace, такой verdict MUST появляться только при deterministic probe correlation и положительном доминирующем client-side wait до самой ранней authoritative server ingress boundary.
 
 Проекция MUST:
 - не создавать client-side ingress verdict для uncorrelated или ambiguous requests;
+- использовать `adapter_read_at_ms` как server ingress boundary, если payload её содержит;
+- использовать более поздний `transport_received_at_ms` только как backward-compatible fallback для старых payload'ов, где ранняя adapter boundary отсутствует;
 - не использовать probe-only эвристики как substitute для authoritative server verdicts;
 - сохранять trace валидным и server-centric, если client correlation недоступна.
 
-#### Scenario: Correlated trace получает client-side ingress verdict
-- **GIVEN** request summary имеет deterministic correlation и положительный `client_to_transport_wait_ms`, доминирующий над server-side ingress waits
-- **WHEN** extension строит human-readable verdicts
-- **THEN** trace получает verdict `client_before_transport_dominant`
-- **AND** server-side verdicts остаются отдельными и не подменяются client-side supplement
-
-#### Scenario: Uncorrelated trace не получает client-side ingress verdict
-- **GIVEN** request summary не имеет deterministic probe correlation
+#### Scenario: Pre-dispatch server backlog не публикуется как client-side ingress
+- **GIVEN** request summary имеет deterministic correlation
+- **AND** authoritative payload содержит положительный `adapter_to_dispatch_wait_ms`
+- **AND** положительный wait до ранней adapter boundary не доказан
 - **WHEN** extension строит human-readable verdicts
 - **THEN** trace не получает verdict `client_before_transport_dominant`
-- **AND** projection остаётся fail-closed без guessed client-side attribution
+- **AND** projection остаётся fail-closed по client-side supplement
+
+#### Scenario: Legacy payload без adapter boundary сохраняет bounded fallback
+- **GIVEN** request summary имеет deterministic correlation, но connected server возвращает более старый payload без `adapter_read_at_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** projection MAY использовать bounded legacy fallback на `transport_received_at_ms`
+- **AND** verdict не публикуется, если deterministic client-side delay всё равно не доказан
 
 ### Requirement: Existing completion surfaces переносят `v6` root-cause attribution без invented data (MUST)
 VS Code extension MUST переносить authoritative `v6` root-cause attribution в уже существующие completion-oriented surface'ы, не требуя от оператора ручного чтения raw JSON для типовых verdict'ов.
@@ -2591,26 +2591,19 @@ Acceptance для архитектурных изменений completion MUST 
 - открывать реальный модуль из representative large configuration;
 - проверять отдельно `same-revision warm` member-access completion и `revision-churn` completion после нового `didChange` перед каждым measured sample;
 - включать `didChange-burst` профиль через реальный LSP transport path, а не только прямой вызов service layer;
-- отдельно учитывать `service_future_to_first_poll_wait_ms`, first-response availability и exact upgrade latency;
+- отдельно учитывать `adapter_to_dispatch_wait_ms`, `service_future_to_first_poll_wait_ms`, first-response availability и exact upgrade latency;
 - использовать warmup phase, которая не входит в measured set;
 - собирать не менее 10 measured completion samples в `didChange-burst` профиле;
-- fail-ить, если `p95(service_future_to_first_poll_wait_ms) > 250ms`;
-- fail-ить, если любой measured sample имеет `service_future_to_first_poll_wait_ms > 1000ms`, а overshoot атрибутирован pending document-sync futures, а не client-side ingress;
+- fail-ить, если `p95(adapter_to_dispatch_wait_ms)` у measured completion samples выше `intellisense_v2_interactive_wait_budget_ms`;
+- fail-ить, если любой measured sample имеет `adapter_to_dispatch_wait_ms > 4 * intellisense_v2_interactive_wait_budget_ms`;
 - fail-ить, если completion после новой revision снова деградирует в `fail_closed`, несмотря на наличие current-revision canonical fast path;
-- fail-ить, если успешный first response достигается только после seconds-scale pre-poll backlog, вызванного удержанием transport slots document-sync notifications.
+- fail-ить, если успешный first response достигается только после seconds-scale pre-dispatch backlog, вызванного concurrent general LSP traffic.
 
-#### Scenario: Real-module gate ловит регрессию first-response availability
-- **GIVEN** representative real module из большой конфигурации открыт в live gate
-- **AND** gate применяет новый `didChange` перед каждым measured completion в `revision-churn` профиле
-- **WHEN** выполняется member-access completion
-- **THEN** gate требует `ok_non_empty` first response из current-revision canonical artifact
-- **AND** gate фиксирует exact upgrade отдельно, не маскируя им first-response availability
-
-#### Scenario: Real-module gate ловит возврат document-sync slot retention
-- **GIVEN** gate отправляет burst changed-text notifications через live LSP transport path
-- **WHEN** completion timeline показывает seconds-scale `service_future_to_first_poll_wait_ms` до входа в handler
-- **THEN** gate завершает прогон ошибкой, даже если completion позже становится `ok_non_empty`
-- **AND** отчёт выделяет pre-poll transport backlog отдельно от handler и exact-upgrade latency
+#### Scenario: Real-module gate ловит возврат pre-dispatch completion starvation
+- **GIVEN** gate отправляет `didChange` churn и concurrent general LSP traffic через live transport path
+- **WHEN** measured completion samples снова получают seconds-scale wait до dispatch
+- **THEN** gate завершается ошибкой, даже если completion позже становится `ok_non_empty`
+- **AND** отчёт выделяет pre-dispatch backlog отдельно от post-dispatch first-poll и handler latency
 
 ### Requirement: `v11` service-future poll / wake split сохраняет truthful post-dispatch attribution semantics (MUST)
 Новый bounded split внутри `service_future_created -> service_scope_entered` MUST не ослаблять existing `v10` / `v9` / `v8` integrity semantics.
@@ -2682,4 +2675,442 @@ Document-sync path MUST NOT удерживать LSP transport request-admission
 - **THEN** `received_version` MAY уже быть равен `V+1`
 - **AND** `applied_version` MAY ещё кратко оставаться на `V`, пока runtime snapshot догоняет handoff
 - **AND** это не считается нарушением short-lived transport contract
+
+### Requirement: Current-revision readiness fast lane продвигает `applied_version` и `CompletionHeadArtifact` раньше slow enrich path (MUST)
+После того как `textDocument/didOpen` или `textDocument/didChange` уже завершил свой transport service future и зарегистрировал current-revision handoff для `file_version=V`, система MUST считать interactive-critical минимумом для этого же `file_id`:
+- продвижение `applied_version` до `V` через runtime writer path;
+- публикацию и queryability `CompletionHeadArtifact` той же revision `V`.
+
+Этот минимум MUST исполняться по readiness fast lane, который:
+- получает приоритет над same-file и older-revision `type_index_precompute`, `ExactSemanticArtifact`, deferred diagnostics и прочими slow background стадиями, не являющимися prerequisite для first current-revision response;
+- сохраняет latest-wins и supersession semantics для newest revision;
+- MUST NOT публиковать stale semantic truth другой revision под видом current-revision readiness.
+
+Post-handoff lag между registered handoff и observable advance `applied_version` MAY оставаться ненулевым, но completion MUST NOT тратить seconds-scale bounded wait только потому, что latest same-file apply стоит позади low-value background backlog.
+
+`CompletionHeadArtifact` для current revision MUST NOT ждать готовности `ExactSemanticArtifact`, `type_index_precompute` или deferred diagnostics той же revision, если для first current-revision response они не обязательны. Exact upgrade MAY продолжаться в фоне.
+
+#### Scenario: Newest same-file apply не ждёт старый background backlog
+- **GIVEN** `didChange` уже зарегистрировал current-revision handoff для `file_version=V+1`
+- **AND** в системе ещё выполняется older-revision `type_index_precompute` или diagnostics backlog
+- **WHEN** completion запрашивается для `V+1`
+- **THEN** runtime продвигает `applied_version` до `V+1` по readiness fast lane
+- **AND** latest apply не остаётся ждать терминального завершения older background работы
+
+#### Scenario: Current-revision head становится queryable до exact readiness
+- **GIVEN** runtime уже продвинул `applied_version` до current revision `V`
+- **AND** `ExactSemanticArtifact` для `V` ещё не ready
+- **WHEN** completion запрашивается для той же revision `V`
+- **THEN** `CompletionHeadArtifact` current revision остаётся publishable/queryable независимо от exact readiness
+- **AND** exact upgrade продолжается в фоне
+
+#### Scenario: Superseded readiness work не блокирует newest revision
+- **GIVEN** same-file revision `V` уже имеет in-flight apply/head work
+- **AND** приходит более новая revision `V+1`
+- **WHEN** readiness scheduler перевыставляет latest work
+- **THEN** superseded work для `V` не удерживает fast lane перед `V+1`
+- **AND** user-facing readiness для `V+1` получает приоритет latest-wins
+
+### Requirement: Completion first-response prepare разделяет lightweight current-revision path и exact stateful path (MUST)
+Для member-access completion система MUST иметь отдельный current-revision prepare contract для first response, не эквивалентный generic heavy `prepare_stateful_operation`.
+
+Этот контракт MUST уметь различать как минимум:
+- `head-ready` для current-revision first response;
+- `exact-ready` для full exact path;
+- bounded `not-ready` для fail-closed path.
+
+Lightweight current-revision prepare MUST:
+- быть feature-specific и request-scoped;
+- использовать только узкие immutable read-model/DTO данные, необходимые для first completion response;
+- MUST NOT публиковать или кэшировать long-lived shared `AnalysisV2` как feature boundary.
+
+#### Scenario: Current-revision head-ready path не требует heavy exact prepare
+- **GIVEN** current revision уже имеет queryable `CompletionHeadArtifact`
+- **AND** exact semantic path для той же revision еще не ready
+- **WHEN** IDE запрашивает member-access completion
+- **THEN** completion first response использует lightweight current-revision prepare
+- **AND** не требует mandatory full exact stateful prepare как prereq для `head_hit`
+
+#### Scenario: Lightweight prepare fail-closed при отсутствии current-revision truth
+- **GIVEN** neither current-revision `CompletionHeadArtifact`, nor exact artifact не ready в пределах bounded policy
+- **WHEN** IDE запрашивает member-access completion
+- **THEN** completion завершает запрос bounded fail-closed
+- **AND** не публикует stale или degraded semantic substitute
+
+### Requirement: Superseded active completion освобождает interactive ownership до завершения stale response-build (MUST)
+Если same-file completion request уже успел first-poll-нуться и войти в handler, но затем потерял latest-wins из-за более нового completion request или explicit cancel, система MUST перестать считать его владельцем active interactive completion path не позже ближайшего cooperative cancellation checkpoint после того, как supersession/cancel стал наблюдаемым.
+
+Для этого completion pipeline MUST иметь interruption points, достаточные для prompt release stale active request внутри длинного `response_build` tail. Как минимум bounded interruptible contract MUST покрывать `collect`, `rank`, `format` и publish boundary либо эквивалентную implementation boundary с тем же observable результатом.
+
+Этот contract MUST реализовываться на existing completion path. Новый admission workaround, отдельная transport/admission lane, увеличение concurrency само по себе или общий executor redesign MUST NOT считаться выполнением этого требования без prompt release stale active completion внутри существующего completion pipeline.
+
+Superseded active request MUST NOT удерживать newer same-file completion в seconds-scale `service_future_created -> first poll` wait только потому, что stale `response_build` ещё не полностью завершился.
+
+#### Scenario: Новый same-file completion first-poll-ится, пока старый request boundedly сворачивается
+- **GIVEN** completion request `A` для файла уже вошёл в handler и начал тяжёлый `response_build`
+- **AND** позже приходит более новый completion request `B` для того же файла
+- **WHEN** request `A` теряет latest-wins
+- **THEN** request `A` boundedly прекращает stale critical path на ближайшем cooperative checkpoint
+- **AND** request `B` достигает first poll в пределах interactive policy, а не после seconds-scale stale tail request `A`
+
+#### Scenario: Superseded response-build не публикует поздний user-facing completion
+- **GIVEN** active completion request уже находится внутри `collect` / `rank` / `format`
+- **WHEN** request получает explicit cancel или становится superseded более новым same-file request
+- **THEN** stale request завершает ответ bounded cancelled/superseded outcome
+- **AND** пользовательский completion ответ для этого stale request не публикуется поздно после потери актуальности
+
+### Requirement: `v12` first-poll contention attribution остаётся bounded и fail-closed (MUST)
+Новый bounded contender cut MUST давать только server-visible facts и MUST NOT подменять их guessed blocker claims.
+
+Сервер MUST:
+- использовать только low-cardinality contender vocabulary;
+- не сериализовать request id, raw URI или free-text debug explanation внутри `first_poll_contention_attribution`;
+- использовать `mixed`, если одновременно видимы несколько contender классов без честного single-class verdict;
+- использовать `none_visible` или `unavailable`, если server-side snapshot не доказывает видимый contender class;
+- не выдумывать `same_uri` / `other_uri`, если `uri_scope` нельзя доказать bounded way.
+
+#### Scenario: Same-file document-sync видим до первого poll
+- **GIVEN** completion trace долго ждёт первый poll
+- **AND** server-side snapshot в этом окне видит contender class document-sync на том же `uri`
+- **WHEN** сервер сериализует completion timeline `v12`
+- **THEN** `first_poll_contention_attribution.contender_class=document_sync`
+- **AND** `first_poll_contention_attribution.uri_scope=same_uri`
+- **AND** payload остаётся bounded и не выдумывает точный blocking request id
+
+#### Scenario: Одновременно видимы несколько contender классов
+- **GIVEN** server-side snapshot в окне `service_future_created -> first_poll` видит больше одного contender class
+- **WHEN** сервер сериализует completion timeline `v12`
+- **THEN** payload использует `first_poll_contention_attribution.contender_class=mixed`
+- **AND** payload не выбирает guessed "главного виновника"
+
+#### Scenario: Contender snapshot не даёт доказанного класса
+- **GIVEN** completion trace имеет положительный `service_future_to_first_poll_wait_ms`
+- **AND** server-side snapshot не видит доказанного contender class или сам unavailable
+- **WHEN** сервер сериализует completion timeline `v12`
+- **THEN** payload использует bounded `none_visible` или `unavailable` semantics
+- **AND** payload не подменяет это guessed `document_sync` / `completion` attribution
+
+### Requirement: Superseded completion в `turn_wait` не становится orphaned до active registration (MUST)
+Если same-file completion request уже вышел из per-file queue и вошёл в dispatcher `turn_wait`, но ещё не был зарегистрирован как active interactive completion, система MUST продолжать считать его частью same-file latest-wins/cancel lifecycle.
+
+Для такого request система MUST:
+- сохранять возможность bounded supersession/cancel до active registration;
+- не требовать, чтобы stale request сначала стал active, чтобы затем его можно было остановить;
+- не допускать seconds-scale inflight retention stale `turn_wait` request после того, как newer same-file completion или explicit cancel уже сделали его неактуальным;
+- не превращать stranded `turn_wait` request в причину seconds-scale `service_future_created -> first poll` backlog для более нового same-file completion.
+
+#### Scenario: Более новый same-file completion вытесняет older request, уже попавший в `turn_wait`
+- **GIVEN** request `A` для одного `file_id` уже вышел из per-file queue и ожидает dispatcher turn
+- **AND** request `A` ещё не зарегистрирован как active completion owner
+- **AND** приходит более новый same-file completion request `B`
+- **WHEN** сервер применяет latest-wins semantics
+- **THEN** request `A` boundedly получает superseded/cancelled outcome без обязательного перехода в active state
+- **AND** request `B` не накапливает seconds-scale pre-poll backlog из-за orphaned `turn_wait` request `A`
+
+#### Scenario: Explicit cancel резолвит `turn_wait` request до active registration
+- **GIVEN** completion request уже ожидает dispatcher turn
+- **AND** клиент отправил `$/cancelRequest` для этого completion
+- **WHEN** adapter и orchestrator обрабатывают cancel
+- **THEN** stale request boundedly сворачивается ещё в `turn_wait` lifecycle
+- **AND** request не публикует поздний user-facing completion ответ
+
+### Requirement: Completion timeline truthfully отражает `turn_wait` lifecycle текущего request и stale contenders (MUST)
+Если authoritative completion timeline публикует absolute `turn_wait` lifecycle текущего request, payload MUST позволять отделить:
+- фактическое ожидание current request в `turn_wait`;
+- stale contenders, которые всё ещё видимы в `phase=turn_wait`;
+- immediate resolve current request без invented multi-second wait.
+
+Сервер MUST NOT схлопывать multi-second current-request `turn_wait` stage в нулевую absolute lifecycle, если такой wait реально наблюдался.
+Если current request резолвится immediately, но stale contender остаётся в `phase=turn_wait`, payload MUST показывать это как отдельный contender-state, а не как длительный current-request wait.
+
+#### Scenario: Текущий request проходит `turn_wait` сразу, а stale contender остаётся в `phase=turn_wait`
+- **GIVEN** current completion request получает dispatcher-ready outcome практически сразу
+- **AND** authoritative contenders всё ещё содержат older same-file completion в `phase=turn_wait`
+- **WHEN** оператор читает completion timeline
+- **THEN** current-request `turn_wait` absolute lifecycle остаётся immediate
+- **AND** stale `turn_wait` contender показывается отдельно через bounded contender fields
+- **AND** payload не приписывает multi-second current-request wait только по возрасту stale contender
+
+#### Scenario: Multi-second current `turn_wait` не схлопывается в нулевую absolute lifecycle
+- **GIVEN** текущий completion request реально провёл multi-second время в `turn_wait`
+- **WHEN** сервер сериализует authoritative completion timeline
+- **THEN** absolute `turn_wait` lifecycle остаётся согласованным со stage duration в пределах bounded measurement tolerance
+- **AND** payload не выдумывает immediate resolve/wake, если wait реально длился секунды
+
+### Requirement: Same-file overlap gate ловит stranded pre-active `turn_wait` request (MUST)
+Acceptance для completion overlap MUST включать сценарий, где older same-file completion теряет актуальность, пока он уже вышел из queue, но ещё не стал active owner.
+
+Этот gate MUST:
+- воспроизводить same-file overlap через live LSP path;
+- fail-ить, если stale contender остаётся видимым в `phase=turn_wait` за пределами bounded supersession window;
+- fail-ить, если новый same-file completion копит seconds-scale `service_future_created -> first poll` backlog из-за stranded pre-active predecessor;
+- сохранять checked-in evidence, достаточную для различения pre-active `turn_wait` blind spot от stale active `response_build` retention.
+
+#### Scenario: Representative overlap gate ловит stranded pre-active predecessor
+- **GIVEN** live overlap profile на representative real module
+- **AND** request `A` уже успел войти в `turn_wait`, но ещё не стал active owner
+- **AND** request `B` для того же файла приходит после `A`
+- **WHEN** gate измеряет same-file completion overlap
+- **THEN** gate требует bounded terminal outcome для `A`
+- **AND** gate требует, чтобы `B` достигал first poll без seconds-scale pre-poll backlog из-за stale `turn_wait` predecessor
+
+### Requirement: Event-driven completion освобождает transport slot до длительного passive `turn_wait` (MUST)
+На default event-driven completion path LSP request MUST NOT удерживать `tower-lsp` transport admission slot только потому, что request пассивно ждёт dispatcher turn или older same-file turn owner.
+
+Перед таким wait система MUST:
+- захватить request correlation и cancellation context, необходимые для normal completion response path;
+- зафиксировать completion-owned handoff boundary, после которой passive wait больше не считается transport-slot retention;
+- сохранить same-file latest-wins/cancel semantics для request, который ещё не начал heavy completion work.
+
+#### Scenario: Current same-file completion ждёт older owner без seconds-scale pre-first-poll backlog
+- **GIVEN** completion request `B` для файла приходит, пока older same-file request `A` ещё удерживает dispatcher turn
+- **AND** `B` должен подождать release текущего owner, прежде чем начать heavy completion stages
+- **WHEN** сервер принимает `B` на default event-driven path
+- **THEN** transport admission slot освобождается до multi-second passive `turn_wait`
+- **AND** authoritative trace не показывает seconds-scale `service_future_created -> first_poll` backlog только из-за ожидания turn для `B`
+- **AND** `B` позже продолжает completion lifecycle по normal response path
+
+#### Scenario: Explicit cancel останавливает completion после handoff, но до heavy work
+- **GIVEN** completion request уже прошёл handoff boundary и ещё только пассивно ждёт dispatcher turn
+- **AND** клиент отправляет `$/cancelRequest` для этого completion
+- **WHEN** adapter и completion orchestrator обрабатывают cancel
+- **THEN** request boundedly сворачивается без late publish user-facing completion ответа
+- **AND** transport slot не удерживается до терминального завершения этого passive wait
+
+### Requirement: Post-handoff completion сохраняет single-owner и exactly-once terminal semantics (MUST)
+После completion handoff система MUST назначать ровно одного lifecycle owner, который владеет:
+- `request_id` и correlation context для terminal response path;
+- cancellation/shutdown cleanup;
+- правом отправить не более одного terminal response или завершить request fail-closed, если transport уже недоступен.
+
+Dispatcher MUST оставаться единственным authority для `latest-wins` и publishability. Post-handoff completion task MUST NOT самостоятельно становиться publishable в обход dispatcher/epoch checks.
+
+#### Scenario: Cancel race не приводит к двойному terminal response
+- **GIVEN** completion request уже передан post-handoff owner и ещё не начал heavy work
+- **AND** почти одновременно приходят `$/cancelRequest` и wakeup/resolution для ожидания turn
+- **WHEN** lifecycle owner и dispatcher обрабатывают эту гонку
+- **THEN** для данного `request_id` наблюдается не более одного terminal outcome
+- **AND** request не публикует поздний completion ответ после terminal cleanup
+
+#### Scenario: Supersede race сохраняет latest-wins и exactly-once cleanup
+- **GIVEN** older same-file completion уже передан post-handoff owner
+- **AND** newer same-file completion supersedes older request до начала heavy work
+- **WHEN** dispatcher и lifecycle owner обрабатывают supersede
+- **THEN** older request получает bounded terminal cleanup ровно один раз
+- **AND** newer request остаётся единственным publishable same-file completion
+
+#### Scenario: Shutdown race завершает handoff owner fail-closed без late publish
+- **GIVEN** completion request уже передан post-handoff owner
+- **AND** server shutdown начинается до terminal completion response
+- **WHEN** lifecycle owner обрабатывает shutdown
+- **THEN** owner boundedly завершает cleanup без двойного terminal response
+- **AND** после shutdown не появляется поздний publish user-facing completion ответа
+
+### Requirement: Completion timeline отделяет off-transport wait от ingress backlog (MUST)
+Если authoritative completion timeline публикует latency profile request, payload MUST позволять отделить:
+- ingress backlog до handoff / admission;
+- completion-owned wait после handoff;
+- stale contenders, которые всё ещё видимы в `phase=turn_wait`.
+
+Сервер MUST NOT объяснять multi-second off-transport wait через `service_future_created -> first_poll` или через handler-resident passive `turn_wait`, если transport slot уже освобождён.
+
+#### Scenario: First poll bounded, а multi-second wait идёт после handoff
+- **GIVEN** current completion request быстро проходит transport admission path
+- **AND** затем request проводит multi-second время в passive wait за same-file turn owner
+- **WHEN** оператор читает authoritative completion timeline
+- **THEN** payload сохраняет bounded ingress attribution до handoff
+- **AND** multi-second completion-owned wait показывается отдельно от `service_future_created -> first_poll`
+- **AND** payload не маскирует off-transport wait под transport backlog
+
+#### Scenario: Connected server ещё не поддерживает handoff-aware contract
+- **GIVEN** connected server возвращает timeline старой версии без новых handoff-aware полей
+- **WHEN** extension или operator читает payload
+- **THEN** клиент не выдумывает off-transport wait attribution
+- **AND** trustworthy semantics остаются ограничены реально присутствующими полями
+
+### Requirement: Same-file overlap gate ловит completion `turn_wait` transport-slot retention (MUST)
+Acceptance для same-file overlap MUST fail-ить не только на stranded contender или pre-first-poll backlog, но и на сценарий, где current completion request всё ещё проводит seconds-scale passive `turn_wait` внутри transport/handler path.
+
+Этот gate MUST:
+- воспроизводить same-file overlap через live LSP default path;
+- fail-ить, если current request удерживает transport/handler path на multi-second passive `turn_wait`;
+- fail-ить, если same-file overlap снова превращает completion lifecycle в ingress bottleneck;
+- сохранять checked-in evidence, достаточную для различения ingress backlog, stale contender и off-transport wait.
+
+#### Scenario: Representative overlap gate ловит inline `turn_wait`, удерживающий transport path
+- **GIVEN** live same-file overlap profile на representative real module
+- **AND** request `B` приходит, пока older same-file request `A` всё ещё удерживает turn
+- **WHEN** gate измеряет latency profile `B`
+- **THEN** gate требует bounded transport admission path для `B`
+- **AND** gate завершает прогон ошибкой, если multi-second passive `turn_wait` всё ещё наблюдается внутри transport/handler path
+- **AND** checked-in evidence позволяет отличить этот regression от stale pre-active contender
+
+### Requirement: Completion timeline использует request-bound probe correlation key (MUST)
+Если default VS Code completion path отправляет namespaced vendor correlation key `bslProbeId` для completion probe, authoritative LSP completion timeline MUST переносить этот opaque key в root-level field `client_probe_id` соответствующего per-request trace.
+
+Derived extension surfaces, которые коррелируют local completion probes с server traces, MUST использовать этот key как primary correlation source. Timestamp/window эвристика MAY использоваться только как backward-compatible fallback для старых payload'ов и MUST оставаться fail-closed при отсутствии deterministic correlation.
+
+Этот requirement дополняет существующий server-driven timeline contract и existing fail-closed правила для client-side ingress supplement; он MUST NOT заменяться guessed attribution по одним только local probe timings.
+
+Реализация этого requirement MUST поднять authoritative completion timeline response version `17 -> 18` и contiguous contract baseline `contracts/lsp-completion-timeline/v14 -> v15`.
+
+`client_probe_id` MUST оставаться только per-request correlation marker и MUST NOT становиться частью агрегированных observability counters, histograms или human-readable guessed summaries без authoritative trace.
+
+#### Scenario: Overlap completion requests коррелируются без ambiguity
+- **GIVEN** два completion probe для одного `uri` и одинакового `trigger_mode` перекрываются по времени
+- **AND** оба request'а несут разные request-bound correlation keys
+- **WHEN** сервер публикует authoritative completion timeline и extension строит incident bundle
+- **THEN** каждый trace коррелируется с ровно одним probe по echoed correlation key
+- **AND** incident bundle не получает `multiple_probe_candidates` только из-за overlap и близких timestamps
+
+#### Scenario: Старый payload без echoed key деградирует fail-closed
+- **GIVEN** extension получает timeline payload старой версии без request-bound correlation key
+- **WHEN** derived surface пытается дополнить trace client-side ingress verdict
+- **THEN** fallback MAY использовать legacy timestamp/window heuristic
+- **AND** verdict не публикуется, если deterministic correlation всё равно не доказана
+
+### Requirement: Completion Timeline panel остаётся quiet во время active completion (MUST)
+VS Code `Completion Timeline` panel MUST NOT создавать дополнительный front-edge noise на default completion path.
+
+Auto-refresh/polling MUST приостанавливаться или переходить в bounded backoff, пока есть active completion probes, и в течение короткого quiet window после их завершения. Incident export и panel rendering MUST по умолчанию использовать последний уже захваченный authoritative snapshot, а не форсировать fresh `bsl.getCompletionTimeline` в момент churn.
+
+Explicit export command MAY делать fresh fetch только когда cached capture отсутствует; он MUST NOT обходить quiet policy в случае, когда authoritative snapshot уже захвачен webview path.
+
+Manual refresh MAY оставаться доступным, но он MUST быть явным действием оператора, а не скрытым side effect active observability view.
+
+#### Scenario: Видимая panel не мешает активному completion
+- **GIVEN** `Completion Timeline` panel открыта и видима
+- **AND** пользователь вызывает completion во время typing/load
+- **WHEN** extension отслеживает active completion probes
+- **THEN** panel не инициирует обычный polling `bsl.getCompletionTimeline`, пока active probe ещё не завершён
+- **AND** incident/export path использует последний already-captured snapshot вместо forced fresh fetch
+
+#### Scenario: Manual refresh остаётся explicit после quiet window
+- **GIVEN** active completion probes уже завершились и quiet window истёк
+- **WHEN** оператор вручную инициирует refresh panel
+- **THEN** extension делает новый timeline fetch явным образом
+- **AND** этот refresh не маскируется под background auto-polling
+
+### Requirement: Same-version member-access completion не теряет didChange-produced exact-task visibility (MUST)
+Если `didChange` уже запланировал exact type-index producer task для текущей версии файла, member-access completion на той же версии MUST наблюдать либо matching producer task, либо уже опубликованное `serve_only_ready` состояние до terminal decision request path.
+
+Race-окно, в котором producer task завершился и исчез из registry раньше, чем readiness стала наблюдаемой, MUST NOT приводить к spurious `NoMatchingTask` для same-version `TriggerCharacter='.'` или `Invoked` request'ов.
+
+Completed matching same-version task entry MUST оставаться observable/joinable до одного из bounded terminal cleanup events:
+- `serve_only_ready` для той же версии стал наблюдаемым;
+- task superseded новой версией;
+- файл закрыт через `didClose`;
+- сервер выполняет shutdown cleanup.
+
+При этом request path MUST NOT сам создавать exact producer task, MUST NOT переходить на stale semantic fallback и MUST сохранять bounded fail-closed behaviour для genuine cold miss, wrong-version и deadline cases.
+
+#### Scenario: Same-version `TriggerCharacter='.'` ждёт producer вместо spurious `NoMatchingTask`
+- **GIVEN** `didChange` уже запланировал exact type-index producer task для версии `V`
+- **AND** completion по `TriggerCharacter='.'` приходит для той же версии `V` до публикации observable `serve_only_ready`
+- **WHEN** request path ожидает current-revision exact readiness
+- **THEN** waiter видит matching producer task или готовый exact artifact для версии `V`
+- **AND** request не завершается `NoMatchingTask` только из-за короткого race между producer completion и readiness publication
+
+#### Scenario: Genuine cold miss остаётся bounded fail-closed
+- **GIVEN** matching producer task для текущей версии не существует либо уже superseded другой версией
+- **WHEN** member-access completion ждёт exact readiness в пределах bounded wait budget
+- **THEN** request path остаётся fail-closed и bounded
+- **AND** система не создаёт exact producer task на request path и не возвращает stale semantic substitute
+
+#### Scenario: Completed matching task очищается только по bounded cleanup rules
+- **GIVEN** exact producer task для текущей версии уже завершил compute, но matching same-version waiter ещё может обратиться к registry
+- **WHEN** `serve_only_ready` ещё не наблюдаем и не произошло supersession, `didClose` или shutdown
+- **THEN** completed task entry остаётся observable для same-version waiter
+- **AND** cleanup не происходит преждевременно только из-за факта single-run completion
+
+### Requirement: Auxiliary `documentSymbol` traffic не starving interactive semantic admission (MUST)
+Система MUST рассматривать `textDocument/documentSymbol` как auxiliary IDE companion request и MUST изолировать его admission/execution path от interactive semantic запросов (`completion`, `hover`, `signatureHelp`, `definition`).
+
+Изоляция MUST обеспечивать:
+- outstanding `documentSymbol` refresh не задерживает первый `poll()` interactive запроса из-за strict current-version wait;
+- auxiliary path не потребляет interactive reserve при наличии interactive waiters;
+- same-file newer `documentSymbol` refresh MAY supersede older outstanding refresh, если старый ещё не принёс user-visible value;
+- `documentSymbol` outcome (`current_ready`, `latest_ready`, `unavailable`, `superseded`) не влияет на strict current-revision contract interactive semantic ответов.
+
+#### Scenario: Outline refresh не блокирует completion ingress
+- **GIVEN** для того же файла одновременно идут `didChange`/`didSave` churn и refresh Outline через `textDocument/documentSymbol`
+- **AND** пользователь запрашивает member-access completion
+- **WHEN** сервер обрабатывает mixed load
+- **THEN** completion получает first `poll()` без ожидания завершения outstanding `documentSymbol` current-version wait
+- **AND** `documentSymbol` обслуживается как auxiliary outcome, а не как gate для interactive completion
+
+#### Scenario: Более новый outline refresh supersede-ит старый
+- **GIVEN** для одного `file_id` в очереди уже есть outstanding `documentSymbol` refresh
+- **AND** приходит более новый `documentSymbol` refresh после следующего `didChange`
+- **WHEN** сервер выбирает, какой refresh исполнять
+- **THEN** older refresh может быть superseded в пользу newest refresh
+- **AND** supersession фиксируется как явный auxiliary outcome
+
+### Requirement: Mixed-load gate детерминированно ловит outline-induced starvation (MUST)
+Система MUST иметь representative live gate, который прогоняет same-file real-module mixed load из:
+- `didChange`/`didSave`;
+- `textDocument/documentSymbol`;
+- `textDocument/completion`.
+
+Gate MUST собирать authoritative server-side evidence минимум по:
+- completion `service_future_to_first_poll_wait_ms`;
+- completion `transport_to_handler_wait_ms`;
+- completion route/outcome;
+- `documentSymbol` outcome class (`current_ready`, `latest_ready`, `unavailable`, `superseded`).
+
+Gate MUST fail:
+- если `p95(service_future_to_first_poll_wait_ms)` у measured completion samples выше `intellisense_v2_interactive_wait_budget_ms`;
+- если любой measured completion sample имеет `service_future_to_first_poll_wait_ms > 4 * intellisense_v2_interactive_wait_budget_ms`;
+- если measured completion sample становится ingress-dominant из-за concurrent auxiliary `documentSymbol` load.
+
+#### Scenario: Representative gate падает при starvation от outline traffic
+- **GIVEN** real-module mixed-load profile с active `documentSymbol` refresh и completion на том же файле
+- **WHEN** auxiliary outline path снова начинает удерживать interactive completion до входа в handler
+- **THEN** representative gate завершается ошибкой
+- **AND** evidence указывает на concurrent outline outcome/load, а не маскирует regression как generic completion slowdown
+
+### Requirement: Interactive completion admission изолирован от general LSP backlog до dispatch (MUST)
+Система MUST изолировать `textDocument/completion` от unrelated general LSP traffic в окне между чтением request transport adapter'ом и dispatch в service pipeline.
+
+Изоляция MUST обеспечивать:
+- shared readiness/admission state MUST принадлежать одному scheduler owner; reader/producers MUST NOT вызывать `poll_ready()/call()` напрямую;
+- completion request классифицируется и попадает в interactive admission queue до shared `poll_ready()` blocking для general traffic;
+- general requests MUST NOT удерживать freshly-read completion request вне interactive admission queue только из-за общего readiness wait;
+- completion-supporting document-sync notifications (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, `textDocument/didClose`), прочитанные transport adapter'ом до completion на том же transport path, MUST NOT теряться или застревать за unrelated general backlog так, чтобы последующий completion видел stale current revision;
+- control traffic (`$/cancelRequest`, shutdown-related flow) MAY preempt queued completion admission;
+- saturated completion spillover MUST оставаться bounded и fail-closed: older queued completion MAY завершаться pre-dispatch outcome `queue_rejected`, но single reader MUST NOT останавливаться так, чтобы поздний control traffic не был даже классифицирован;
+- queued completion cancellation MUST сохранять existing exactly-once terminal semantics, MUST возвращать ровно один terminal response и MUST NOT допускать late publish после признанного cancel.
+
+#### Scenario: General request burst не блокирует completion до dispatch
+- **GIVEN** transport adapter уже читает burst general requests, включая `textDocument/documentSymbol`
+- **AND** на том же transport path приходит новый completion request
+- **WHEN** сервер выбирает, что dispatch-ить дальше
+- **THEN** completion попадает в interactive admission queue без ожидания завершения general readiness path
+- **AND** authoritative trace не показывает seconds-scale `adapter_to_dispatch_wait_ms` только из-за concurrent general backlog
+
+#### Scenario: `didChange` handoff не теряется за unrelated general backlog на default path
+- **GIVEN** transport adapter уже держит unrelated `textDocument/documentSymbol` backlog
+- **AND** затем на том же transport path приходит `textDocument/didChange`, публикующий новую current revision
+- **AND** после этого приходит completion request для того же документа
+- **WHEN** сервер формирует first response для completion
+- **THEN** `didChange` current-revision handoff достигает interactive admission path раньше completion result
+- **AND** completion first response видит latest current revision, а не stale текст до `didChange`
+
+#### Scenario: Queued completion отменяется до dispatch без late publish
+- **GIVEN** completion request уже стоит в pre-dispatch queue
+- **AND** до его dispatch приходит matching `$/cancelRequest`
+- **WHEN** scheduler обрабатывает control lane
+- **THEN** queued completion помечается cancelled до dispatch
+- **AND** сервер возвращает ровно один terminal response с cancellation semantics `RequestCancelled`
+- **AND** authoritative trace публикует outcome `cancelled` без выдуманных post-dispatch timestamps
+- **AND** система сохраняет exactly-once terminal semantics без поздней публикации completion result
+
+#### Scenario: Saturated completion spillover не прячет late cancel за reader stall
+- **GIVEN** completion lane уже заполнен queued completion work
+- **AND** bounded completion spillover тоже исчерпан
+- **AND** затем на том же transport path приходит ещё один completion request, а сразу после него matching `$/cancelRequest`
+- **WHEN** transport adapter применяет overflow policy до dispatch
+- **THEN** older queued completion fail-closed завершается pre-dispatch outcome `queue_rejected` вместо блокировки single reader
+- **AND** late `$/cancelRequest` всё ещё классифицируется и отменяет самый новый queued completion до dispatch
+- **AND** transport path сохраняет exactly-once terminal semantics без late publish
 

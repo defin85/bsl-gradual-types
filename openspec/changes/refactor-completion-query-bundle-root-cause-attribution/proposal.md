@@ -14,10 +14,11 @@ Incident bundle `2026-04-02T15:44:53Z` показывает, что delivered pr
 ## Что меняется
 
 - authoritative completion timeline поднимается `19 -> 20`, а contiguous contract baseline поднимается `contracts/lsp-completion-timeline/v16 -> v17`;
-- query-body path перестаёт быть opaque aggregate: timeline получает bounded `query_bundle` stage breakdown как минимум для `pool_wait`, `deps_and_file_snapshot`, `ir_query`, optional `ir_retry` и `other`;
+- query-body path перестаёт быть opaque aggregate: timeline, scale-aware metrics/report consumers и incident surfaces мигрируют на canonical grouped `query_bundle` taxonomy (`pool_wait`, `deps_and_file_snapshot`, `owner_hint`, `ir_query`, optional `ir_retry`, `other`);
 - если request вошёл в `query_bundle`, trace MUST публиковать соответствующий `query_bundle*` stage и на `cancelled/failed` path, а не терять spent time в `unattributed_overhead`;
+- request-level query-body attribution выходит из blocking closure через отдельный structured carrier (`observed blocking result + query bundle trace report`), чтобы cancelled path не терял truthful substage accounting;
 - blocking runtime path для interactive completion получает request-local observed split между pool queue wait и blocking exec, чтобы incident analysis мог отделить saturation от actual compute;
-- derived extension verdicts и incident summary перестают обвинять `adapter_before_dispatch_dominant`, когда authoritative `dominant_stage`/`stages` доказывают query-body dominance;
+- derived extension verdicts и incident summary перестают обвинять `adapter_before_dispatch_dominant`, когда authoritative `dominant_stage`/`stages` доказывают query-body dominance, и переходят на bounded query-body verdict vocabulary;
 - webview/clipboard/incident projections для `v20` используют единый truthful verdict source, а на `v19` деградируют явно без invented `query_bundle` breakdown.
 
 ## Impact

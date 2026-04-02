@@ -39,35 +39,81 @@
 
 ## Decisions
 
-### 1. Truthful query-body attribution идёт через bounded stage taxonomy, а не через свободный текст
+### 1. Полная миграция consumers идёт на canonical grouped query-body taxonomy
 
-Выбранное решение: `v20` остаётся stage-centric contract. Вместо opaque aggregate `query_bundle` timeline MAY раскладывать query-body path на bounded stage names:
+Выбранное решение: `v20` вводит новый canonical grouped vocabulary для query-body stages. Он становится source of truth одновременно для:
+
+- per-request timeline `stages`;
+- `dominant_stage` в timeline;
+- scale-aware metrics/report consumers;
+- human-readable verdict projection;
+- incident summary / clipboard export.
+
+Canonical grouped vocabulary:
 
 - `query_bundle_pool_wait`
 - `query_bundle_deps_and_file_snapshot`
+- `query_bundle_owner_hint`
 - `query_bundle_ir_query`
 - `query_bundle_ir_retry`
 - `query_bundle_other`
+
+Низкоуровневые observability metrics внутри owner-hint path сохраняются, но перестают быть canonical public stage vocabulary. Они MUST нормализоваться к grouped taxonomy при:
+
+- построении `dominant_stage`;
+- scale-aware perf reports;
+- incident handoff summary;
+- derived verdicts.
+
+Legacy aggregate `query_bundle` и `completion_stage_query_bundle_ms` допускаются только как transitional mirror внутри runtime/metrics слоя на период миграции, но:
+
+- MUST NOT быть canonical stage name для `v20`;
+- MUST NOT определять `dominant_stage`;
+- MUST NOT использоваться acceptance gates или versioned contract baseline `v17`.
 
 Почему так:
 
 - `stages` уже являются authoritative request-level surface;
 - extension, clipboard и incident summary уже умеют работать с bounded stage taxonomy;
-- это позволяет сохранить additive evolution без отдельного raw-only debug object.
+- grouped vocabulary сохраняет bounded cardinality и не тащит в public surface десятки `query_bundle_owner_hint_*` leaf labels;
+- полная миграция consumers убирает двойную canonical truth между aggregate `query_bundle` и new leaf stages.
 
 Следствие:
 
-- `dominant_stage` в `v20` может указывать на конкретный `query_bundle*` stage;
-- aggregate `query_bundle` не обязан сохраняться, если trace публикует breakdown stage set.
+- `dominant_stage` в `v20` указывает только на grouped `query_bundle*` stage;
+- existing metrics/report consumers перепривязываются на grouped taxonomy;
+- low-level owner-hint metrics остаются internal drilldown, а не public stage contract.
 
-### 2. Pool wait и blocking exec фиксируются в request-local trace, а не только в глобальных метриках
+### 2. Request-level substage attribution выходит из blocking closure через structured carrier
+
+Сейчас query-body computation живёт внутри blocking closure, а request-level `timeline_capture` находится снаружи. Поэтому новый design фиксирует два отдельных carrier objects:
+
+- `ObservedBlockingCall<R>`:
+  - `queue_wait`
+  - `exec_elapsed`
+  - `join_result: Result<R, JoinError>`
+- `QueryBundleTraceReport`:
+  - bounded `SmallVec<QueryBundleStageSample>` для grouped query-body stages;
+  - `covered_exec_ms`;
+  - `terminal_status: completed|cancelled|failed`;
+  - optional bounded terminal cause (`cancelled_after_retry`, `join_error`, `checkpoint_cancelled`, `handler_error`, `completed`).
+
+Blocking closure возвращает не только business payload, но и `QueryBundleTraceReport`. Наружный async слой:
+
+1. Превращает `queue_wait` в `query_bundle_pool_wait`.
+2. Добавляет grouped stages из `QueryBundleTraceReport`.
+3. Если `covered_exec_ms < exec_elapsed`, синтезирует `query_bundle_other` на remainder.
+4. Если closure упала с `JoinError`, синтезирует `query_bundle_other | failed` на весь `exec_elapsed`.
+
+Это даёт total accounting даже там, где closure не смогла вернуть normal payload.
 
 Сейчас [policy.rs](/home/egor/code/bsl-gradual-types/bsl-runtime/src/application/intellisense_v2/policy.rs) уже считает `queue_wait_elapsed` и `exec_elapsed`, но request trace их не видит. Для root-cause incident analysis этого недостаточно.
 
 Выбранное решение:
 
-- bounded blocking helper возвращает observed queue wait / exec durations вместе с result;
-- completion handler использует эти значения при построении `query_bundle_pool_wait` и downstream query stages;
+- bounded blocking helper возвращает observed queue wait / exec durations вместе с `join_result`;
+- closure использует локальный `QueryBundleStageRecorder`/stage guards и собирает `QueryBundleTraceReport`;
+- completion handler использует `ObservedBlockingCall + QueryBundleTraceReport` при построении `query_bundle_pool_wait` и downstream grouped stages;
 - global metrics сохраняются как отдельный слой, но больше не являются единственным источником этой информации.
 
 ### 3. Query-body stage accounting MUST быть total для success/cancel/fail path
@@ -77,27 +123,47 @@
 Требования:
 
 - если request уже вошёл в query-body path, trace MUST публиковать `query_bundle*` stage и для `cancelled`, и для `failed`;
-- stage status обязан совпадать с terminal outcome path (`completed|cancelled|failed`);
+- leaf stage, завершившийся до cancellation boundary, MAY остаться `completed`; если cancellation происходит после завершения известных leaves, `query_bundle_other` обязан нести cancelled remainder;
+- итоговый query-body accounting MUST содержать хотя бы один grouped stage, отражающий terminal `cancelled/failed` tail, если такой tail реально был внутри query-body envelope;
 - seconds-scale handler tail после входа в query-body MUST NOT полностью исчезать в `unattributed_overhead`.
 
 Это не означает, что cancellation instantly прерывает `analysis.ir()`. Change обещает truthful accounting и bounded checkpoints, а не hard preemption чужого compute.
 
-### 4. Extension verdict builder должен перестать быть ingress-only эвристикой
+### 4. Canonical verdict vocabulary для query-body dominance фиксируется явно
+
+Выбранное решение: extension surfaces используют bounded verdict vocabulary:
+
+- `query_bundle_dominant`
+- `query_bundle_pool_wait_dominant`
+- `query_bundle_deps_and_file_snapshot_dominant`
+- `query_bundle_owner_hint_dominant`
+- `query_bundle_ir_query_dominant`
+- `query_bundle_ir_retry_dominant`
+- `query_bundle_other_dominant`
+
+Правила:
+
+- leaf verdict MAY публиковаться только для grouped `query_bundle*` stage;
+- generic `query_bundle_dominant` публикуется вместе с leaf verdict;
+- если `dominant_stage` нормализуется из deeper owner-hint metrics, user-facing verdict остаётся `query_bundle_owner_hint_dominant`;
+- query-body verdicts имеют precedence над `adapter_before_dispatch_dominant`, `server_before_method_entry_dominant` и `handler_prelude_dominant`.
+
+### 5. Extension verdict builder должен перестать быть ingress-only эвристикой
 
 Выбранное решение:
 
 - host-side verdict logic становится единственным source of truth;
 - webview перестаёт дублировать собственную эвристику или использует тот же helper;
-- `adapter_before_dispatch_dominant` публикуется только если ingress wait реально доминирует над later-stage latency;
-- если authoritative `dominant_stage` или stage durations показывают `query_bundle*` dominance, derived verdict обязан следовать им, а не спорить с ними.
+- `adapter_before_dispatch_dominant` публикуется только если ingress wait реально доминирует над later-stage latency и query-body dominance не доказана;
+- если authoritative `dominant_stage` или stage durations показывают `query_bundle*` dominance, derived verdict обязан следовать grouped query-body vocabulary, а не спорить с ним.
 
-### 5. `v19` degradation остаётся явной и fail-closed
+### 6. `v19` degradation остаётся явной и fail-closed
 
 Новый truthful query-body split появляется только на `v20`.
 
 Для `v19` consumers:
 
-- не выдумывают `query_bundle_pool_wait` или `query_bundle_ir_query`;
+- не выдумывают grouped `query_bundle_pool_wait`, `query_bundle_owner_hint` или `query_bundle_ir_query`;
 - могут показывать legacy aggregate `query_bundle`, если он есть;
 - обязаны явно отмечать, что detailed query-body split unavailable by design.
 

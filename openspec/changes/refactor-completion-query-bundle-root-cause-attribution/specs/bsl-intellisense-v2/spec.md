@@ -23,14 +23,17 @@ Per-request timeline payload MUST формироваться на стороне
 
 Если `server_edge_details` присутствует, additive `v19` ingress split (`adapter_read_at_ms`, `adapter_to_dispatch_wait_ms`) MUST сохраняться без переосмысления legacy `transport_received_at_ms`.
 
-Timeline stage taxonomy в `v20` MUST оставаться bounded и MAY включать detailed `query_bundle` stage names:
+Timeline stage taxonomy в `v20` MUST оставаться bounded и использовать canonical grouped `query_bundle` stage names:
 - `query_bundle_pool_wait`
 - `query_bundle_deps_and_file_snapshot`
+- `query_bundle_owner_hint`
 - `query_bundle_ir_query`
 - `query_bundle_ir_retry`
 - `query_bundle_other`
 
-Если trace использует detailed `query_bundle` stage names, `dominant_stage` MAY ссылаться на конкретный `query_bundle*` stage вместо legacy aggregate `query_bundle`.
+`dominant_stage` в `v20` MUST ссылаться только на canonical grouped stage name.
+
+Если runtime/metrics слой содержит более глубокий owner-hint drilldown, такие leaf metrics MUST нормализоваться к `query_bundle_owner_hint` при построении `dominant_stage`, scale-aware reports и других user-facing summaries.
 
 Каждый stage entry MUST включать:
 - `name`;
@@ -63,9 +66,11 @@ Timeline stage taxonomy в `v20` MUST оставаться bounded и MAY вкл
 
 Для `v20` это означает:
 - request-local trace MUST публиковать хотя бы один `query_bundle*` stage после входа в query-body path;
-- stage status MUST отражать terminal path (`completed`, `cancelled` или `failed`);
-- bounded request-local attribution SHOULD отделять pool wait от blocking query execution;
+- grouped query-body vocabulary MUST использоваться и в trace, и в acceptance reports, и в dominant-stage selection;
+- bounded request-local attribution MUST отделять pool wait от blocking query execution;
 - trace MUST NOT выдумывать hard preemption или cancellation checkpoint внутри compute, если его реально не было.
+
+Request-level query-body attribution MUST покидать blocking closure через structured bounded carrier, достаточный для serializing grouped sub-stages на success/cancel/fail paths и для synthesize remainder accounting при join-error или uncovered exec tail.
 
 #### Scenario: Cancelled request внутри query-body сохраняет stage accounting
 - **GIVEN** completion request вошёл в query-body path и затем был superseded или cancelled
@@ -84,3 +89,9 @@ Timeline stage taxonomy в `v20` MUST оставаться bounded и MAY вкл
 - **WHEN** authoritative timeline формируется для этого request
 - **THEN** trace публикует `query_bundle*` stage со статусом `failed`
 - **AND** stage accounting остаётся truthful даже без successful completion result
+
+#### Scenario: Deeper owner-hint metrics нормализуются в canonical grouped stage
+- **GIVEN** runtime observability зафиксировала leaf metric внутри `query_bundle_owner_hint_*`
+- **WHEN** строится `dominant_stage` или acceptance report
+- **THEN** consumer получает canonical grouped label `query_bundle_owner_hint`
+- **AND** user-facing summaries не расширяют public vocabulary до всех internal leaf labels

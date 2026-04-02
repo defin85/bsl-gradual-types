@@ -6,8 +6,19 @@ Completion Timeline panel, clipboard export и request-centric incident bundle s
 Human-readable projection MUST:
 - строиться только из bounded authoritative fields/stages и локальных bounded status markers;
 - не публиковать verdict `adapter_before_dispatch_dominant`, если authoritative `dominant_stage` или visible `stages` показывают dominance внутри `query_bundle*`;
+- использовать canonical bounded verdict vocabulary:
+  - `query_bundle_dominant`
+  - `query_bundle_pool_wait_dominant`
+  - `query_bundle_deps_and_file_snapshot_dominant`
+  - `query_bundle_owner_hint_dominant`
+  - `query_bundle_ir_query_dominant`
+  - `query_bundle_ir_retry_dominant`
+  - `query_bundle_other_dominant`;
 - переносить `query_bundle` dominance в человекочитаемом виде для panel, clipboard и incident summary, если connected server возвращает `v20` payload;
 - явно деградировать на `v19`, не выдумывая detailed `query_bundle_pool_wait`, `query_bundle_ir_query` или equivalent split.
+
+Если query-body leaf verdict публикуется, surfaces SHOULD также публиковать umbrella verdict `query_bundle_dominant`.
+Query-body verdicts MUST иметь precedence над ingress-only verdicts для того же trace.
 
 #### Scenario: Panel и clipboard не обвиняют adapter ingress при dominant query-body stage
 - **GIVEN** extension получает completion timeline `v20`, где `adapter_to_dispatch_wait_ms` положителен, но authoritative `dominant_stage` находится в `query_bundle*`

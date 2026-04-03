@@ -10334,7 +10334,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        19
+        20
     );
     assert!(
         result
@@ -14517,29 +14517,6 @@ fn completion_timeline_trace_stage_duration_ms(
     stage_name: &str,
 ) -> Option<u64> {
     let stages = trace.get("stages").and_then(|value| value.as_array())?;
-    if stage_name == "query_bundle" {
-        let grouped_total = stages.iter().fold(0_u64, |acc, stage| {
-            let Some(stage) = stage.as_object() else {
-                return acc;
-            };
-            let Some(name) = stage.get("name").and_then(|value| value.as_str()) else {
-                return acc;
-            };
-            if !name.starts_with("query_bundle_") {
-                return acc;
-            }
-            acc.saturating_add(
-                stage
-                    .get("duration_ms")
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(0),
-            )
-        });
-        if grouped_total > 0 {
-            return Some(grouped_total);
-        }
-    }
-
     stages.iter().find_map(|stage| {
         let stage = stage.as_object()?;
         let name = stage.get("name")?.as_str()?;
@@ -14547,6 +14524,56 @@ fn completion_timeline_trace_stage_duration_ms(
             return None;
         }
         stage.get("duration_ms").and_then(|value| value.as_u64())
+    })
+}
+
+const COMPLETION_TIMELINE_QUERY_BUNDLE_STAGE_NAMES: &[&str] = &[
+    "query_bundle_pool_wait",
+    "query_bundle_deps_and_file_snapshot",
+    "query_bundle_owner_hint",
+    "query_bundle_ir_query",
+    "query_bundle_ir_retry",
+    "query_bundle_other",
+];
+
+fn completion_timeline_query_bundle_total_ms(trace: &serde_json::Value) -> Option<u64> {
+    let stages = trace.get("stages").and_then(|value| value.as_array())?;
+    let grouped_total = stages.iter().fold(0_u64, |acc, stage| {
+        let Some(stage) = stage.as_object() else {
+            return acc;
+        };
+        let Some(name) = stage.get("name").and_then(|value| value.as_str()) else {
+            return acc;
+        };
+        if !COMPLETION_TIMELINE_QUERY_BUNDLE_STAGE_NAMES.contains(&name) {
+            return acc;
+        }
+        acc.saturating_add(
+            stage
+                .get("duration_ms")
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0),
+        )
+    });
+    if grouped_total > 0 {
+        return Some(grouped_total);
+    }
+
+    completion_timeline_trace_stage_duration_ms(trace, "query_bundle")
+}
+
+fn completion_timeline_query_bundle_breakdown(trace: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "total_ms": completion_timeline_query_bundle_total_ms(trace),
+        "pool_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle_pool_wait"),
+        "deps_and_file_snapshot_ms": completion_timeline_trace_stage_duration_ms(
+            trace,
+            "query_bundle_deps_and_file_snapshot",
+        ),
+        "owner_hint_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle_owner_hint"),
+        "ir_query_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle_ir_query"),
+        "ir_retry_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle_ir_retry"),
+        "other_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle_other"),
     })
 }
 
@@ -15135,8 +15162,7 @@ async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_rea
         "form-module head-path completion with injected IR delay must still expose head route, trace={trace:?}"
     );
     assert!(
-        completion_timeline_trace_stage_duration_ms(trace, "query_bundle").unwrap_or(u64::MAX)
-            < 250,
+        completion_timeline_query_bundle_total_ms(trace).unwrap_or(u64::MAX) < 250,
         "head-path query_bundle must not inherit injected IR delay, trace={trace:?}"
     );
 
@@ -20540,8 +20566,8 @@ async fn p33_completion_head_upgrade_perf_report() {
     let second_wait_exact_type_index_ms =
         completion_timeline_trace_stage_duration_ms(second_trace, "wait_exact_type_index")
             .unwrap_or(0);
-    let second_query_bundle_ms =
-        completion_timeline_trace_stage_duration_ms(second_trace, "query_bundle").unwrap_or(0);
+    let second_query_bundle_total_ms =
+        completion_timeline_query_bundle_total_ms(second_trace).unwrap_or(0);
     let second_collect_ms =
         completion_timeline_trace_stage_duration_ms(second_trace, "collect").unwrap_or(0);
 
@@ -20648,7 +20674,7 @@ async fn p33_completion_head_upgrade_perf_report() {
             "second_prepare_guard_outcome": second_prepare_guard_outcome,
             "second_prepare_outcome": second_prepare_outcome,
             "second_wait_exact_type_index_ms": second_wait_exact_type_index_ms,
-            "second_query_bundle_ms": second_query_bundle_ms,
+            "second_query_bundle_total_ms": second_query_bundle_total_ms,
             "second_collect_ms": second_collect_ms,
             "head_hit_total": head_hit_total,
             "exact_hit_total": exact_hit_total,
@@ -20824,6 +20850,32 @@ fn histogram_p95(metrics: &serde_json::Value, key: &str) -> f64 {
         .unwrap_or(0.0)
 }
 
+fn histogram_p95_max_by_prefix(metrics: &serde_json::Value, prefix: &str) -> f64 {
+    metrics
+        .as_object()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter(|(key, _)| key.starts_with(prefix) && key.ends_with("_ms"))
+                .fold(0.0_f64, |acc, (key, _)| {
+                    acc.max(histogram_p95(metrics, key))
+                })
+        })
+        .unwrap_or(0.0)
+}
+
+fn dominant_stage_candidate_insert(
+    candidates: &mut serde_json::Map<String, serde_json::Value>,
+    dominant: &mut Option<(&'static str, f64)>,
+    name: &'static str,
+    p95: f64,
+) {
+    candidates.insert(name.to_string(), serde_json::json!(p95));
+    if p95 > 0.0 && dominant.is_none_or(|(_, value)| p95 > value) {
+        *dominant = Some((name, p95));
+    }
+}
+
 fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value {
     let stage_keys = [
         (
@@ -20938,172 +20990,24 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "completion_stage_exact_wait_apply_age_at_terminal_ms",
         ),
         (
-            "completion_stage_query_bundle",
-            "completion_stage_query_bundle_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint",
-            "completion_stage_query_bundle_owner_hint_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_extract",
-            "completion_stage_query_bundle_owner_hint_extract_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_offset",
-            "completion_stage_query_bundle_owner_hint_offset_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_flow_lookup",
-            "completion_stage_query_bundle_owner_hint_flow_lookup_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_direct",
-            "completion_stage_query_bundle_owner_hint_type_lookup_direct_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_fallback",
-            "completion_stage_query_bundle_owner_hint_type_lookup_fallback_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_unattributed_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_pre_first_salsa_event_wait_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_post_last_salsa_event_tail_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_parse_result_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_other_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_iterate_cycle_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_cancellation_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_cancellation_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_check_to_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_last_will_execute_parse_result_to_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_idle_before_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_age_at_query_start_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_first_will_execute_type_index_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_apply_to_fetch_end_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_total_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_inputs_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_parse_result_query_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_query_build_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_parse_result_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_total_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_seed_context_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_local_function_summaries_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_build_visit_statements_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_scan",
-            "completion_stage_query_bundle_owner_hint_type_lookup_index_scan_ms",
-        ),
-        (
-            "completion_stage_query_bundle_owner_hint_type_lookup",
-            "completion_stage_query_bundle_owner_hint_type_lookup_ms",
-        ),
-        (
             "completion_stage_query_bundle_deps_and_file_snapshot",
             "completion_stage_query_bundle_deps_and_file_snapshot_ms",
+        ),
+        (
+            "completion_stage_query_bundle_pool_wait",
+            "completion_stage_query_bundle_pool_wait_ms",
+        ),
+        (
+            "completion_stage_query_bundle_ir_query",
+            "completion_stage_query_bundle_ir_query_ms",
+        ),
+        (
+            "completion_stage_query_bundle_ir_retry",
+            "completion_stage_query_bundle_ir_retry_ms",
+        ),
+        (
+            "completion_stage_query_bundle_other",
+            "completion_stage_query_bundle_other_ms",
         ),
         (
             "completion_stage_response_build",
@@ -21155,11 +21059,14 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
     let mut dominant: Option<(&'static str, f64)> = None;
     for (name, key) in stage_keys {
         let p95 = histogram_p95(metrics, key);
-        candidates.insert(name.to_string(), serde_json::json!(p95));
-        if p95 > 0.0 && dominant.is_none_or(|(_, value)| p95 > value) {
-            dominant = Some((name, p95));
-        }
+        dominant_stage_candidate_insert(&mut candidates, &mut dominant, name, p95);
     }
+    dominant_stage_candidate_insert(
+        &mut candidates,
+        &mut dominant,
+        "completion_stage_query_bundle_owner_hint",
+        histogram_p95_max_by_prefix(metrics, "completion_stage_query_bundle_owner_hint"),
+    );
 
     let (stage, p95_ms) = dominant.unwrap_or(("none", 0.0));
     serde_json::json!({
@@ -22390,7 +22297,7 @@ fn scale_aware_dominant_stage_includes_completion_query_bundle_breakdown() {
         "intellisense_v2_parse_result_query_ms": {"p95": 120.0},
         "intellisense_v2_singleflight_wait_ms": {"p95": 40.0},
         "intellisense_v2_runtime_exec_interactive_ms": {"p95": 25.0},
-        "completion_stage_query_bundle_ms": {"p95": 2400.0},
+        "completion_stage_query_bundle_ir_query_ms": {"p95": 2400.0},
         "completion_stage_response_build_ms": {"p95": 50.0},
         "completion_stage_cache_store_ms": {"p95": 30.0}
     });
@@ -22401,7 +22308,7 @@ fn scale_aware_dominant_stage_includes_completion_query_bundle_breakdown() {
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle"
+        "completion_stage_query_bundle_ir_query"
     );
     assert_eq!(
         dominant
@@ -22420,7 +22327,6 @@ fn scale_aware_dominant_stage_includes_completion_query_bundle_owner_hint_breakd
         "intellisense_v2_ir_query_completion_ms": {"p95": 9.0},
         "intellisense_v2_runtime_queue_wait_interactive_ms": {"p95": 2.0},
         "intellisense_v2_semantic_diagnostics_query_ms": {"p95": 320.0},
-        "completion_stage_query_bundle_ms": {"p95": 2400.0},
         "completion_stage_query_bundle_owner_hint_ms": {"p95": 3500.0},
         "completion_stage_query_bundle_deps_and_file_snapshot_ms": {"p95": 100.0}
     });
@@ -22459,7 +22365,7 @@ fn scale_aware_dominant_stage_includes_owner_hint_index_fetch_wait_breakdown() {
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_wait"
+        "completion_stage_query_bundle_owner_hint"
     );
     assert_eq!(
         dominant
@@ -22485,7 +22391,7 @@ fn scale_aware_dominant_stage_includes_owner_hint_index_fetch_inside_salsa_windo
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_inside_salsa_window"
+        "completion_stage_query_bundle_owner_hint"
     );
     assert_eq!(
         dominant
@@ -22512,7 +22418,7 @@ fn scale_aware_dominant_stage_includes_owner_hint_first_will_check_to_first_will
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_check_to_first_will_execute_type_index"
+        "completion_stage_query_bundle_owner_hint"
     );
     assert_eq!(
         dominant
@@ -22538,7 +22444,7 @@ fn scale_aware_dominant_stage_includes_owner_hint_first_will_execute_other_break
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_execute_other"
+        "completion_stage_query_bundle_owner_hint"
     );
     assert_eq!(
         dominant
@@ -22563,7 +22469,7 @@ fn scale_aware_dominant_stage_includes_owner_hint_will_iterate_cycle_breakdown()
             .get("stage")
             .and_then(|value| value.as_str())
             .unwrap_or(""),
-        "completion_stage_query_bundle_owner_hint_type_lookup_index_fetch_first_will_iterate_cycle"
+        "completion_stage_query_bundle_owner_hint"
     );
     assert_eq!(
         dominant
@@ -22580,7 +22486,7 @@ fn scale_aware_dominant_stage_includes_runtime_apply_changes_breakdown() {
         "intellisense_v2_runtime_apply_changes_queue_wait_ms": {"p95": 3500.0},
         "intellisense_v2_runtime_apply_changes_exec_ms": {"p95": 3200.0},
         "intellisense_v2_runtime_apply_change_set_file_exec_ms": {"p95": 2800.0},
-        "completion_stage_query_bundle_ms": {"p95": 1200.0}
+        "completion_stage_query_bundle_ir_query_ms": {"p95": 1200.0}
     });
 
     let dominant = dominant_stage_from_metrics(&metrics);
@@ -23367,7 +23273,7 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                         "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
                         "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                         "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                        "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                        "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                         "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                         "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
                     })
@@ -23422,7 +23328,7 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
                 "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
                 "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                 "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                 "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                 "rank_ms": completion_timeline_trace_stage_duration_ms(trace, "rank"),
                 "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
@@ -23492,10 +23398,14 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
         let values = samples
             .iter()
             .filter_map(|sample| {
-                sample
-                    .get("trace")
-                    .and_then(|trace| trace.get(field))
-                    .and_then(|value| value.as_u64())
+                let trace = sample.get("trace")?;
+                if field == "query_bundle_total_ms" {
+                    return trace
+                        .get("query_bundle")
+                        .and_then(|value| value.get("total_ms"))
+                        .and_then(|value| value.as_u64());
+                }
+                trace.get(field).and_then(|value| value.as_u64())
             })
             .map(|value| value as f64)
             .collect::<Vec<_>>();
@@ -23570,7 +23480,10 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
             "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
             "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
             "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
-            "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+            "measured_query_bundle_total_ms": sample_trace_histogram(
+                &measured_samples,
+                "query_bundle_total_ms",
+            ),
             "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
         },
         "extension_like_key_latencies": {
@@ -24067,7 +23980,7 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                         "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
                         "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                         "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                        "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                        "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                         "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                         "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
                         "response_build_other_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build_other"),
@@ -24174,7 +24087,7 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
                 "turn_wait_ms": completion_timeline_trace_stage_duration_ms(trace, "turn_wait"),
                 "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                 "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                 "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                 "rank_ms": completion_timeline_trace_stage_duration_ms(trace, "rank"),
                 "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
@@ -24274,10 +24187,14 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         let values = samples
             .iter()
             .filter_map(|sample| {
-                sample
-                    .get("trace")
-                    .and_then(|trace| trace.get(field))
-                    .and_then(|value| value.as_u64())
+                let trace = sample.get("trace")?;
+                if field == "query_bundle_total_ms" {
+                    return trace
+                        .get("query_bundle")
+                        .and_then(|value| value.get("total_ms"))
+                        .and_then(|value| value.as_u64());
+                }
+                trace.get(field).and_then(|value| value.as_u64())
             })
             .map(|value| value as f64)
             .collect::<Vec<_>>();
@@ -24551,7 +24468,10 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
             "measured_turn_wait_ms": sample_trace_histogram(&measured_samples, "turn_wait_ms"),
             "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
             "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
-            "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+            "measured_query_bundle_total_ms": sample_trace_histogram(
+                &measured_samples,
+                "query_bundle_total_ms",
+            ),
             "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
         },
         "extension_like_key_latencies": {
@@ -26602,7 +26522,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                             ),
                             "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                             "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                            "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                            "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                             "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                             "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
                         })
@@ -26671,7 +26591,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     ),
                     "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                     "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
-                    "query_bundle_ms": completion_timeline_trace_stage_duration_ms(trace, "query_bundle"),
+                    "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                     "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                     "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
                 })
@@ -26694,10 +26614,14 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             let values = samples
                 .iter()
                 .filter_map(|sample| {
-                    sample
-                        .get("trace")
-                        .and_then(|trace| trace.get(field))
-                        .and_then(|value| value.as_u64())
+                    let trace = sample.get("trace")?;
+                    if field == "query_bundle_total_ms" {
+                        return trace
+                            .get("query_bundle")
+                            .and_then(|value| value.get("total_ms"))
+                            .and_then(|value| value.as_u64());
+                    }
+                    trace.get(field).and_then(|value| value.as_u64())
                 })
                 .map(|value| value as f64)
                 .collect::<Vec<_>>();
@@ -26986,7 +26910,10 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 ),
                 "measured_prepare_stateful_ms": sample_trace_histogram(&measured_samples, "prepare_stateful_ms"),
                 "measured_wait_exact_type_index_ms": sample_trace_histogram(&measured_samples, "wait_exact_type_index_ms"),
-                "measured_query_bundle_ms": sample_trace_histogram(&measured_samples, "query_bundle_ms"),
+                "measured_query_bundle_total_ms": sample_trace_histogram(
+                    &measured_samples,
+                    "query_bundle_total_ms",
+                ),
                 "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
             },
             "extension_like_key_latencies": {

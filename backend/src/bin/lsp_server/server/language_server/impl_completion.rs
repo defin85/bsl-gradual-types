@@ -109,6 +109,7 @@ struct QueryBundleWorkResult {
     ir_program: Option<Arc<bsl_shared::ir::SemanticProgram>>,
     ir_cancelled_after_retry: bool,
     query_checkpoint_cancelled: bool,
+    terminal_outcome_override: Option<&'static str>,
     report: QueryBundleTraceReport,
 }
 
@@ -1027,6 +1028,17 @@ fn observe_cancelled_timeline_outcome(
     if outcome == "cancelled" {
         timeline_capture.observe_cancel_at_ms(super::super::unix_timestamp_ms());
     }
+}
+
+fn resolve_query_bundle_completion_outcome(
+    current_outcome: Option<&'static str>,
+    terminal_outcome_override: Option<&'static str>,
+    ir_cancelled_after_retry: bool,
+    query_checkpoint_cancelled: bool,
+) -> Option<&'static str> {
+    current_outcome
+        .or(terminal_outcome_override)
+        .or_else(|| (ir_cancelled_after_retry || query_checkpoint_cancelled).then_some("cancelled"))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2659,6 +2671,7 @@ impl BslLanguageServer {
                                             ir_program: None,
                                             ir_cancelled_after_retry: false,
                                             query_checkpoint_cancelled: true,
+                                            terminal_outcome_override: None,
                                             report,
                                         };
                                     }
@@ -2810,6 +2823,7 @@ impl BslLanguageServer {
                                             ir_program,
                                             ir_cancelled_after_retry,
                                             query_checkpoint_cancelled: true,
+                                            terminal_outcome_override: None,
                                             report,
                                         };
                                     }
@@ -2853,6 +2867,7 @@ impl BslLanguageServer {
                                             ir_program,
                                             ir_cancelled_after_retry,
                                             query_checkpoint_cancelled: true,
+                                            terminal_outcome_override: None,
                                             report,
                                         };
                                     }
@@ -2868,6 +2883,7 @@ impl BslLanguageServer {
                                         ir_program,
                                         ir_cancelled_after_retry,
                                         query_checkpoint_cancelled: false,
+                                        terminal_outcome_override: None,
                                         report,
                                     }
                                 },
@@ -2897,6 +2913,7 @@ impl BslLanguageServer {
                                 ir_program,
                                 ir_cancelled_after_retry,
                                 query_checkpoint_cancelled,
+                                terminal_outcome_override,
                                 report,
                             } = match observed_query_call.join_result {
                                 Ok(result) => result,
@@ -2916,18 +2933,21 @@ impl BslLanguageServer {
                                         member_access_owner_type_hints: Vec::new(),
                                         deps: None,
                                         ir_program: None,
-                                        ir_cancelled_after_retry: true,
-                                        query_checkpoint_cancelled: true,
+                                        ir_cancelled_after_retry: false,
+                                        query_checkpoint_cancelled: false,
+                                        terminal_outcome_override: Some("handler_error"),
                                         report,
                                     }
                                 }
                             };
-                            if (ir_cancelled_after_retry || query_checkpoint_cancelled)
-                                && completion_outcome.is_none()
-                            {
-                                timeline_capture
-                                    .observe_cancel_at_ms(super::super::unix_timestamp_ms());
-                                completion_outcome = Some("cancelled");
+                            if let Some(outcome) = resolve_query_bundle_completion_outcome(
+                                completion_outcome,
+                                terminal_outcome_override,
+                                ir_cancelled_after_retry,
+                                query_checkpoint_cancelled,
+                            ) {
+                                observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
+                                completion_outcome = Some(outcome);
                             }
                             if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
                                 event_driven_guards_enabled,
@@ -3600,6 +3620,70 @@ mod tests {
         assert_eq!(capture.stages[2].name, QueryBundleStageName::Other.as_str());
         assert_eq!(capture.stages[2].status, "cancelled");
         assert_eq!(capture.stages[2].duration_ms, 7);
+    }
+
+    #[test]
+    fn query_bundle_trace_keeps_pool_wait_and_ir_query_distinct() {
+        let mut capture = sample_capture();
+        let mut report = QueryBundleTraceReport::default();
+        report.push(
+            QueryBundleStageName::IrQuery,
+            CompletionTimelineStageStatus::Completed,
+            std::time::Duration::from_millis(14),
+        );
+        report.set_terminal_status(CompletionTimelineStageStatus::Completed);
+        capture.push_query_bundle_report(
+            &report,
+            9,
+            14,
+            23,
+            CompletionTimelineStageStatus::Completed,
+        );
+
+        let trace = capture.into_trace(
+            "trace-query-bundle-split".to_string(),
+            std::time::Duration::from_millis(23),
+            "ok_non_empty",
+        );
+        let stage_names: Vec<&str> = trace
+            .stages
+            .iter()
+            .map(|stage| stage.name.as_str())
+            .collect();
+        assert_eq!(
+            stage_names,
+            vec![
+                QueryBundleStageName::PoolWait.as_str(),
+                QueryBundleStageName::IrQuery.as_str(),
+            ]
+        );
+        assert_eq!(
+            trace.dominant_stage.as_deref(),
+            Some(QueryBundleStageName::IrQuery.as_str())
+        );
+        assert_eq!(trace.stages[0].duration_ms, 9);
+        assert_eq!(trace.stages[1].duration_ms, 14);
+    }
+
+    #[test]
+    fn query_bundle_completion_outcome_prefers_failure_override_over_cancelled_flags() {
+        assert_eq!(
+            resolve_query_bundle_completion_outcome(None, Some("handler_error"), true, true,),
+            Some("handler_error")
+        );
+        assert_eq!(
+            resolve_query_bundle_completion_outcome(None, None, true, false),
+            Some("cancelled")
+        );
+        assert_eq!(
+            resolve_query_bundle_completion_outcome(
+                Some("superseded"),
+                Some("handler_error"),
+                false,
+                false,
+            ),
+            Some("superseded")
+        );
     }
 
     #[test]

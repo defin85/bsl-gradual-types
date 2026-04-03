@@ -1,7 +1,7 @@
 use super::*;
 use bsl_shared::domain::types::FORM_DATA_SEMANTICS_NOTE;
 
-impl TypeInferencer {
+impl TypeInferencer<'_> {
     pub(super) fn infer_binary(
         &self,
         operator: &str,

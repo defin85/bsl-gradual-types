@@ -29,7 +29,7 @@ fn expression_ast_span(expr: &Expression) -> Span {
     }
 }
 
-impl AstToIrConverter {
+impl AstToIrConverter<'_> {
     /// Создаёт IR-узлы для hover внутри выражений
     ///
     /// Обходит выражение рекурсивно и конвертирует Call/PropertyAccess,

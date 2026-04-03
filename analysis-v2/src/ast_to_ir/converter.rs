@@ -30,7 +30,7 @@ use crate::implicit_bindings::{ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBO
 /// Выполняет два прохода:
 /// 1. Сбор глобальных символов (функции, процедуры)
 /// 2. Конвертация statements -> SemanticNode с построением scope hierarchy
-pub struct AstToIrConverter {
+pub struct AstToIrConverter<'a> {
     /// Таблица символов в процессе построения
     pub(crate) symbol_table: SymbolTable,
 
@@ -66,15 +66,18 @@ pub struct AstToIrConverter {
     /// Стек доступности контекстных form symbols для вложенных процедур/функций.
     /// `false` наследуется вглубь и запрещает инжект context-bound symbols.
     pub(crate) form_context_enabled_stack: Vec<bool>,
+    /// Coarse cooperative cancellation checkpoint used by exact IR builds.
+    pub(crate) cancellation_checkpoint: Option<&'a dyn Fn()>,
 }
 
-impl AstToIrConverter {
+impl<'a> AstToIrConverter<'a> {
     /// Создать новый конвертер
     pub(crate) fn new(
         source: String,
         repository: Arc<dyn TypeRepository>,
         signature_index: SignatureIndex,
         resolver: Option<Arc<TypeResolver>>,
+        cancellation_checkpoint: Option<&'a dyn Fn()>,
     ) -> Self {
         let symbol_table = SymbolTable::new();
         let current_scope = symbol_table.root_scope;
@@ -92,6 +95,7 @@ impl AstToIrConverter {
             metadata_lookup,
             form_context_symbols: Vec::new(),
             form_context_enabled_stack: vec![true],
+            cancellation_checkpoint,
         }
     }
 
@@ -138,19 +142,47 @@ impl AstToIrConverter {
         signature_index: SignatureIndex,
         resolver: Option<Arc<TypeResolver>>,
     ) -> Result<SemanticProgram> {
-        let mut converter = Self::new(source.clone(), repository, signature_index, resolver);
+        Self::convert_with_resolver_and_checkpoint(
+            ast,
+            source,
+            file_path,
+            repository,
+            signature_index,
+            resolver,
+            None,
+        )
+    }
+
+    pub(crate) fn convert_with_resolver_and_checkpoint(
+        ast: Program,
+        source: String,
+        file_path: String,
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+        cancellation_checkpoint: Option<&'a dyn Fn()>,
+    ) -> Result<SemanticProgram> {
+        let mut converter = Self::new(
+            source.clone(),
+            repository,
+            signature_index,
+            resolver,
+            cancellation_checkpoint,
+        );
 
         // Milestone: инжект контекста модуля (FormModule) в SymbolTable
         converter.seed_module_context(&file_path);
 
         // Проход 1: Сбор глобальных функций/процедур
         for statement in &ast.statements {
+            converter.cancellation_checkpoint();
             converter.collect_global_symbols(statement)?;
         }
 
         // Проход 2: Конвертация statements -> SemanticNode
         // Игнорируем индексы для root level - они нам не нужны
         for statement in ast.statements {
+            converter.cancellation_checkpoint();
             let _ = converter.convert_statement(statement)?;
         }
 
@@ -167,6 +199,13 @@ impl AstToIrConverter {
             cfg,
             semantic_facts: SemanticFacts::default(),
         })
+    }
+
+    #[inline(always)]
+    pub(crate) fn cancellation_checkpoint(&self) {
+        if let Some(checkpoint) = self.cancellation_checkpoint {
+            checkpoint();
+        }
     }
 
     fn seed_module_context(&mut self, file_path: &str) {

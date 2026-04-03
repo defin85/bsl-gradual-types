@@ -239,8 +239,17 @@ pub fn ir(
     let source = file.text(db).to_string();
     let file_path = file.path(db).to_string();
     cancellation_checkpoint(db);
-
-    SemanticProgramSnapshot(build_ir_from_parsed(parsed, &source, &file_path, deps_data))
+    let checkpoint = || cancellation_checkpoint(db);
+    SemanticProgramSnapshot(
+        build_ir_from_parsed_profiled_with_checkpoint(
+            parsed,
+            &source,
+            &file_path,
+            deps_data,
+            Some(&checkpoint),
+        )
+        .program,
+    )
 }
 
 #[salsa::tracked]
@@ -635,22 +644,33 @@ fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
     })
 }
 
-fn build_ir_from_parsed(
+fn build_ir_from_parsed_profiled_with_checkpoint(
     parsed: Arc<bsl_syntax::ast::ParseResult>,
     source: &str,
     file_path: &str,
     deps_data: Arc<SemanticDeps>,
-) -> Arc<SemanticProgram> {
-    build_ir_from_parsed_profiled(parsed, source, file_path, deps_data).program
-}
-
-fn build_ir_from_parsed_profiled(
-    parsed: Arc<bsl_syntax::ast::ParseResult>,
-    source: &str,
-    file_path: &str,
-    deps_data: Arc<SemanticDeps>,
+    cancellation_checkpoint: Option<&dyn Fn()>,
 ) -> IrProfiledResult {
+    #[inline(always)]
+    fn checkpoint(cancellation_checkpoint: Option<&dyn Fn()>) {
+        if let Some(checkpoint) = cancellation_checkpoint {
+            checkpoint();
+        }
+    }
+
+    fn maybe_inject_ir_build_delay_for_test() {
+        if let Some(delay_ms) = std::env::var("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+    }
+
     let started = Instant::now();
+    checkpoint(cancellation_checkpoint);
+    maybe_inject_ir_build_delay_for_test();
     let convert_started = Instant::now();
     tracing::debug!(
         target: "bsl_backend::analysis_v2",
@@ -658,13 +678,14 @@ fn build_ir_from_parsed_profiled(
         source_len = source.len(),
         "ir_build: ast_to_ir start"
     );
-    match AstToIrConverter::convert_with_resolver(
+    match AstToIrConverter::convert_with_resolver_and_checkpoint(
         parsed.program.clone(),
         source.to_string(),
         file_path.to_string(),
         deps_data.repository.clone(),
         deps_data.signature_index.clone(),
         deps_data.resolver.clone(),
+        cancellation_checkpoint,
     ) {
         Ok(mut program) => {
             let ast_to_ir_convert_ms = convert_started.elapsed().as_millis();
@@ -680,13 +701,25 @@ fn build_ir_from_parsed_profiled(
                 file_path,
                 "ir_build: semantic_facts start"
             );
-            let profile = type_inference_v2::materialize_semantic_facts_with_path_profiled(
-                &mut program,
-                &parsed.program,
-                source,
-                file_path,
-                deps_data,
-            );
+            checkpoint(cancellation_checkpoint);
+            let profile = if let Some(cancellation_checkpoint) = cancellation_checkpoint {
+                type_inference_v2::materialize_semantic_facts_with_path_profiled_and_checkpoint(
+                    &mut program,
+                    &parsed.program,
+                    source,
+                    file_path,
+                    deps_data,
+                    cancellation_checkpoint,
+                )
+            } else {
+                type_inference_v2::materialize_semantic_facts_with_path_profiled(
+                    &mut program,
+                    &parsed.program,
+                    source,
+                    file_path,
+                    deps_data,
+                )
+            };
             let semantic_facts_materialize_ms = materialize_started.elapsed().as_millis();
             let total_ms = started.elapsed().as_millis();
             tracing::debug!(

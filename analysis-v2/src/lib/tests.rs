@@ -2854,6 +2854,112 @@ fn apply_change_reports_type_index_invalidation_effects() {
 }
 
 #[test]
+fn cancelled_parse_snapshot_ir_build_does_not_publish_partial_head_artifact() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _ir_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "200");
+
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(901);
+    let path: Arc<str> = Arc::from("cancelled_parse_snapshot_ir_build.bsl");
+    let version1_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n    Значение = 1;\n    Результат = Значение + 1;\nКонецПроцедуры\n",
+    );
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: version1_text.clone(),
+        version: 1,
+        path: path.clone(),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, version1_text.as_ref(), Vec::new(), true, None),
+    });
+
+    let deps_id = host.snapshot().deps_id().expect("deps id");
+    let settings_id = host.snapshot().settings_id().expect("settings id");
+    let analysis_v1 = host.snapshot();
+    let query = std::thread::spawn(move || analysis_v1.ir_profiled(file_id));
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    let version2_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n    Значение = 1;\n    Результат = Значение + 2;\nКонецПроцедуры\n",
+    );
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: version2_text.clone(),
+        version: 2,
+        path: path.clone(),
+        parse_snapshot: parse_snapshot_for_test(file_id, 2, version2_text.as_ref(), Vec::new(), true, None),
+    });
+
+    let cancelled = query.join().expect("ir query join");
+    assert!(
+        cancelled.is_err(),
+        "parse-snapshot IR build should unwind on revision cancel instead of succeeding"
+    );
+
+    let analysis_after_cancel = host.snapshot();
+    assert!(
+        !analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 1, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version v1"),
+        "cancelled exact build must not publish partial completion head for superseded version"
+    );
+    assert!(
+        !analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 2, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version v2 before rebuild"),
+        "newer revision must stay unpublished until a successful exact build completes"
+    );
+
+    let rebuilt = analysis_after_cancel
+        .ir_profiled(file_id)
+        .expect("rebuilt ir")
+        .expect("rebuilt ir present");
+    assert!(
+        rebuilt.profile.total_ms > 0,
+        "rebuilt current revision should produce a profiled exact artifact"
+    );
+    assert!(
+        analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 2, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version v2 after rebuild"),
+        "successful rebuild must publish completion head for latest revision"
+    );
+    assert!(
+        !analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 1, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version v1 after rebuild"),
+        "rebuild for latest revision must not resurrect stale completion head"
+    );
+}
+
+#[test]
 fn cancellable_propagates_panics() {
     let result = std::panic::catch_unwind(|| {
         let _: Cancellable<()> = cancellable(|| panic!("test panic"));

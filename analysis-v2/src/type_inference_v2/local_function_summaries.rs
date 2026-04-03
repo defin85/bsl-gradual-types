@@ -1,7 +1,7 @@
 use super::*;
 use bsl_shared::ir::Span;
 
-impl TypeInferencer {
+impl TypeInferencer<'_> {
     pub(super) fn infer_local_function_summaries(
         &self,
         program: &Program,
@@ -300,13 +300,14 @@ impl TypeInferencer {
         }
 
         fn collect_return_type_names(
-            inferencer: &TypeInferencer,
+            inferencer: &TypeInferencer<'_>,
             body: &[Statement],
             env: &mut TypeEnv,
             facts: &mut SemanticFacts,
             out: &mut ReturnTypeSet,
         ) {
             for stmt in body {
+                inferencer.cancellation_checkpoint();
                 match stmt {
                     Statement::Return { value, .. } => {
                         if let Some(expr) = value {
@@ -395,6 +396,7 @@ impl TypeInferencer {
 
         let mut function_defs: Vec<(String, Def<'_>)> = Vec::new();
         for stmt in &program.statements {
+            self.cancellation_checkpoint();
             match stmt {
                 Statement::FunctionDecl {
                     name,
@@ -441,19 +443,23 @@ impl TypeInferencer {
         let n = function_defs.len();
         let mut name_to_idx: HashMap<String, usize> = HashMap::new();
         for (idx, (name_lower, _)) in function_defs.iter().enumerate() {
+            self.cancellation_checkpoint();
             name_to_idx.insert(name_lower.clone(), idx);
         }
 
         let mut may_fallthrough: Vec<bool> = Vec::with_capacity(n);
         for (_, def) in &function_defs {
+            self.cancellation_checkpoint();
             may_fallthrough.push(!block_always_exits(def.body));
         }
 
         // Call graph edges: caller -> callee (by index), only for local functions in this file.
         let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (caller_idx, (_, def)) in function_defs.iter().enumerate() {
+            self.cancellation_checkpoint();
             let mut called = BTreeSet::<String>::new();
             for stmt in def.body {
+                self.cancellation_checkpoint();
                 collect_called_locals_in_stmt(stmt, &mut called);
             }
             for callee in called {

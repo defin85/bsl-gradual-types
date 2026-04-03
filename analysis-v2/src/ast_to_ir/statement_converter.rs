@@ -14,12 +14,13 @@ use crate::implicit_bindings::directive_disables_form_context;
 
 use super::converter::AstToIrConverter;
 
-impl AstToIrConverter {
+impl AstToIrConverter<'_> {
     /// Конвертация Statement -> SemanticNode
     ///
     /// Возвращает Option<usize> - индекс добавленного главного узла (или None если узел не добавлен).
     /// Это позволяет собирать только прямые дочерние узлы, исключая вложенные.
     pub(crate) fn convert_statement(&mut self, statement: Statement) -> Result<Option<usize>> {
+        self.cancellation_checkpoint();
         match statement {
             Statement::VarDeclaration {
                 name,

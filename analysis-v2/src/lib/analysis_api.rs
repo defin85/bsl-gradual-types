@@ -937,12 +937,16 @@ impl AnalysisV2 {
                 source_len = source.len(),
                 "ir_profiled: build_ir_from_parsed start"
             );
-            let profiled = build_ir_from_parsed_profiled(
-                parsed,
-                source.as_ref(),
-                file_path.as_ref(),
-                deps_data,
-            );
+            let checkpoint = || cancellation_checkpoint(&self.db);
+            let profiled = cancellable(|| {
+                build_ir_from_parsed_profiled_with_checkpoint(
+                    parsed,
+                    source.as_ref(),
+                    file_path.as_ref(),
+                    deps_data,
+                    Some(&checkpoint),
+                )
+            })?;
             tracing::debug!(
                 target: "bsl_backend::analysis_v2",
                 file_id = file_id.0,

@@ -20003,6 +20003,192 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
+async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_path() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE_V1: &str =
+        "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
+    const FIXTURE_V2: &str = "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
+    const LEADER_IR_METRIC: &str =
+        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
+    const SHARED_IR_METRIC: &str =
+        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "500");
+    let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
+
+    let (_service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        FIXTURE_V1,
+        "file:///test_p33_current_revision_exact_ir_singleflight_reuse.bsl",
+    )
+    .await;
+
+    let metrics_before = server.coordinator.observability_metrics();
+    let counters_before = metrics_before
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_before.counters object");
+    let leader_before = read_u64_metric(counters_before.get(LEADER_IR_METRIC));
+    let shared_before = read_u64_metric(counters_before.get(SHARED_IR_METRIC));
+
+    server
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: FIXTURE_V2.to_string(),
+            }],
+        })
+        .await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version_for_operation(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                2,
+            )
+            .await,
+        "runtime must observe current revision before request-side IR query joins prewarm"
+    );
+
+    let leader_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        let metrics = server.coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        if read_u64_metric(counters.get(LEADER_IR_METRIC)) >= leader_before.saturating_add(1) {
+            break;
+        }
+        if tokio::time::Instant::now() >= leader_deadline {
+            panic!(
+                "current-revision prewarm did not become IR singleflight leader in time, counters={counters:?}"
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let completion_snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            bsl_runtime::application::SemanticOperation::Completion,
+        )
+        .await;
+    let analysis = completion_snapshot.analysis;
+    assert_eq!(
+        analysis.file_version(file_id).expect("file_version"),
+        Some(2),
+        "request-side snapshot must target same current revision as prewarm"
+    );
+    let deps_id = completion_snapshot.deps_id;
+    let settings_id = analysis.settings_id().expect("settings id");
+    let coordinator = server.coordinator.clone();
+    let request_ir = tokio::task::spawn_blocking(move || {
+        let context = bsl_runtime::application::ExecutionContext {
+            origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
+            operation: bsl_runtime::application::SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(2),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: bsl_runtime::application::ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+            },
+            cancellation: bsl_runtime::application::CancellationPolicy::BestEffort,
+        };
+
+        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+            &context,
+            &analysis,
+            Some(coordinator.as_ref()),
+            file_id,
+        )
+    })
+    .await
+    .expect("request ir join")
+    .expect("request ir singleflight")
+    .expect("request ir result");
+    assert!(
+        !request_ir.nodes.is_empty(),
+        "request-side exact IR query must return a semantic program"
+    );
+
+    let ready_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        if server
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_completion_head_ready(file_id)
+            .expect("current_completion_head_ready")
+        {
+            break;
+        }
+        if tokio::time::Instant::now() >= ready_deadline {
+            panic!("current-revision head artifact did not become ready after shared IR flight");
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let metrics_after = server.coordinator.observability_metrics();
+    let counters_after = metrics_after
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_after.counters object");
+    let leader_delta =
+        read_u64_metric(counters_after.get(LEADER_IR_METRIC)).saturating_sub(leader_before);
+    let shared_delta =
+        read_u64_metric(counters_after.get(SHARED_IR_METRIC)).saturating_sub(shared_before);
+
+    assert_eq!(
+        leader_delta, 1,
+        "same-revision prewarm/request overlap must produce exactly one IR singleflight leader, counters={counters_after:?}"
+    );
+    assert_eq!(
+        shared_delta, 1,
+        "request path must attach as shared follower to current-revision prewarm instead of starting duplicate IR compute, counters={counters_after:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
 async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same_revision() {
     struct EnvVarGuard {
         key: &'static str,

@@ -171,6 +171,42 @@ impl BslLanguageServer {
         );
     }
 
+    async fn run_completion_exact_ir_singleflight_prewarm_v2(
+        &self,
+        analysis: bsl_analysis_v2::AnalysisV2,
+        file_id: bsl_analysis_v2::FileId,
+        cpu_class: bsl_runtime::application::CpuWorkClass,
+        inject_test_delay: bool,
+    ) {
+        let context = self
+            .build_execution_context_v2(
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                None,
+                false,
+            )
+            .await;
+        let coordinator = self.coordinator.clone();
+        let observed_coordinator = coordinator.clone();
+        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            cpu_class,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(observed_coordinator.as_ref()),
+            move || {
+                if inject_test_delay {
+                    maybe_inject_current_revision_head_precompute_delay_for_test();
+                }
+                let _ = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                    &context,
+                    &analysis,
+                    Some(coordinator.as_ref()),
+                    file_id,
+                );
+            },
+        )
+        .await;
+    }
+
     async fn build_parse_snapshot_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -459,12 +495,12 @@ impl BslLanguageServer {
                 .ok()
                 .unwrap_or(false);
             if !reused {
-                let _ =
-                    bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                server
+                    .run_completion_exact_ir_singleflight_prewarm_v2(
+                        analysis,
+                        file_id,
                         bsl_runtime::application::CpuWorkClass::Interactive,
-                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                        Some(server.coordinator.as_ref()),
-                        move || analysis.ir(file_id),
+                        false,
                     )
                     .await;
             }
@@ -536,13 +572,14 @@ impl BslLanguageServer {
                 return;
             }
 
-            let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(server.coordinator.as_ref()),
-                move || analysis.ir(file_id),
-            )
-            .await;
+            server
+                .run_completion_exact_ir_singleflight_prewarm_v2(
+                    analysis,
+                    file_id,
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    false,
+                )
+                .await;
         });
     }
 
@@ -670,17 +707,14 @@ impl BslLanguageServer {
                 continue;
             }
 
-            let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            self.run_completion_exact_ir_singleflight_prewarm_v2(
+                analysis,
+                file_id,
                 // Current-revision completion head is the readiness fast lane for strict-latest
                 // completion. Keep it on interactive CPU permits so background exact/index work
                 // cannot starve head publication after didOpen/didChange already handed off.
                 bsl_runtime::application::CpuWorkClass::Interactive,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(self.coordinator.as_ref()),
-                move || {
-                    maybe_inject_current_revision_head_precompute_delay_for_test();
-                    analysis.ir(file_id)
-                },
+                true,
             )
             .await;
 

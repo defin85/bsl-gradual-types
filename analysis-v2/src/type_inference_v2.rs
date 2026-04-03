@@ -326,7 +326,7 @@ struct TypeInferencerStats {
     incomplete_call_target_recovery_count: Cell<u64>,
 }
 
-struct TypeInferencer {
+struct TypeInferencer<'a> {
     deps: Arc<SemanticDeps>,
     resolver: Arc<TypeResolver>,
     signature_index: SignatureIndex,
@@ -337,6 +337,7 @@ struct TypeInferencer {
     definition_location_cache:
         RefCell<HashMap<DefinitionLocationCacheKey, Option<TypeDefinitionLocation>>>,
     stats: TypeInferencerStats,
+    cancellation_checkpoint: Option<&'a dyn Fn()>,
 }
 
 #[path = "type_inference_v2/expression_helpers.rs"]
@@ -352,8 +353,15 @@ use self::instance_effects::{
     InstanceBinding, InstanceEffectStore, InstanceId,
 };
 
-impl TypeInferencer {
+impl<'a> TypeInferencer<'a> {
     fn new(deps: Arc<SemanticDeps>) -> Self {
+        Self::with_cancellation_checkpoint(deps, None)
+    }
+
+    fn with_cancellation_checkpoint(
+        deps: Arc<SemanticDeps>,
+        cancellation_checkpoint: Option<&'a dyn Fn()>,
+    ) -> Self {
         let resolver = deps
             .resolver
             .clone()
@@ -370,6 +378,7 @@ impl TypeInferencer {
             method_target_cache: RefCell::new(HashMap::new()),
             definition_location_cache: RefCell::new(HashMap::new()),
             stats: TypeInferencerStats::default(),
+            cancellation_checkpoint,
         }
     }
 
@@ -379,6 +388,13 @@ impl TypeInferencer {
 
     fn add_u64_stat(stat: &Cell<u64>, value: u64) {
         stat.set(stat.get().saturating_add(value));
+    }
+
+    #[inline(always)]
+    fn cancellation_checkpoint(&self) {
+        if let Some(checkpoint) = self.cancellation_checkpoint {
+            checkpoint();
+        }
     }
 
     fn lookup_cache_base_key(resolution: &TypeResolution) -> ResolutionLookupCacheBaseKey {
@@ -454,10 +470,12 @@ impl TypeInferencer {
         let mut facts = SemanticFacts::default();
         env.current_file_path = Arc::from(file_path.to_string());
 
+        self.cancellation_checkpoint();
         let seed_started = Instant::now();
         self.seed_module_context(file_path, &mut env);
         let seed_module_context_ms = seed_started.elapsed().as_millis();
 
+        self.cancellation_checkpoint();
         let local_function_summaries_started = Instant::now();
         let local_function_summaries = self.infer_local_function_summaries(program, &env);
         let local_function_summary_count = local_function_summaries.len() as u64;
@@ -468,6 +486,7 @@ impl TypeInferencer {
 
         let visit_statements_started = Instant::now();
         for stmt in &program.statements {
+            self.cancellation_checkpoint();
             match stmt {
                 Statement::FunctionDecl {
                     params,
@@ -664,6 +683,7 @@ impl TypeInferencer {
             fn_env.set_variable_value(param.to_lowercase(), TypeResolution::unknown(), None);
         }
         for stmt in body {
+            self.cancellation_checkpoint();
             self.visit_statement(stmt, &mut fn_env, facts);
         }
         Self::add_u128_stat(
@@ -1062,6 +1082,7 @@ impl TypeInferencer {
     }
 
     fn visit_statement(&self, stmt: &Statement, env: &mut TypeEnv, facts: &mut SemanticFacts) {
+        self.cancellation_checkpoint();
         match stmt {
             Statement::VarDeclaration {
                 name, type_hint, ..
@@ -3481,6 +3502,23 @@ pub(crate) fn materialize_semantic_facts_with_path_profiled(
         Some(source_text),
         None,
     );
+    program.semantic_facts = profiled.facts;
+    profiled.profile
+}
+
+pub(crate) fn materialize_semantic_facts_with_path_profiled_and_checkpoint(
+    program: &mut SemanticProgram,
+    parsed_program: &Program,
+    source_text: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+    cancellation_checkpoint: &dyn Fn(),
+) -> TypeIndexBuildProfile {
+    let profiled = TypeInferencer::with_cancellation_checkpoint(
+        deps,
+        Some(cancellation_checkpoint),
+    )
+    .build_facts_internal(parsed_program, file_path, Some(source_text), None);
     program.semantic_facts = profiled.facts;
     profiled.profile
 }

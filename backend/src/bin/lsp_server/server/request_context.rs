@@ -53,8 +53,7 @@ fn pre_dispatch_completion_terminal_hook_cell(
     CELL.get_or_init(|| Mutex::new(None))
 }
 
-fn completion_response_flush_hook_cell(
-) -> &'static Mutex<Option<CompletionResponseFlushHook>> {
+fn completion_response_flush_hook_cell() -> &'static Mutex<Option<CompletionResponseFlushHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<CompletionResponseFlushHook>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))

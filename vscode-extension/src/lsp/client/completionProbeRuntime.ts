@@ -14,10 +14,57 @@ const COMPLETION_PROBE_TRANSPORT_INSTRUMENTED = Symbol('completionProbeTransport
 
 type SendRequestLike = {
     sendRequest: (...args: any[]) => Promise<unknown>;
+    completionProbeTransportTracker?: CompletionProbeTransportTracker;
     [COMPLETION_PROBE_TRANSPORT_INSTRUMENTED]?: boolean;
 };
 
 type TextEditorSelectionWindowLike = Pick<typeof vscode.window, 'onDidChangeTextEditorSelection'>;
+
+export class CompletionProbeTransportTracker {
+    private readonly completionProbeIdsByRequestId = new Map<string, string>();
+    private readonly requestIdsByProbeId = new Map<string, string>();
+
+    get size(): number {
+        return this.completionProbeIdsByRequestId.size;
+    }
+
+    trackRequest(requestId: string, probeId: string): void {
+        const previousProbeId = this.completionProbeIdsByRequestId.get(requestId);
+        if (previousProbeId) {
+            this.requestIdsByProbeId.delete(previousProbeId);
+        }
+        const previousRequestId = this.requestIdsByProbeId.get(probeId);
+        if (previousRequestId) {
+            this.completionProbeIdsByRequestId.delete(previousRequestId);
+        }
+        this.completionProbeIdsByRequestId.set(requestId, probeId);
+        this.requestIdsByProbeId.set(probeId, requestId);
+    }
+
+    takeProbeIdForResponse(requestId: string): string | undefined {
+        const probeId = this.completionProbeIdsByRequestId.get(requestId);
+        if (!probeId) {
+            return undefined;
+        }
+        this.completionProbeIdsByRequestId.delete(requestId);
+        this.requestIdsByProbeId.delete(probeId);
+        return probeId;
+    }
+
+    clearProbe(probeId: string): void {
+        const requestId = this.requestIdsByProbeId.get(probeId);
+        if (!requestId) {
+            return;
+        }
+        this.requestIdsByProbeId.delete(probeId);
+        this.completionProbeIdsByRequestId.delete(requestId);
+    }
+
+    clear(): void {
+        this.completionProbeIdsByRequestId.clear();
+        this.requestIdsByProbeId.clear();
+    }
+}
 
 export function instrumentCompletionProbeTransport(
     client: SendRequestLike,
@@ -35,6 +82,7 @@ export function instrumentCompletionProbeTransport(
         const probeId = isCompletionRequest && token
             ? recorder.getProbeIdForToken(token)
             : undefined;
+        const transportTracker = client.completionProbeTransportTracker;
         const requestParams = isCompletionRequest && probeId
             ? injectCompletionProbeId(params, probeId)
             : params;
@@ -54,6 +102,10 @@ export function instrumentCompletionProbeTransport(
                 recorder.recordCompletionLspResponseResolved(token, now());
             }
             throw error;
+        } finally {
+            if (isCompletionRequest && probeId) {
+                transportTracker?.clearProbe(probeId);
+            }
         }
     };
     client[COMPLETION_PROBE_TRANSPORT_INSTRUMENTED] = true;
@@ -73,6 +125,8 @@ export function registerCompletionProbeSelectionObserver(
 }
 
 export class CompletionProbeLanguageClient extends LanguageClient {
+    readonly completionProbeTransportTracker = new CompletionProbeTransportTracker();
+
     constructor(
         id: string,
         name: string,
@@ -88,6 +142,8 @@ export class CompletionProbeLanguageClient extends LanguageClient {
         return instrumentCompletionProbeMessageTransports(
             transports,
             this.completionProbeRecorder,
+            Date.now,
+            this.completionProbeTransportTracker,
         );
     }
 }
@@ -95,20 +151,20 @@ export class CompletionProbeLanguageClient extends LanguageClient {
 export function instrumentCompletionProbeMessageTransports(
     transports: MessageTransports,
     recorder: CompletionProbeRecorder,
-    now: () => number = Date.now
+    now: () => number = Date.now,
+    transportTracker: CompletionProbeTransportTracker = new CompletionProbeTransportTracker(),
 ): MessageTransports {
-    const completionProbeIdsByRequestId = new Map<string, string>();
     return {
         ...transports,
         reader: new CompletionProbeMessageReader(
             transports.reader,
-            completionProbeIdsByRequestId,
+            transportTracker,
             recorder,
             now,
         ),
         writer: new CompletionProbeMessageWriter(
             transports.writer,
-            completionProbeIdsByRequestId,
+            transportTracker,
         ),
     };
 }
@@ -186,7 +242,7 @@ function completionProbeIdFromRequestMessage(message: Message): string | undefin
 class CompletionProbeMessageReader implements MessageReader {
     constructor(
         private readonly inner: MessageReader,
-        private readonly completionProbeIdsByRequestId: Map<string, string>,
+        private readonly transportTracker: CompletionProbeTransportTracker,
         private readonly recorder: CompletionProbeRecorder,
         private readonly now: () => number,
     ) {}
@@ -207,13 +263,12 @@ class CompletionProbeMessageReader implements MessageReader {
         return this.inner.listen((message) => {
             const requestId = requestIdFromMessage(message);
             if (requestId) {
-                const probeId = this.completionProbeIdsByRequestId.get(requestId);
+                const probeId = this.transportTracker.takeProbeIdForResponse(requestId);
                 if (probeId) {
                     this.recorder.recordCompletionRawTransportResponseReceived(
                         probeId,
                         this.now(),
                     );
-                    this.completionProbeIdsByRequestId.delete(requestId);
                 }
             }
             callback(message);
@@ -221,6 +276,7 @@ class CompletionProbeMessageReader implements MessageReader {
     }
 
     dispose(): void {
+        this.transportTracker.clear();
         this.inner.dispose();
     }
 }
@@ -228,7 +284,7 @@ class CompletionProbeMessageReader implements MessageReader {
 class CompletionProbeMessageWriter implements MessageWriter {
     constructor(
         private readonly inner: MessageWriter,
-        private readonly completionProbeIdsByRequestId: Map<string, string>,
+        private readonly transportTracker: CompletionProbeTransportTracker,
     ) {}
 
     get onError() {
@@ -242,17 +298,19 @@ class CompletionProbeMessageWriter implements MessageWriter {
     async write(message: Message): Promise<void> {
         const requestId = requestIdFromMessage(message);
         const probeId = completionProbeIdFromRequestMessage(message);
-        if (requestId && probeId) {
-            this.completionProbeIdsByRequestId.set(requestId, probeId);
-        }
         await this.inner.write(message);
+        if (requestId && probeId) {
+            this.transportTracker.trackRequest(requestId, probeId);
+        }
     }
 
     end(): void {
+        this.transportTracker.clear();
         this.inner.end();
     }
 
     dispose(): void {
+        this.transportTracker.clear();
         this.inner.dispose();
     }
 }

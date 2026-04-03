@@ -471,7 +471,10 @@ impl BslLanguageServer {
             .clamp(1, super::COMPLETION_TIMELINE_MAX_ENTRIES);
         let request_id_filter = params.request_id.as_deref();
 
-        let traces_guard = self.completion_timeline_traces.lock().await;
+        let traces_guard = self
+            .completion_timeline_traces
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let traces = traces_guard
             .iter()
             .rev()
@@ -908,7 +911,7 @@ mod tests {
                 10 + idx,
                 vec![sample_stage("prepare_stateful", "completed", 0, 10 + idx)],
             );
-            server.record_completion_timeline_trace(trace).await;
+            server.record_completion_timeline_trace(trace);
         }
 
         let response = server
@@ -930,24 +933,20 @@ mod tests {
     #[tokio::test]
     async fn completion_timeline_can_filter_by_request_id() {
         let server = create_test_server();
-        server
-            .record_completion_timeline_trace(sample_trace(
-                "trace-a",
-                Some("req-a"),
-                "ok_non_empty",
-                30,
-                vec![sample_stage("query_bundle", "completed", 0, 30)],
-            ))
-            .await;
-        server
-            .record_completion_timeline_trace(sample_trace(
-                "trace-b",
-                Some("req-b"),
-                "cancelled",
-                5,
-                vec![sample_stage("query_bundle", "cancelled", 0, 5)],
-            ))
-            .await;
+        server.record_completion_timeline_trace(sample_trace(
+            "trace-a",
+            Some("req-a"),
+            "ok_non_empty",
+            30,
+            vec![sample_stage("query_bundle", "completed", 0, 30)],
+        ));
+        server.record_completion_timeline_trace(sample_trace(
+            "trace-b",
+            Some("req-b"),
+            "cancelled",
+            5,
+            vec![sample_stage("query_bundle", "cancelled", 0, 5)],
+        ));
 
         let response = server
             .handle_get_completion_timeline(crate::types::CompletionTimelineRequest {

@@ -3,7 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
@@ -72,23 +72,27 @@ fn next_completion_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64
     format!("completion-trace-{id}")
 }
 
-async fn record_completion_timeline_trace_inner(
-    traces: &Mutex<VecDeque<crate::types::CompletionTimelineTrace>>,
+fn record_completion_timeline_trace_inner(
+    traces: &StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>,
     trace: crate::types::CompletionTimelineTrace,
 ) {
-    let mut traces = traces.lock().await;
+    let mut traces = traces
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     traces.push_back(trace);
     while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
         let _ = traces.pop_front();
     }
 }
 
-async fn record_completion_response_flush_completed_at_ms_inner(
-    traces: &Mutex<VecDeque<crate::types::CompletionTimelineTrace>>,
+fn record_completion_response_flush_completed_at_ms_inner(
+    traces: &StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>,
     request_id: &str,
     response_flush_completed_at_ms: u64,
 ) {
-    let mut traces = traces.lock().await;
+    let mut traces = traces
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(trace) = traces
         .iter_mut()
         .rfind(|trace| trace.request_id.as_deref() == Some(request_id))
@@ -225,7 +229,7 @@ impl BslLanguageServer {
         );
         let completion_cancellation_registry_v2 =
             Arc::new(super::completion_cancellation::CompletionCancellationRegistry::default());
-        let completion_timeline_traces = Arc::new(Mutex::new(VecDeque::new()));
+        let completion_timeline_traces = Arc::new(StdMutex::new(VecDeque::new()));
         let next_completion_timeline_trace_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
 
         let server = Self {
@@ -333,8 +337,7 @@ impl BslLanguageServer {
                     record_completion_timeline_trace_inner(
                         completion_timeline_traces.as_ref(),
                         trace,
-                    )
-                    .await;
+                    );
                     coordinator.record_intellisense_v2_completion_outcome(&public_outcome);
                 });
             },
@@ -343,15 +346,11 @@ impl BslLanguageServer {
         let completion_timeline_traces_for_flush_hook = completion_timeline_traces.clone();
         super::request_context::set_completion_response_flush_hook(Some(Arc::new(
             move |request_id, response_flush_completed_at_ms| {
-                let completion_timeline_traces = completion_timeline_traces_for_flush_hook.clone();
-                tokio::spawn(async move {
-                    record_completion_response_flush_completed_at_ms_inner(
-                        completion_timeline_traces.as_ref(),
-                        request_id.as_str(),
-                        response_flush_completed_at_ms,
-                    )
-                    .await;
-                });
+                record_completion_response_flush_completed_at_ms_inner(
+                    completion_timeline_traces_for_flush_hook.as_ref(),
+                    request_id.as_str(),
+                    response_flush_completed_at_ms,
+                );
             },
         )));
 
@@ -362,12 +361,11 @@ impl BslLanguageServer {
         next_completion_timeline_trace_id_from(self.next_completion_timeline_trace_id.as_ref())
     }
 
-    pub(crate) async fn record_completion_timeline_trace(
+    pub(crate) fn record_completion_timeline_trace(
         &self,
         trace: crate::types::CompletionTimelineTrace,
     ) {
-        record_completion_timeline_trace_inner(self.completion_timeline_traces.as_ref(), trace)
-            .await;
+        record_completion_timeline_trace_inner(self.completion_timeline_traces.as_ref(), trace);
     }
 
     pub(crate) async fn record_completion_head_hit_v2(

@@ -113,7 +113,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         clientOptions,
         completionProbeRecorder,
     );
-    instrumentCompletionProbeTransport(client as unknown as { sendRequest: (...args: any[]) => Promise<unknown> }, completionProbeRecorder);
+    instrumentCompletionProbeTransport(client, completionProbeRecorder);
     completionProbeSelectionDisposable?.dispose();
     completionProbeSelectionDisposable = registerCompletionProbeSelectionObserver(completionProbeRecorder);
 

@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import {
+    CompletionProbeTransportTracker,
     instrumentCompletionProbeMessageTransports,
     instrumentCompletionProbeTransport,
     registerCompletionProbeSelectionObserver,
@@ -223,6 +224,92 @@ suite('Completion Probe Runtime Test Suite', () => {
             assert.strictEqual(snapshot[0].lsp_response_received_at_ms, 1_700_000_200_012);
         } finally {
             clock.restore();
+            tokenSource.dispose();
+        }
+    });
+
+    test('message transport tracker stays bounded when write fails before request is sent', async () => {
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const tracker = new CompletionProbeTransportTracker();
+        const transports = instrumentCompletionProbeMessageTransports(
+            {
+                reader: {
+                    onError: () => ({ dispose() {} }),
+                    onClose: () => ({ dispose() {} }),
+                    onPartialMessage: () => ({ dispose() {} }),
+                    listen: () => ({ dispose() {} }),
+                    dispose: () => undefined,
+                },
+                writer: {
+                    onError: () => ({ dispose() {} }),
+                    onClose: () => ({ dispose() {} }),
+                    write: async () => {
+                        throw new Error('write failed');
+                    },
+                    end: () => undefined,
+                    dispose: () => undefined,
+                },
+            } as any,
+            recorder,
+            () => Date.now(),
+            tracker,
+        );
+
+        await assert.rejects(
+            transports.writer.write({
+                jsonrpc: '2.0',
+                id: 77,
+                method: 'textDocument/completion',
+                params: { bslProbeId: 'probe-1' },
+            } as any),
+            /write failed/,
+        );
+        assert.strictEqual(tracker.size, 0);
+    });
+
+    test('transport observer clears stale tracked request when completion rejects without response', async () => {
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const tracker = new CompletionProbeTransportTracker();
+        const tokenSource = new vscode.CancellationTokenSource();
+        const document = createDocument(7, 'Документы.');
+        const client = {
+            completionProbeTransportTracker: tracker,
+            sendRequest: async (...args: unknown[]) => {
+                tracker.trackRequest('77', String((args[1] as Record<string, unknown>).bslProbeId));
+                throw new Error('transport dropped request');
+            },
+        };
+
+        recorder.recordCompletionStarted({
+            document,
+            position: new vscode.Position(0, 'Документы.'.length),
+            context: {
+                triggerKind: vscode.CompletionTriggerKind.TriggerCharacter,
+                triggerCharacter: '.',
+            },
+            token: tokenSource.token,
+            requestStartedAtMs: Date.now(),
+        });
+        instrumentCompletionProbeTransport(client, recorder, () => Date.now());
+
+        try {
+            await assert.rejects(
+                client.sendRequest(
+                    { method: 'textDocument/completion' },
+                    {
+                        textDocument: { uri: document.uri.toString() },
+                        position: { line: 0, character: 'Документы.'.length },
+                    },
+                    tokenSource.token,
+                ),
+                /transport dropped request/,
+            );
+            assert.strictEqual(tracker.size, 0);
+        } finally {
             tokenSource.dispose();
         }
     });

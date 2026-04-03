@@ -3499,7 +3499,7 @@ impl BslLanguageServer {
                 elapsed,
                 timeline_outcome,
             );
-            self.record_completion_timeline_trace(trace).await;
+            self.record_completion_timeline_trace(trace);
         }
 
         if let Some(outcome) = completion_outcome {

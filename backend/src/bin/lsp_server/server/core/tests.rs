@@ -11279,38 +11279,27 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
         "completion should return a response over live transport"
     );
 
-    let trace = tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            let timeline = live_transport_get_completion_timeline(&mut harness, 50_522, 16).await;
-            assert_eq!(
-                timeline.get("version").and_then(|value| value.as_u64()),
-                Some(21),
-                "live transport completion timeline must expose v21 payload"
-            );
-            let traces = timeline
-                .get("traces")
-                .and_then(|value| value.as_array())
-                .expect("completion timeline traces array");
-            if let Some(trace) = traces.iter().find(|trace| {
-                trace.get("request_id").and_then(|value| value.as_str())
-                    == Some(&REQUEST_ID.to_string())
-                    && completion_timeline_server_edge_u64(
-                        trace,
-                        "response_flush_completed_at_ms",
-                    )
-                    .is_some()
-            }) {
-                break trace.clone();
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("live completion trace with flush split must appear in timeline");
+    let timeline = live_transport_get_completion_timeline(&mut harness, 50_522, 16).await;
+    assert_eq!(
+        timeline.get("version").and_then(|value| value.as_u64()),
+        Some(21),
+        "live transport completion timeline must expose v21 payload"
+    );
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("request_id").and_then(|value| value.as_str())
+                == Some(&REQUEST_ID.to_string())
+        })
+        .cloned()
+        .expect("live completion trace must be immediately visible in timeline after response");
 
-    let response_sent_at_ms =
-        completion_timeline_server_edge_u64(&trace, "response_sent_at_ms")
-            .expect("response_sent_at_ms");
+    let response_sent_at_ms = completion_timeline_server_edge_u64(&trace, "response_sent_at_ms")
+        .expect("response_sent_at_ms");
     let response_flush_completed_at_ms =
         completion_timeline_server_edge_u64(&trace, "response_flush_completed_at_ms")
             .expect("response_flush_completed_at_ms");

@@ -19,7 +19,7 @@ pub(crate) mod transport_adapter;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
@@ -240,7 +240,7 @@ pub struct BslLanguageServer {
     pub(crate) next_full_index_operation_id: Arc<AtomicU64>,
     pub(crate) full_index_watchdog_timeout: Duration,
     pub(crate) completion_timeline_traces:
-        Arc<Mutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
+        Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) next_document_symbol_request_epoch_v2: Arc<AtomicU64>,
     pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,

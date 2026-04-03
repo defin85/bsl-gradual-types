@@ -307,6 +307,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub handler_entered_at_ms: u64,
     pub response_sent_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_flush_completed_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dispatch_to_request_context_wait_ms: Option<u64>,
@@ -342,6 +344,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     pub slot_release_to_response_wait_ms: Option<u64>,
     pub transport_to_handler_wait_ms: u64,
     pub server_handler_exec_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_ready_to_flush_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_after_handler_enter_ms: Option<u64>,
 }

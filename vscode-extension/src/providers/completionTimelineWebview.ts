@@ -832,6 +832,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 20) {
                 notices.push('v20 truthful grouped query-body split is unavailable by design on this payload.');
             }
+            if (contractVersion < 21) {
+                notices.push('v21 flush-aware post-handler egress split is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -1001,6 +1004,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                ...(typeof details.response_flush_completed_at_ms === 'number'
+                    ? ['response_flush_completed=' + escapeHtml(new Date(details.response_flush_completed_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(typeof details.transport_to_service_future_wait_ms === 'number'
                     ? ['transport_to_service_future_wait=' + escapeHtml(details.transport_to_service_future_wait_ms) + 'ms']
                     : []),
@@ -1041,6 +1047,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'transport_to_handler_wait=' + escapeHtml(details.transport_to_handler_wait_ms) + 'ms',
                 'server_handler_exec=' + escapeHtml(details.server_handler_exec_ms) + 'ms',
+                ...(typeof details.response_ready_to_flush_wait_ms === 'number'
+                    ? ['response_ready_to_flush_wait=' + escapeHtml(details.response_ready_to_flush_wait_ms) + 'ms']
+                    : []),
             ];
             if (typeof details.cancel_observed_at_ms === 'number') {
                 bits.push('cancel_observed=' + escapeHtml(new Date(details.cancel_observed_at_ms).toLocaleTimeString()));
@@ -1053,6 +1062,78 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 );
             }
             return '<div class="overhead">' + bits.join(' | ') + '</div>';
+        }
+
+        function derivePostResponseSplit(trace) {
+            const details = trace.server_edge_details;
+            const probe = trace.correlated_probe;
+            if (!details && !probe) {
+                return null;
+            }
+            const serverIngressAtMs = typeof details?.adapter_read_at_ms === 'number'
+                ? details.adapter_read_at_ms
+                : details?.transport_received_at_ms;
+            return {
+                client_to_transport_wait_ms:
+                    probe && typeof serverIngressAtMs === 'number'
+                        ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
+                        : undefined,
+                response_ready_to_flush_wait_ms: details?.response_ready_to_flush_wait_ms,
+                transport_to_client_receive_wait_ms:
+                    probe?.transport_response_receive_state === 'observed'
+                    && typeof probe.transport_response_received_at_ms === 'number'
+                    && typeof details?.response_flush_completed_at_ms === 'number'
+                        ? Math.max(0, probe.transport_response_received_at_ms - details.response_flush_completed_at_ms)
+                        : undefined,
+                client_receive_to_resolve_wait_ms:
+                    probe?.transport_response_receive_state === 'observed'
+                    && typeof probe.transport_response_received_at_ms === 'number'
+                        ? Math.max(0, probe.lsp_response_received_at_ms - probe.transport_response_received_at_ms)
+                        : undefined,
+                client_post_response_ms:
+                    probe
+                        ? Math.max(0, probe.request_completed_at_ms - probe.lsp_response_received_at_ms)
+                        : undefined,
+                server_to_client_post_response_ms:
+                    probe && details
+                        ? Math.max(0, probe.request_completed_at_ms - details.response_sent_at_ms)
+                        : undefined,
+                raw_transport_receive_state: probe?.transport_response_receive_state,
+            };
+        }
+
+        function renderPostResponseSplit(trace) {
+            const split = derivePostResponseSplit(trace);
+            if (!split) {
+                return '';
+            }
+            const bits = [];
+            if (typeof split.client_to_transport_wait_ms === 'number') {
+                bits.push('client_to_transport_wait=' + escapeHtml(split.client_to_transport_wait_ms) + 'ms');
+            }
+            if (typeof split.response_ready_to_flush_wait_ms === 'number') {
+                bits.push('response_ready_to_flush_wait=' + escapeHtml(split.response_ready_to_flush_wait_ms) + 'ms');
+            }
+            if (typeof split.transport_to_client_receive_wait_ms === 'number') {
+                bits.push('transport_to_client_receive_wait=' + escapeHtml(split.transport_to_client_receive_wait_ms) + 'ms');
+            } else if (split.raw_transport_receive_state === 'unavailable') {
+                bits.push('transport_to_client_receive_wait=unavailable');
+            }
+            if (typeof split.client_receive_to_resolve_wait_ms === 'number') {
+                bits.push('client_receive_to_resolve_wait=' + escapeHtml(split.client_receive_to_resolve_wait_ms) + 'ms');
+            } else if (split.raw_transport_receive_state === 'unavailable') {
+                bits.push('client_receive_to_resolve_wait=unavailable');
+            }
+            if (typeof split.client_post_response_ms === 'number') {
+                bits.push('client_post_response=' + escapeHtml(split.client_post_response_ms) + 'ms');
+            }
+            if (typeof split.server_to_client_post_response_ms === 'number') {
+                bits.push('server_to_client_post_response=' + escapeHtml(split.server_to_client_post_response_ms) + 'ms');
+            }
+            if (bits.length === 0) {
+                return '';
+            }
+            return '<div class="overhead">Post-response split: ' + bits.join(' | ') + '</div>';
         }
 
         function sanitizeTraceForContractVersion(trace, contractVersion) {
@@ -1097,6 +1178,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 : '';
             const averageTraceNotice = getAverageTraceProvenanceNoticeForTrace(trace);
             const serverEdgeDetails = renderServerEdgeDetails(trace);
+            const postResponseSplit = renderPostResponseSplit(trace);
             const prepareDetails = renderPrepareDetails(trace);
             const turnAttribution = renderTurnAttribution(trace);
             const correlatedProbe = trace.correlated_probe
@@ -1126,6 +1208,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 (averageTraceNotice ? '<div class="placeholder">' + escapeHtml(averageTraceNotice) + '</div>' : '') +
                 overhead +
                 serverEdgeDetails +
+                postResponseSplit +
                 prepareDetails +
                 turnAttribution +
                 '<table class="stage-table"><tbody>' + stageRows + '</tbody></table>' +
@@ -1141,7 +1224,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 ? ' | trigger_character=' + escapeHtml(probe.trigger_character)
                 : '';
             const dispatchDeltaMs = Math.max(0, probe.lsp_request_started_at_ms - probe.request_started_at_ms);
-            const lspRoundtripMs = Math.max(0, probe.lsp_response_received_at_ms - probe.lsp_request_started_at_ms);
+            const transportRoundtripMs = probe.transport_response_receive_state === 'observed'
+                && typeof probe.transport_response_received_at_ms === 'number'
+                ? Math.max(0, probe.transport_response_received_at_ms - probe.lsp_request_started_at_ms)
+                : undefined;
+            const clientReceiveToResolveWaitMs = probe.transport_response_receive_state === 'observed'
+                && typeof probe.transport_response_received_at_ms === 'number'
+                ? Math.max(0, probe.lsp_response_received_at_ms - probe.transport_response_received_at_ms)
+                : undefined;
+            const lspResolveMs = Math.max(0, probe.lsp_response_received_at_ms - probe.lsp_request_started_at_ms);
             const postResponseMs = Math.max(0, probe.request_completed_at_ms - probe.lsp_response_received_at_ms);
             const incompleteSuffix = typeof probe.is_incomplete === 'boolean'
                 ? ' | is_incomplete=' + escapeHtml(String(probe.is_incomplete))
@@ -1168,10 +1259,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     ' | uri=' + escapeHtml(probe.uri) +
                     ' | version=' + escapeHtml(probe.document_version) +
                     ' | terminal_version=' + escapeHtml(probe.document_version_at_terminal) + '</div>' +
+                '<div class="meta">transport_response_received=' + (
+                    probe.transport_response_receive_state === 'observed'
+                    && typeof probe.transport_response_received_at_ms === 'number'
+                        ? escapeHtml(new Date(probe.transport_response_received_at_ms).toLocaleTimeString())
+                        : 'unavailable'
+                ) +
+                    ' | lsp_response_resolved=' + escapeHtml(new Date(probe.lsp_response_received_at_ms).toLocaleTimeString()) +
+                    ' | request_completed=' + escapeHtml(new Date(probe.request_completed_at_ms).toLocaleTimeString()) + '</div>' +
                 '<div class="probe-grid">' +
                     '<div class="probe-cell"><strong>Local edit</strong><br>' + escapeHtml(probe.time_since_last_local_edit_ms) + 'ms</div>' +
                     '<div class="probe-cell"><strong>didChange sent</strong><br>' + escapeHtml(didChangeDelta) + '</div>' +
-                    '<div class="probe-cell"><strong>Transport</strong><br>dispatch=' + escapeHtml(dispatchDeltaMs) + 'ms | wait=' + escapeHtml(lspRoundtripMs) + 'ms | post=' + escapeHtml(postResponseMs) + 'ms</div>' +
+                    '<div class="probe-cell"><strong>Transport</strong><br>dispatch=' + escapeHtml(dispatchDeltaMs) + 'ms | receive=' + escapeHtml(transportRoundtripMs ?? 'unavailable') + 'ms | receive_to_resolve=' + escapeHtml(clientReceiveToResolveWaitMs ?? 'unavailable') + 'ms | resolve=' + escapeHtml(lspResolveMs) + 'ms | post=' + escapeHtml(postResponseMs) + 'ms</div>' +
                     '<div class="probe-cell"><strong>Result</strong><br>' + escapeHtml(probe.result_kind) + ' | bucket=' + escapeHtml(probe.item_count_bucket) + incompleteSuffix + '</div>' +
                     '<div class="probe-cell"><strong>Cancel hint</strong><br>' + escapeHtml(probe.cancel_reason_hint) + supersededSuffix + supersededAfterSuffix + '</div>' +
                     '<div class="probe-cell"><strong>Drift</strong><br>did_change=' + escapeHtml(probe.did_change_count_during_probe) + ' | cursor_moved=' + escapeHtml(probe.cursor_moved_during_probe) + '</div>' +

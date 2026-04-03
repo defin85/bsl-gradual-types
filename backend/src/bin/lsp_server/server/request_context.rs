@@ -39,6 +39,7 @@ tokio::task_local! {
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
 type PreDispatchCompletionTerminalHook =
     Arc<dyn Fn(PreDispatchCompletionTerminalTraceInput) + Send + Sync + 'static>;
+type CompletionResponseFlushHook = Arc<dyn Fn(String, u64) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<CancelRequestHook>>> = std::sync::OnceLock::new();
@@ -48,6 +49,13 @@ fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
 fn pre_dispatch_completion_terminal_hook_cell(
 ) -> &'static Mutex<Option<PreDispatchCompletionTerminalHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<PreDispatchCompletionTerminalHook>>> =
+        std::sync::OnceLock::new();
+    CELL.get_or_init(|| Mutex::new(None))
+}
+
+fn completion_response_flush_hook_cell(
+) -> &'static Mutex<Option<CompletionResponseFlushHook>> {
+    static CELL: std::sync::OnceLock<Mutex<Option<CompletionResponseFlushHook>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
 }
@@ -1539,6 +1547,13 @@ pub(crate) fn set_pre_dispatch_completion_terminal_hook(
     *slot = hook;
 }
 
+pub(crate) fn set_completion_response_flush_hook(hook: Option<CompletionResponseFlushHook>) {
+    let mut slot = completion_response_flush_hook_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *slot = hook;
+}
+
 pub(crate) fn notify_pre_dispatch_completion_terminal_outcome(
     context: PendingCompletionRequestContext,
     resolved_at_ms: u64,
@@ -1622,6 +1637,19 @@ fn request_id_from_jsonrpc_id(id: &Id) -> Option<String> {
         Id::Number(value) => Some(value.to_string()),
         Id::String(value) => Some(value.clone()),
         Id::Null => None,
+    }
+}
+
+pub(crate) fn notify_completion_response_flush_completed(
+    request_id: String,
+    response_flush_completed_at_ms: u64,
+) {
+    let hook = completion_response_flush_hook_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone();
+    if let Some(hook) = hook {
+        hook(request_id, response_flush_completed_at_ms);
     }
 }
 

@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 20,
+            version: 21,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -23,6 +23,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         trigger_character: '.',
                         request_started_at_ms: 1_700_000_000_090,
                         lsp_request_started_at_ms: 1_700_000_000_091,
+                        transport_response_receive_state: 'observed',
+                        transport_response_received_at_ms: 1_700_000_000_097,
                         lsp_response_received_at_ms: 1_700_000_000_098,
                         request_completed_at_ms: 1_700_000_000_100,
                         client_duration_ms: 10,
@@ -79,6 +81,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         method_entered_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_030,
+                        response_flush_completed_at_ms: 1_700_000_000_034,
                         cancel_observed_at_ms: 1_700_000_000_021,
                         dispatch_to_request_context_wait_ms: 4,
                         adapter_to_dispatch_wait_ms: 4,
@@ -95,6 +98,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         slot_release_to_response_wait_ms: 41,
                         transport_to_handler_wait_ms: 42,
                         server_handler_exec_ms: 28,
+                        response_ready_to_flush_wait_ms: 4,
                         cancel_observed_after_handler_enter_ms: 19,
                     },
                     prepare_details: {
@@ -167,6 +171,37 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'query_bundle_ir_query_dominant',
                         'prepare_timeout@prepare_guard',
                     ],
+                    correlated_probe: {
+                        probe_id: 'probe-1',
+                        uri: 'file:///tmp/test1.bsl',
+                        document_version: 9,
+                        document_version_at_terminal: 10,
+                        trigger_mode: 'trigger_character',
+                        trigger_character: '.',
+                        request_started_at_ms: 1_700_000_000_090,
+                        lsp_request_started_at_ms: 1_700_000_000_091,
+                        transport_response_receive_state: 'observed',
+                        transport_response_received_at_ms: 1_700_000_000_097,
+                        lsp_response_received_at_ms: 1_700_000_000_098,
+                        request_completed_at_ms: 1_700_000_000_100,
+                        client_duration_ms: 10,
+                        client_terminal_state: 'ok_non_empty',
+                        cancel_reason_hint: 'superseded_newer_version',
+                        result_kind: 'non_empty',
+                        item_count_bucket: '1_5',
+                        is_incomplete: false,
+                        time_since_last_local_edit_ms: 21,
+                        time_since_last_did_change_sent_ms: 8,
+                        did_change_count_during_probe: 1,
+                        cursor_moved_during_probe: true,
+                        active_completion_count_at_start: 1,
+                        same_uri_probe_overlap_count: 1,
+                        newer_probe_started_before_terminal: true,
+                        superseded_by_probe_id: 'probe-2',
+                        superseded_after_ms: 6,
+                        is_after_dot: true,
+                        identifier_tail_length: 0,
+                    },
                     stages: [
                         {
                             name: 'prepare_stateful',
@@ -226,7 +261,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v20'));
+        assert.ok(text!.includes('contract=v21'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -264,11 +299,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('transport_to_handler_wait_ms=42'));
         assert.ok(text!.includes('server_handler_exec_ms=28'));
         assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
+        assert.ok(text!.includes('post_response_split | client_to_transport_wait_ms=0 | response_ready_to_flush_wait_ms=4 | transport_to_client_receive_wait_ms=63 | client_receive_to_resolve_wait_ms=1 | client_post_response_ms=2 | server_to_client_post_response_ms=70'));
         assert.ok(text!.includes('document_version_at_terminal=10'));
         assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
         assert.ok(text!.includes('superseded_by_probe_id=probe-2'));
         assert.ok(text!.includes('transport_dispatch_delta_ms=1'));
-        assert.ok(text!.includes('lsp_roundtrip_ms=7'));
+        assert.ok(text!.includes('transport_response_received_at_ms=1700000000097'));
+        assert.ok(text!.includes('transport_roundtrip_ms=6'));
+        assert.ok(text!.includes('client_receive_to_resolve_wait_ms=1'));
+        assert.ok(text!.includes('lsp_resolve_ms=7'));
         assert.ok(text!.includes('client_post_response_ms=2'));
         assert.ok(text!.includes('result_kind=non_empty | item_count_bucket=1_5 | is_incomplete=false'));
         assert.ok(text!.includes('did_change_count_during_probe=1'));
@@ -377,7 +416,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, and v21 flush-aware post-handler egress split are unavailable by design.'
                     )
             )
         );

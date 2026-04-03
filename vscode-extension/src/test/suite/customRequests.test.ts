@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 20,
+                        version: 21,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -256,6 +256,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                     method_entered_at_ms: 1_700_000_000_003,
                                     handler_entered_at_ms: 1_700_000_000_003,
                                     response_sent_at_ms: 1_700_000_000_018,
+                                    response_flush_completed_at_ms: 1_700_000_000_020,
                                     dispatch_to_request_context_wait_ms: 0,
                                     adapter_to_dispatch_wait_ms: 5,
                                     transport_to_service_future_wait_ms: 1,
@@ -265,7 +266,8 @@ suite('LSP Custom Requests Test Suite', () => {
                                     transport_to_service_scope_wait_ms: 2,
                                     service_scope_to_method_wait_ms: 1,
                                     transport_to_handler_wait_ms: 3,
-                                    server_handler_exec_ms: 15
+                                    server_handler_exec_ms: 15,
+                                    response_ready_to_flush_wait_ms: 2
                                 },
                                 turn_attribution: {
                                     request_file_seq: 17,
@@ -460,7 +462,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 20);
+        assert.strictEqual(result.response.version, 21);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);

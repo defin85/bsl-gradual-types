@@ -10,10 +10,21 @@ import {
     CompletionTimelineTrace,
     CompletionTimelineTurnAttributionTrace,
 } from '../lsp/customRequests';
+import { CompletionProbe } from './completionProbe';
 
 export interface CompletionTraceClientIngressSupplement {
     correlation_status: 'correlated' | 'unavailable' | 'ambiguous';
     client_to_transport_wait_ms?: number;
+}
+
+export interface CompletionTracePostResponseSplit {
+    client_to_transport_wait_ms?: number;
+    response_ready_to_flush_wait_ms?: number;
+    transport_to_client_receive_wait_ms?: number;
+    client_receive_to_resolve_wait_ms?: number;
+    client_post_response_ms?: number;
+    server_to_client_post_response_ms?: number;
+    raw_transport_receive_state?: 'observed' | 'unavailable';
 }
 
 const QUERY_BUNDLE_STAGE_TO_VERDICT: Record<string, string> = {
@@ -195,6 +206,60 @@ export function buildCompletionTraceBottleneckVerdicts(
     }
 
     return verdicts;
+}
+
+export function deriveCompletionTracePostResponseSplit(
+    trace: Pick<CompletionTimelineTrace, 'server_edge_details'>,
+    probe?: Pick<
+        CompletionProbe,
+        | 'lsp_request_started_at_ms'
+        | 'transport_response_receive_state'
+        | 'transport_response_received_at_ms'
+        | 'lsp_response_received_at_ms'
+        | 'request_completed_at_ms'
+    >,
+): CompletionTracePostResponseSplit {
+    const serverEdgeDetails = trace.server_edge_details;
+    const serverIngressAtMs = typeof serverEdgeDetails?.adapter_read_at_ms === 'number'
+        ? serverEdgeDetails.adapter_read_at_ms
+        : serverEdgeDetails?.transport_received_at_ms;
+    const split: CompletionTracePostResponseSplit = {
+        client_to_transport_wait_ms:
+            probe && typeof serverIngressAtMs === 'number'
+                ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
+                : undefined,
+        response_ready_to_flush_wait_ms: serverEdgeDetails?.response_ready_to_flush_wait_ms,
+        client_post_response_ms: probe
+            ? Math.max(0, probe.request_completed_at_ms - probe.lsp_response_received_at_ms)
+            : undefined,
+        server_to_client_post_response_ms:
+            probe && serverEdgeDetails
+                ? Math.max(
+                    0,
+                    probe.request_completed_at_ms - serverEdgeDetails.response_sent_at_ms,
+                )
+                : undefined,
+        raw_transport_receive_state: probe?.transport_response_receive_state,
+    };
+
+    if (
+        probe?.transport_response_receive_state === 'observed'
+        && typeof probe.transport_response_received_at_ms === 'number'
+    ) {
+        split.client_receive_to_resolve_wait_ms = Math.max(
+            0,
+            probe.lsp_response_received_at_ms - probe.transport_response_received_at_ms,
+        );
+        if (typeof serverEdgeDetails?.response_flush_completed_at_ms === 'number') {
+            split.transport_to_client_receive_wait_ms = Math.max(
+                0,
+                probe.transport_response_received_at_ms
+                    - serverEdgeDetails.response_flush_completed_at_ms,
+            );
+        }
+    }
+
+    return split;
 }
 
 export function formatPrepareProgressTrace(

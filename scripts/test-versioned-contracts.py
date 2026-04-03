@@ -18,7 +18,7 @@ class VersionedContractsScriptTest(unittest.TestCase):
         REPO_ROOT
         / "contracts"
         / "lsp-completion-timeline"
-        / "v17"
+        / "v18"
         / "contract.json"
     )
 
@@ -44,33 +44,37 @@ class VersionedContractsScriptTest(unittest.TestCase):
             return str(exc)
         return None
 
-    def test_completion_timeline_latest_baseline_is_v17_and_response_version_20(self) -> None:
+    def test_completion_timeline_latest_baseline_is_v18_and_response_version_21(self) -> None:
         module = self.load_script_module()
         contract = module.parse_json(self.LSP_TIMELINE_CONTRACT)
 
-        self.assertEqual(module.REQUIRED_LATEST_MAJORS["lsp-completion-timeline"], 17)
-        self.assertEqual(contract["major_version"], 17)
-        self.assertEqual(contract["response"]["version"], 20)
+        self.assertEqual(module.REQUIRED_LATEST_MAJORS["lsp-completion-timeline"], 18)
+        self.assertEqual(contract["major_version"], 18)
+        self.assertEqual(contract["response"]["version"], 21)
         self.assertEqual(
             set(contract["response"]["query_bundle_stage_names"]),
             module.REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
+        )
+        self.assertEqual(
+            set(contract["response"]["server_edge_details_fields"]),
+            module.REQUIRED_V18_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
         )
 
     def test_completion_timeline_surface_validates_against_current_latest_major(self) -> None:
         module = self.load_script_module()
         module.validate_surface_contract(self.REPO_ROOT / "contracts" / "lsp-completion-timeline")
 
-    def test_completion_timeline_v17_rejects_wrong_response_version(self) -> None:
+    def test_completion_timeline_v18_rejects_wrong_response_version(self) -> None:
         module = self.load_script_module()
-        with tempfile.TemporaryDirectory(prefix="versioned-contracts-v17-version-") as tmp_dir:
+        with tempfile.TemporaryDirectory(prefix="versioned-contracts-v18-version-") as tmp_dir:
             surface_dir = Path(tmp_dir) / "lsp-completion-timeline"
             shutil.copytree(
                 self.REPO_ROOT / "contracts" / "lsp-completion-timeline",
                 surface_dir,
             )
-            contract_path = surface_dir / "v17" / "contract.json"
+            contract_path = surface_dir / "v18" / "contract.json"
             payload = json.loads(contract_path.read_text(encoding="utf-8"))
-            payload["response"]["version"] = 19
+            payload["response"]["version"] = 20
             contract_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
@@ -79,10 +83,10 @@ class VersionedContractsScriptTest(unittest.TestCase):
             failure = self.validate_surface_failure_message(module, surface_dir)
             self.assertIsNotNone(
                 failure,
-                "validate_surface_contract() must reject v17 contract with wrong response.version",
+                "validate_surface_contract() must reject v18 contract with wrong response.version",
             )
 
-    def test_completion_timeline_v17_rejects_non_exact_server_edge_field_sets(self) -> None:
+    def test_completion_timeline_v18_rejects_non_exact_server_edge_field_sets(self) -> None:
         module = self.load_script_module()
 
         def mutate_contract(payload: dict[str, object], mutation: str) -> None:
@@ -112,14 +116,14 @@ class VersionedContractsScriptTest(unittest.TestCase):
         for mutation in ("rename", "extra", "missing"):
             with self.subTest(mutation=mutation):
                 with tempfile.TemporaryDirectory(
-                    prefix=f"versioned-contracts-v17-fields-{mutation}-"
+                    prefix=f"versioned-contracts-v18-fields-{mutation}-"
                 ) as tmp_dir:
                     surface_dir = Path(tmp_dir) / "lsp-completion-timeline"
                     shutil.copytree(
                         self.REPO_ROOT / "contracts" / "lsp-completion-timeline",
                         surface_dir,
                     )
-                    contract_path = surface_dir / "v17" / "contract.json"
+                    contract_path = surface_dir / "v18" / "contract.json"
                     payload = json.loads(contract_path.read_text(encoding="utf-8"))
                     mutate_contract(payload, mutation)
                     contract_path.write_text(
@@ -130,19 +134,19 @@ class VersionedContractsScriptTest(unittest.TestCase):
                     failure = self.validate_surface_failure_message(module, surface_dir)
                     self.assertIsNotNone(
                         failure,
-                        "validate_surface_contract() must reject non-exact v17 server edge field sets",
+                        "validate_surface_contract() must reject non-exact v18 server edge field sets",
                     )
 
-    def test_completion_timeline_v17_rejects_non_exact_query_bundle_stage_names(self) -> None:
+    def test_completion_timeline_v18_rejects_non_exact_query_bundle_stage_names(self) -> None:
         module = self.load_script_module()
 
-        with tempfile.TemporaryDirectory(prefix="versioned-contracts-v17-query-bundle-stage-names-") as tmp_dir:
+        with tempfile.TemporaryDirectory(prefix="versioned-contracts-v18-query-bundle-stage-names-") as tmp_dir:
             surface_dir = Path(tmp_dir) / "lsp-completion-timeline"
             shutil.copytree(
                 self.REPO_ROOT / "contracts" / "lsp-completion-timeline",
                 surface_dir,
             )
-            contract_path = surface_dir / "v17" / "contract.json"
+            contract_path = surface_dir / "v18" / "contract.json"
             payload = json.loads(contract_path.read_text(encoding="utf-8"))
             payload["response"]["query_bundle_stage_names"] = [
                 "query_bundle_pool_wait",
@@ -159,7 +163,7 @@ class VersionedContractsScriptTest(unittest.TestCase):
             failure = self.validate_surface_failure_message(module, surface_dir)
             self.assertIsNotNone(
                 failure,
-                "validate_surface_contract() must reject non-exact v17 query_bundle_stage_names",
+                "validate_surface_contract() must reject non-exact v18 query_bundle_stage_names",
             )
 
 

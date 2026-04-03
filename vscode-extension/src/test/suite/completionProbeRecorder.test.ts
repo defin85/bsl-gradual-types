@@ -242,7 +242,8 @@ suite('Completion Probe Recorder Test Suite', () => {
         recorder.recordTextEditorSelectionChanged(createEditor(documentV8, 'Документы.Н'.length));
 
         nowMs += 17;
-        recorder.recordCompletionLspResponseReceived(token.token, nowMs);
+        recorder.recordCompletionRawTransportResponseReceived('probe-1', nowMs - 3);
+        recorder.recordCompletionLspResponseResolved(token.token, nowMs);
 
         nowMs += 5;
         recorder.recordCompletionOutcome({
@@ -267,6 +268,8 @@ suite('Completion Probe Recorder Test Suite', () => {
         assert.strictEqual(snapshot[0].document_version, 7);
         assert.strictEqual(snapshot[0].document_version_at_terminal, 8);
         assert.strictEqual(snapshot[0].lsp_request_started_at_ms, 1_700_000_002_003);
+        assert.strictEqual(snapshot[0].transport_response_receive_state, 'observed');
+        assert.strictEqual(snapshot[0].transport_response_received_at_ms, 1_700_000_002_027);
         assert.strictEqual(snapshot[0].lsp_response_received_at_ms, 1_700_000_002_030);
         assert.strictEqual(snapshot[0].result_kind, 'empty_list');
         assert.strictEqual(snapshot[0].item_count_bucket, '0');

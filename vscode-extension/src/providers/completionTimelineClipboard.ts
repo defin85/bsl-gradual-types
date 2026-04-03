@@ -7,6 +7,7 @@ import {
 } from './completionTimelineModel';
 import {
     buildCompletionTraceBottleneckVerdicts,
+    deriveCompletionTracePostResponseSplit,
     formatDispatcherAttributionTrace,
     formatExactArtifactPollTrace,
     formatExactWaitTrace,
@@ -194,6 +195,46 @@ export function formatCompletionTimelineTraceForClipboard(
             );
         }
         lines.push(detailsBits.join(' | '));
+    }
+    const postResponseSplit = deriveCompletionTracePostResponseSplit(
+        trace,
+        trace.correlated_probe,
+    );
+    const postResponseBits: string[] = [];
+    if (typeof postResponseSplit.client_to_transport_wait_ms === 'number') {
+        postResponseBits.push(
+            `client_to_transport_wait_ms=${postResponseSplit.client_to_transport_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_ready_to_flush_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_ready_to_flush_wait_ms=${postResponseSplit.response_ready_to_flush_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.transport_to_client_receive_wait_ms === 'number') {
+        postResponseBits.push(
+            `transport_to_client_receive_wait_ms=${postResponseSplit.transport_to_client_receive_wait_ms}`
+        );
+    } else if (postResponseSplit.raw_transport_receive_state === 'unavailable') {
+        postResponseBits.push('transport_to_client_receive_wait_ms=unavailable');
+    }
+    if (typeof postResponseSplit.client_receive_to_resolve_wait_ms === 'number') {
+        postResponseBits.push(
+            `client_receive_to_resolve_wait_ms=${postResponseSplit.client_receive_to_resolve_wait_ms}`
+        );
+    } else if (postResponseSplit.raw_transport_receive_state === 'unavailable') {
+        postResponseBits.push('client_receive_to_resolve_wait_ms=unavailable');
+    }
+    if (typeof postResponseSplit.client_post_response_ms === 'number') {
+        postResponseBits.push(`client_post_response_ms=${postResponseSplit.client_post_response_ms}`);
+    }
+    if (typeof postResponseSplit.server_to_client_post_response_ms === 'number') {
+        postResponseBits.push(
+            `server_to_client_post_response_ms=${postResponseSplit.server_to_client_post_response_ms}`
+        );
+    }
+    if (postResponseBits.length > 0) {
+        lines.push(`post_response_split | ${postResponseBits.join(' | ')}`);
     }
     const bottleneckVerdicts = trace.bottleneck_verdicts
         ?? buildCompletionTraceBottleneckVerdicts(trace);
@@ -424,6 +465,9 @@ function formatServerTimelineSectionForClipboard(
     if (state.version < 20) {
         lines.push('v20 truthful grouped query-body split is unavailable by design on this payload.');
     }
+    if (state.version < 21) {
+        lines.push('v21 flush-aware post-handler egress split is unavailable by design on this payload.');
+    }
     const traces = mode === 'average'
         ? (state.average_trace
             ? [sanitizeTraceForContractVersion(state.average_trace, state.version)]
@@ -476,7 +520,21 @@ function formatClientProbeForClipboard(
         0,
         probe.lsp_request_started_at_ms - probe.request_started_at_ms
     );
-    const lspRoundtripMs = Math.max(
+    const transportRoundtripMs = probe.transport_response_receive_state === 'observed'
+        && typeof probe.transport_response_received_at_ms === 'number'
+        ? Math.max(
+            0,
+            probe.transport_response_received_at_ms - probe.lsp_request_started_at_ms
+        )
+        : undefined;
+    const clientReceiveToResolveWaitMs = probe.transport_response_receive_state === 'observed'
+        && typeof probe.transport_response_received_at_ms === 'number'
+        ? Math.max(
+            0,
+            probe.lsp_response_received_at_ms - probe.transport_response_received_at_ms
+        )
+        : undefined;
+    const lspResolveMs = Math.max(
         0,
         probe.lsp_response_received_at_ms - probe.lsp_request_started_at_ms
     );
@@ -484,13 +542,18 @@ function formatClientProbeForClipboard(
         0,
         probe.request_completed_at_ms - probe.lsp_response_received_at_ms
     );
+    const transportReceiveTrace = probe.transport_response_receive_state === 'observed'
+        && typeof probe.transport_response_received_at_ms === 'number'
+        ? `transport_response_received_at_ms=${probe.transport_response_received_at_ms}`
+        : 'transport_response_received_at_ms=unavailable';
 
     return [
         `${probe.probe_id} (${probe.trigger_mode})`,
         `started=${new Date(probe.request_started_at_ms).toLocaleTimeString()} | uri=${probe.uri} | document_version=${probe.document_version} | document_version_at_terminal=${probe.document_version_at_terminal}`,
         `client_terminal_state=${probe.client_terminal_state} | client_duration=${probe.client_duration_ms}ms | cancel_reason_hint=${probe.cancel_reason_hint}${supersededBySuffix}${supersededAfterSuffix}`,
         `result_kind=${probe.result_kind} | item_count_bucket=${probe.item_count_bucket}${incompleteSuffix}`,
-        `transport_dispatch_delta_ms=${dispatchDeltaMs} | lsp_roundtrip_ms=${lspRoundtripMs} | client_post_response_ms=${postResponseMs}`,
+        `${transportReceiveTrace} | lsp_response_resolved_at_ms=${probe.lsp_response_received_at_ms} | request_completed_at_ms=${probe.request_completed_at_ms}`,
+        `transport_dispatch_delta_ms=${dispatchDeltaMs} | transport_roundtrip_ms=${transportRoundtripMs ?? 'unavailable'} | client_receive_to_resolve_wait_ms=${clientReceiveToResolveWaitMs ?? 'unavailable'} | lsp_resolve_ms=${lspResolveMs} | client_post_response_ms=${postResponseMs}`,
         `time_since_last_local_edit_ms=${probe.time_since_last_local_edit_ms} | time_since_last_did_change_sent_ms=${didChangeDelta} | did_change_count_during_probe=${probe.did_change_count_during_probe}`,
         `cursor_moved_during_probe=${probe.cursor_moved_during_probe} | active_completion_count_at_start=${probe.active_completion_count_at_start} | same_uri_probe_overlap_count=${probe.same_uri_probe_overlap_count} | newer_probe_started_before_terminal=${probe.newer_probe_started_before_terminal}`,
         `is_after_dot=${probe.is_after_dot}${triggerCharacter} | identifier_tail_length=${probe.identifier_tail_length}`,

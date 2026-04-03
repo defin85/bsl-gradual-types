@@ -17,6 +17,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             trigger_mode: 'invoked',
             request_started_at_ms: 1_700_000_000_000,
             lsp_request_started_at_ms: 1_700_000_000_005,
+            transport_response_receive_state: 'unavailable',
             lsp_response_received_at_ms: 1_700_000_000_020,
             request_completed_at_ms: 1_700_000_000_021,
             client_duration_ms: 21,
@@ -41,7 +42,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 20,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -109,6 +110,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
+                            response_flush_completed_at_ms: 1_700_000_003_172,
                             dispatch_to_request_context_wait_ms: 200,
                             adapter_to_dispatch_wait_ms: 200,
                             transport_to_service_future_wait_ms: 1200,
@@ -121,6 +123,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             method_prelude_exec_ms: 0,
                             transport_to_handler_wait_ms: 3000,
                             server_handler_exec_ms: 172,
+                            response_ready_to_flush_wait_ms: 0,
                         },
                         turn_attribution: {
                             request_file_seq: 42,
@@ -238,6 +241,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                     trigger_mode: 'invoked',
                     request_started_at_ms: 1_700_000_000_000,
                     lsp_request_started_at_ms: 1_700_000_000_000,
+                    transport_response_receive_state: 'observed',
+                    transport_response_received_at_ms: 1_700_000_003_173,
                     lsp_response_received_at_ms: 1_700_000_003_173,
                     request_completed_at_ms: 1_700_000_003_174,
                     client_duration_ms: 3174,
@@ -247,6 +252,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                     trigger_mode: 'invoked',
                     request_started_at_ms: 1_700_000_010_010,
                     lsp_request_started_at_ms: 1_700_000_010_010,
+                    transport_response_receive_state: 'observed',
+                    transport_response_received_at_ms: 1_700_000_012_997,
                     lsp_response_received_at_ms: 1_700_000_012_997,
                     request_completed_at_ms: 1_700_000_012_999,
                     client_duration_ms: 2989,
@@ -267,7 +274,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 20);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 21);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -283,6 +290,18 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.response_ready_to_flush_wait_ms,
+            0
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.transport_to_client_receive_wait_ms,
+            1
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.client_receive_to_resolve_wait_ms,
+            0
+        );
         assert.strictEqual(
             bundle.incidentReport.requests[0].transport_received_at_ms_provenance,
             'jsonrpc_dispatch_received'

@@ -10373,7 +10373,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        20
+        21
     );
     assert!(
         result
@@ -11229,6 +11229,106 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
     }
 
     drain_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_split() {
+    const FIXTURE: &str =
+        "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
+    const REQUEST_ID: i64 = 50_521;
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///completion_timeline_flush_split_fixture.bsl").expect("uri");
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: FIXTURE.to_string(),
+            },
+        })
+        .await;
+    server.sync_v2_globals().await;
+
+    let completion_position = find_utf16_position_after_marker(FIXTURE, "(Новый Массив()).");
+    let completion_response = harness
+        .send_request(
+            REQUEST_ID,
+            "textDocument/completion",
+            CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: completion_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: Some(CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some(".".to_string()),
+                }),
+            },
+        )
+        .await;
+    assert!(
+        completion_response.get("result").is_some(),
+        "completion should return a response over live transport"
+    );
+
+    let trace = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 50_522, 16).await;
+            assert_eq!(
+                timeline.get("version").and_then(|value| value.as_u64()),
+                Some(21),
+                "live transport completion timeline must expose v21 payload"
+            );
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&REQUEST_ID.to_string())
+                    && completion_timeline_server_edge_u64(
+                        trace,
+                        "response_flush_completed_at_ms",
+                    )
+                    .is_some()
+            }) {
+                break trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("live completion trace with flush split must appear in timeline");
+
+    let response_sent_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_sent_at_ms")
+            .expect("response_sent_at_ms");
+    let response_flush_completed_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_flush_completed_at_ms")
+            .expect("response_flush_completed_at_ms");
+    let response_ready_to_flush_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_ready_to_flush_wait_ms")
+            .expect("response_ready_to_flush_wait_ms");
+    assert!(
+        response_sent_at_ms <= response_flush_completed_at_ms,
+        "flush completion must not precede handler-ready boundary, trace={trace:?}"
+    );
+    assert_eq!(
+        response_ready_to_flush_wait_ms,
+        response_flush_completed_at_ms.saturating_sub(response_sent_at_ms),
+        "response_ready_to_flush_wait_ms must match handler-ready to flush delta, trace={trace:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
 }
 
 #[tokio::test]

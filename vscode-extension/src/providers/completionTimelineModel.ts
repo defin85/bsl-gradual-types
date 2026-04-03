@@ -62,7 +62,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, and v21 flush-aware post-handler egress split are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -188,6 +188,15 @@ function sanitizeServerEdgeDetailsForContract(
         const {
             adapter_read_at_ms: _adapterReadAtMs,
             adapter_to_dispatch_wait_ms: _adapterToDispatchWaitMs,
+            ...legacyDetails
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
+    }
+
+    if (contractVersion < 21) {
+        const {
+            response_flush_completed_at_ms: _responseFlushCompletedAtMs,
+            response_ready_to_flush_wait_ms: _responseReadyToFlushWaitMs,
             ...legacyDetails
         } = sanitizedDetails;
         sanitizedDetails = legacyDetails;

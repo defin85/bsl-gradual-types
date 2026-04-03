@@ -40,6 +40,8 @@ interface ActiveCompletionProbeSession {
     supersededByProbeId?: string;
     supersededAfterMs?: number;
     lspRequestStartedAtMs: number;
+    transportResponseReceiveState: 'observed' | 'unavailable';
+    transportResponseReceivedAtMs?: number;
     lspResponseReceivedAtMs: number;
 }
 
@@ -78,6 +80,7 @@ export class CompletionProbeRecorder {
     private readonly didChangeCountByUri = new Map<string, number>();
     private readonly cursorClockByUri = new Map<string, CursorClock>();
     private readonly activeSessionsByToken = new Map<vscode.CancellationToken, ActiveCompletionProbeSession>();
+    private readonly activeSessionsByProbeId = new Map<string, ActiveCompletionProbeSession>();
     private readonly activeSessionsByUri = new Map<string, ActiveCompletionProbeSession[]>();
     private nextProbeSequence = 1;
     private lastCompletedAtMs: number | undefined;
@@ -98,6 +101,7 @@ export class CompletionProbeRecorder {
         this.didChangeCountByUri.clear();
         this.cursorClockByUri.clear();
         this.activeSessionsByToken.clear();
+        this.activeSessionsByProbeId.clear();
         this.activeSessionsByUri.clear();
         this.lastCompletedAtMs = undefined;
     }
@@ -197,6 +201,8 @@ export class CompletionProbeRecorder {
             newerProbeStartedBeforeTerminal: false,
             cancelReasonHint: 'unknown',
             lspRequestStartedAtMs: requestStartedAtMs,
+            transportResponseReceiveState: 'unavailable',
+            transportResponseReceivedAtMs: undefined,
             lspResponseReceivedAtMs: requestStartedAtMs,
         };
 
@@ -214,6 +220,7 @@ export class CompletionProbeRecorder {
         }
 
         this.activeSessionsByToken.set(input.token, session);
+        this.activeSessionsByProbeId.set(session.probeId, session);
         this.activeSessionsByUri.set(documentKey, [...activeSessionsForUri, session]);
         return session.probeId;
     }
@@ -230,7 +237,20 @@ export class CompletionProbeRecorder {
         session.lspRequestStartedAtMs = clampTimestamp(timestampMs);
     }
 
-    recordCompletionLspResponseReceived(
+    recordCompletionRawTransportResponseReceived(
+        probeId: string,
+        timestampMs: number = this.now()
+    ): void {
+        const session = this.activeSessionsByProbeId.get(probeId);
+        if (!session) {
+            return;
+        }
+
+        session.transportResponseReceiveState = 'observed';
+        session.transportResponseReceivedAtMs = clampTimestamp(timestampMs);
+    }
+
+    recordCompletionLspResponseResolved(
         token: vscode.CancellationToken,
         timestampMs: number = this.now()
     ): void {
@@ -274,6 +294,10 @@ export class CompletionProbeRecorder {
             trigger_character: session?.triggerCharacter ?? input.context.triggerCharacter,
             request_started_at_ms: requestStartedAtMs,
             lsp_request_started_at_ms: session?.lspRequestStartedAtMs ?? requestStartedAtMs,
+            transport_response_receive_state:
+                session?.transportResponseReceiveState ?? 'unavailable',
+            transport_response_received_at_ms:
+                session?.transportResponseReceivedAtMs,
             lsp_response_received_at_ms:
                 session?.lspResponseReceivedAtMs ?? requestCompletedAtMs,
             request_completed_at_ms: requestCompletedAtMs,
@@ -320,6 +344,7 @@ export class CompletionProbeRecorder {
             this.activeSessionsByToken.delete(input.token);
         }
         if (session) {
+            this.activeSessionsByProbeId.delete(session.probeId);
             const activeSessionsForUri = this.activeSessionsByUri.get(session.documentKey) ?? [];
             const nextActiveSessions = activeSessionsForUri.filter(
                 (activeSession) => activeSession.probeId !== session.probeId

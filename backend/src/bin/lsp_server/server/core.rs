@@ -83,6 +83,29 @@ async fn record_completion_timeline_trace_inner(
     }
 }
 
+async fn record_completion_response_flush_completed_at_ms_inner(
+    traces: &Mutex<VecDeque<crate::types::CompletionTimelineTrace>>,
+    request_id: &str,
+    response_flush_completed_at_ms: u64,
+) {
+    let mut traces = traces.lock().await;
+    let Some(trace) = traces
+        .iter_mut()
+        .rfind(|trace| trace.request_id.as_deref() == Some(request_id))
+    else {
+        return;
+    };
+    let Some(server_edge_details) = trace.server_edge_details.as_mut() else {
+        return;
+    };
+    if server_edge_details.response_flush_completed_at_ms.is_none() {
+        server_edge_details.response_flush_completed_at_ms = Some(response_flush_completed_at_ms);
+        server_edge_details.response_ready_to_flush_wait_ms = Some(
+            response_flush_completed_at_ms.saturating_sub(server_edge_details.response_sent_at_ms),
+        );
+    }
+}
+
 fn build_pre_dispatch_terminal_completion_trace(
     input: super::request_context::PreDispatchCompletionTerminalTraceInput,
     trace_id: String,
@@ -313,6 +336,21 @@ impl BslLanguageServer {
                     )
                     .await;
                     coordinator.record_intellisense_v2_completion_outcome(&public_outcome);
+                });
+            },
+        )));
+
+        let completion_timeline_traces_for_flush_hook = completion_timeline_traces.clone();
+        super::request_context::set_completion_response_flush_hook(Some(Arc::new(
+            move |request_id, response_flush_completed_at_ms| {
+                let completion_timeline_traces = completion_timeline_traces_for_flush_hook.clone();
+                tokio::spawn(async move {
+                    record_completion_response_flush_completed_at_ms_inner(
+                        completion_timeline_traces.as_ref(),
+                        request_id.as_str(),
+                        response_flush_completed_at_ms,
+                    )
+                    .await;
                 });
             },
         )));

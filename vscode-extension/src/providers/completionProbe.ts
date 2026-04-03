@@ -32,6 +32,7 @@ export type CompletionProbeItemCountBucket =
     | '21_plus';
 
 export type CompletionProbeDidChangeDeltaMs = number | 'unknown';
+export type CompletionProbeTransportReceiveState = 'observed' | 'unavailable';
 
 export interface CompletionProbeInput {
     probe_id: string;
@@ -42,6 +43,8 @@ export interface CompletionProbeInput {
     trigger_character?: string | null;
     request_started_at_ms: number;
     lsp_request_started_at_ms: number;
+    transport_response_receive_state: CompletionProbeTransportReceiveState;
+    transport_response_received_at_ms?: number | null;
     lsp_response_received_at_ms: number;
     request_completed_at_ms: number;
     client_terminal_state: CompletionProbeTerminalState;
@@ -71,6 +74,8 @@ export interface CompletionProbe {
     trigger_character?: string;
     request_started_at_ms: number;
     lsp_request_started_at_ms: number;
+    transport_response_receive_state: CompletionProbeTransportReceiveState;
+    transport_response_received_at_ms?: number;
     lsp_response_received_at_ms: number;
     request_completed_at_ms: number;
     client_duration_ms: number;
@@ -106,6 +111,9 @@ export function buildCompletionProbe(input: CompletionProbeInput): CompletionPro
         trigger_mode: input.trigger_mode,
         request_started_at_ms: requestStartedAtMs,
         lsp_request_started_at_ms: lspRequestStartedAtMs,
+        transport_response_receive_state: sanitizeTransportReceiveState(
+            input.transport_response_receive_state
+        ),
         lsp_response_received_at_ms: lspResponseReceivedAtMs,
         request_completed_at_ms: requestCompletedAtMs,
         client_duration_ms: Math.max(0, requestCompletedAtMs - requestStartedAtMs),
@@ -136,6 +144,12 @@ export function buildCompletionProbe(input: CompletionProbeInput): CompletionPro
 
     if (typeof input.is_incomplete === 'boolean') {
         probe.is_incomplete = input.is_incomplete;
+    }
+
+    if (typeof input.transport_response_received_at_ms === 'number') {
+        probe.transport_response_received_at_ms = clampNonNegativeInteger(
+            input.transport_response_received_at_ms
+        );
     }
 
     if (typeof input.superseded_by_probe_id === 'string' && input.superseded_by_probe_id.length > 0) {
@@ -171,6 +185,12 @@ function sanitizeTriggerCharacter(value?: string | null): string | undefined {
         return undefined;
     }
     return value.slice(0, COMPLETION_PROBE_MAX_TRIGGER_CHARACTER_LENGTH);
+}
+
+function sanitizeTransportReceiveState(
+    value: CompletionProbeTransportReceiveState
+): CompletionProbeTransportReceiveState {
+    return value === 'observed' ? value : 'unavailable';
 }
 
 function sanitizeProbeId(value: string): string {

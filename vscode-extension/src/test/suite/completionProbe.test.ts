@@ -16,6 +16,8 @@ suite('Completion Probe Schema Test Suite', () => {
             trigger_character: '::very-long-trigger::',
             request_started_at_ms: 1_700_000_000_000,
             lsp_request_started_at_ms: 1_700_000_000_003,
+            transport_response_receive_state: 'observed',
+            transport_response_received_at_ms: 1_700_000_000_118,
             lsp_response_received_at_ms: 1_700_000_000_120,
             request_completed_at_ms: 1_700_000_000_125,
             client_terminal_state: 'ok_non_empty',
@@ -64,6 +66,8 @@ suite('Completion Probe Schema Test Suite', () => {
             'superseded_by_probe_id',
             'time_since_last_did_change_sent_ms',
             'time_since_last_local_edit_ms',
+            'transport_response_receive_state',
+            'transport_response_received_at_ms',
             'trigger_character',
             'trigger_mode',
             'uri',
@@ -84,6 +88,7 @@ suite('Completion Probe Schema Test Suite', () => {
             trigger_mode: 'invoked',
             request_started_at_ms: 1_700_000_000_250,
             lsp_request_started_at_ms: 1_700_000_000_240,
+            transport_response_receive_state: 'unavailable',
             lsp_response_received_at_ms: Number.NaN,
             request_completed_at_ms: 1_700_000_000_200,
             client_terminal_state: 'cancelled',
@@ -106,6 +111,7 @@ suite('Completion Probe Schema Test Suite', () => {
         assert.strictEqual(probe.document_version_at_terminal, 0);
         assert.strictEqual(probe.client_duration_ms, 0);
         assert.strictEqual(probe.lsp_request_started_at_ms, 1_700_000_000_240);
+        assert.strictEqual(probe.transport_response_receive_state, 'unavailable');
         assert.strictEqual(probe.lsp_response_received_at_ms, 0);
         assert.strictEqual(probe.time_since_last_local_edit_ms, 0);
         assert.strictEqual(probe.time_since_last_did_change_sent_ms, 0);
@@ -128,6 +134,7 @@ suite('Completion Probe Schema Test Suite', () => {
             trigger_mode: 'trigger_for_incomplete_completions',
             request_started_at_ms: 1_700_000_000_500,
             lsp_request_started_at_ms: 1_700_000_000_510,
+            transport_response_receive_state: 'unavailable',
             lsp_response_received_at_ms: 1_700_000_000_560,
             request_completed_at_ms: 1_700_000_000_580,
             client_terminal_state: 'ok_empty',

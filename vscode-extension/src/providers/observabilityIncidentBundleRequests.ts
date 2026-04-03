@@ -16,6 +16,7 @@ import { CompletionProbe, CompletionProbeTerminalState } from './completionProbe
 import {
     CompletionTraceClientIngressSupplement,
     buildCompletionTraceBottleneckVerdicts,
+    deriveCompletionTracePostResponseSplit,
 } from './completionTimelineDrilldown';
 
 const PROBE_TRACE_RESPONSE_MATCH_WINDOW_MS = 5;
@@ -42,7 +43,12 @@ export interface ObservabilityIncidentClientCorrelation {
     client_duration_ms?: number;
     client_terminal_state?: CompletionProbeTerminalState;
     client_to_transport_wait_ms?: number;
+    response_ready_to_flush_wait_ms?: number;
+    transport_to_client_receive_wait_ms?: number;
+    client_receive_to_resolve_wait_ms?: number;
+    client_post_response_ms?: number;
     server_to_client_post_response_ms?: number;
+    raw_transport_receive_state?: 'observed' | 'unavailable';
 }
 
 export interface ObservabilityIncidentExactDeadlineSummary {
@@ -85,6 +91,7 @@ export interface ObservabilityIncidentRequestSummary {
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     server_handler_exec_ms?: number;
+    response_ready_to_flush_wait_ms?: number;
     bottleneck_verdicts: string[];
     prepare_timeout?: CompletionTimelinePrepareTimeoutAttributionTrace;
     snapshot_with_deps_timeout_runtime?: CompletionTimelinePrepareRuntimeTrace;
@@ -220,6 +227,8 @@ export function buildObservabilityIncidentRequestSection(
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
+            response_ready_to_flush_wait_ms:
+                trace.server_edge_details?.response_ready_to_flush_wait_ms,
             bottleneck_verdicts: buildCompletionTraceBottleneckVerdicts(
                 trace,
                 asClientIngressSupplement(clientCorrelation)
@@ -237,6 +246,17 @@ export function buildObservabilityIncidentRequestSection(
             client_correlation: clientCorrelation,
         };
     });
+
+    const correlatedLegacyReceiveCount = requests.filter(
+        (request) =>
+            request.client_correlation.status === 'correlated'
+            && request.client_correlation.raw_transport_receive_state === 'unavailable'
+    ).length;
+    if (correlatedLegacyReceiveCount > 0) {
+        gaps.push(
+            `Raw transport receive boundary is unavailable for ${correlatedLegacyReceiveCount} correlated completion trace(s); transport_to_client_receive_wait_ms and client_receive_to_resolve_wait_ms are unavailable by design on legacy probe paths.`
+        );
+    }
 
     return {
         captureScope,
@@ -370,6 +390,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.server_handler_exec_ms === 'number'
                 ? `server_handler_exec_ms=${request.server_handler_exec_ms}`
+                : undefined,
+            typeof request.response_ready_to_flush_wait_ms === 'number'
+                ? `response_ready_to_flush_wait_ms=${request.response_ready_to_flush_wait_ms}`
                 : undefined,
             formatSnapshotTimeoutRuntimeForSummary(request.snapshot_with_deps_timeout_runtime),
             formatCorrelationForSummary(request.client_correlation),
@@ -530,36 +553,60 @@ function buildCorrelatedProbe(
     trace: CompletionTimelineTrace,
     probe: CompletionProbe
 ): ObservabilityIncidentClientCorrelation {
-    const serverEdgeDetails = trace.server_edge_details;
-    if (!serverEdgeDetails) {
+    if (!trace.server_edge_details) {
         return {
             status: 'unavailable',
             reason: 'missing_server_edge',
         };
     }
-    const serverIngressAtMs = typeof serverEdgeDetails.adapter_read_at_ms === 'number'
-        ? serverEdgeDetails.adapter_read_at_ms
-        : serverEdgeDetails.transport_received_at_ms;
+    const postResponseSplit = deriveCompletionTracePostResponseSplit(trace, probe);
     return {
         status: 'correlated',
         probe_id: probe.probe_id,
         client_duration_ms: probe.client_duration_ms,
         client_terminal_state: probe.client_terminal_state,
-        client_to_transport_wait_ms: Math.max(
-            0,
-            serverIngressAtMs - probe.lsp_request_started_at_ms
-        ),
-        server_to_client_post_response_ms: Math.max(
-            0,
-            probe.request_completed_at_ms - serverEdgeDetails.response_sent_at_ms
-        ),
+        client_to_transport_wait_ms: postResponseSplit.client_to_transport_wait_ms,
+        response_ready_to_flush_wait_ms: postResponseSplit.response_ready_to_flush_wait_ms,
+        transport_to_client_receive_wait_ms:
+            postResponseSplit.transport_to_client_receive_wait_ms,
+        client_receive_to_resolve_wait_ms:
+            postResponseSplit.client_receive_to_resolve_wait_ms,
+        client_post_response_ms: postResponseSplit.client_post_response_ms,
+        server_to_client_post_response_ms:
+            postResponseSplit.server_to_client_post_response_ms,
+        raw_transport_receive_state: postResponseSplit.raw_transport_receive_state,
     };
 }
 
 function formatCorrelationForSummary(correlation: ObservabilityIncidentClientCorrelation): string {
     switch (correlation.status) {
         case 'correlated':
-            return `correlation=correlated:${correlation.probe_id}`;
+            return [
+                `correlation=correlated:${correlation.probe_id}`,
+                typeof correlation.client_to_transport_wait_ms === 'number'
+                    ? `client_to_transport_wait_ms=${correlation.client_to_transport_wait_ms}`
+                    : undefined,
+                typeof correlation.response_ready_to_flush_wait_ms === 'number'
+                    ? `response_ready_to_flush_wait_ms=${correlation.response_ready_to_flush_wait_ms}`
+                    : undefined,
+                correlation.raw_transport_receive_state
+                    ? `transport_receive_state=${correlation.raw_transport_receive_state}`
+                    : undefined,
+                typeof correlation.transport_to_client_receive_wait_ms === 'number'
+                    ? `transport_to_client_receive_wait_ms=${correlation.transport_to_client_receive_wait_ms}`
+                    : undefined,
+                typeof correlation.client_receive_to_resolve_wait_ms === 'number'
+                    ? `client_receive_to_resolve_wait_ms=${correlation.client_receive_to_resolve_wait_ms}`
+                    : undefined,
+                typeof correlation.client_post_response_ms === 'number'
+                    ? `client_post_response_ms=${correlation.client_post_response_ms}`
+                    : undefined,
+                typeof correlation.server_to_client_post_response_ms === 'number'
+                    ? `server_to_client_post_response_ms=${correlation.server_to_client_post_response_ms}`
+                    : undefined,
+            ]
+                .filter((value): value is string => Boolean(value))
+                .join('|');
         case 'ambiguous':
             return `correlation=ambiguous:${correlation.reason}`;
         default:

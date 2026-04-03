@@ -16,6 +16,7 @@ import { updateStatusBar, updateLspStatus } from '../progress';
 import { buildServerOptions } from './server-options';
 import { buildClientOptions } from './client-options';
 import {
+    CompletionProbeLanguageClient,
     instrumentCompletionProbeTransport,
     registerCompletionProbeSelectionObserver,
 } from './completionProbeRuntime';
@@ -37,7 +38,7 @@ function StateToString(state: State): string {
 }
 
 /** Текущий LSP клиент */
-let client: LanguageClient | null = null;
+let client: CompletionProbeLanguageClient | null = null;
 let completionTriggerWarningShown = false;
 let completionProbeSelectionDisposable: vscode.Disposable | undefined;
 
@@ -105,11 +106,12 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     }
 
     // Create the language client
-    client = new LanguageClient(
+    client = new CompletionProbeLanguageClient(
         'bslAnalyzer',
         'BSL Type Safety Analyzer',
         serverOptions,
-        clientOptions
+        clientOptions,
+        completionProbeRecorder,
     );
     instrumentCompletionProbeTransport(client as unknown as { sendRequest: (...args: any[]) => Promise<unknown> }, completionProbeRecorder);
     completionProbeSelectionDisposable?.dispose();

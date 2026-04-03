@@ -17,6 +17,8 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
         trigger_character: '.',
         request_started_at_ms: startedAtMs,
         lsp_request_started_at_ms: startedAtMs + 1,
+        transport_response_receive_state: 'observed',
+        transport_response_received_at_ms: startedAtMs + 3,
         lsp_response_received_at_ms: startedAtMs + 4,
         request_completed_at_ms: startedAtMs + 5,
         client_duration_ms: 5,
@@ -42,7 +44,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 20,
+            version: 21,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -182,7 +184,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 20);
+        assert.strictEqual(state.version, 21);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
@@ -869,7 +871,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, and v19 adapter ingress pre-dispatch split are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, and v21 flush-aware post-handler egress split are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

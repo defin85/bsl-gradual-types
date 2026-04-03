@@ -588,9 +588,19 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                     let Some(message) = maybe_message else {
                         break;
                     };
+                    let response_request_id = match &message {
+                        TransportMessage::Response(response) => request_id_from_response(response),
+                        TransportMessage::Request(_) => None,
+                    };
                     if let Err(err) = write_transport_message(&mut stdout, &message).await {
                         error!("failed to encode message: {err}");
                         break;
+                    }
+                    if let Some(request_id) = response_request_id {
+                        super::request_context::notify_completion_response_flush_completed(
+                            request_id,
+                            super::unix_timestamp_ms(),
+                        );
                     }
                 }
             }
@@ -823,6 +833,14 @@ fn cancelled_request_id_from_request(request: &Request) -> Option<String> {
             .map(|id| id.to_string())
             .or_else(|| value.as_str().map(ToString::to_string))
     })
+}
+
+fn request_id_from_response(response: &Response) -> Option<String> {
+    match response.id() {
+        Id::Number(value) => Some(value.to_string()),
+        Id::String(value) => Some(value.clone()),
+        Id::Null => None,
+    }
 }
 
 fn request_text_document_uri(request: &Request) -> Option<&str> {

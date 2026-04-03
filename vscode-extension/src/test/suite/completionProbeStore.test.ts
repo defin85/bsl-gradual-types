@@ -14,6 +14,7 @@ function makeProbe(id: string, version: number) {
         trigger_mode: 'invoked',
         request_started_at_ms: 1_700_000_000_000 + version,
         lsp_request_started_at_ms: 1_700_000_000_001 + version,
+        transport_response_receive_state: 'unavailable',
         lsp_response_received_at_ms: 1_700_000_000_009 + version,
         request_completed_at_ms: 1_700_000_000_010 + version,
         client_terminal_state: 'ok_non_empty',

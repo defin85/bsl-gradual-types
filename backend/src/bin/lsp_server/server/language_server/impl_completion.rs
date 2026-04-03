@@ -330,6 +330,7 @@ struct CompletionTimelineCapture {
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
     response_sent_at_ms: Option<u64>,
+    response_flush_completed_at_ms: Option<u64>,
     cancel_observed_at_ms: Option<u64>,
     timeline_cursor_ms: u64,
     prepare_details: Option<crate::types::CompletionTimelinePrepareDetailsTrace>,
@@ -376,6 +377,7 @@ impl CompletionTimelineCapture {
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
             response_sent_at_ms: None,
+            response_flush_completed_at_ms: None,
             cancel_observed_at_ms: None,
             timeline_cursor_ms: 0,
             prepare_details: None,
@@ -630,6 +632,11 @@ impl CompletionTimelineCapture {
         self.response_sent_at_ms = Some(response_sent_at_ms);
     }
 
+    #[cfg(test)]
+    fn set_response_flush_completed_at_ms(&mut self, response_flush_completed_at_ms: u64) {
+        self.response_flush_completed_at_ms = Some(response_flush_completed_at_ms);
+    }
+
     fn observe_cancel_at_ms(&mut self, cancel_observed_at_ms: u64) {
         if self.cancel_observed_at_ms.is_none() {
             self.cancel_observed_at_ms = Some(cancel_observed_at_ms);
@@ -662,6 +669,7 @@ impl CompletionTimelineCapture {
                 method_entered_at_ms: self.method_entered_at_ms,
                 handler_entered_at_ms: self.handler_entered_at_ms,
                 response_sent_at_ms: self.response_sent_at_ms,
+                response_flush_completed_at_ms: self.response_flush_completed_at_ms,
                 cancel_observed_at_ms: self.cancel_observed_at_ms,
             },
         )
@@ -4089,6 +4097,31 @@ mod tests {
         assert_eq!(details.server_handler_exec_ms, 30);
         assert_eq!(details.cancel_observed_at_ms, Some(1_700_000_000_012));
         assert_eq!(details.cancel_observed_after_handler_enter_ms, Some(12));
+    }
+
+    #[test]
+    fn server_edge_details_publish_flush_completion_split_when_present() {
+        let mut capture = sample_capture();
+        capture.set_transport_received_at_ms(1_699_999_999_995);
+        capture.set_transport_received_at_ms_provenance("request_context_call_entry");
+        capture.set_handler_entered_at_ms(1_700_000_000_000);
+        capture.set_response_sent_at_ms(1_700_000_000_030);
+        capture.set_response_flush_completed_at_ms(1_700_000_000_037);
+
+        let trace = capture.into_trace(
+            "trace-response-flush-split".to_string(),
+            std::time::Duration::from_millis(37),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+        assert_eq!(
+            details.response_flush_completed_at_ms,
+            Some(1_700_000_000_037)
+        );
+        assert_eq!(details.response_ready_to_flush_wait_ms, Some(7));
+        assert_eq!(details.response_sent_at_ms, 1_700_000_000_030);
     }
 
     #[test]

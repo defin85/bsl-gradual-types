@@ -152,6 +152,11 @@ function buildCompletionTimelineSource(
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
     if (completionTimeline.kind === 'ok') {
+        if (completionTimeline.response.version < 20) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include truthful v20 grouped query-body split; detailed query-body breakdown is unavailable by design.`
+            );
+        }
         if (completionTimeline.response.version < 7) {
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include all v7 pre-method and snapshot overshoot attribution fields; those facts are unavailable by design.`
@@ -318,6 +323,11 @@ function deriveFindings(
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
+        if (input.completionTimeline.response.version < 20) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but truthful v20 grouped query-body split is unavailable by design.`
+            );
+        }
         if (input.completionTimeline.response.version < 7) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v7 pre-method and snapshot overshoot attribution details are unavailable by design.`
@@ -382,6 +392,30 @@ function deriveFindings(
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but v19 adapter ingress pre-dispatch split is unavailable by design.`
             );
+        }
+        const queryBundleDominantCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('query_bundle_dominant')
+        ).length;
+        if (queryBundleDominantCount > 0) {
+            findings.push(
+                `authoritative query-body dominance was observed in ${queryBundleDominantCount} completion trace(s).`
+            );
+        }
+        const queryBundleLeafFindings: Array<[string, string]> = [
+            ['query_bundle_pool_wait_dominant', 'bounded blocking pool wait'],
+            ['query_bundle_deps_and_file_snapshot_dominant', 'query-body deps/file snapshot work'],
+            ['query_bundle_owner_hint_dominant', 'query-body owner-hint work'],
+            ['query_bundle_ir_query_dominant', 'query-body IR query work'],
+            ['query_bundle_ir_retry_dominant', 'query-body IR retry work'],
+            ['query_bundle_other_dominant', 'unclassified query-body remainder'],
+        ];
+        for (const [verdict, label] of queryBundleLeafFindings) {
+            const count = requestSection.requests.filter((request) =>
+                request.bottleneck_verdicts.includes(verdict)
+            ).length;
+            if (count > 0) {
+                findings.push(`${label} dominated ${count} completion trace(s).`);
+            }
         }
         const adapterBeforeDispatchCount = requestSection.requests.filter((request) =>
             request.bottleneck_verdicts.includes('adapter_before_dispatch_dominant')

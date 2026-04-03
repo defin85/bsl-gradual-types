@@ -621,6 +621,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 sync_globals: 'Синхронизация глобального состояния и зависимостей перед анализом.',
                 prepare_stateful: 'Подготовка stateful snapshot и runtime-контекста для completion.',
                 query_bundle: 'Основной запросный блок: чтение snapshot/IR и сбор контекста.',
+                query_bundle_pool_wait: 'Ожидание permit в bounded blocking runtime перед выполнением query-body.',
+                query_bundle_deps_and_file_snapshot: 'Чтение file/deps snapshot для query-body execution.',
+                query_bundle_owner_hint: 'Построение grouped owner-hint attribution внутри query-body.',
+                query_bundle_ir_query: 'Основной IR query внутри query-body.',
+                query_bundle_ir_retry: 'Повтор IR query после transient cancellation race.',
+                query_bundle_other: 'Оставшееся bounded query-body время вне canonical grouped leaves.',
                 snapshot_read: 'Чтение snapshot данных для completion pipeline.',
                 collect: 'Сбор кандидатов completion из доступных источников.',
                 rank: 'Ранжирование кандидатов по релевантности.',
@@ -823,6 +829,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 12) {
                 notices.push('v12 first-poll contention attribution is unavailable by design on this payload.');
             }
+            if (contractVersion < 20) {
+                notices.push('v20 truthful grouped query-body split is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -882,79 +891,7 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
         }
 
         function buildBottleneckVerdicts(trace) {
-            const verdicts = [];
-            const adapterToDispatchWait = trace.server_edge_details?.adapter_to_dispatch_wait_ms;
-            const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
-            const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
-            const strongPreMethodAttribution =
-                trace.server_edge_details?.pre_method_attribution_provenance === 'same_request_authoritative';
-            if (
-                typeof adapterToDispatchWait === 'number' &&
-                adapterToDispatchWait > 0 &&
-                (
-                    typeof transportToMethodWait !== 'number' ||
-                    adapterToDispatchWait > transportToMethodWait
-                ) &&
-                (
-                    typeof methodPreludeExec !== 'number' ||
-                    adapterToDispatchWait > methodPreludeExec
-                )
-            ) {
-                verdicts.push('adapter_before_dispatch_dominant');
-            }
-            if (
-                typeof transportToMethodWait === 'number' &&
-                typeof methodPreludeExec === 'number'
-            ) {
-                if (
-                    strongPreMethodAttribution &&
-                    transportToMethodWait > 0 &&
-                    transportToMethodWait > methodPreludeExec &&
-                    (
-                        typeof adapterToDispatchWait !== 'number' ||
-                        transportToMethodWait > adapterToDispatchWait
-                    )
-                ) {
-                    verdicts.push('server_before_method_entry_dominant');
-                } else if (
-                    methodPreludeExec > 0 &&
-                    methodPreludeExec > transportToMethodWait &&
-                    (
-                        typeof adapterToDispatchWait !== 'number' ||
-                        methodPreludeExec > adapterToDispatchWait
-                    )
-                ) {
-                    verdicts.push('handler_prelude_dominant');
-                }
-            }
-            if (trace.prepare_details?.fail_closed_cause === 'prepare_timeout') {
-                if (trace.prepare_details.timeout_attribution?.source) {
-                    verdicts.push('prepare_timeout@' + trace.prepare_details.timeout_attribution.source);
-                } else {
-                    const prepareTimeoutSubphase = derivePrepareTimeoutSubphase(trace.prepare_details);
-                    if (prepareTimeoutSubphase) {
-                        verdicts.push('prepare_timeout@' + prepareTimeoutSubphase);
-                    }
-                }
-            }
-            if (trace.prepare_details?.fail_closed_cause === 'exact_deadline') {
-                if (trace.prepare_details.exact_wait?.artifact_poll) {
-                    verdicts.push('exact_deadline@artifact_poll');
-                } else {
-                    const exactWait = trace.prepare_details.exact_wait;
-                    let suffix = 'task_state=unavailable';
-                    if (exactWait?.matching_task_state && exactWait?.task_phase) {
-                        suffix = 'task_state=' + exactWait.matching_task_state + ':' + exactWait.task_phase;
-                    } else if (exactWait?.matching_task_state) {
-                        suffix = 'task_state=' + exactWait.matching_task_state;
-                    }
-                    if (exactWait?.type_index_waiter_action) {
-                        suffix = 'waiter_action=' + exactWait.type_index_waiter_action + ' | ' + suffix;
-                    }
-                    verdicts.push('exact_deadline | ' + suffix);
-                }
-            }
-            return verdicts;
+            return Array.isArray(trace.bottleneck_verdicts) ? trace.bottleneck_verdicts : [];
         }
 
         function renderPrepareDetails(trace) {
@@ -1329,6 +1266,8 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                                 ? ' | v11 first-poll / first-wake split unavailable by design'
                                 : state.version < 12
                                     ? ' | v12 first-poll contention attribution unavailable by design'
+                                    : state.version < 20
+                                        ? ' | v20 query-body split unavailable by design'
                                 : '');
             }
         }

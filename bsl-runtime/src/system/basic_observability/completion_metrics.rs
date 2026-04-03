@@ -23,6 +23,7 @@ impl BasicObservability {
                 "completion_stage_exact_wait_apply_age_at_terminal_ms"
             }
             "query_bundle" => "completion_stage_query_bundle_ms",
+            "query_bundle_pool_wait" => "completion_stage_query_bundle_pool_wait_ms",
             "query_bundle_owner_hint" => "completion_stage_query_bundle_owner_hint_ms",
             "query_bundle_owner_hint_extract" => {
                 "completion_stage_query_bundle_owner_hint_extract_ms"
@@ -143,7 +144,10 @@ impl BasicObservability {
             }
             "query_bundle_deps_and_file_snapshot" => {
                 "completion_stage_query_bundle_deps_and_file_snapshot_ms"
-            },
+            }
+            "query_bundle_ir_query" => "completion_stage_query_bundle_ir_query_ms",
+            "query_bundle_ir_retry" => "completion_stage_query_bundle_ir_retry_ms",
+            "query_bundle_other" => "completion_stage_query_bundle_other_ms",
             "transport_to_handler_wait" => "completion_stage_transport_to_handler_wait_ms",
             "server_handler_exec" => "completion_stage_server_handler_exec_ms",
             "cancel_observed_after_handler_enter" => {

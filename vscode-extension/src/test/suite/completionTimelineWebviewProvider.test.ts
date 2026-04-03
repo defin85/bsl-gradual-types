@@ -155,10 +155,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,
@@ -250,7 +250,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 19,
+                version: 20,
                 traces: [
                     {
                         trace_id: 'trace-quiet',
@@ -260,10 +260,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,
@@ -381,7 +381,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 19,
+                version: 20,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -391,7 +391,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         server_edge_details: {
                             adapter_read_at_ms: 1_699_999_999_996,
                             transport_received_at_ms: 1_700_000_000_000,
@@ -473,7 +473,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         },
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,
@@ -519,7 +519,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const clipboardPayload = clipboardStub.firstCall.args[0];
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=all'));
         assert.ok(clipboardPayload.includes('Server Timeline'));
-        assert.ok(clipboardPayload.includes('contract=v19'));
+        assert.ok(clipboardPayload.includes('contract=v20'));
         assert.ok(clipboardPayload.includes('trace-copy (invoked)'));
         assert.ok(clipboardPayload.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(clipboardPayload.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -549,7 +549,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('slot_release_to_response_wait_ms=14'));
         assert.ok(clipboardPayload.includes('transport_to_handler_wait_ms=9'));
         assert.ok(clipboardPayload.includes('server_handler_exec_ms=7'));
-        assert.ok(clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=query_bundle_dominant'));
+        assert.ok(clipboardPayload.includes('bottleneck_verdict=query_bundle_ir_query_dominant'));
+        assert.ok(!clipboardPayload.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(clipboardPayload.includes('bottleneck_verdict=prepare_timeout@prepare_guard'));
         assert.ok(
             clipboardPayload.includes(
@@ -581,7 +583,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         const timelinePayload: CompletionTimelineFetchResult = {
             kind: 'ok',
             response: {
-                version: 19,
+                version: 20,
                 traces: [
                     {
                         trace_id: 'trace-copy',
@@ -591,7 +593,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         server_edge_details: {
                             adapter_read_at_ms: 1_699_999_999_996,
                             transport_received_at_ms: 1_700_000_000_000,
@@ -654,7 +656,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         },
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,
@@ -783,10 +785,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,
@@ -885,7 +887,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                     total_duration_ms: 10,
                     max_stage_end_ms: 10,
                     unattributed_overhead_ms: 0,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_000,
                         service_future_created_at_ms: 1_700_000_000_001,
@@ -905,7 +907,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                     },
                     stages: [
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 0,
                             end_offset_ms: 10,
@@ -937,6 +939,81 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         onDidChangeVisibilityEmitter.dispose();
     });
 
+    test('inline webview script should mark v19 payload as missing v20 query-body split by design', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: false,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+
+        const rendered = renderTimelineStateInInlineWebview(webview.html, {
+            kind: 'ready',
+            version: 19,
+            updated_at_ms: 1_700_000_000_100,
+            traces: [
+                {
+                    trace_id: 'trace-v19',
+                    request_id: 'req-v19',
+                    uri: 'file:///tmp/v19.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_000,
+                    total_duration_ms: 10,
+                    max_stage_end_ms: 10,
+                    unattributed_overhead_ms: 0,
+                    dominant_stage: 'query_bundle',
+                    stages: [
+                        {
+                            name: 'query_bundle',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            end_offset_ms: 10,
+                            duration_ms: 10,
+                            width_percent: 100,
+                            duration_percent: 100,
+                            is_dominant: true,
+                        },
+                    ],
+                },
+            ],
+            average_trace: null,
+            client_probe_feed: {
+                updated_at_ms: 1_700_000_000_100,
+                probes: [],
+            },
+        });
+
+        assert.ok(
+            rendered.serverHtml.includes(
+                'v20 truthful grouped query-body split is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(rendered.serverHtml.includes('query_bundle'));
+        assert.ok(!rendered.serverHtml.includes('query_bundle_ir_query_dominant'));
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
     test('exportBundle message should execute shared export command', async () => {
         const customRequestsModule = await import('../../lsp/customRequests');
         const timelinePayload: CompletionTimelineFetchResult = {
@@ -952,10 +1029,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         outcome: 'ok_non_empty',
                         started_at_ms: 1_700_000_000_000,
                         total_duration_ms: 10,
-                        dominant_stage: 'query_bundle',
+                        dominant_stage: 'query_bundle_ir_query',
                         stages: [
                             {
-                                name: 'query_bundle',
+                                name: 'query_bundle_ir_query',
                                 status: 'completed',
                                 started_offset_ms: 0,
                                 duration_ms: 10,

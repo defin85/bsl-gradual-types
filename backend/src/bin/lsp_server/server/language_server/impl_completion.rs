@@ -19,6 +19,99 @@ impl CompletionTimelineStageStatus {
     }
 }
 
+fn completion_timeline_stage_status_from_outcome(outcome: &str) -> CompletionTimelineStageStatus {
+    match outcome {
+        "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
+        "fail_closed" | "handler_error" => CompletionTimelineStageStatus::Failed,
+        "skipped" => CompletionTimelineStageStatus::Skipped,
+        _ => CompletionTimelineStageStatus::Completed,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QueryBundleStageName {
+    PoolWait,
+    DepsAndFileSnapshot,
+    OwnerHint,
+    IrQuery,
+    IrRetry,
+    Other,
+}
+
+impl QueryBundleStageName {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::PoolWait => "query_bundle_pool_wait",
+            Self::DepsAndFileSnapshot => "query_bundle_deps_and_file_snapshot",
+            Self::OwnerHint => "query_bundle_owner_hint",
+            Self::IrQuery => "query_bundle_ir_query",
+            Self::IrRetry => "query_bundle_ir_retry",
+            Self::Other => "query_bundle_other",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct QueryBundleStageSample {
+    name: QueryBundleStageName,
+    status: CompletionTimelineStageStatus,
+    duration: std::time::Duration,
+}
+
+#[derive(Debug, Clone)]
+struct QueryBundleTraceReport {
+    samples: Vec<QueryBundleStageSample>,
+    terminal_status: CompletionTimelineStageStatus,
+}
+
+impl Default for QueryBundleTraceReport {
+    fn default() -> Self {
+        Self {
+            samples: Vec::new(),
+            terminal_status: CompletionTimelineStageStatus::Completed,
+        }
+    }
+}
+
+impl QueryBundleTraceReport {
+    fn push(
+        &mut self,
+        name: QueryBundleStageName,
+        status: CompletionTimelineStageStatus,
+        duration: std::time::Duration,
+    ) {
+        if duration.is_zero() {
+            return;
+        }
+        self.samples.push(QueryBundleStageSample {
+            name,
+            status,
+            duration,
+        });
+    }
+
+    fn covered_exec_ms(&self) -> u64 {
+        self.samples.iter().fold(0_u64, |acc, sample| {
+            acc.saturating_add(sample.duration.as_millis().min(u64::MAX as u128) as u64)
+        })
+    }
+
+    fn set_terminal_status(&mut self, status: CompletionTimelineStageStatus) {
+        self.terminal_status = status;
+    }
+}
+
+struct QueryBundleWorkResult {
+    file_content: Option<Arc<str>>,
+    file_path: Option<Arc<str>>,
+    member_access_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
+    deps: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
+    ir_program: Option<Arc<bsl_shared::ir::SemanticProgram>>,
+    ir_cancelled_after_retry: bool,
+    query_checkpoint_cancelled: bool,
+    report: QueryBundleTraceReport,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompletionGuardResult<T> {
     Completed(T),
@@ -314,6 +407,25 @@ impl CompletionTimelineCapture {
         self.stages.push(stage);
     }
 
+    fn push_stage_ms_merged(
+        &mut self,
+        name: &str,
+        status: CompletionTimelineStageStatus,
+        duration_ms: u64,
+    ) {
+        if duration_ms == 0 {
+            return;
+        }
+        if let Some(last_stage) = self.stages.last_mut() {
+            if last_stage.name == name && last_stage.status == status.as_str() {
+                last_stage.duration_ms = last_stage.duration_ms.saturating_add(duration_ms);
+                self.timeline_cursor_ms = self.timeline_cursor_ms.saturating_add(duration_ms);
+                return;
+            }
+        }
+        self.push_stage_ms(name, status, duration_ms);
+    }
+
     fn push_stage(
         &mut self,
         name: &str,
@@ -329,6 +441,47 @@ impl CompletionTimelineCapture {
 
     fn push_completed_stage(&mut self, name: &str, duration: std::time::Duration) {
         self.push_stage(name, CompletionTimelineStageStatus::Completed, duration);
+    }
+
+    fn push_query_bundle_report(
+        &mut self,
+        report: &QueryBundleTraceReport,
+        pool_wait_ms: u64,
+        exec_elapsed_ms: u64,
+        total_elapsed_ms: u64,
+        outer_status: CompletionTimelineStageStatus,
+    ) {
+        if pool_wait_ms > 0 {
+            self.push_stage_ms_merged(
+                QueryBundleStageName::PoolWait.as_str(),
+                CompletionTimelineStageStatus::Completed,
+                pool_wait_ms,
+            );
+        }
+
+        for sample in &report.samples {
+            self.push_stage(sample.name.as_str(), sample.status, sample.duration);
+        }
+
+        let covered_exec_ms = report.covered_exec_ms();
+        let exec_remainder_ms = exec_elapsed_ms.saturating_sub(covered_exec_ms);
+        if exec_remainder_ms > 0 {
+            self.push_stage_ms_merged(
+                QueryBundleStageName::Other.as_str(),
+                report.terminal_status,
+                exec_remainder_ms,
+            );
+        }
+
+        let covered_total_ms = pool_wait_ms.saturating_add(exec_elapsed_ms);
+        let outer_remainder_ms = total_elapsed_ms.saturating_sub(covered_total_ms);
+        if outer_remainder_ms > 0 {
+            self.push_stage_ms_merged(
+                QueryBundleStageName::Other.as_str(),
+                outer_status,
+                outer_remainder_ms,
+            );
+        }
     }
 
     fn push_response_build_stage(
@@ -375,12 +528,7 @@ impl CompletionTimelineCapture {
     }
 
     fn push_terminal_stage(&mut self, outcome: &str) {
-        let status = match outcome {
-            "cancelled" | "superseded" => CompletionTimelineStageStatus::Cancelled,
-            "fail_closed" | "handler_error" => CompletionTimelineStageStatus::Failed,
-            "skipped" => CompletionTimelineStageStatus::Skipped,
-            _ => CompletionTimelineStageStatus::Completed,
-        };
+        let status = completion_timeline_stage_status_from_outcome(outcome);
         self.push_stage("terminal", status, std::time::Duration::from_millis(0));
     }
 
@@ -2327,6 +2475,10 @@ impl BslLanguageServer {
                         observed_deps_id,
                         observed_settings_id,
                         observed_file_version,
+                        query_bundle_report,
+                        query_bundle_pool_wait_ms,
+                        query_bundle_exec_elapsed_ms,
+                        query_bundle_outer_status,
                     ) = {
                         let file_content_override = prepared.file_content_override.clone();
                         let file_path_override = prepared.file_path_override.clone();
@@ -2360,6 +2512,10 @@ impl BslLanguageServer {
                                 observed_deps_id,
                                 observed_settings_id,
                                 observed_file_version_override,
+                                QueryBundleTraceReport::default(),
+                                0_u64,
+                                0_u64,
+                                CompletionTimelineStageStatus::Completed,
                             )
                         } else {
                             let snapshot = exact_snapshot_for_query
@@ -2424,40 +2580,66 @@ impl BslLanguageServer {
                             let observed_deps_id_for_query = observed_deps_id.clone();
                             let cancellation_token_for_query =
                                 completion_cancellation_token.clone();
-                            let query_result =
-                                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                            let observed_query_call =
+                                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin(
                                     bsl_runtime::application::CpuWorkClass::Interactive,
                                     context_for_query.origin.as_str(),
                                     Some(self.coordinator.as_ref()),
                                     move || {
+                                    let mut report = QueryBundleTraceReport::default();
                                     let deps_and_file_snapshot_started = Instant::now();
                                     let file_content = analysis.file_text(file_id).ok().flatten();
                                     let file_path = analysis.file_path(file_id).ok().flatten();
                                     let deps = analysis.deps_data().ok();
-                                    let member_access_owner_type_hints = file_content
+                                    let mut member_access_owner_type_hints = Vec::new();
+                                    let owner_hint_elapsed = file_content
                                         .as_deref()
-                                        .map(|text| {
-                                            if completion_request_targets_member_access(
+                                        .and_then(|text| {
+                                            if !completion_request_targets_member_access(
                                                 text,
                                                 position,
                                                 trigger_char_hint,
                                             ) {
+                                                return None;
+                                            }
+                                            let owner_hint_started = Instant::now();
+                                            member_access_owner_type_hints =
                                                 completion_member_access_owner_type_hints_at_position(
                                                     &analysis,
                                                     file_id,
                                                     text,
                                                     position,
                                                     Some(coordinator_for_query.as_ref()),
-                                                )
-                                            } else {
-                                                Vec::new()
-                                            }
-                                        })
-                                        .unwrap_or_default();
-                                    coordinator_for_query.record_completion_stage_latency(
-                                        "query_bundle_deps_and_file_snapshot",
-                                        deps_and_file_snapshot_started.elapsed(),
-                                    );
+                                                );
+                                            Some(owner_hint_started.elapsed())
+                                        });
+                                    let deps_and_file_snapshot_elapsed = deps_and_file_snapshot_started
+                                        .elapsed()
+                                        .saturating_sub(
+                                            owner_hint_elapsed.unwrap_or_default(),
+                                        );
+                                    if !deps_and_file_snapshot_elapsed.is_zero() {
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            QueryBundleStageName::DepsAndFileSnapshot.as_str(),
+                                            deps_and_file_snapshot_elapsed,
+                                        );
+                                        report.push(
+                                            QueryBundleStageName::DepsAndFileSnapshot,
+                                            CompletionTimelineStageStatus::Completed,
+                                            deps_and_file_snapshot_elapsed,
+                                        );
+                                    }
+                                    if let Some(owner_hint_elapsed) = owner_hint_elapsed {
+                                        coordinator_for_query.record_completion_stage_latency(
+                                            QueryBundleStageName::OwnerHint.as_str(),
+                                            owner_hint_elapsed,
+                                        );
+                                        report.push(
+                                            QueryBundleStageName::OwnerHint,
+                                            CompletionTimelineStageStatus::Completed,
+                                            owner_hint_elapsed,
+                                        );
+                                    }
                                     if cancellation_token_for_query
                                         .as_ref()
                                         .is_some_and(|token| token.is_cancelled())
@@ -2466,15 +2648,19 @@ impl BslLanguageServer {
                                             .record_intellisense_v2_completion_owner_hint_result(
                                                 "cancelled",
                                             );
-                                        return (
+                                        report.set_terminal_status(
+                                            CompletionTimelineStageStatus::Cancelled,
+                                        );
+                                        return QueryBundleWorkResult {
                                             file_content,
                                             file_path,
                                             member_access_owner_type_hints,
                                             deps,
-                                            None,
-                                            false,
-                                            true,
-                                        );
+                                            ir_program: None,
+                                            ir_cancelled_after_retry: false,
+                                            query_checkpoint_cancelled: true,
+                                            report,
+                                        };
                                     }
 
                                     #[cfg(test)]
@@ -2514,8 +2700,29 @@ impl BslLanguageServer {
                                     }
 
                                     let (ir_program, ir_cancelled_after_retry) = match ir_query {
-                                        Ok(program) => (program, false),
+                                        Ok(program) => {
+                                            coordinator_for_query.record_completion_stage_latency(
+                                                QueryBundleStageName::IrQuery.as_str(),
+                                                ir_elapsed,
+                                            );
+                                            report.push(
+                                                QueryBundleStageName::IrQuery,
+                                                CompletionTimelineStageStatus::Completed,
+                                                ir_elapsed,
+                                            );
+                                            (program, false)
+                                        }
                                         Err(first_cancelled) => {
+                                            coordinator_for_query.record_completion_stage_latency(
+                                                QueryBundleStageName::IrQuery.as_str(),
+                                                ir_elapsed,
+                                            );
+                                            report.push(
+                                                QueryBundleStageName::IrQuery,
+                                                CompletionTimelineStageStatus::Cancelled,
+                                                ir_elapsed,
+                                            );
+
                                             // One fast retry mitigates transient cancellation races between
                                             // rapid didChange updates and completion query execution.
                                             let retry_started = Instant::now();
@@ -2547,6 +2754,15 @@ impl BslLanguageServer {
                                                         file_id = file_id.0,
                                                         "Completion v2: recovered from transient ir cancellation via retry"
                                                     );
+                                                    coordinator_for_query.record_completion_stage_latency(
+                                                        QueryBundleStageName::IrRetry.as_str(),
+                                                        retry_elapsed,
+                                                    );
+                                                    report.push(
+                                                        QueryBundleStageName::IrRetry,
+                                                        CompletionTimelineStageStatus::Completed,
+                                                        retry_elapsed,
+                                                    );
                                                     (program, false)
                                                 }
                                                 Err(retry_cancelled) => {
@@ -2557,6 +2773,18 @@ impl BslLanguageServer {
                                                         retry_error = ?retry_cancelled,
                                                         ir_outcome = ir_outcome.as_str(),
                                                         "Completion v2: ir query cancelled after retry"
+                                                    );
+                                                    coordinator_for_query.record_completion_stage_latency(
+                                                        QueryBundleStageName::IrRetry.as_str(),
+                                                        retry_elapsed,
+                                                    );
+                                                    report.push(
+                                                        QueryBundleStageName::IrRetry,
+                                                        CompletionTimelineStageStatus::Cancelled,
+                                                        retry_elapsed,
+                                                    );
+                                                    report.set_terminal_status(
+                                                        CompletionTimelineStageStatus::Cancelled,
                                                     );
                                                     (None, true)
                                                 }
@@ -2571,15 +2799,19 @@ impl BslLanguageServer {
                                             .record_intellisense_v2_completion_owner_hint_result(
                                                 "cancelled",
                                             );
-                                        return (
+                                        report.set_terminal_status(
+                                            CompletionTimelineStageStatus::Cancelled,
+                                        );
+                                        return QueryBundleWorkResult {
                                             file_content,
                                             file_path,
                                             member_access_owner_type_hints,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
-                                            true,
-                                        );
+                                            query_checkpoint_cancelled: true,
+                                            report,
+                                        };
                                     }
                                     if bsl_runtime::system::global_runtime_config()
                                         .get_bool(
@@ -2610,31 +2842,54 @@ impl BslLanguageServer {
                                             .record_intellisense_v2_completion_owner_hint_result(
                                                 "cancelled",
                                             );
-                                        return (
+                                        report.set_terminal_status(
+                                            CompletionTimelineStageStatus::Cancelled,
+                                        );
+                                        return QueryBundleWorkResult {
                                             file_content,
                                             file_path,
                                             member_access_owner_type_hints,
                                             deps,
                                             ir_program,
                                             ir_cancelled_after_retry,
-                                            true,
-                                        );
+                                            query_checkpoint_cancelled: true,
+                                            report,
+                                        };
                                     }
 
-                                    (
+                                    report.set_terminal_status(
+                                        CompletionTimelineStageStatus::Completed,
+                                    );
+                                    QueryBundleWorkResult {
                                         file_content,
                                         file_path,
                                         member_access_owner_type_hints,
                                         deps,
                                         ir_program,
                                         ir_cancelled_after_retry,
-                                        false,
-                                    )
+                                        query_checkpoint_cancelled: false,
+                                        report,
+                                    }
                                 },
                                 )
                                 .await;
 
-                            let (
+                            let query_bundle_pool_wait_ms =
+                                CompletionTimelineCapture::duration_to_ms(
+                                    observed_query_call.queue_wait_elapsed,
+                                );
+                            let query_bundle_exec_elapsed_ms =
+                                CompletionTimelineCapture::duration_to_ms(
+                                    observed_query_call.exec_elapsed,
+                                );
+                            if query_bundle_pool_wait_ms > 0 {
+                                self.coordinator.record_completion_stage_latency(
+                                    QueryBundleStageName::PoolWait.as_str(),
+                                    observed_query_call.queue_wait_elapsed,
+                                );
+                            }
+
+                            let QueryBundleWorkResult {
                                 file_content,
                                 file_path,
                                 member_access_owner_type_hints,
@@ -2642,7 +2897,8 @@ impl BslLanguageServer {
                                 ir_program,
                                 ir_cancelled_after_retry,
                                 query_checkpoint_cancelled,
-                            ) = match query_result {
+                                report,
+                            } = match observed_query_call.join_result {
                                 Ok(result) => result,
                                 Err(join_error) => {
                                     warn!(
@@ -2651,7 +2907,19 @@ impl BslLanguageServer {
                                         error = %join_error,
                                         "Completion v2: interactive query task failed"
                                     );
-                                    (None, None, Vec::new(), None, None, true, true)
+                                    let mut report = QueryBundleTraceReport::default();
+                                    report
+                                        .set_terminal_status(CompletionTimelineStageStatus::Failed);
+                                    QueryBundleWorkResult {
+                                        file_content: None,
+                                        file_path: None,
+                                        member_access_owner_type_hints: Vec::new(),
+                                        deps: None,
+                                        ir_program: None,
+                                        ir_cancelled_after_retry: true,
+                                        query_checkpoint_cancelled: true,
+                                        report,
+                                    }
                                 }
                             };
                             if (ir_cancelled_after_retry || query_checkpoint_cancelled)
@@ -2675,10 +2943,41 @@ impl BslLanguageServer {
                             {
                                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                                 completion_outcome = Some(outcome);
+                                let query_bundle_elapsed = query_bundle_started.elapsed();
+                                let query_bundle_elapsed_ms =
+                                    CompletionTimelineCapture::duration_to_ms(query_bundle_elapsed);
+                                self.coordinator.record_completion_stage_latency(
+                                    "query_bundle",
+                                    query_bundle_elapsed,
+                                );
+                                let query_bundle_other_ms = query_bundle_exec_elapsed_ms
+                                    .saturating_sub(report.covered_exec_ms())
+                                    .saturating_add(
+                                        query_bundle_elapsed_ms.saturating_sub(
+                                            query_bundle_pool_wait_ms
+                                                .saturating_add(query_bundle_exec_elapsed_ms),
+                                        ),
+                                    );
+                                if query_bundle_other_ms > 0 {
+                                    self.coordinator.record_completion_stage_latency(
+                                        QueryBundleStageName::Other.as_str(),
+                                        std::time::Duration::from_millis(query_bundle_other_ms),
+                                    );
+                                }
+                                timeline_capture.push_query_bundle_report(
+                                    &report,
+                                    query_bundle_pool_wait_ms,
+                                    query_bundle_exec_elapsed_ms,
+                                    query_bundle_elapsed_ms,
+                                    completion_timeline_stage_status_from_outcome(outcome),
+                                );
                                 release_completion_active_turn(&mut completion_active_turn_guard);
                                 break 'completion_flow Some(completion_incomplete_empty_response());
                             }
 
+                            let query_bundle_outer_status = completion_outcome
+                                .map(completion_timeline_stage_status_from_outcome)
+                                .unwrap_or(report.terminal_status);
                             (
                                 file_content,
                                 file_path,
@@ -2689,13 +2988,51 @@ impl BslLanguageServer {
                                 observed_deps_id,
                                 observed_settings_id,
                                 observed_file_version,
+                                report,
+                                query_bundle_pool_wait_ms,
+                                query_bundle_exec_elapsed_ms,
+                                query_bundle_outer_status,
                             )
                         }
                     };
                     let query_bundle_elapsed = query_bundle_started.elapsed();
+                    let query_bundle_elapsed_ms =
+                        CompletionTimelineCapture::duration_to_ms(query_bundle_elapsed);
                     self.coordinator
                         .record_completion_stage_latency("query_bundle", query_bundle_elapsed);
-                    timeline_capture.push_completed_stage("query_bundle", query_bundle_elapsed);
+                    let query_bundle_other_ms = if head_route_candidate {
+                        query_bundle_elapsed_ms
+                    } else {
+                        query_bundle_exec_elapsed_ms
+                            .saturating_sub(query_bundle_report.covered_exec_ms())
+                            .saturating_add(
+                                query_bundle_elapsed_ms.saturating_sub(
+                                    query_bundle_pool_wait_ms
+                                        .saturating_add(query_bundle_exec_elapsed_ms),
+                                ),
+                            )
+                    };
+                    if query_bundle_other_ms > 0 {
+                        self.coordinator.record_completion_stage_latency(
+                            QueryBundleStageName::Other.as_str(),
+                            std::time::Duration::from_millis(query_bundle_other_ms),
+                        );
+                    }
+                    if head_route_candidate {
+                        timeline_capture.push_stage(
+                            QueryBundleStageName::Other.as_str(),
+                            query_bundle_outer_status,
+                            query_bundle_elapsed,
+                        );
+                    } else {
+                        timeline_capture.push_query_bundle_report(
+                            &query_bundle_report,
+                            query_bundle_pool_wait_ms,
+                            query_bundle_exec_elapsed_ms,
+                            query_bundle_elapsed_ms,
+                            query_bundle_outer_status,
+                        );
+                    }
                     observed_file_version_for_completion = observed_file_version;
                     let member_access_context = file_content
                         .as_deref()
@@ -3150,7 +3487,10 @@ mod tests {
     fn completion_timeline_total_duration_is_never_less_than_stage_end() {
         let mut capture = sample_capture();
         capture.push_completed_stage("sync_globals", std::time::Duration::from_millis(7));
-        capture.push_completed_stage("query_bundle", std::time::Duration::from_millis(11));
+        capture.push_completed_stage(
+            QueryBundleStageName::IrQuery.as_str(),
+            std::time::Duration::from_millis(11),
+        );
 
         let trace = capture.into_trace(
             "trace-1".to_string(),
@@ -3158,6 +3498,108 @@ mod tests {
             "ok_empty",
         );
         assert_eq!(trace.total_duration_ms, 18);
+    }
+
+    #[test]
+    fn query_bundle_report_publishes_grouped_stages_and_other_remainder() {
+        let mut capture = sample_capture();
+        let mut report = QueryBundleTraceReport::default();
+        report.push(
+            QueryBundleStageName::DepsAndFileSnapshot,
+            CompletionTimelineStageStatus::Completed,
+            std::time::Duration::from_millis(5),
+        );
+        report.push(
+            QueryBundleStageName::OwnerHint,
+            CompletionTimelineStageStatus::Completed,
+            std::time::Duration::from_millis(7),
+        );
+        report.push(
+            QueryBundleStageName::IrQuery,
+            CompletionTimelineStageStatus::Completed,
+            std::time::Duration::from_millis(11),
+        );
+        capture.push_query_bundle_report(
+            &report,
+            3,
+            30,
+            37,
+            CompletionTimelineStageStatus::Completed,
+        );
+
+        let stage_names: Vec<&str> = capture
+            .stages
+            .iter()
+            .map(|stage| stage.name.as_str())
+            .collect();
+        assert_eq!(
+            stage_names,
+            vec![
+                QueryBundleStageName::PoolWait.as_str(),
+                QueryBundleStageName::DepsAndFileSnapshot.as_str(),
+                QueryBundleStageName::OwnerHint.as_str(),
+                QueryBundleStageName::IrQuery.as_str(),
+                QueryBundleStageName::Other.as_str(),
+            ]
+        );
+        assert_eq!(
+            capture.stages.last().map(|stage| stage.duration_ms),
+            Some(11)
+        );
+    }
+
+    #[test]
+    fn query_bundle_report_marks_failed_remainder_on_join_error() {
+        let mut capture = sample_capture();
+        let mut report = QueryBundleTraceReport::default();
+        report.set_terminal_status(CompletionTimelineStageStatus::Failed);
+
+        capture.push_query_bundle_report(&report, 4, 20, 24, CompletionTimelineStageStatus::Failed);
+
+        assert_eq!(capture.stages.len(), 2);
+        assert_eq!(
+            capture.stages[0].name,
+            QueryBundleStageName::PoolWait.as_str()
+        );
+        assert_eq!(capture.stages[0].status, "completed");
+        assert_eq!(capture.stages[1].name, QueryBundleStageName::Other.as_str());
+        assert_eq!(capture.stages[1].status, "failed");
+        assert_eq!(capture.stages[1].duration_ms, 20);
+    }
+
+    #[test]
+    fn query_bundle_report_marks_cancelled_outer_remainder() {
+        let mut capture = sample_capture();
+        let mut report = QueryBundleTraceReport::default();
+        report.push(
+            QueryBundleStageName::IrQuery,
+            CompletionTimelineStageStatus::Completed,
+            std::time::Duration::from_millis(5),
+        );
+        report.set_terminal_status(CompletionTimelineStageStatus::Cancelled);
+
+        capture.push_query_bundle_report(
+            &report,
+            3,
+            8,
+            15,
+            CompletionTimelineStageStatus::Cancelled,
+        );
+
+        assert_eq!(capture.stages.len(), 3);
+        assert_eq!(
+            capture.stages[0].name,
+            QueryBundleStageName::PoolWait.as_str()
+        );
+        assert_eq!(capture.stages[0].status, "completed");
+        assert_eq!(
+            capture.stages[1].name,
+            QueryBundleStageName::IrQuery.as_str()
+        );
+        assert_eq!(capture.stages[1].status, "completed");
+        assert_eq!(capture.stages[2].name, QueryBundleStageName::Other.as_str());
+        assert_eq!(capture.stages[2].status, "cancelled");
+        assert_eq!(capture.stages[2].duration_ms, 7);
     }
 
     #[test]

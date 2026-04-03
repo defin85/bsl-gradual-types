@@ -6,6 +6,7 @@ import {
     CompletionTimelinePrepareProgressTrace,
     CompletionTimelinePrepareRuntimeTrace,
     CompletionTimelinePrepareTimeoutAttributionTrace,
+    CompletionTimelineStageTrace,
     CompletionTimelineTrace,
     CompletionTimelineTurnAttributionTrace,
 } from '../lsp/customRequests';
@@ -13,6 +14,44 @@ import {
 export interface CompletionTraceClientIngressSupplement {
     correlation_status: 'correlated' | 'unavailable' | 'ambiguous';
     client_to_transport_wait_ms?: number;
+}
+
+const QUERY_BUNDLE_STAGE_TO_VERDICT: Record<string, string> = {
+    query_bundle_pool_wait: 'query_bundle_pool_wait_dominant',
+    query_bundle_deps_and_file_snapshot: 'query_bundle_deps_and_file_snapshot_dominant',
+    query_bundle_owner_hint: 'query_bundle_owner_hint_dominant',
+    query_bundle_ir_query: 'query_bundle_ir_query_dominant',
+    query_bundle_ir_retry: 'query_bundle_ir_retry_dominant',
+    query_bundle_other: 'query_bundle_other_dominant',
+};
+
+function isCanonicalQueryBundleStageName(stageName: string | undefined): stageName is string {
+    return Boolean(stageName && QUERY_BUNDLE_STAGE_TO_VERDICT[stageName]);
+}
+
+function pickDominantStage(
+    stages: CompletionTimelineStageTrace[] | undefined
+): CompletionTimelineStageTrace | undefined {
+    let bestStage: CompletionTimelineStageTrace | undefined;
+    for (const stage of stages ?? []) {
+        if (!bestStage || stage.duration_ms > bestStage.duration_ms) {
+            bestStage = stage;
+        }
+    }
+    return bestStage;
+}
+
+function resolveQueryBundleDominantStage(
+    trace: Pick<CompletionTimelineTrace, 'dominant_stage' | 'stages'>
+): string | undefined {
+    if (isCanonicalQueryBundleStageName(trace.dominant_stage)) {
+        return trace.dominant_stage;
+    }
+    const dominantStage = pickDominantStage(trace.stages);
+    if (dominantStage && isCanonicalQueryBundleStageName(dominantStage.name)) {
+        return dominantStage.name;
+    }
+    return undefined;
 }
 
 export function getPreMethodAttributionProvenance(
@@ -55,16 +94,22 @@ export function derivePrepareTimeoutSubphase(
 export function buildCompletionTraceBottleneckVerdicts(
     trace: Pick<
         CompletionTimelineTrace,
-        'prepare_details' | 'server_edge_details' | 'turn_attribution'
+        'dominant_stage' | 'stages' | 'prepare_details' | 'server_edge_details' | 'turn_attribution'
     >,
     clientIngress?: CompletionTraceClientIngressSupplement
 ): string[] {
     const verdicts: string[] = [];
+    const queryBundleDominantStage = resolveQueryBundleDominantStage(trace);
+    if (queryBundleDominantStage) {
+        verdicts.push('query_bundle_dominant');
+        verdicts.push(QUERY_BUNDLE_STAGE_TO_VERDICT[queryBundleDominantStage]);
+    }
     const adapterToDispatchWait = trace.server_edge_details?.adapter_to_dispatch_wait_ms;
     const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
     const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
     const strongPreMethodAttribution = hasStrongPreMethodAttribution(trace);
     if (
+        !queryBundleDominantStage &&
         typeof adapterToDispatchWait === 'number' &&
         adapterToDispatchWait > 0 &&
         (
@@ -79,6 +124,7 @@ export function buildCompletionTraceBottleneckVerdicts(
         verdicts.push('adapter_before_dispatch_dominant');
     }
     if (
+        !queryBundleDominantStage &&
         typeof transportToMethodWait === 'number' &&
         typeof methodPreludeExec === 'number'
     ) {
@@ -105,6 +151,7 @@ export function buildCompletionTraceBottleneckVerdicts(
     }
 
     if (
+        !queryBundleDominantStage &&
         clientIngress?.correlation_status === 'correlated' &&
         typeof clientIngress.client_to_transport_wait_ms === 'number' &&
         clientIngress.client_to_transport_wait_ms > 0 &&

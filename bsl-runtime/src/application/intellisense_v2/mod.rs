@@ -22,9 +22,10 @@ pub use policy::{
     diagnostics_execution_plan, diagnostics_profiles_for_trigger, interactive_freshness_knobs,
     scale_aware_document_is_large, should_query_parse_result, spawn_bounded_blocking,
     spawn_bounded_blocking_with_class, spawn_bounded_blocking_with_class_observed,
+    spawn_bounded_blocking_with_class_observed_call_origin,
     spawn_bounded_blocking_with_class_observed_origin, CompletionFastpathPreconditions,
     CompletionMissingIrPolicyDecision, CompletionMode, CompletionPipelineKnobs, CpuWorkClass,
     DeferredHeavyDiagnosticsReason, DiagnosticsDisposition, DiagnosticsExecutionPlan,
-    DiagnosticsProfile, DiagnosticsTrigger, InteractiveFreshnessKnobs, RuntimePerfKnobs,
-    ScaleAwareDiagnosticsKnobs,
+    DiagnosticsProfile, DiagnosticsTrigger, InteractiveFreshnessKnobs, ObservedBlockingCall,
+    RuntimePerfKnobs, ScaleAwareDiagnosticsKnobs,
 };

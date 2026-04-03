@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "lsp-completion-timeline contract v17",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "surface",
+    "major_version",
+    "schema_version",
+    "compatibility",
+    "request",
+    "response"
+  ],
+  "properties": {
+    "surface": {
+      "type": "string",
+      "const": "lsp-completion-timeline"
+    },
+    "major_version": {
+      "type": "integer",
+      "const": 17
+    },
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "compatibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "breaking_change_requires_major_bump",
+        "breaking_change_requires_migration_note"
+      ],
+      "properties": {
+        "breaking_change_requires_major_bump": {
+          "type": "boolean",
+          "const": true
+        },
+        "breaking_change_requires_migration_note": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "command",
+        "params_shape"
+      ],
+      "properties": {
+        "method": {
+          "type": "string",
+          "const": "workspace/executeCommand"
+        },
+        "command": {
+          "type": "string",
+          "const": "bsl.getCompletionTimeline"
+        },
+        "params_shape": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "optional_fields",
+            "limit_bounds"
+          ],
+          "properties": {
+            "optional_fields": {
+              "type": "array",
+              "minItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "type": "string"
+              }
+            },
+            "limit_bounds": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "minimum",
+                "maximum",
+                "default"
+              ],
+              "properties": {
+                "minimum": {
+                  "type": "integer",
+                  "const": 1
+                },
+                "maximum": {
+                  "type": "integer",
+                  "const": 200
+                },
+                "default": {
+                  "type": "integer",
+                  "const": 200
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "retention_max_entries_default",
+        "trace_fields",
+        "prepare_details_fields",
+        "prepare_progress_fields",
+        "prepare_runtime_fields",
+        "prepare_timeout_attribution_fields",
+        "exact_wait_fields",
+        "exact_artifact_poll_fields",
+        "server_edge_details_fields",
+        "first_poll_contention_attribution_fields",
+        "first_poll_contention_contender_fields",
+        "first_poll_contention_contender_classes",
+        "first_poll_contention_request_classes",
+        "first_poll_contention_uri_scopes",
+        "turn_attribution_fields",
+        "turn_holder_fields",
+        "query_bundle_stage_names",
+        "stage_fields",
+        "stage_statuses",
+        "prepare_routes",
+        "prepare_fail_closed_causes",
+        "outcomes"
+      ],
+      "properties": {
+        "version": {
+          "type": "integer",
+          "const": 20
+        },
+        "retention_max_entries_default": {
+          "type": "integer",
+          "const": 200
+        },
+        "trace_fields": {
+          "type": "array",
+          "minItems": 13,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepare_details_fields": {
+          "type": "array",
+          "minItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+            "prepare_progress_fields": {
+              "type": "array",
+              "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepare_runtime_fields": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepare_timeout_attribution_fields": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "exact_wait_fields": {
+          "type": "array",
+          "minItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "exact_artifact_poll_fields": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "server_edge_details_fields": {
+          "type": "array",
+          "minItems": 33,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_poll_contention_attribution_fields": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_poll_contention_contender_fields": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_poll_contention_contender_classes": {
+          "type": "array",
+          "minItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_poll_contention_request_classes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "first_poll_contention_uri_scopes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "turn_attribution_fields": {
+          "type": "array",
+          "minItems": 17,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "turn_holder_fields": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "query_bundle_stage_names": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "stage_fields": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "stage_statuses": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepare_routes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepare_fail_closed_causes": {
+          "type": "array",
+          "minItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "outcomes": {
+          "type": "array",
+          "minItems": 6,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

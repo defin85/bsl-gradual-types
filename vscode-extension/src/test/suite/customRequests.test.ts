@@ -183,7 +183,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getCompletionTimeline') {
                     return Promise.resolve({
-                        version: 19,
+                        version: 20,
                         traces: [
                             {
                                 trace_id: 'trace-1',
@@ -193,7 +193,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                 outcome: 'ok_non_empty',
                                 started_at_ms: Date.now(),
                                 total_duration_ms: 18,
-                                dominant_stage: 'query_bundle',
+                                dominant_stage: 'query_bundle_ir_query',
                                 prepare_details: {
                                     progress: {
                                         phase: 'wait_for_file_version',
@@ -294,7 +294,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                 },
                                 stages: [
                                     {
-                                        name: 'query_bundle',
+                                        name: 'query_bundle_ir_query',
                                         status: 'completed',
                                         started_offset_ms: 0,
                                         duration_ms: 18
@@ -460,7 +460,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 19);
+        assert.strictEqual(result.response.version, 20);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'trace-1');
         assert.ok(result.response.traces[0].server_edge_details);

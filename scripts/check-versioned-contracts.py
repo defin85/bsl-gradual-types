@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 16,
+    "lsp-completion-timeline": 17,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }
@@ -318,6 +318,15 @@ REQUIRED_V9_TIMELINE_FIRST_POLL_CONTENTION_URI_SCOPES = {
     "unavailable",
 }
 
+REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES = {
+    "query_bundle_pool_wait",
+    "query_bundle_deps_and_file_snapshot",
+    "query_bundle_owner_hint",
+    "query_bundle_ir_query",
+    "query_bundle_ir_retry",
+    "query_bundle_other",
+}
+
 REQUIRED_V4_COMPLETION_ROUTES = {
     "head_hit",
     "exact_hit",
@@ -567,6 +576,7 @@ def validate_lsp_completion_timeline_response_fields(
     response: dict[str, Any],
     expected_version: int,
     expected_server_edge_details_fields: set[str],
+    expected_query_bundle_stage_names: set[str] | None = None,
 ) -> None:
     ensure(
         response.get("version") == expected_version,
@@ -600,6 +610,7 @@ def validate_lsp_completion_timeline_response_fields(
     )
     turn_attribution_fields = set(response.get("turn_attribution_fields", []))
     turn_holder_fields = set(response.get("turn_holder_fields", []))
+    query_bundle_stage_names = set(response.get("query_bundle_stage_names", []))
     prepare_routes = set(response.get("prepare_routes", []))
     prepare_fail_closed_causes = set(response.get("prepare_fail_closed_causes", []))
     ensure(
@@ -669,6 +680,11 @@ def validate_lsp_completion_timeline_response_fields(
         turn_holder_fields == REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS,
         f"{contract_path}: response.turn_holder_fields must equal {sorted(REQUIRED_V4_TIMELINE_TURN_HOLDER_FIELDS)}",
     )
+    if expected_query_bundle_stage_names is not None:
+        ensure(
+            query_bundle_stage_names == expected_query_bundle_stage_names,
+            f"{contract_path}: response.query_bundle_stage_names must equal {sorted(expected_query_bundle_stage_names)}",
+        )
     ensure(
         prepare_routes == REQUIRED_V4_COMPLETION_ROUTES,
         f"{contract_path}: response.prepare_routes must equal {sorted(REQUIRED_V4_COMPLETION_ROUTES)}",
@@ -2331,6 +2347,17 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 response,
                 expected_version=19,
                 expected_server_edge_details_fields=REQUIRED_V16_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+            )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 17:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            validate_lsp_completion_timeline_response_fields(
+                contract_path,
+                response,
+                expected_version=20,
+                expected_server_edge_details_fields=REQUIRED_V16_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+                expected_query_bundle_stage_names=REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
             )
 
 

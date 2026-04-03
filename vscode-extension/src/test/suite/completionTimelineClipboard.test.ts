@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 19,
+            version: 20,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -56,7 +56,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                     total_duration_ms: 30,
                     max_stage_end_ms: 28,
                     unattributed_overhead_ms: 2,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         adapter_read_at_ms: 1_699_999_999_956,
                         transport_received_at_ms: 1_699_999_999_960,
@@ -162,6 +162,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                             age_ms: 88,
                         },
                     },
+                    bottleneck_verdicts: [
+                        'query_bundle_dominant',
+                        'query_bundle_ir_query_dominant',
+                        'prepare_timeout@prepare_guard',
+                    ],
                     stages: [
                         {
                             name: 'prepare_stateful',
@@ -174,7 +179,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                             is_dominant: false,
                         },
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 10,
                             end_offset_ms: 28,
@@ -197,10 +202,11 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                 total_duration_ms: 30,
                 max_stage_end_ms: 30,
                 unattributed_overhead_ms: 0,
-                dominant_stage: 'query_bundle',
+                dominant_stage: 'query_bundle_ir_query',
+                bottleneck_verdicts: [],
                 stages: [
                     {
-                        name: 'query_bundle',
+                        name: 'query_bundle_ir_query',
                         status: 'completed',
                         started_offset_ms: 0,
                         end_offset_ms: 30,
@@ -220,7 +226,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v19'));
+        assert.ok(text!.includes('contract=v20'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -273,7 +279,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('prepare_outcome=wait_not_ready'));
         assert.ok(text!.includes('completion_route=exact_hit'));
         assert.ok(text!.includes('fail_closed_cause=prepare_timeout'));
-        assert.ok(text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
+        assert.ok(text!.includes('bottleneck_verdict=query_bundle_dominant'));
+        assert.ok(text!.includes('bottleneck_verdict=query_bundle_ir_query_dominant'));
+        assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(text!.includes('bottleneck_verdict=prepare_timeout@prepare_guard'));
         assert.ok(text!.includes('timeout_attribution | source=prepare_guard | phase=snapshot_with_deps | budget_ms=120 | elapsed_ms=2996 | overshoot_ms=2876'));
         assert.ok(text!.includes('prepare_progress | phase=snapshot_with_deps | phase_started_offset_ms=9 | wait_completed_offset_ms=9'));
@@ -286,7 +294,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('turn_wait_resolved_at_ms=1700000000006'));
         assert.ok(text!.includes('wake_after_turn_resolution_at_ms=1700000000007'));
         assert.ok(text!.includes('active_holder | request=req-0'));
-        assert.ok(text!.includes('query_bundle | completed'));
+        assert.ok(text!.includes('query_bundle_ir_query | completed'));
         assert.ok(
             text!.includes(
                 'Client probes are extension-local debug records and do not replace server timeline stages, routes, or outcomes.'
@@ -299,6 +307,15 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         if (state.kind !== 'ready') {
             throw new Error('expected ready state fixture');
         }
+        state.traces[0].dominant_stage = 'sync_globals';
+        state.traces[0].stages = [
+            {
+                ...state.traces[0].stages[0],
+                name: 'sync_globals',
+                is_dominant: true,
+            },
+        ];
+        (state.traces[0] as { bottleneck_verdicts?: string[] }).bottleneck_verdicts = undefined;
         state.traces[0].server_edge_details = {
             ...state.traces[0].server_edge_details!,
             transport_to_method_wait_ms: undefined,
@@ -311,8 +328,43 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('adapter_read_at_ms=1699999999956'));
         assert.ok(text!.includes('adapter_to_dispatch_wait_ms=4'));
         assert.ok(text!.includes('bottleneck_verdict=adapter_before_dispatch_dominant'));
+        assert.ok(!text!.includes('bottleneck_verdict=query_bundle_dominant'));
         assert.ok(!text!.includes('prepare_wait_budget_ms='));
         assert.ok(!text!.includes('prepare_outcome='));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should mark v19 payload as missing v20 query-body split by design', () => {
+        const state = buildReadyState();
+        if (state.kind !== 'ready') {
+            throw new Error('expected ready state fixture');
+        }
+        state.version = 19;
+        state.traces[0].dominant_stage = 'query_bundle';
+        state.traces[0].stages = state.traces[0].stages.map((stage, index) =>
+            index === 1
+                ? {
+                    ...stage,
+                    name: 'query_bundle',
+                    is_dominant: true,
+                }
+                : {
+                    ...stage,
+                    is_dominant: false,
+                }
+        );
+        (state.traces[0] as { bottleneck_verdicts?: string[] }).bottleneck_verdicts = undefined;
+
+        const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('contract=v19'));
+        assert.ok(
+            text!.includes(
+                'v20 truthful grouped query-body split is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(!text!.includes('bottleneck_verdict=query_bundle_dominant'));
+        assert.ok(!text!.includes('bottleneck_verdict=query_bundle_ir_query_dominant'));
+        assert.ok(text!.includes('query_bundle | completed'));
     });
 
     test('formatVisibleCompletionTimelineForClipboard should use average trace in average mode', () => {
@@ -339,6 +391,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
             throw new Error('expected ready state fixture');
         }
         state.version = 11;
+        (state.traces[0] as { bottleneck_verdicts?: string[] }).bottleneck_verdicts = undefined;
         state.traces[0].server_edge_details = {
             ...state.traces[0].server_edge_details!,
             first_poll_contention_attribution: undefined,
@@ -364,6 +417,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
             throw new Error('expected ready state fixture');
         }
         state.version = 10;
+        (state.traces[0] as { bottleneck_verdicts?: string[] }).bottleneck_verdicts = undefined;
         state.traces[0].server_edge_details = {
             ...state.traces[0].server_edge_details!,
             service_future_first_poll_entered_at_ms: undefined,
@@ -403,6 +457,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
             throw new Error('expected ready state fixture');
         }
         state.version = 7;
+        (state.traces[0] as { bottleneck_verdicts?: string[] }).bottleneck_verdicts = undefined;
         state.traces[0].server_edge_details = {
             transport_received_at_ms: 1_699_999_999_960,
             transport_received_at_ms_provenance: undefined,

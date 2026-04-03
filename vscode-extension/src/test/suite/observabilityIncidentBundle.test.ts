@@ -41,7 +41,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 19,
+                version: 20,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -267,7 +267,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 19);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 20);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -769,6 +769,48 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('v19 completion timeline should mark v20 grouped query-body split as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 19;
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                outcome: 'ok_non_empty',
+                dominant_stage: 'query_bundle',
+                prepare_details: undefined,
+                stages: [
+                    {
+                        name: 'query_bundle',
+                        status: 'completed',
+                        started_offset_ms: 0,
+                        duration_ms: 172,
+                    },
+                ],
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v20 grouped query-body split')));
+        assert.ok(bundle.incidentReport.findings.some((finding) => finding.includes('v20 grouped query-body split')));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('query_bundle_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('query_bundle_ir_query_dominant'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'detailed query-body breakdown is unavailable by design'
+            )
+        );
+    });
+
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {
@@ -822,6 +864,61 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.incidentReport.findings.some((finding) =>
                 finding.includes('server-side ingress before method entry dominated 1 completion trace(s)')
+            )
+        );
+    });
+
+    test('query-body dominance should suppress ingress-only verdicts in incident summaries', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                outcome: 'ok_non_empty',
+                total_duration_ms: 2600,
+                dominant_stage: 'query_bundle_ir_query',
+                prepare_details: undefined,
+                server_edge_details: {
+                    ...timeline.response.traces[0].server_edge_details!,
+                    adapter_to_dispatch_wait_ms: 1800,
+                    transport_to_method_wait_ms: 3000,
+                    method_prelude_exec_ms: 0,
+                    transport_to_handler_wait_ms: 3000,
+                    server_handler_exec_ms: 2600,
+                },
+                stages: [
+                    {
+                        name: 'query_bundle_ir_query',
+                        status: 'completed',
+                        started_offset_ms: 0,
+                        duration_ms: 2200,
+                    },
+                ],
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('query_bundle_dominant'));
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('query_bundle_ir_query_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('adapter_before_dispatch_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('authoritative query-body dominance was observed in 1 completion trace(s)')
+            )
+        );
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('query-body IR query work dominated 1 completion trace(s)')
             )
         );
     });

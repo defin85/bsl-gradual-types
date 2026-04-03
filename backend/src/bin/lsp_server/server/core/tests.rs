@@ -14516,19 +14516,38 @@ fn completion_timeline_trace_stage_duration_ms(
     trace: &serde_json::Value,
     stage_name: &str,
 ) -> Option<u64> {
-    trace
-        .get("stages")
-        .and_then(|value| value.as_array())
-        .and_then(|stages| {
-            stages.iter().find_map(|stage| {
-                let stage = stage.as_object()?;
-                let name = stage.get("name")?.as_str()?;
-                if name != stage_name {
-                    return None;
-                }
-                stage.get("duration_ms").and_then(|value| value.as_u64())
-            })
-        })
+    let stages = trace.get("stages").and_then(|value| value.as_array())?;
+    if stage_name == "query_bundle" {
+        let grouped_total = stages.iter().fold(0_u64, |acc, stage| {
+            let Some(stage) = stage.as_object() else {
+                return acc;
+            };
+            let Some(name) = stage.get("name").and_then(|value| value.as_str()) else {
+                return acc;
+            };
+            if !name.starts_with("query_bundle_") {
+                return acc;
+            }
+            acc.saturating_add(
+                stage
+                    .get("duration_ms")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0),
+            )
+        });
+        if grouped_total > 0 {
+            return Some(grouped_total);
+        }
+    }
+
+    stages.iter().find_map(|stage| {
+        let stage = stage.as_object()?;
+        let name = stage.get("name")?.as_str()?;
+        if name != stage_name {
+            return None;
+        }
+        stage.get("duration_ms").and_then(|value| value.as_u64())
+    })
 }
 
 fn completion_timeline_prepare_detail_str<'a>(
@@ -17121,9 +17140,8 @@ async fn p33_document_symbol_request_bootstrap_materializes_ready_outline_after_
         "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
         &PARSE_DELAY_MS.to_string(),
     );
-    let uri =
-        Url::parse("file:///test_p33_document_symbol_request_bootstrap_did_open_gap.bsl")
-            .expect("test uri");
+    let uri = Url::parse("file:///test_p33_document_symbol_request_bootstrap_did_open_gap.bsl")
+        .expect("test uri");
     let did_open = DidOpenTextDocumentParams {
         text_document: TextDocumentItem {
             uri: uri.clone(),
@@ -17225,9 +17243,8 @@ async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready
         "BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS",
         &PARSE_DELAY_MS.to_string(),
     );
-    let uri =
-        Url::parse("file:///test_p33_live_transport_document_symbol_request_bootstrap.bsl")
-            .expect("test uri");
+    let uri = Url::parse("file:///test_p33_live_transport_document_symbol_request_bootstrap.bsl")
+        .expect("test uri");
     harness
         .send_notification(
             "textDocument/didOpen",

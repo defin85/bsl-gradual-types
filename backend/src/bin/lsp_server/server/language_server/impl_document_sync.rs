@@ -767,7 +767,8 @@ impl BslLanguageServer {
             previous.handle.abort();
         }
 
-        let requested_version_state = Arc::new(std::sync::atomic::AtomicI32::new(requested_version));
+        let requested_version_state =
+            Arc::new(std::sync::atomic::AtomicI32::new(requested_version));
         let server = self.clone();
         let worker_requested_version_state = Arc::clone(&requested_version_state);
         let handle = tokio::spawn(async move {

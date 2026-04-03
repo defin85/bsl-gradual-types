@@ -195,7 +195,8 @@ export function formatCompletionTimelineTraceForClipboard(
         }
         lines.push(detailsBits.join(' | '));
     }
-    const bottleneckVerdicts = buildCompletionTraceBottleneckVerdicts(trace);
+    const bottleneckVerdicts = trace.bottleneck_verdicts
+        ?? buildCompletionTraceBottleneckVerdicts(trace);
     if (bottleneckVerdicts.length > 0) {
         for (const verdict of bottleneckVerdicts) {
             lines.push(`bottleneck_verdict=${verdict}`);
@@ -419,6 +420,9 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 12) {
         lines.push('v12 first-poll contention attribution is unavailable by design on this payload.');
+    }
+    if (state.version < 20) {
+        lines.push('v20 truthful grouped query-body split is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace

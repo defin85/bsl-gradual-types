@@ -4,6 +4,7 @@ import { buildCompletionTraceBottleneckVerdicts } from '../../providers/completi
 suite('Completion Timeline Drilldown Test Suite', () => {
     test('buildCompletionTraceBottleneckVerdicts should not mark hot path with zero ingress or prelude wait', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 transport_received_at_ms: 1,
                 method_entered_at_ms: 1,
@@ -22,6 +23,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should distinguish server wait before method entry dominance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 transport_received_at_ms: 1,
                 pre_method_attribution_provenance: 'same_request_authoritative',
@@ -41,6 +43,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should distinguish adapter pre-dispatch dominance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 adapter_read_at_ms: 1,
                 transport_received_at_ms: 6,
@@ -64,6 +67,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should fail-closed for weak pre-method provenance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 transport_received_at_ms: 1,
                 pre_method_attribution_provenance: 'best_effort_fallback',
@@ -82,6 +86,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should distinguish handler prelude dominance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 transport_received_at_ms: 1,
                 method_entered_at_ms: 11,
@@ -100,6 +105,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should prefer timeout source when v6 attribution is available', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             prepare_details: {
                 fail_closed_cause: 'prepare_timeout',
                 timeout_attribution: {
@@ -120,6 +126,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should distinguish artifact polling exact deadline', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             prepare_details: {
                 fail_closed_cause: 'exact_deadline',
                 exact_wait: {
@@ -139,6 +146,7 @@ suite('Completion Timeline Drilldown Test Suite', () => {
 
     test('buildCompletionTraceBottleneckVerdicts should fail-closed for client ingress when adapter backlog already dominates', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
             server_edge_details: {
                 adapter_read_at_ms: 100,
                 transport_received_at_ms: 100,

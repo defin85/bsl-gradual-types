@@ -42,7 +42,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 19,
+            version: 20,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -53,7 +53,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_042,
                     total_duration_ms: 48,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         adapter_read_at_ms: 1_700_000_000_036,
                         transport_received_at_ms: 1_700_000_000_040,
@@ -161,7 +161,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     },
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 12 },
-                        { name: 'query_bundle', status: 'completed', started_offset_ms: 12, duration_ms: 30 },
+                        { name: 'query_bundle_ir_query', status: 'completed', started_offset_ms: 12, duration_ms: 30 },
                         { name: 'response_build', status: 'completed', started_offset_ms: 42, duration_ms: 6 },
                     ],
                 },
@@ -182,7 +182,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 19);
+        assert.strictEqual(state.version, 20);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
@@ -342,7 +342,7 @@ suite('Completion Timeline Model Test Suite', () => {
 
     test('ready state leaves traces uncorrelated when no matching probe exists', () => {
         const payload: CompletionTimelineResponse = {
-            version: 19,
+            version: 20,
             traces: [
                 {
                     trace_id: 'trace-unmatched',
@@ -384,7 +384,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_010,
                     total_duration_ms: 14,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_000,
                         service_future_created_at_ms: 1_700_000_000_001,
@@ -413,7 +413,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     },
                     stages: [
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 0,
                             duration_ms: 14,
@@ -448,7 +448,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_010,
                     total_duration_ms: 14,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_000,
                         service_future_created_at_ms: 1_700_000_000_001,
@@ -478,7 +478,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     },
                     stages: [
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 0,
                             duration_ms: 14,
@@ -518,7 +518,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_010,
                     total_duration_ms: 14,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     server_edge_details: {
                         transport_received_at_ms: 1_700_000_000_000,
                         service_future_created_at_ms: 1_700_000_000_001,
@@ -548,7 +548,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     },
                     stages: [
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 0,
                             duration_ms: 14,
@@ -708,10 +708,10 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_empty',
                     started_at_ms: 1_700_000_000_010,
                     total_duration_ms: 14,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     stages: [
                         {
-                            name: 'query_bundle',
+                            name: 'query_bundle_ir_query',
                             status: 'completed',
                             started_offset_ms: 0,
                             duration_ms: 14,
@@ -750,7 +750,7 @@ suite('Completion Timeline Model Test Suite', () => {
                     },
                     stages: [
                         { name: 'sync_globals', status: 'completed', started_offset_ms: 0, duration_ms: 5 },
-                        { name: 'query_bundle', status: 'completed', started_offset_ms: 5, duration_ms: 15 },
+                        { name: 'query_bundle_ir_query', status: 'completed', started_offset_ms: 5, duration_ms: 15 },
                         { name: 'response_build', status: 'completed', started_offset_ms: 20, duration_ms: 5 },
                     ],
                 },
@@ -765,7 +765,7 @@ suite('Completion Timeline Model Test Suite', () => {
 
         const dominant = state.traces[0].stages.filter((stage) => stage.is_dominant);
         assert.strictEqual(dominant.length, 1);
-        assert.strictEqual(dominant[0].name, 'query_bundle');
+        assert.strictEqual(dominant[0].name, 'query_bundle_ir_query');
     });
 
     test('Overhead and stage percent should be derived from total duration', () => {
@@ -780,14 +780,14 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_500,
                     total_duration_ms: 50,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     prepare_details: {
                         wait_budget_ms: 120,
                         outcome: 'ready',
                     },
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 10 },
-                        { name: 'query_bundle', status: 'completed', started_offset_ms: 10, duration_ms: 30 },
+                        { name: 'query_bundle_ir_query', status: 'completed', started_offset_ms: 10, duration_ms: 30 },
                         { name: 'response_build_other', status: 'completed', started_offset_ms: 40, duration_ms: 5 },
                     ],
                 },
@@ -804,8 +804,8 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(trace.max_stage_end_ms, 45);
         assert.strictEqual(trace.unattributed_overhead_ms, 5);
 
-        const queryBundle = trace.stages.find((stage) => stage.name === 'query_bundle');
-        assert.ok(queryBundle, 'query_bundle stage should exist');
+        const queryBundle = trace.stages.find((stage) => stage.name === 'query_bundle_ir_query');
+        assert.ok(queryBundle, 'query_bundle_ir_query stage should exist');
         assert.ok(queryBundle!.duration_percent > 59.9 && queryBundle!.duration_percent < 60.1);
     });
 
@@ -821,10 +821,10 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_001,
                     total_duration_ms: 30,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 10 },
-                        { name: 'query_bundle', status: 'completed', started_offset_ms: 10, duration_ms: 20 },
+                        { name: 'query_bundle_ir_query', status: 'completed', started_offset_ms: 10, duration_ms: 20 },
                     ],
                 },
                 {
@@ -835,10 +835,10 @@ suite('Completion Timeline Model Test Suite', () => {
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_002,
                     total_duration_ms: 50,
-                    dominant_stage: 'query_bundle',
+                    dominant_stage: 'query_bundle_ir_query',
                     stages: [
                         { name: 'prepare_stateful', status: 'completed', started_offset_ms: 0, duration_ms: 20 },
-                        { name: 'query_bundle', status: 'completed', started_offset_ms: 20, duration_ms: 30 },
+                        { name: 'query_bundle_ir_query', status: 'completed', started_offset_ms: 20, duration_ms: 30 },
                     ],
                 },
             ],
@@ -856,7 +856,7 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(average.trace_id, 'average(2)');
 
         const prepare = average.stages.find((stage) => stage.name === 'prepare_stateful');
-        const query = average.stages.find((stage) => stage.name === 'query_bundle');
+        const query = average.stages.find((stage) => stage.name === 'query_bundle_ir_query');
         assert.ok(prepare);
         assert.ok(query);
         assert.strictEqual(prepare!.duration_ms, 15);

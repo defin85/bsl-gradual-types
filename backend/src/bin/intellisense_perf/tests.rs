@@ -335,8 +335,12 @@ fn resolve_expected_change_id_prefers_cli_over_env() {
 
 #[test]
 fn authoritative_evidence_is_required_only_for_change_scoped_runs() {
-    assert!(requires_authoritative_evidence_context(true, false, false, true));
-    assert!(requires_authoritative_evidence_context(false, false, true, true));
+    assert!(requires_authoritative_evidence_context(
+        true, false, false, true
+    ));
+    assert!(requires_authoritative_evidence_context(
+        false, false, true, true
+    ));
     assert!(!requires_authoritative_evidence_context(
         true, false, true, false
     ));

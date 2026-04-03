@@ -9,6 +9,7 @@ import {
     CompletionTimelineTrace,
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
+import { buildCompletionTraceBottleneckVerdicts } from './completionTimelineDrilldown';
 
 export const COMPLETION_TIMELINE_UNSUPPORTED_MESSAGE =
     'Connected LSP server does not support completion timeline (`bsl.getCompletionTimeline`). Update backend binary.';
@@ -37,6 +38,7 @@ export interface CompletionTimelineTraceViewModel {
     server_edge_details?: CompletionTimelineServerEdgeDetailsTrace;
     turn_attribution?: CompletionTimelineTurnAttributionTrace;
     correlated_probe?: CompletionProbeViewModel;
+    bottleneck_verdicts: string[];
     stages: CompletionTimelineStageViewModel[];
 }
 
@@ -237,18 +239,28 @@ function mapTrace(
             is_dominant: stage.name === dominantStage,
         };
     });
+    const serverEdgeDetails = sanitizeServerEdgeDetailsForContract(
+        contractVersion,
+        trace.server_edge_details
+    );
+    const turnAttribution = sanitizeTurnAttributionForContract(contractVersion, trace.turn_attribution);
+    const bottleneckVerdicts = buildCompletionTraceBottleneckVerdicts({
+        dominant_stage: dominantStage,
+        stages,
+        prepare_details: trace.prepare_details,
+        server_edge_details: serverEdgeDetails,
+        turn_attribution: turnAttribution,
+    });
 
     return {
         ...trace,
-        server_edge_details: sanitizeServerEdgeDetailsForContract(
-            contractVersion,
-            trace.server_edge_details
-        ),
-        turn_attribution: sanitizeTurnAttributionForContract(contractVersion, trace.turn_attribution),
+        server_edge_details: serverEdgeDetails,
+        turn_attribution: turnAttribution,
         max_stage_end_ms: maxStageEnd,
         unattributed_overhead_ms: unattributedOverheadMs,
         dominant_stage: dominantStage,
         total_duration_ms: trace.total_duration_ms,
+        bottleneck_verdicts: bottleneckVerdicts,
         stages,
     };
 }

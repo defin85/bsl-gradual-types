@@ -109,7 +109,7 @@ pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
 
-pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 19;
+pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 20;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,8 +217,7 @@ pub struct BslLanguageServer {
         Arc<Mutex<CurrentRevisionHeadPrecomputeTasksV2>>,
     pub(crate) background_parse_snapshot_apply_tasks_v2:
         Arc<Mutex<BackgroundParseSnapshotApplyTasksV2>>,
-    pub(crate) document_symbol_bootstrap_tasks_v2:
-        Arc<Mutex<DocumentSymbolBootstrapTasksV2>>,
+    pub(crate) document_symbol_bootstrap_tasks_v2: Arc<Mutex<DocumentSymbolBootstrapTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:

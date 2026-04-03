@@ -620,12 +620,34 @@ where
     spawn_bounded_blocking_with_class_observed_origin(class, "runtime", observability, f).await
 }
 
+#[derive(Debug)]
+pub struct ObservedBlockingCall<R> {
+    pub queue_wait_elapsed: Duration,
+    pub exec_elapsed: Duration,
+    pub join_result: Result<R, tokio::task::JoinError>,
+}
+
 pub async fn spawn_bounded_blocking_with_class_observed_origin<F, R>(
     class: CpuWorkClass,
     origin: &'static str,
     observability: Option<&SystemCoordinator>,
     f: F,
 ) -> Result<R, tokio::task::JoinError>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    spawn_bounded_blocking_with_class_observed_call_origin(class, origin, observability, f)
+        .await
+        .join_result
+}
+
+pub async fn spawn_bounded_blocking_with_class_observed_call_origin<F, R>(
+    class: CpuWorkClass,
+    origin: &'static str,
+    observability: Option<&SystemCoordinator>,
+    f: F,
+) -> ObservedBlockingCall<R>
 where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
@@ -653,7 +675,7 @@ where
     emit_runtime_saturation_gauges(origin, observability);
 
     let exec_started = Instant::now();
-    let result = tokio::task::spawn_blocking(f).await;
+    let join_result = tokio::task::spawn_blocking(f).await;
     let exec_elapsed = exec_started.elapsed();
     if let Some(coordinator) = observability {
         coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
@@ -664,7 +686,11 @@ where
     }
     drop(permit);
     emit_runtime_saturation_gauges(origin, observability);
-    result
+    ObservedBlockingCall {
+        queue_wait_elapsed,
+        exec_elapsed,
+        join_result,
+    }
 }
 
 fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoordinator>) {

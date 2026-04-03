@@ -1178,10 +1178,10 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     def test_front_edge_docs_reference_current_contract_versions(self) -> None:
         manual = (self.REPO_ROOT / "vscode-extension" / "manual-lsp-test.md").read_text(encoding="utf-8")
         test_readme = (self.REPO_ROOT / "vscode-extension" / "src" / "test" / "README.md").read_text(encoding="utf-8")
-        self.assertIn("payload `version=19`", manual)
+        self.assertIn("payload `version=20`", manual)
         self.assertNotIn("payload `version=12`", manual)
-        self.assertIn("`response.version=19`", test_readme)
-        self.assertNotIn("`response.version=16`", test_readme)
+        self.assertIn("`response.version=20`", test_readme)
+        self.assertNotIn("`response.version=19`", test_readme)
 
     def test_front_edge_ci_watches_wrapper(self) -> None:
         workflow = self.ci_workflow_content()

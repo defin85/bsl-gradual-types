@@ -893,6 +893,22 @@ impl IntellisenseV2Facade {
         observability: Option<&SystemCoordinator>,
         file_id: FileId,
     ) -> Result<Option<Arc<SemanticProgram>>, SingleflightQueryError> {
+        Self::run_ir_query_singleflight_with_cancellation(
+            context,
+            analysis,
+            observability,
+            file_id,
+            None,
+        )
+    }
+
+    pub fn run_ir_query_singleflight_with_cancellation(
+        context: &ExecutionContext,
+        analysis: &AnalysisV2,
+        observability: Option<&SystemCoordinator>,
+        file_id: FileId,
+        external_cancellation: Option<bsl_analysis_v2::ExternalCancellationCheck>,
+    ) -> Result<Option<Arc<SemanticProgram>>, SingleflightQueryError> {
         let key = Self::singleflight_revision_key(analysis, file_id, SingleflightQueryKind::Ir);
         Self::run_optional_query(
             context,
@@ -901,16 +917,22 @@ impl IntellisenseV2Facade {
             observability,
             |_analysis| {
                 if let Some(key) = key {
-                    Self::run_singleflight_query(
+                    Self::run_singleflight_query_with_wait_cancellation(
                         &IR_FLIGHTS,
                         key,
                         context.origin,
                         SingleflightQueryKind::Ir,
                         observability,
+                        external_cancellation.as_ref(),
                         || {
-                            analysis
-                                .ir(file_id)
-                                .map_err(|_| SingleflightQueryError::Cancelled)
+                            bsl_analysis_v2::with_external_cancellation_check(
+                                external_cancellation.clone(),
+                                || {
+                                    analysis
+                                        .ir(file_id)
+                                        .map_err(|_| SingleflightQueryError::Cancelled)
+                                },
+                            )
                         },
                     )
                 } else {
@@ -921,9 +943,11 @@ impl IntellisenseV2Facade {
                                 SingleflightQueryKind::Ir.as_str(),
                             );
                     }
-                    analysis
-                        .ir(file_id)
-                        .map_err(|_| SingleflightQueryError::Cancelled)
+                    bsl_analysis_v2::with_external_cancellation_check(external_cancellation, || {
+                        analysis
+                            .ir(file_id)
+                            .map_err(|_| SingleflightQueryError::Cancelled)
+                    })
                 }
             },
         )
@@ -1072,6 +1096,29 @@ impl IntellisenseV2Facade {
     where
         T: Clone,
     {
+        Self::run_singleflight_query_with_wait_cancellation(
+            flights,
+            key,
+            origin,
+            query_kind,
+            observability,
+            None,
+            query,
+        )
+    }
+
+    fn run_singleflight_query_with_wait_cancellation<T>(
+        flights: &OnceLock<SingleflightMap<T>>,
+        key: SingleflightRevisionKey,
+        origin: ObservabilityOrigin,
+        query_kind: SingleflightQueryKind,
+        observability: Option<&SystemCoordinator>,
+        wait_cancellation: Option<&bsl_analysis_v2::ExternalCancellationCheck>,
+        query: impl FnOnce() -> Result<Option<T>, SingleflightQueryError>,
+    ) -> Result<Option<T>, SingleflightQueryError>
+    where
+        T: Clone,
+    {
         let flights = flights.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
         let (flight, is_leader) = {
             let mut guard = flights
@@ -1127,10 +1174,21 @@ impl IntellisenseV2Facade {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             while state.in_progress {
-                state = flight
-                    .cv
-                    .wait(state)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if wait_cancellation.is_some_and(|check| check.is_cancelled()) {
+                    return Err(SingleflightQueryError::Cancelled);
+                }
+                if wait_cancellation.is_some() {
+                    let (next_state, _) = flight
+                        .cv
+                        .wait_timeout(state, std::time::Duration::from_millis(10))
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    state = next_state;
+                } else {
+                    state = flight
+                        .cv
+                        .wait(state)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
             }
             if let Some(coordinator) = observability {
                 coordinator.record_intellisense_v2_singleflight_wait_latency_with_origin(

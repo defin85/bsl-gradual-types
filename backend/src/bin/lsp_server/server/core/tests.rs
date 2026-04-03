@@ -9,6 +9,7 @@ use bsl_agent::server::types::{
 };
 use bsl_agent::session::SessionManager;
 use bsl_agent::types::JobStateDto;
+use bsl_analysis_v2::{LineIndex, ParseChangedRange, ParseSnapshot};
 use bsl_backend::perf_gate_evaluator::{
     get_report_u64, validate_parity_cutover_evidence, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
     PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
@@ -18,6 +19,7 @@ use bsl_backend::system::{
     build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
     IndexSnapshot, IndexSnapshotId, TypeKind,
 };
+use bsl_syntax::ParseOptions;
 use futures::StreamExt;
 use std::collections::BTreeSet;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -41,6 +43,7 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::LspService;
+use tree_sitter::{Parser as TreeSitterParser, Tree};
 
 fn init_test_tracing() {
     static INIT: std::sync::Once = std::sync::Once::new();
@@ -61,6 +64,42 @@ fn lock_test_env_mutex(
         .get_or_init(|| std::sync::Mutex::new(()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn parse_backend_tree_for_test(text: &str) -> Arc<Tree> {
+    let mut parser = TreeSitterParser::new();
+    parser
+        .set_language(&tree_sitter_bsl::LANGUAGE.into())
+        .expect("tree-sitter-bsl language");
+    Arc::new(
+        parser
+            .parse(text, None)
+            .expect("tree-sitter parse for snapshot"),
+    )
+}
+
+fn parse_snapshot_for_test(
+    file_id: bsl_analysis_v2::FileId,
+    file_version: i32,
+    text: &str,
+    changed_ranges: Vec<ParseChangedRange>,
+    incremental: bool,
+    fallback_reason: Option<&str>,
+) -> ParseSnapshot {
+    ParseSnapshot {
+        file_id,
+        file_version,
+        parse_result: Arc::new(
+            bsl_syntax::parse(text, &ParseOptions::default()).expect("snapshot parse"),
+        ),
+        line_index: Arc::new(LineIndex::new(text)),
+        backend_tree: parse_backend_tree_for_test(text),
+        changed_ranges: Arc::new(changed_ranges),
+        produced_at_millis: 0,
+        backend_tree_hash: 0,
+        incremental,
+        fallback_reason: fallback_reason.map(Arc::from),
+    }
 }
 
 const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
@@ -20027,9 +20066,9 @@ async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_
         }
     }
 
-    const FIXTURE_V1: &str =
-        "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
-    const FIXTURE_V2: &str = "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
+    const FIXTURE_V1: &str = "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
+    const FIXTURE_V2: &str =
+        "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
     const LEADER_IR_METRIC: &str =
         "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
     const SHARED_IR_METRIC: &str =
@@ -20129,7 +20168,7 @@ async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_
                 settings_id,
                 diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
             },
-            cancellation: bsl_runtime::application::CancellationPolicy::BestEffort,
+            cancellation: bsl_runtime::application::CancellationPolicy::RespectClientAbort,
         };
 
         bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
@@ -20182,6 +20221,241 @@ async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_
     assert_eq!(
         shared_delta, 1,
         "request path must attach as shared follower to current-revision prewarm instead of starting duplicate IR compute, counters={counters_after:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_current_revision_exact_prewarm_reuses_request_started_ir_singleflight() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE_V1: &str = "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
+    const FIXTURE_V2: &str =
+        "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
+    const LEADER_IR_METRIC: &str =
+        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
+    const SHARED_IR_METRIC: &str =
+        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
+
+    let (_service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        FIXTURE_V1,
+        "file:///test_p33_request_started_ir_singleflight_reuse.bsl",
+    )
+    .await;
+
+    let metrics_before = server.coordinator.observability_metrics();
+    let counters_before = metrics_before
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_before.counters object");
+    let leader_before = read_u64_metric(counters_before.get(LEADER_IR_METRIC));
+    let shared_before = read_u64_metric(counters_before.get(SHARED_IR_METRIC));
+
+    let file_path: Arc<str> = Arc::from(
+        uri.to_file_path()
+            .expect("fixture file path")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let fixture_v2: Arc<str> = Arc::from(FIXTURE_V2);
+    server.analysis_v2.apply_changes_interactive(
+        bsl_runtime::application::ObservabilityOrigin::Lsp,
+        vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
+            file_id,
+            text: fixture_v2.clone(),
+            version: 2,
+            path: file_path,
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                2,
+                fixture_v2.as_ref(),
+                vec![],
+                true,
+                None,
+            ),
+        }],
+    );
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 2);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 2,
+            text: fixture_v2,
+        },
+    );
+
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version_for_operation(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                2,
+            )
+            .await,
+        "runtime must observe current revision before request-side IR query becomes leader"
+    );
+
+    let completion_snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            bsl_runtime::application::SemanticOperation::Completion,
+        )
+        .await;
+    let analysis = completion_snapshot.analysis;
+    assert_eq!(
+        analysis.file_version(file_id).expect("file_version"),
+        Some(2),
+        "request-side snapshot must target same current revision as delayed prewarm"
+    );
+    let deps_id = completion_snapshot.deps_id;
+    let settings_id = analysis.settings_id().expect("settings id");
+    let coordinator = server.coordinator.clone();
+    let request_ir = tokio::task::spawn_blocking(move || {
+        let context = bsl_runtime::application::ExecutionContext {
+            origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
+            operation: bsl_runtime::application::SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(2),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: bsl_runtime::application::ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+            },
+            cancellation: bsl_runtime::application::CancellationPolicy::RespectClientAbort,
+        };
+
+        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+            &context,
+            &analysis,
+            Some(coordinator.as_ref()),
+            file_id,
+        )
+    });
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    let prewarm_snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            bsl_runtime::application::SemanticOperation::Completion,
+        )
+        .await;
+    let prewarm_server = server.clone();
+    let prewarm_task = tokio::spawn(async move {
+        prewarm_server
+            .run_completion_exact_ir_singleflight_prewarm_v2(
+                prewarm_snapshot.analysis,
+                file_id,
+                bsl_runtime::application::CpuWorkClass::Background,
+                false,
+            )
+            .await;
+    });
+
+    let shared_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        let metrics = server.coordinator.observability_metrics();
+        let counters = metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let leader_delta =
+            read_u64_metric(counters.get(LEADER_IR_METRIC)).saturating_sub(leader_before);
+        let shared_delta =
+            read_u64_metric(counters.get(SHARED_IR_METRIC)).saturating_sub(shared_before);
+        if leader_delta >= 1 && shared_delta >= 1 {
+            break;
+        }
+        if tokio::time::Instant::now() >= shared_deadline {
+            panic!(
+                "delayed prewarm did not reuse request-started IR flight in time, counters={counters:?}"
+            );
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let request_ir = request_ir
+        .await
+        .expect("request ir join")
+        .expect("request ir singleflight");
+    prewarm_task.await.expect("prewarm task join");
+    if let Some(request_ir) = request_ir.as_ref() {
+        assert!(
+            !request_ir.nodes.is_empty(),
+            "request-started exact IR query must return a non-empty semantic program when the follower flight resolves directly"
+        );
+    }
+
+    let ready_deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        if server
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_completion_head_ready(file_id)
+            .expect("current_completion_head_ready")
+        {
+            break;
+        }
+        if tokio::time::Instant::now() >= ready_deadline {
+            panic!("current-revision head artifact did not become ready after request-started shared IR flight");
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+
+    let metrics_after = server.coordinator.observability_metrics();
+    let counters_after = metrics_after
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_after.counters object");
+    let leader_delta =
+        read_u64_metric(counters_after.get(LEADER_IR_METRIC)).saturating_sub(leader_before);
+    let shared_delta =
+        read_u64_metric(counters_after.get(SHARED_IR_METRIC)).saturating_sub(shared_before);
+
+    assert_eq!(
+        leader_delta, 1,
+        "request-started same-revision overlap must produce exactly one IR singleflight leader, counters={counters_after:?}"
+    );
+    assert_eq!(
+        shared_delta, 1,
+        "delayed current-revision prewarm must attach as shared follower to request-started IR flight instead of starting duplicate compute, counters={counters_after:?}"
     );
 
     drain_task.abort();

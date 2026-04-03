@@ -171,7 +171,7 @@ impl BslLanguageServer {
         );
     }
 
-    async fn run_completion_exact_ir_singleflight_prewarm_v2(
+    pub(crate) async fn run_completion_exact_ir_singleflight_prewarm_v2(
         &self,
         analysis: bsl_analysis_v2::AnalysisV2,
         file_id: bsl_analysis_v2::FileId,
@@ -760,7 +760,10 @@ impl BslLanguageServer {
         true
     }
 
-    async fn cancel_current_revision_head_precompute_v2(&self, file_id: bsl_analysis_v2::FileId) {
+    pub(crate) async fn cancel_current_revision_head_precompute_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+    ) {
         let task = self
             .current_revision_head_precompute_tasks_v2
             .lock()

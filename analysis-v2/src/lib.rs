@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use salsa::Setter;
+use salsa::{Database as _, Setter};
 
 pub use bsl_line_index::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 
@@ -43,6 +43,29 @@ pub struct FileId(pub u32);
 
 pub const DEPS_SCHEMA_VERSION: &str = "deps-snapshot-v1";
 pub const SETTINGS_SCHEMA_VERSION: &str = "settings-v1";
+
+#[derive(Clone)]
+pub struct ExternalCancellationCheck {
+    checker: Arc<dyn Fn() -> bool + Send + Sync>,
+}
+
+impl ExternalCancellationCheck {
+    pub fn new(checker: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        Self {
+            checker: Arc::new(checker),
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        (self.checker)()
+    }
+}
+
+impl std::fmt::Debug for ExternalCancellationCheck {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ExternalCancellationCheck(..)")
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DepsSnapshotId(String);
@@ -378,13 +401,67 @@ fn cancellable<T>(op: impl FnOnce() -> T) -> Cancellable<T> {
         Ok(value) => Ok(value),
         Err(payload) => match payload.downcast::<salsa::Cancelled>() {
             Ok(cancelled) => Err(*cancelled),
-            Err(payload) => std::panic::resume_unwind(payload),
+            Err(payload) => match payload.downcast::<ExternalCancellationPanic>() {
+                Ok(_) => Err(external_cancelled()),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
         },
+    }
+}
+
+thread_local! {
+    static EXTERNAL_CANCELLATION_CHECKS: RefCell<Vec<ExternalCancellationCheck>> = const {
+        RefCell::new(Vec::new())
+    };
+}
+
+#[derive(Debug)]
+struct ExternalCancellationPanic;
+
+struct ScopedExternalCancellationCheck;
+
+impl Drop for ScopedExternalCancellationCheck {
+    fn drop(&mut self) {
+        EXTERNAL_CANCELLATION_CHECKS.with(|checks| {
+            checks
+                .borrow_mut()
+                .pop()
+                .expect("external cancellation check stack must stay balanced");
+        });
+    }
+}
+
+pub fn with_external_cancellation_check<T>(
+    check: Option<ExternalCancellationCheck>,
+    op: impl FnOnce() -> T,
+) -> T {
+    with_external_cancellation_registration(check, op)
+}
+
+fn with_external_cancellation_registration<T>(
+    check: Option<ExternalCancellationCheck>,
+    op: impl FnOnce() -> T,
+) -> T {
+    if let Some(check) = check {
+        EXTERNAL_CANCELLATION_CHECKS.with(|checks| {
+            checks.borrow_mut().push(check);
+        });
+        let _guard = ScopedExternalCancellationCheck;
+        op()
+    } else {
+        op()
     }
 }
 
 #[inline(always)]
 fn cancellation_checkpoint(db: &dyn salsa::Database) {
+    EXTERNAL_CANCELLATION_CHECKS.with(|checks| {
+        if let Some(check) = checks.borrow().last() {
+            if check.is_cancelled() {
+                std::panic::resume_unwind(Box::new(ExternalCancellationPanic));
+            }
+        }
+    });
     db.unwind_if_revision_cancelled();
 }
 
@@ -392,6 +469,29 @@ include!("lib/salsa_events.rs");
 include!("lib/snapshots.rs");
 include!("lib/host_runtime.rs");
 include!("lib/analysis_api.rs");
+
+fn external_cancelled() -> salsa::Cancelled {
+    let mut db = AnalysisDatabase::default();
+    let query_db = db.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        ready_tx.send(()).expect("ready send");
+        let result = salsa::Cancelled::catch(|| loop {
+            query_db.unwind_if_revision_cancelled();
+            std::thread::yield_now();
+        });
+        result_tx.send(result).expect("result send");
+    });
+    ready_rx.recv().expect("ready recv");
+    db.trigger_cancellation();
+    let cancelled = result_rx
+        .recv()
+        .expect("result recv")
+        .expect_err("trigger_cancellation worker must observe salsa::Cancelled");
+    worker.join().expect("cancellation worker join");
+    cancelled
+}
 
 #[cfg(test)]
 #[path = "lib/tests.rs"]

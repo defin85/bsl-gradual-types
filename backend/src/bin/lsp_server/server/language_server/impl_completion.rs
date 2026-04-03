@@ -2592,6 +2592,13 @@ impl BslLanguageServer {
                             let observed_deps_id_for_query = observed_deps_id.clone();
                             let cancellation_token_for_query =
                                 completion_cancellation_token.clone();
+                            let external_ir_cancellation_for_query =
+                                cancellation_token_for_query.as_ref().map(|token| {
+                                    let token = token.clone();
+                                    bsl_analysis_v2::ExternalCancellationCheck::new(move || {
+                                        token.is_cancelled()
+                                    })
+                                });
                             let observed_query_call =
                                 bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin(
                                     bsl_runtime::application::CpuWorkClass::Interactive,
@@ -2689,11 +2696,12 @@ impl BslLanguageServer {
 
                                     let ir_started = Instant::now();
                                     let ir_query =
-                                        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                                        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight_with_cancellation(
                                             &context_for_query,
                                             &analysis,
                                             Some(coordinator_for_query.as_ref()),
                                             file_id,
+                                            external_ir_cancellation_for_query.clone(),
                                         );
                                     let ir_elapsed = ir_started.elapsed();
                                     let ir_outcome =
@@ -2736,70 +2744,88 @@ impl BslLanguageServer {
                                                 ir_elapsed,
                                             );
 
-                                            // One fast retry mitigates transient cancellation races between
-                                            // rapid didChange updates and completion query execution.
-                                            let retry_started = Instant::now();
-                                            let ir_retry =
-                                                bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                                                    &context_for_query,
-                                                    &analysis,
-                                                    Some(coordinator_for_query.as_ref()),
-                                                    file_id,
-                                                );
-                                            let retry_elapsed = retry_started.elapsed();
-                                            if let Some(threshold) =
-                                                super::super::intellisense_v2_slow_query_warn_threshold()
+                                            if cancellation_token_for_query
+                                                .as_ref()
+                                                .is_some_and(|token| token.is_cancelled())
                                             {
-                                                if retry_elapsed >= threshold {
-                                                    warn!(
-                                                        uri = %uri_for_query,
-                                                        file_id = file_id.0,
-                                                        ir_retry_ms = retry_elapsed.as_millis(),
-                                                        threshold_ms = threshold.as_millis(),
-                                                        "Completion v2: ir retry query is slow"
+                                                debug!(
+                                                    uri = %uri_for_query,
+                                                    file_id = file_id.0,
+                                                    first_error = ?first_cancelled,
+                                                    ir_outcome = ir_outcome.as_str(),
+                                                    "Completion v2: skipping ir retry after explicit cancellation"
+                                                );
+                                                report.set_terminal_status(
+                                                    CompletionTimelineStageStatus::Cancelled,
+                                                );
+                                                (None, true)
+                                            } else {
+                                                // One fast retry mitigates transient cancellation races between
+                                                // rapid didChange updates and completion query execution.
+                                                let retry_started = Instant::now();
+                                                let ir_retry =
+                                                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight_with_cancellation(
+                                                        &context_for_query,
+                                                        &analysis,
+                                                        Some(coordinator_for_query.as_ref()),
+                                                        file_id,
+                                                        external_ir_cancellation_for_query.clone(),
                                                     );
+                                                let retry_elapsed = retry_started.elapsed();
+                                                if let Some(threshold) =
+                                                    super::super::intellisense_v2_slow_query_warn_threshold()
+                                                {
+                                                    if retry_elapsed >= threshold {
+                                                        warn!(
+                                                            uri = %uri_for_query,
+                                                            file_id = file_id.0,
+                                                            ir_retry_ms = retry_elapsed.as_millis(),
+                                                            threshold_ms = threshold.as_millis(),
+                                                            "Completion v2: ir retry query is slow"
+                                                        );
+                                                    }
                                                 }
-                                            }
-                                            match ir_retry {
-                                                Ok(program) => {
-                                                    debug!(
-                                                        uri = %uri_for_query,
-                                                        file_id = file_id.0,
-                                                        "Completion v2: recovered from transient ir cancellation via retry"
-                                                    );
-                                                    coordinator_for_query.record_completion_stage_latency(
-                                                        QueryBundleStageName::IrRetry.as_str(),
-                                                        retry_elapsed,
-                                                    );
-                                                    report.push(
-                                                        QueryBundleStageName::IrRetry,
-                                                        CompletionTimelineStageStatus::Completed,
-                                                        retry_elapsed,
-                                                    );
-                                                    (program, false)
-                                                }
-                                                Err(retry_cancelled) => {
-                                                    debug!(
-                                                        uri = %uri_for_query,
-                                                        file_id = file_id.0,
-                                                        first_error = ?first_cancelled,
-                                                        retry_error = ?retry_cancelled,
-                                                        ir_outcome = ir_outcome.as_str(),
-                                                        "Completion v2: ir query cancelled after retry"
-                                                    );
-                                                    coordinator_for_query.record_completion_stage_latency(
-                                                        QueryBundleStageName::IrRetry.as_str(),
-                                                        retry_elapsed,
-                                                    );
-                                                    report.push(
-                                                        QueryBundleStageName::IrRetry,
-                                                        CompletionTimelineStageStatus::Cancelled,
-                                                        retry_elapsed,
-                                                    );
-                                                    report.set_terminal_status(
-                                                        CompletionTimelineStageStatus::Cancelled,
-                                                    );
-                                                    (None, true)
+                                                match ir_retry {
+                                                    Ok(program) => {
+                                                        debug!(
+                                                            uri = %uri_for_query,
+                                                            file_id = file_id.0,
+                                                            "Completion v2: recovered from transient ir cancellation via retry"
+                                                        );
+                                                        coordinator_for_query.record_completion_stage_latency(
+                                                            QueryBundleStageName::IrRetry.as_str(),
+                                                            retry_elapsed,
+                                                        );
+                                                        report.push(
+                                                            QueryBundleStageName::IrRetry,
+                                                            CompletionTimelineStageStatus::Completed,
+                                                            retry_elapsed,
+                                                        );
+                                                        (program, false)
+                                                    }
+                                                    Err(retry_cancelled) => {
+                                                        debug!(
+                                                            uri = %uri_for_query,
+                                                            file_id = file_id.0,
+                                                            first_error = ?first_cancelled,
+                                                            retry_error = ?retry_cancelled,
+                                                            ir_outcome = ir_outcome.as_str(),
+                                                            "Completion v2: ir query cancelled after retry"
+                                                        );
+                                                        coordinator_for_query.record_completion_stage_latency(
+                                                            QueryBundleStageName::IrRetry.as_str(),
+                                                            retry_elapsed,
+                                                        );
+                                                        report.push(
+                                                            QueryBundleStageName::IrRetry,
+                                                            CompletionTimelineStageStatus::Cancelled,
+                                                            retry_elapsed,
+                                                        );
+                                                        report.set_terminal_status(
+                                                            CompletionTimelineStageStatus::Cancelled,
+                                                        );
+                                                        (None, true)
+                                                    }
                                                 }
                                             }
                                         }

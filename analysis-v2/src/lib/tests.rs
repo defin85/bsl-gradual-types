@@ -2896,7 +2896,14 @@ fn cancelled_parse_snapshot_ir_build_does_not_publish_partial_head_artifact() {
         text: version1_text.clone(),
         version: 1,
         path: path.clone(),
-        parse_snapshot: parse_snapshot_for_test(file_id, 1, version1_text.as_ref(), Vec::new(), true, None),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            version1_text.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
     });
 
     let deps_id = host.snapshot().deps_id().expect("deps id");
@@ -2914,7 +2921,14 @@ fn cancelled_parse_snapshot_ir_build_does_not_publish_partial_head_artifact() {
         text: version2_text.clone(),
         version: 2,
         path: path.clone(),
-        parse_snapshot: parse_snapshot_for_test(file_id, 2, version2_text.as_ref(), Vec::new(), true, None),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            2,
+            version2_text.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
     });
 
     let cancelled = query.join().expect("ir query join");

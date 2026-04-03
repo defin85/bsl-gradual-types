@@ -3514,11 +3514,9 @@ pub(crate) fn materialize_semantic_facts_with_path_profiled_and_checkpoint(
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
 ) -> TypeIndexBuildProfile {
-    let profiled = TypeInferencer::with_cancellation_checkpoint(
-        deps,
-        Some(cancellation_checkpoint),
-    )
-    .build_facts_internal(parsed_program, file_path, Some(source_text), None);
+    let profiled =
+        TypeInferencer::with_cancellation_checkpoint(deps, Some(cancellation_checkpoint))
+            .build_facts_internal(parsed_program, file_path, Some(source_text), None);
     program.semantic_facts = profiled.facts;
     profiled.profile
 }

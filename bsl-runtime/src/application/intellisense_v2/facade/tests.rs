@@ -1,5 +1,5 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 
@@ -3245,6 +3245,121 @@ fn singleflight_propagates_leader_cancel_without_retry_and_cleans_up() {
     .expect("new request after cleanup should run as new leader");
     assert_eq!(rerun.as_deref().map(String::as_str), Some("after-cleanup"));
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn external_cancelled_ir_query_singleflight_does_not_publish_partial_head_artifact() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _ir_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "200");
+
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(901);
+    let path: Arc<str> = Arc::from("cancelled_runtime_ir_singleflight.bsl");
+    let file_text: Arc<str> = Arc::from(
+        "Процедура Тест()\n    Значение = 1;\n    Результат = Значение + 1;\nКонецПроцедуры\n",
+    );
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: file_text.clone(),
+        version: 1,
+        path: path.clone(),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, file_text.as_ref(), vec![], true, None),
+    });
+
+    let analysis = host.snapshot();
+    let deps_id = analysis.deps_id().expect("deps id");
+    let settings_id = analysis.settings_id().expect("settings id");
+    let deps_id_for_query = deps_id.clone();
+    let settings_id_for_query = settings_id.clone();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancellation_check = bsl_analysis_v2::ExternalCancellationCheck::new({
+        let cancelled = cancelled.clone();
+        move || cancelled.load(Ordering::SeqCst)
+    });
+    let query = std::thread::spawn(move || {
+        let context = ExecutionContext {
+            origin: ObservabilityOrigin::Runtime,
+            operation: SemanticOperation::Completion,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(1),
+            expected_deps_id: Some(deps_id_for_query),
+            flow_sensitive: false,
+            settings: ExecutionSettings {
+                settings_id: settings_id_for_query,
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+            },
+            cancellation: CancellationPolicy::RespectClientAbort,
+        };
+
+        IntellisenseV2Facade::run_ir_query_singleflight_with_cancellation(
+            &context,
+            &analysis,
+            None,
+            file_id,
+            Some(cancellation_check),
+        )
+    });
+
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    cancelled.store(true, Ordering::SeqCst);
+
+    let cancelled = query.join().expect("ir query join");
+    assert!(
+        cancelled.is_err(),
+        "explicit external cancellation must terminate exact IR singleflight with cancelled outcome"
+    );
+
+    let analysis_after_cancel = host.snapshot();
+    assert!(
+        !analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 1, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version after external cancel"),
+        "externally cancelled exact build must not publish partial completion head"
+    );
+
+    let rebuilt = analysis_after_cancel
+        .ir_profiled(file_id)
+        .expect("rebuilt ir")
+        .expect("rebuilt ir present");
+    assert!(
+        rebuilt.profile.total_ms > 0,
+        "rebuild after explicit cancel must still succeed for the same revision"
+    );
+    assert!(
+        analysis_after_cancel
+            .completion_head_ready_for_version(file_id, 1, &deps_id, &settings_id)
+            .expect("completion_head_ready_for_version after rebuild"),
+        "successful rebuild after explicit cancel must publish completion head"
+    );
 }
 
 #[test]

@@ -1752,26 +1752,22 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `19`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `21`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов, incident summary или агрегированных observability-метрик.
 
-Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v16`, синхронизированный с текущим authoritative payload и его bounded field-set.
+Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v18`, синхронизированный с текущим authoritative payload и его bounded field-set.
 
-В этом change `transport_received_at_ms` сохраняет существующую legacy semantics и MUST NOT ретроактивно переосмысляться как ранняя adapter boundary.
-Новый earliest server-side ingress split MUST публиковаться только через additive поля `adapter_read_at_ms` и `adapter_to_dispatch_wait_ms`.
+`v21` MUST сохранять additive `v20` ingress/query-body semantics, включая grouped `query_bundle*` taxonomy и existing bounded server-edge fields.
 
-VS Code extension MAY отображать отдельно captured local client-side completion probes рядом с server trace, и такой local-only debug stream MAY включать bounded cancellation hints, transport-phase diagnostics, result-shape diagnostics и overlap/drift diagnostics, но такой stream:
-- MUST NOT менять contract version или shape server-generated payload;
-- MUST NOT подменять server-generated stages, routes, causes, waiter states или outcomes;
-- MUST оставаться отдельным UI-level stream, а не частью LSP timeline contract.
+Контракт `v21` MUST включать:
 
-Контракт `v19` MUST включать:
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
 
 Каждый trace MUST включать:
+
 - `trace_id`, `request_id`, `uri`, `trigger_mode`;
 - `outcome`, `started_at_ms`, `total_duration_ms`;
 - `dominant_stage`;
@@ -1780,110 +1776,44 @@ VS Code extension MAY отображать отдельно captured local clien
 - optional `server_edge_details`;
 - `stages`.
 
-Если `turn_attribution` присутствует, объект MUST оставаться bounded и MAY включать `dispatcher_resolution_latency_ms`, достаточный для отделения dispatcher-ready latency от остального ingress wait.
+Если `server_edge_details` присутствует, additive `v21` post-handler egress split MUST сохранять existing semantics `response_sent_at_ms` и MAY включать:
 
-Если `prepare_details` присутствует, объект MUST оставаться bounded и MUST NOT вводить high-cardinality labels.
-Для completion bottleneck drilldown этот объект MUST включать:
-- `route` со значениями только из bounded vocabulary `head_hit|exact_hit` либо `null`;
-- `fail_closed_cause` со значениями только из bounded vocabulary `prepare_timeout|exact_deadline` либо `null`;
-- `progress` с coarse prepare phase и bounded offsets;
-- optional bounded runtime drilldown для `wait_for_file_version`;
-- optional bounded runtime drilldown для `snapshot_with_deps`;
-- optional bounded `timeout_attribution`;
-- optional `exact_wait`.
+- `response_flush_completed_at_ms`;
+- `response_ready_to_flush_wait_ms`.
 
-Если `server_edge_details` присутствует, объект MUST оставаться bounded и MUST включать:
-- `transport_received_at_ms`;
-- `transport_received_at_ms_provenance`;
-- `pre_method_attribution_provenance`;
-- `handler_entered_at_ms`;
-- `response_sent_at_ms`;
-- optional `cancel_observed_at_ms`;
-- `transport_to_handler_wait_ms`;
-- `server_handler_exec_ms`;
-- optional `cancel_observed_after_handler_enter_ms`;
-- optional `adapter_read_at_ms`;
-- optional `adapter_to_dispatch_wait_ms`;
-- optional `jsonrpc_dispatch_received_at_ms`;
-- optional `dispatch_to_request_context_wait_ms`;
-- optional `method_entered_at_ms`;
-- optional `transport_to_method_wait_ms`;
-- optional `method_prelude_exec_ms`;
-- optional `service_scope_entered_at_ms`;
-- optional `transport_to_service_scope_wait_ms`;
-- optional `service_scope_to_method_wait_ms`;
-- optional `service_future_created_at_ms`;
-- optional `transport_to_service_future_wait_ms`;
-- optional `service_future_to_scope_wait_ms`;
-- optional `service_future_first_poll_entered_at_ms`;
-- optional `service_future_to_first_poll_wait_ms`;
-- optional `service_future_first_poll_outcome`;
-- optional `service_future_first_wake_scheduled_at_ms`;
-- optional `first_poll_to_first_wake_wait_ms`.
+`response_sent_at_ms` MUST продолжать обозначать handler-local response-ready boundary. Это поле MUST NOT ретроактивно переосмысляться как transport flush completion.
 
-`transport_received_at_ms_provenance` MUST использовать только bounded vocabulary:
-- `request_context_call_entry`;
-- `jsonrpc_dispatch_received`.
+Если `response_flush_completed_at_ms` присутствует, payload MUST включать и `response_ready_to_flush_wait_ms`, чтобы post-handler server egress split не требовал ручного вычитания timestamp'ов.
 
-`service_future_first_poll_outcome` MUST использовать только bounded vocabulary:
-- `ready`;
-- `pending`.
+Если `response_ready_to_flush_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_sent_at_ms` и фактическим flush completion для этого response и MUST NOT включать client-side transport или extension-host post-receive wait.
 
-Если `adapter_read_at_ms` присутствует, это поле MUST обозначать earliest server-side adapter ingress boundary, записанную сразу после успешного read/decode transport message и до shared readiness/admission blocking.
+#### Scenario: VS Code клиент получает `v21` payload без reconstruction
 
-Если `adapter_read_at_ms` присутствует, payload MUST включать и `adapter_to_dispatch_wait_ms`, чтобы pre-dispatch split не требовал ручного вычитания timestamp'ов.
-
-Если `adapter_to_dispatch_wait_ms` присутствует, это поле MUST описывать только server-side wait между `adapter_read_at_ms` и earliest dispatch boundary и MUST NOT включать client-side ingress или post-dispatch wait.
-
-Если `method_entered_at_ms` присутствует, payload MUST включать и `transport_to_method_wait_ms`, и `method_prelude_exec_ms`, чтобы ingress attribution можно было прочитать без ручного вычитания timestamp'ов.
-
-Если `service_scope_entered_at_ms` присутствует, payload MUST включать и `transport_to_service_scope_wait_ms`, и `service_scope_to_method_wait_ms`, чтобы pre-method split оставался self-contained.
-
-Если `service_future_created_at_ms` присутствует, payload MUST включать и `transport_to_service_future_wait_ms`, и `service_future_to_scope_wait_ms`, чтобы pre-service-scope split не требовал ручного вычитания timestamp'ов.
-
-Если `jsonrpc_dispatch_received_at_ms` присутствует, payload MUST включать и `dispatch_to_request_context_wait_ms`, чтобы pre-request-context split не требовал ручного вычитания timestamp'ов.
-
-Если `service_future_first_poll_entered_at_ms` присутствует, payload MUST включать и `service_future_to_first_poll_wait_ms`, чтобы first-poll split не требовал ручного вычитания timestamp'ов.
-
-Если `service_future_first_wake_scheduled_at_ms` присутствует, payload MUST включать и `first_poll_to_first_wake_wait_ms`, чтобы first-wake split не требовал ручного вычитания timestamp'ов.
-
-Если `transport_received_at_ms_provenance=jsonrpc_dispatch_received`, payload MUST включать `jsonrpc_dispatch_received_at_ms`, а `transport_received_at_ms` MUST совпадать с ним.
-
-Если `transport_received_at_ms_provenance=request_context_call_entry`, payload MUST NOT выдумывать `jsonrpc_dispatch_received_at_ms` и `dispatch_to_request_context_wait_ms`.
-
-Если request завершился до dispatch, payload MUST NOT выдумывать `jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `transport_to_method_wait_ms` или `method_prelude_exec_ms`.
-
-Если `service_future_first_poll_outcome=ready`, payload MUST NOT выдумывать `service_future_first_wake_scheduled_at_ms` и `first_poll_to_first_wake_wait_ms`.
-
-Каждый stage entry MUST включать:
-- `name`;
-- `status` (`completed|cancelled|failed|skipped`);
-- `started_offset_ms`;
-- `duration_ms`.
-
-#### Scenario: VS Code клиент получает server-generated payload без reconstruction
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v19` с server-generated traces
+- **THEN** LSP возвращает response контракта `v21` с server-generated traces
 - **AND** клиент не строит authoritative server trace из raw logs, incident summary или p95/p99 агрегатов
 
-#### Scenario: Pre-dispatch backlog виден отдельно от dispatch/request-context split
-- **GIVEN** completion request был прочитан transport adapter, но dispatch в service задержался
+#### Scenario: Flush completion отделён от handler-ready boundary
+
+- **GIVEN** completion handler уже подготовил response, но transport flush завершится позже
 - **WHEN** клиент читает `server_edge_details`
-- **THEN** payload содержит `adapter_read_at_ms` и `adapter_to_dispatch_wait_ms`
-- **AND** post-dispatch поля (`jsonrpc_dispatch_received_at_ms`, `dispatch_to_request_context_wait_ms`, `transport_to_method_wait_ms`) остаются отдельными bounded срезами
+- **THEN** payload сохраняет `response_sent_at_ms` как handler-ready boundary
+- **AND** публикует `response_flush_completed_at_ms` и `response_ready_to_flush_wait_ms` отдельно, если flush boundary наблюдаема
 
 #### Scenario: Versioned contract baseline синхронизирован с shipped payload
-- **GIVEN** authoritative completion timeline уже публикует contract `v19`
-- **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
-- **THEN** `contracts/lsp-completion-timeline/v16` совпадает по bounded field-set с runtime payload
-- **AND** policy/verification scripts валидируют именно `v19/v16`, а не более старую версию
 
-#### Scenario: Legacy transport ingress field не переосмысляется задним числом
-- **GIVEN** authoritative payload содержит новый adapter boundary split
+- **GIVEN** authoritative completion timeline уже публикует contract `v21`
+- **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
+- **THEN** `contracts/lsp-completion-timeline/v18` совпадает по bounded field-set с runtime payload
+- **AND** policy/verification scripts валидируют именно `v21/v18`, а не более старую версию
+
+#### Scenario: Legacy `response_sent_at_ms` semantics не меняется задним числом
+
+- **GIVEN** authoritative payload содержит новый flush-aware split
 - **WHEN** downstream consumer читает `server_edge_details`
-- **THEN** `transport_received_at_ms` сохраняет legacy semantics
-- **AND** earliest adapter ingress публикуется отдельно через `adapter_read_at_ms`
+- **THEN** `response_sent_at_ms` сохраняет response-ready semantics
+- **AND** transport flush completion публикуется только через additive `response_flush_completed_at_ms`
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.

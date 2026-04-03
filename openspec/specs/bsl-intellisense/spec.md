@@ -358,12 +358,14 @@ Observability completion UI MUST NOT:
 VS Code extension MUST вести bounded in-memory ring buffer последних client-side completion probes на основном activation/runtime path.
 
 Probe buffer MUST:
+
 - быть wired на default `LanguageClient` path, используемый обычной активацией extension;
 - использовать deterministic oldest-first eviction;
 - хранить только bounded/redacted probe fields;
 - оставаться session-local и in-memory only.
 
 Каждый probe MUST включать только bounded metadata:
+
 - `probe_id`;
 - `uri`;
 - `document_version`;
@@ -371,7 +373,12 @@ Probe buffer MUST:
 - `trigger_mode` и optional `trigger_character`;
 - `request_started_at_ms`;
 - `request_completed_at_ms`;
-- explicit transport-phase milestones, достаточные для отделения client enter, LSP dispatch, LSP response receive и client terminal;
+- explicit transport-phase milestones, достаточные для отделения:
+  - client enter;
+  - LSP request dispatch;
+  - raw transport response receive;
+  - LSP promise resolve;
+  - client terminal;
 - terminal status/result summary;
 - bounded `result_kind` vocabulary;
 - bounded `item_count_bucket`;
@@ -382,31 +389,28 @@ Probe buffer MUST:
 - bounded overlap/drift diagnostics: `did_change_count_during_probe`, `cursor_moved_during_probe`, `active_completion_count_at_start`, `same_uri_probe_overlap_count`, `newer_probe_started_before_terminal`;
 - derived context flags вроде `is_after_dot` и `identifier_tail_length`.
 
+Если raw transport response receive boundary недоступна на конкретном runtime path, probe MUST фиксировать это explicit bounded marker'ом unavailable/unknown и MUST NOT silently подменять receive timestamp временем promise resolution.
+
 Probe buffer MUST NOT:
+
 - хранить raw document text, line prefixes или произвольные snippets;
 - хранить unbounded free-form labels;
 - требовать отдельного persistent telemetry pipeline в рамках этой capability;
 - требовать protocol-level `client_probe_id` или trace-level correlation с `Server Timeline`.
 
-#### Scenario: Superseded completion probe получает bounded cancellation diagnostics
-- **GIVEN** completion probe был отменён после старта более нового completion probe на том же `uri`
+#### Scenario: Probe отделяет raw receive от promise resolution
+
+- **GIVEN** completion probe завершился успешным LSP response
+- **WHEN** extension записывает transport-phase milestones
+- **THEN** probe отдельно фиксирует raw transport response receive и LSP promise resolve
+- **AND** не смешивает эти две границы в один timestamp
+
+#### Scenario: Недоступный receive boundary не подменяется guessed timestamp
+
+- **GIVEN** на конкретном runtime seam raw transport receive boundary нельзя наблюдать детерминированно
 - **WHEN** extension завершает запись client-side probe
-- **THEN** probe содержит `client_terminal_state=cancelled`
-- **AND** probe содержит bounded `cancel_reason_hint`
-- **AND** если superseding probe известен локально, probe MAY содержать `superseded_by_probe_id` и `superseded_after_ms`
-
-#### Scenario: Успешный пустой completion probe содержит result-shape и transport diagnostics
-- **GIVEN** completion probe завершился без cancellation и без items
-- **WHEN** extension записывает probe
-- **THEN** probe содержит bounded `result_kind` и `item_count_bucket`
-- **AND** probe содержит transport-phase milestones для локального разбора длительности
-- **AND** probe не требует реконструкции server timeline
-
-#### Scenario: Probe фиксирует drift и overlap контекст во время жизни запроса
-- **GIVEN** во время completion probe произошли дополнительные правки, движение курсора или запуск новых completion probes на том же документе
-- **WHEN** extension завершает запись probe
-- **THEN** probe содержит bounded drift/overlap diagnostics
-- **AND** probe остаётся redacted и session-local
+- **THEN** probe явно помечает receive boundary как unavailable или unknown
+- **AND** не записывает promise-resolution timestamp под видом raw receive
 
 ### Requirement: Existing completion surfaces переносят `v9` pre-service-scope split без invented data (MUST)
 Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить `v11` service-future first-poll / first-wake split в человекочитаемом виде.
@@ -666,4 +670,68 @@ Human-readable projection MUST:
 - **WHEN** extension формирует panel, clipboard или incident bundle
 - **THEN** extension не выдумывает `first_poll_contention_attribution`
 - **AND** человекочитаемый output явно отмечает, что bounded contender attribution unavailable by design for `contract=v11`
+
+### Requirement: Existing completion surfaces различают ingress и query-body dominance без invented findings (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST использовать authoritative server stages для различения ingress bottleneck и query-body bottleneck.
+
+Human-readable projection MUST:
+- строиться только из bounded authoritative fields/stages и локальных bounded status markers;
+- не публиковать verdict `adapter_before_dispatch_dominant`, если authoritative `dominant_stage` или visible `stages` показывают dominance внутри `query_bundle*`;
+- использовать canonical bounded verdict vocabulary:
+  - `query_bundle_dominant`
+  - `query_bundle_pool_wait_dominant`
+  - `query_bundle_deps_and_file_snapshot_dominant`
+  - `query_bundle_owner_hint_dominant`
+  - `query_bundle_ir_query_dominant`
+  - `query_bundle_ir_retry_dominant`
+  - `query_bundle_other_dominant`;
+- переносить `query_bundle` dominance в человекочитаемом виде для panel, clipboard и incident summary, если connected server возвращает `v20` payload;
+- явно деградировать на `v19`, не выдумывая detailed `query_bundle_pool_wait`, `query_bundle_ir_query` или equivalent split.
+
+Если query-body leaf verdict публикуется, surfaces SHOULD также публиковать umbrella verdict `query_bundle_dominant`.
+Query-body verdicts MUST иметь precedence над ingress-only verdicts для того же trace.
+
+#### Scenario: Panel и clipboard не обвиняют adapter ingress при dominant query-body stage
+- **GIVEN** extension получает completion timeline `v20`, где `adapter_to_dispatch_wait_ms` положителен, но authoritative `dominant_stage` находится в `query_bundle*`
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible trace
+- **THEN** human-readable output не публикует `adapter_before_dispatch_dominant`
+- **AND** output показывает truthful query-body dominance рядом с existing ingress facts
+
+#### Scenario: Incident bundle summary переносит query-body root cause без guessed reconstruction
+- **GIVEN** incident bundle строится по `v20` payload с detailed `query_bundle` stages
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** request summary сохраняет bounded query-body stage facts и derived verdict
+- **AND** summary не заменяет их guessed ingress bottleneck
+
+#### Scenario: Extension явно деградирует на `v19`
+- **GIVEN** connected server возвращает completion timeline `v19`
+- **WHEN** extension формирует panel, clipboard или incident bundle
+- **THEN** extension не выдумывает detailed `query_bundle` split
+- **AND** человекочитаемый output явно отмечает, что truthful query-body breakdown unavailable by design for `contract=v19`
+
+### Requirement: Existing completion surfaces переносят `v21` post-response gap split без guessed root cause (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить `v21` flush-aware server egress split и новый client probe receive/resolve split в человекочитаемом виде.
+
+Human-readable projection MUST:
+
+- показывать `response_ready_to_flush_wait_ms`, если connected server возвращает `v21` payload с flush-aware boundary;
+- при deterministic correlation и наличии нового probe split показывать отдельно `transport_to_client_receive_wait_ms`, `client_receive_to_resolve_wait_ms` и existing `client_post_response_ms`;
+- сохранять existing `client_to_transport_wait_ms` как отдельный ingress bucket;
+- MAY сохранять compatibility umbrella вроде `server_to_client_post_response_ms`, но MUST NOT использовать её как единственный evidence bucket, если новый split доступен;
+- явно деградировать на `v20` и на legacy probe paths, не выдумывая flush или raw-receive boundaries.
+
+#### Scenario: Panel и clipboard показывают split post-response tail
+
+- **GIVEN** extension получает completion timeline `v21`
+- **AND** correlated probe содержит raw receive и promise resolve milestones
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible trace
+- **THEN** output показывает server egress wait отдельно от transport-after-flush и client-after-receive waits
+- **AND** оператору не нужно читать raw JSON, чтобы увидеть этот split
+
+#### Scenario: Incident bundle summary не обвиняет одну сторону при incomplete split
+
+- **GIVEN** connected server возвращает `v20` payload или correlated probe не имеет raw receive boundary
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** summary явно отмечает, что post-response gap split unavailable by design для этой evidence version
+- **AND** derived handoff не переименовывает opaque tail в точный server-side или client-side виновник
 

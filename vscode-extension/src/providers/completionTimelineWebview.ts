@@ -835,6 +835,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 21) {
                 notices.push('v21 flush-aware post-handler egress split is unavailable by design on this payload.');
             }
+            if (contractVersion < 22) {
+                notices.push('v22 finer output-egress split is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -1004,6 +1007,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                ...(typeof details.response_output_enqueue_completed_at_ms === 'number'
+                    ? ['response_output_enqueue_completed=' + escapeHtml(new Date(details.response_output_enqueue_completed_at_ms).toLocaleTimeString())]
+                    : []),
+                ...(typeof details.response_output_write_started_at_ms === 'number'
+                    ? ['response_output_write_started=' + escapeHtml(new Date(details.response_output_write_started_at_ms).toLocaleTimeString())]
+                    : []),
+                ...(typeof details.response_output_encode_completed_at_ms === 'number'
+                    ? ['response_output_encode_completed=' + escapeHtml(new Date(details.response_output_encode_completed_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(typeof details.response_flush_completed_at_ms === 'number'
                     ? ['response_flush_completed=' + escapeHtml(new Date(details.response_flush_completed_at_ms).toLocaleTimeString())]
                     : []),
@@ -1047,6 +1059,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'transport_to_handler_wait=' + escapeHtml(details.transport_to_handler_wait_ms) + 'ms',
                 'server_handler_exec=' + escapeHtml(details.server_handler_exec_ms) + 'ms',
+                ...(typeof details.response_ready_to_output_enqueue_wait_ms === 'number'
+                    ? ['response_ready_to_output_enqueue_wait=' + escapeHtml(details.response_ready_to_output_enqueue_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.response_output_queue_wait_ms === 'number'
+                    ? ['response_output_queue_wait=' + escapeHtml(details.response_output_queue_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.response_output_encode_exec_ms === 'number'
+                    ? ['response_output_encode_exec=' + escapeHtml(details.response_output_encode_exec_ms) + 'ms']
+                    : []),
+                ...(typeof details.response_output_write_and_flush_exec_ms === 'number'
+                    ? ['response_output_write_and_flush_exec=' + escapeHtml(details.response_output_write_and_flush_exec_ms) + 'ms']
+                    : []),
                 ...(typeof details.response_ready_to_flush_wait_ms === 'number'
                     ? ['response_ready_to_flush_wait=' + escapeHtml(details.response_ready_to_flush_wait_ms) + 'ms']
                     : []),
@@ -1078,6 +1102,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     probe && typeof serverIngressAtMs === 'number'
                         ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
                         : undefined,
+                response_ready_to_output_enqueue_wait_ms:
+                    details?.response_ready_to_output_enqueue_wait_ms,
+                response_output_queue_wait_ms: details?.response_output_queue_wait_ms,
+                response_output_encode_exec_ms: details?.response_output_encode_exec_ms,
+                response_output_write_and_flush_exec_ms:
+                    details?.response_output_write_and_flush_exec_ms,
                 response_ready_to_flush_wait_ms: details?.response_ready_to_flush_wait_ms,
                 transport_to_client_receive_wait_ms:
                     probe?.transport_response_receive_state === 'observed'
@@ -1110,6 +1140,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const bits = [];
             if (typeof split.client_to_transport_wait_ms === 'number') {
                 bits.push('client_to_transport_wait=' + escapeHtml(split.client_to_transport_wait_ms) + 'ms');
+            }
+            if (typeof split.response_ready_to_output_enqueue_wait_ms === 'number') {
+                bits.push('response_ready_to_output_enqueue_wait=' + escapeHtml(split.response_ready_to_output_enqueue_wait_ms) + 'ms');
+            }
+            if (typeof split.response_output_queue_wait_ms === 'number') {
+                bits.push('response_output_queue_wait=' + escapeHtml(split.response_output_queue_wait_ms) + 'ms');
+            }
+            if (typeof split.response_output_encode_exec_ms === 'number') {
+                bits.push('response_output_encode_exec=' + escapeHtml(split.response_output_encode_exec_ms) + 'ms');
+            }
+            if (typeof split.response_output_write_and_flush_exec_ms === 'number') {
+                bits.push('response_output_write_and_flush_exec=' + escapeHtml(split.response_output_write_and_flush_exec_ms) + 'ms');
             }
             if (typeof split.response_ready_to_flush_wait_ms === 'number') {
                 bits.push('response_ready_to_flush_wait=' + escapeHtml(split.response_ready_to_flush_wait_ms) + 'ms');

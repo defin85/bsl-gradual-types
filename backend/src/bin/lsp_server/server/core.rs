@@ -85,17 +85,16 @@ fn record_completion_timeline_trace_inner(
     }
 }
 
-fn record_completion_response_flush_completed_at_ms_inner(
+fn record_completion_response_egress_patch_inner(
     traces: &StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>,
-    request_id: &str,
-    response_flush_completed_at_ms: u64,
+    patch: &super::request_context::CompletionResponseEgressTracePatch,
 ) {
     let mut traces = traces
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let Some(trace) = traces
         .iter_mut()
-        .rfind(|trace| trace.request_id.as_deref() == Some(request_id))
+        .rfind(|trace| trace.request_id.as_deref() == Some(patch.request_id.as_str()))
     else {
         return;
     };
@@ -103,9 +102,38 @@ fn record_completion_response_flush_completed_at_ms_inner(
         return;
     };
     if server_edge_details.response_flush_completed_at_ms.is_none() {
-        server_edge_details.response_flush_completed_at_ms = Some(response_flush_completed_at_ms);
+        server_edge_details.response_output_enqueue_completed_at_ms =
+            Some(patch.response_output_enqueue_completed_at_ms);
+        server_edge_details.response_output_write_started_at_ms =
+            Some(patch.response_output_write_started_at_ms);
+        server_edge_details.response_output_encode_completed_at_ms =
+            Some(patch.response_output_encode_completed_at_ms);
+        server_edge_details.response_flush_completed_at_ms =
+            Some(patch.response_flush_completed_at_ms);
+        server_edge_details.response_ready_to_output_enqueue_wait_ms = Some(
+            patch
+                .response_output_enqueue_completed_at_ms
+                .saturating_sub(server_edge_details.response_sent_at_ms),
+        );
+        server_edge_details.response_output_queue_wait_ms = Some(
+            patch
+                .response_output_write_started_at_ms
+                .saturating_sub(patch.response_output_enqueue_completed_at_ms),
+        );
+        server_edge_details.response_output_encode_exec_ms = Some(
+            patch
+                .response_output_encode_completed_at_ms
+                .saturating_sub(patch.response_output_write_started_at_ms),
+        );
+        server_edge_details.response_output_write_and_flush_exec_ms = Some(
+            patch
+                .response_flush_completed_at_ms
+                .saturating_sub(patch.response_output_encode_completed_at_ms),
+        );
         server_edge_details.response_ready_to_flush_wait_ms = Some(
-            response_flush_completed_at_ms.saturating_sub(server_edge_details.response_sent_at_ms),
+            patch
+                .response_flush_completed_at_ms
+                .saturating_sub(server_edge_details.response_sent_at_ms),
         );
     }
 }
@@ -343,13 +371,12 @@ impl BslLanguageServer {
             },
         )));
 
-        let completion_timeline_traces_for_flush_hook = completion_timeline_traces.clone();
-        super::request_context::set_completion_response_flush_hook(Some(Arc::new(
-            move |request_id, response_flush_completed_at_ms| {
-                record_completion_response_flush_completed_at_ms_inner(
-                    completion_timeline_traces_for_flush_hook.as_ref(),
-                    request_id.as_str(),
-                    response_flush_completed_at_ms,
+        let completion_timeline_traces_for_egress_hook = completion_timeline_traces.clone();
+        super::request_context::set_completion_response_egress_hook(Some(Arc::new(
+            move |patch| {
+                record_completion_response_egress_patch_inner(
+                    completion_timeline_traces_for_egress_hook.as_ref(),
+                    &patch,
                 );
             },
         )));

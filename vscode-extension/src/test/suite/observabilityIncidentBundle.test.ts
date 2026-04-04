@@ -42,7 +42,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -110,6 +110,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                             method_entered_at_ms: 1_700_000_003_000,
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
+                            response_output_enqueue_completed_at_ms: 1_700_000_003_172,
+                            response_output_write_started_at_ms: 1_700_000_003_172,
+                            response_output_encode_completed_at_ms: 1_700_000_003_172,
                             response_flush_completed_at_ms: 1_700_000_003_172,
                             dispatch_to_request_context_wait_ms: 200,
                             adapter_to_dispatch_wait_ms: 200,
@@ -123,6 +126,10 @@ suite('Observability Incident Bundle Test Suite', () => {
                             method_prelude_exec_ms: 0,
                             transport_to_handler_wait_ms: 3000,
                             server_handler_exec_ms: 172,
+                            response_ready_to_output_enqueue_wait_ms: 0,
+                            response_output_queue_wait_ms: 0,
+                            response_output_encode_exec_ms: 0,
+                            response_output_write_and_flush_exec_ms: 0,
                             response_ready_to_flush_wait_ms: 0,
                         },
                         turn_attribution: {
@@ -274,7 +281,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 21);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 22);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -292,6 +299,10 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
         assert.strictEqual(
             bundle.incidentReport.requests[0].client_correlation?.response_ready_to_flush_wait_ms,
+            0
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.response_output_write_and_flush_exec_ms,
             0
         );
         assert.strictEqual(
@@ -828,6 +839,28 @@ suite('Observability Incident Bundle Test Suite', () => {
                 'detailed query-body breakdown is unavailable by design'
             )
         );
+    });
+
+    test('v21 completion timeline should mark v22 finer output-egress split as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 21;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('v22 output-egress split')));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) => finding.includes('finer v22 output-egress split'))
+        );
+        assert.ok(bundle.summaryMarkdown.includes('finer v22 output-egress split'));
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

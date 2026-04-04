@@ -129,6 +129,15 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             `handler_entered_at_ms=${trace.server_edge_details.handler_entered_at_ms}`,
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
+            ...(typeof trace.server_edge_details.response_output_enqueue_completed_at_ms === 'number'
+                ? [`response_output_enqueue_completed_at_ms=${trace.server_edge_details.response_output_enqueue_completed_at_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.response_output_write_started_at_ms === 'number'
+                ? [`response_output_write_started_at_ms=${trace.server_edge_details.response_output_write_started_at_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.response_output_encode_completed_at_ms === 'number'
+                ? [`response_output_encode_completed_at_ms=${trace.server_edge_details.response_output_encode_completed_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.transport_to_service_scope_wait_ms === 'number'
                 ? [`transport_to_service_scope_wait_ms=${trace.server_edge_details.transport_to_service_scope_wait_ms}`]
                 : []),
@@ -204,6 +213,26 @@ export function formatCompletionTimelineTraceForClipboard(
     if (typeof postResponseSplit.client_to_transport_wait_ms === 'number') {
         postResponseBits.push(
             `client_to_transport_wait_ms=${postResponseSplit.client_to_transport_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_ready_to_output_enqueue_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_ready_to_output_enqueue_wait_ms=${postResponseSplit.response_ready_to_output_enqueue_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_output_queue_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_output_queue_wait_ms=${postResponseSplit.response_output_queue_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_output_encode_exec_ms === 'number') {
+        postResponseBits.push(
+            `response_output_encode_exec_ms=${postResponseSplit.response_output_encode_exec_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_output_write_and_flush_exec_ms === 'number') {
+        postResponseBits.push(
+            `response_output_write_and_flush_exec_ms=${postResponseSplit.response_output_write_and_flush_exec_ms}`
         );
     }
     if (typeof postResponseSplit.response_ready_to_flush_wait_ms === 'number') {
@@ -467,6 +496,9 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 21) {
         lines.push('v21 flush-aware post-handler egress split is unavailable by design on this payload.');
+    }
+    if (state.version < 22) {
+        lines.push('v22 finer output-egress split is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace

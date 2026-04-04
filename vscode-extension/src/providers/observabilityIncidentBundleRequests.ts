@@ -43,6 +43,10 @@ export interface ObservabilityIncidentClientCorrelation {
     client_duration_ms?: number;
     client_terminal_state?: CompletionProbeTerminalState;
     client_to_transport_wait_ms?: number;
+    response_ready_to_output_enqueue_wait_ms?: number;
+    response_output_queue_wait_ms?: number;
+    response_output_encode_exec_ms?: number;
+    response_output_write_and_flush_exec_ms?: number;
     response_ready_to_flush_wait_ms?: number;
     transport_to_client_receive_wait_ms?: number;
     client_receive_to_resolve_wait_ms?: number;
@@ -91,6 +95,10 @@ export interface ObservabilityIncidentRequestSummary {
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     server_handler_exec_ms?: number;
+    response_ready_to_output_enqueue_wait_ms?: number;
+    response_output_queue_wait_ms?: number;
+    response_output_encode_exec_ms?: number;
+    response_output_write_and_flush_exec_ms?: number;
     response_ready_to_flush_wait_ms?: number;
     bottleneck_verdicts: string[];
     prepare_timeout?: CompletionTimelinePrepareTimeoutAttributionTrace;
@@ -227,6 +235,14 @@ export function buildObservabilityIncidentRequestSection(
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
+            response_ready_to_output_enqueue_wait_ms:
+                trace.server_edge_details?.response_ready_to_output_enqueue_wait_ms,
+            response_output_queue_wait_ms:
+                trace.server_edge_details?.response_output_queue_wait_ms,
+            response_output_encode_exec_ms:
+                trace.server_edge_details?.response_output_encode_exec_ms,
+            response_output_write_and_flush_exec_ms:
+                trace.server_edge_details?.response_output_write_and_flush_exec_ms,
             response_ready_to_flush_wait_ms:
                 trace.server_edge_details?.response_ready_to_flush_wait_ms,
             bottleneck_verdicts: buildCompletionTraceBottleneckVerdicts(
@@ -390,6 +406,18 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.server_handler_exec_ms === 'number'
                 ? `server_handler_exec_ms=${request.server_handler_exec_ms}`
+                : undefined,
+            typeof request.response_ready_to_output_enqueue_wait_ms === 'number'
+                ? `response_ready_to_output_enqueue_wait_ms=${request.response_ready_to_output_enqueue_wait_ms}`
+                : undefined,
+            typeof request.response_output_queue_wait_ms === 'number'
+                ? `response_output_queue_wait_ms=${request.response_output_queue_wait_ms}`
+                : undefined,
+            typeof request.response_output_encode_exec_ms === 'number'
+                ? `response_output_encode_exec_ms=${request.response_output_encode_exec_ms}`
+                : undefined,
+            typeof request.response_output_write_and_flush_exec_ms === 'number'
+                ? `response_output_write_and_flush_exec_ms=${request.response_output_write_and_flush_exec_ms}`
                 : undefined,
             typeof request.response_ready_to_flush_wait_ms === 'number'
                 ? `response_ready_to_flush_wait_ms=${request.response_ready_to_flush_wait_ms}`
@@ -566,6 +594,12 @@ function buildCorrelatedProbe(
         client_duration_ms: probe.client_duration_ms,
         client_terminal_state: probe.client_terminal_state,
         client_to_transport_wait_ms: postResponseSplit.client_to_transport_wait_ms,
+        response_ready_to_output_enqueue_wait_ms:
+            postResponseSplit.response_ready_to_output_enqueue_wait_ms,
+        response_output_queue_wait_ms: postResponseSplit.response_output_queue_wait_ms,
+        response_output_encode_exec_ms: postResponseSplit.response_output_encode_exec_ms,
+        response_output_write_and_flush_exec_ms:
+            postResponseSplit.response_output_write_and_flush_exec_ms,
         response_ready_to_flush_wait_ms: postResponseSplit.response_ready_to_flush_wait_ms,
         transport_to_client_receive_wait_ms:
             postResponseSplit.transport_to_client_receive_wait_ms,
@@ -585,6 +619,18 @@ function formatCorrelationForSummary(correlation: ObservabilityIncidentClientCor
                 `correlation=correlated:${correlation.probe_id}`,
                 typeof correlation.client_to_transport_wait_ms === 'number'
                     ? `client_to_transport_wait_ms=${correlation.client_to_transport_wait_ms}`
+                    : undefined,
+                typeof correlation.response_ready_to_output_enqueue_wait_ms === 'number'
+                    ? `response_ready_to_output_enqueue_wait_ms=${correlation.response_ready_to_output_enqueue_wait_ms}`
+                    : undefined,
+                typeof correlation.response_output_queue_wait_ms === 'number'
+                    ? `response_output_queue_wait_ms=${correlation.response_output_queue_wait_ms}`
+                    : undefined,
+                typeof correlation.response_output_encode_exec_ms === 'number'
+                    ? `response_output_encode_exec_ms=${correlation.response_output_encode_exec_ms}`
+                    : undefined,
+                typeof correlation.response_output_write_and_flush_exec_ms === 'number'
+                    ? `response_output_write_and_flush_exec_ms=${correlation.response_output_write_and_flush_exec_ms}`
                     : undefined,
                 typeof correlation.response_ready_to_flush_wait_ms === 'number'
                     ? `response_ready_to_flush_wait_ms=${correlation.response_ready_to_flush_wait_ms}`

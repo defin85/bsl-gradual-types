@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 21,
+            version: 22,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -81,6 +81,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         method_entered_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_030,
+                        response_output_enqueue_completed_at_ms: 1_700_000_000_031,
+                        response_output_write_started_at_ms: 1_700_000_000_032,
+                        response_output_encode_completed_at_ms: 1_700_000_000_033,
                         response_flush_completed_at_ms: 1_700_000_000_034,
                         cancel_observed_at_ms: 1_700_000_000_021,
                         dispatch_to_request_context_wait_ms: 4,
@@ -98,6 +101,10 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         slot_release_to_response_wait_ms: 41,
                         transport_to_handler_wait_ms: 42,
                         server_handler_exec_ms: 28,
+                        response_ready_to_output_enqueue_wait_ms: 1,
+                        response_output_queue_wait_ms: 1,
+                        response_output_encode_exec_ms: 1,
+                        response_output_write_and_flush_exec_ms: 1,
                         response_ready_to_flush_wait_ms: 4,
                         cancel_observed_after_handler_enter_ms: 19,
                     },
@@ -261,7 +268,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v21'));
+        assert.ok(text!.includes('contract=v22'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -284,6 +291,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('method_entered_at_ms=1700000000000'));
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
         assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
+        assert.ok(text!.includes('response_output_enqueue_completed_at_ms=1700000000031'));
+        assert.ok(text!.includes('response_output_write_started_at_ms=1700000000032'));
+        assert.ok(text!.includes('response_output_encode_completed_at_ms=1700000000033'));
         assert.ok(text!.includes('dispatch_to_request_context_wait_ms=4'));
         assert.ok(text!.includes('transport_to_slot_release_wait_ms=29'));
         assert.ok(text!.includes('transport_to_service_future_wait_ms=12'));
@@ -299,7 +309,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('transport_to_handler_wait_ms=42'));
         assert.ok(text!.includes('server_handler_exec_ms=28'));
         assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
-        assert.ok(text!.includes('post_response_split | client_to_transport_wait_ms=0 | response_ready_to_flush_wait_ms=4 | transport_to_client_receive_wait_ms=63 | client_receive_to_resolve_wait_ms=1 | client_post_response_ms=2 | server_to_client_post_response_ms=70'));
+        assert.ok(text!.includes('post_response_split | client_to_transport_wait_ms=0 | response_ready_to_output_enqueue_wait_ms=1 | response_output_queue_wait_ms=1 | response_output_encode_exec_ms=1 | response_output_write_and_flush_exec_ms=1 | response_ready_to_flush_wait_ms=4 | transport_to_client_receive_wait_ms=63 | client_receive_to_resolve_wait_ms=1 | client_post_response_ms=2 | server_to_client_post_response_ms=70'));
         assert.ok(text!.includes('document_version_at_terminal=10'));
         assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
         assert.ok(text!.includes('superseded_by_probe_id=probe-2'));
@@ -416,7 +426,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, and v21 flush-aware post-handler egress split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, and v22 finer output-egress split are unavailable by design.'
                     )
             )
         );

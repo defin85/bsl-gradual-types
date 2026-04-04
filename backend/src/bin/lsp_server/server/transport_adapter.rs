@@ -103,11 +103,14 @@ impl CompletionHandoffTask {
         Self { request_id, future }
     }
 
-    async fn forward_response(self, mut responses_tx: mpsc::Sender<TransportMessage>) {
+    async fn forward_response(self, mut responses_tx: mpsc::Sender<QueuedTransportMessage>) {
         let request_id = self.request_id;
         if let Some(response) = self.future.await {
             if responses_tx
-                .send(TransportMessage::Response(response))
+                .send(QueuedTransportMessage::completion_response(
+                    response,
+                    request_id.clone(),
+                ))
                 .await
                 .is_err()
             {
@@ -122,6 +125,42 @@ impl CompletionHandoffTask {
             }
         }
     }
+}
+
+#[derive(Debug)]
+struct QueuedTransportMessage {
+    message: TransportMessage,
+    completion_request_id: Option<String>,
+}
+
+impl QueuedTransportMessage {
+    fn request(request: Request) -> Self {
+        Self {
+            message: TransportMessage::Request(request),
+            completion_request_id: None,
+        }
+    }
+
+    fn response(response: Response) -> Self {
+        Self {
+            message: TransportMessage::Response(response),
+            completion_request_id: None,
+        }
+    }
+
+    fn completion_response(response: Response, completion_request_id: Option<String>) -> Self {
+        Self {
+            message: TransportMessage::Response(response),
+            completion_request_id,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TransportMessageWriteMilestones {
+    write_started_at_ms: u64,
+    encode_completed_at_ms: u64,
+    flush_completed_at_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -443,7 +482,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                 continue;
             };
             if responses_tx
-                .send(TransportMessage::Response(response))
+                .send(QueuedTransportMessage::response(response))
                 .await
                 .is_err()
             {
@@ -503,7 +542,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
             if is_completion_handoff_barrier {
                 if let Some(response) = future.await {
                     if responses_tx
-                        .send(TransportMessage::Response(response))
+                        .send(QueuedTransportMessage::response(response))
                         .await
                         .is_err()
                     {
@@ -578,28 +617,33 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     let transport_shutdown_for_output = transport_shutdown.clone();
     let print_output = async move {
         let mut stdout = BufWriter::new(stdout);
-        let outbound = stream::select(responses_rx, client_requests.map(TransportMessage::Request));
+        let outbound = stream::select(responses_rx, client_requests.map(QueuedTransportMessage::request));
         pin_mut!(outbound);
 
         loop {
             tokio::select! {
                 _ = transport_shutdown_for_output.notified() => break,
-                maybe_message = outbound.next() => {
-                    let Some(message) = maybe_message else {
+                maybe_queued_message = outbound.next() => {
+                    let Some(queued_message) = maybe_queued_message else {
                         break;
                     };
-                    let response_request_id = match &message {
-                        TransportMessage::Response(response) => request_id_from_response(response),
-                        TransportMessage::Request(_) => None,
-                    };
-                    if let Err(err) = write_transport_message(&mut stdout, &message).await {
+                    let response_output_enqueue_completed_at_ms = super::unix_timestamp_ms();
+                    let write_milestones = match write_transport_message(&mut stdout, &queued_message.message).await {
+                        Ok(milestones) => milestones,
+                        Err(err) => {
                         error!("failed to encode message: {err}");
                         break;
-                    }
-                    if let Some(request_id) = response_request_id {
-                        super::request_context::notify_completion_response_flush_completed(
-                            request_id,
-                            super::unix_timestamp_ms(),
+                        }
+                    };
+                    if let Some(request_id) = queued_message.completion_request_id {
+                        super::request_context::notify_completion_response_egress(
+                            super::request_context::CompletionResponseEgressTracePatch {
+                                request_id,
+                                response_output_enqueue_completed_at_ms,
+                                response_output_write_started_at_ms: write_milestones.write_started_at_ms,
+                                response_output_encode_completed_at_ms: write_milestones.encode_completed_at_ms,
+                                response_flush_completed_at_ms: write_milestones.flush_completed_at_ms,
+                            },
                         );
                     }
                 }
@@ -766,7 +810,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                     error!("failed to decode message: {err}");
                     let response = Response::from_error(Id::Null, to_jsonrpc_error(&err));
                     if responses_tx
-                        .send(TransportMessage::Response(response))
+                        .send(QueuedTransportMessage::response(response))
                         .await
                         .is_err()
                     {
@@ -835,14 +879,6 @@ fn cancelled_request_id_from_request(request: &Request) -> Option<String> {
     })
 }
 
-fn request_id_from_response(response: &Response) -> Option<String> {
-    match response.id() {
-        Id::Number(value) => Some(value.to_string()),
-        Id::String(value) => Some(value.clone()),
-        Id::Null => None,
-    }
-}
-
 fn request_text_document_uri(request: &Request) -> Option<&str> {
     request.params()?.get("textDocument")?.get("uri")?.as_str()
 }
@@ -878,7 +914,7 @@ fn oldest_pending_notification_position_with_different_uri(
 async fn respond_to_pre_dispatch_cancelled_completion(
     cancelled_request: ScheduledRequest,
     request_id: &str,
-    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    responses_tx: &mut mpsc::Sender<QueuedTransportMessage>,
 ) -> Result<(), ()> {
     if let Some(context) =
         super::request_context::take_completion_request_context_by_request_id(request_id)
@@ -899,7 +935,7 @@ async fn respond_to_pre_dispatch_cancelled_completion(
     };
 
     if responses_tx
-        .send(TransportMessage::Response(response))
+        .send(QueuedTransportMessage::response(response))
         .await
         .is_err()
     {
@@ -912,7 +948,7 @@ async fn respond_to_pre_dispatch_cancelled_completion(
 async fn respond_to_pre_dispatch_rejected_completion(
     rejected_request: ScheduledRequest,
     request_id: &str,
-    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    responses_tx: &mut mpsc::Sender<QueuedTransportMessage>,
 ) -> Result<(), ()> {
     if let Some(context) =
         super::request_context::take_completion_request_context_by_request_id(request_id)
@@ -937,7 +973,7 @@ async fn respond_to_pre_dispatch_rejected_completion(
     };
 
     if responses_tx
-        .send(TransportMessage::Response(response))
+        .send(QueuedTransportMessage::response(response))
         .await
         .is_err()
     {
@@ -951,7 +987,7 @@ async fn stage_completion_request_with_overflow_policy(
     pending_completion_requests: &mut std::collections::VecDeque<ScheduledRequest>,
     completion_spillover_capacity: usize,
     incoming_request: ScheduledRequest,
-    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    responses_tx: &mut mpsc::Sender<QueuedTransportMessage>,
 ) -> Result<(), ()> {
     if pending_completion_requests.len() < completion_spillover_capacity {
         pending_completion_requests.push_back(incoming_request);
@@ -1053,7 +1089,7 @@ async fn stage_completion_request_with_overflow_policy(
 async fn cancel_queued_completion_before_dispatch(
     admission_queues: &AdmissionQueues,
     request_id: &str,
-    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    responses_tx: &mut mpsc::Sender<QueuedTransportMessage>,
 ) -> Result<(), ()> {
     let Some(cancelled_request) = admission_queues
         .remove_queued_completion_by_request_id(request_id)
@@ -1073,7 +1109,7 @@ fn general_backpressure_error(method: &str) -> Error {
 }
 
 async fn reject_saturated_general_request(
-    responses_tx: &mut mpsc::Sender<TransportMessage>,
+    responses_tx: &mut mpsc::Sender<QueuedTransportMessage>,
     scheduled_request: ScheduledRequest,
 ) -> Result<(), ()> {
     let Some(id) = scheduled_request.request.id().cloned() else {
@@ -1088,7 +1124,7 @@ async fn reject_saturated_general_request(
         general_backpressure_error(scheduled_request.request.method()),
     );
     if responses_tx
-        .send(TransportMessage::Response(response))
+        .send(QueuedTransportMessage::response(response))
         .await
         .is_err()
     {
@@ -1143,16 +1179,22 @@ where
 async fn write_transport_message<O>(
     writer: &mut BufWriter<O>,
     message: &TransportMessage,
-) -> Result<(), TransportCodecError>
+) -> Result<TransportMessageWriteMilestones, TransportCodecError>
 where
     O: AsyncWrite + Unpin,
 {
+    let write_started_at_ms = super::unix_timestamp_ms();
     let body = serde_json::to_vec(message).map_err(TransportCodecError::Json)?;
+    let encode_completed_at_ms = super::unix_timestamp_ms();
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
     writer.write_all(header.as_bytes()).await?;
     writer.write_all(&body).await?;
     writer.flush().await?;
-    Ok(())
+    Ok(TransportMessageWriteMilestones {
+        write_started_at_ms,
+        encode_completed_at_ms,
+        flush_completed_at_ms: super::unix_timestamp_ms(),
+    })
 }
 
 fn validate_content_type(content_type: &str) -> Result<(), TransportCodecError> {

@@ -666,6 +666,9 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     method_entered_at_ms?: number;
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
+    response_output_enqueue_completed_at_ms?: number;
+    response_output_write_started_at_ms?: number;
+    response_output_encode_completed_at_ms?: number;
     response_flush_completed_at_ms?: number;
     cancel_observed_at_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
@@ -683,6 +686,10 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     slot_release_to_response_wait_ms?: number;
     transport_to_handler_wait_ms: number;
     server_handler_exec_ms: number;
+    response_ready_to_output_enqueue_wait_ms?: number;
+    response_output_queue_wait_ms?: number;
+    response_output_encode_exec_ms?: number;
+    response_output_write_and_flush_exec_ms?: number;
     response_ready_to_flush_wait_ms?: number;
     cancel_observed_after_handler_enter_ms?: number;
 }

@@ -39,7 +39,8 @@ tokio::task_local! {
 type CancelRequestHook = Arc<dyn Fn(String) + Send + Sync + 'static>;
 type PreDispatchCompletionTerminalHook =
     Arc<dyn Fn(PreDispatchCompletionTerminalTraceInput) + Send + Sync + 'static>;
-type CompletionResponseFlushHook = Arc<dyn Fn(String, u64) + Send + Sync + 'static>;
+type CompletionResponseEgressHook =
+    Arc<dyn Fn(CompletionResponseEgressTracePatch) + Send + Sync + 'static>;
 
 fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<CancelRequestHook>>> = std::sync::OnceLock::new();
@@ -53,8 +54,8 @@ fn pre_dispatch_completion_terminal_hook_cell(
     CELL.get_or_init(|| Mutex::new(None))
 }
 
-fn completion_response_flush_hook_cell() -> &'static Mutex<Option<CompletionResponseFlushHook>> {
-    static CELL: std::sync::OnceLock<Mutex<Option<CompletionResponseFlushHook>>> =
+fn completion_response_egress_hook_cell() -> &'static Mutex<Option<CompletionResponseEgressHook>> {
+    static CELL: std::sync::OnceLock<Mutex<Option<CompletionResponseEgressHook>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
 }
@@ -125,6 +126,15 @@ pub(crate) struct PreDispatchCompletionTerminalTraceInput {
     pub(crate) adapter_read_at_ms: Option<u64>,
     pub(crate) resolved_at_ms: u64,
     pub(crate) outcome: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CompletionResponseEgressTracePatch {
+    pub(crate) request_id: String,
+    pub(crate) response_output_enqueue_completed_at_ms: u64,
+    pub(crate) response_output_write_started_at_ms: u64,
+    pub(crate) response_output_encode_completed_at_ms: u64,
+    pub(crate) response_flush_completed_at_ms: u64,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1546,8 +1556,8 @@ pub(crate) fn set_pre_dispatch_completion_terminal_hook(
     *slot = hook;
 }
 
-pub(crate) fn set_completion_response_flush_hook(hook: Option<CompletionResponseFlushHook>) {
-    let mut slot = completion_response_flush_hook_cell()
+pub(crate) fn set_completion_response_egress_hook(hook: Option<CompletionResponseEgressHook>) {
+    let mut slot = completion_response_egress_hook_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     *slot = hook;
@@ -1639,16 +1649,13 @@ fn request_id_from_jsonrpc_id(id: &Id) -> Option<String> {
     }
 }
 
-pub(crate) fn notify_completion_response_flush_completed(
-    request_id: String,
-    response_flush_completed_at_ms: u64,
-) {
-    let hook = completion_response_flush_hook_cell()
+pub(crate) fn notify_completion_response_egress(patch: CompletionResponseEgressTracePatch) {
+    let hook = completion_response_egress_hook_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .clone();
     if let Some(hook) = hook {
-        hook(request_id, response_flush_completed_at_ms);
+        hook(patch);
     }
 }
 

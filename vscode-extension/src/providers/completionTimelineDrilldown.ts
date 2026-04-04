@@ -19,6 +19,10 @@ export interface CompletionTraceClientIngressSupplement {
 
 export interface CompletionTracePostResponseSplit {
     client_to_transport_wait_ms?: number;
+    response_ready_to_output_enqueue_wait_ms?: number;
+    response_output_queue_wait_ms?: number;
+    response_output_encode_exec_ms?: number;
+    response_output_write_and_flush_exec_ms?: number;
     response_ready_to_flush_wait_ms?: number;
     transport_to_client_receive_wait_ms?: number;
     client_receive_to_resolve_wait_ms?: number;
@@ -228,6 +232,12 @@ export function deriveCompletionTracePostResponseSplit(
             probe && typeof serverIngressAtMs === 'number'
                 ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
                 : undefined,
+        response_ready_to_output_enqueue_wait_ms:
+            serverEdgeDetails?.response_ready_to_output_enqueue_wait_ms,
+        response_output_queue_wait_ms: serverEdgeDetails?.response_output_queue_wait_ms,
+        response_output_encode_exec_ms: serverEdgeDetails?.response_output_encode_exec_ms,
+        response_output_write_and_flush_exec_ms:
+            serverEdgeDetails?.response_output_write_and_flush_exec_ms,
         response_ready_to_flush_wait_ms: serverEdgeDetails?.response_ready_to_flush_wait_ms,
         client_post_response_ms: probe
             ? Math.max(0, probe.request_completed_at_ms - probe.lsp_response_received_at_ms)

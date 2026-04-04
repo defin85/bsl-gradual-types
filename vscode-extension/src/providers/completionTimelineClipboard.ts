@@ -129,6 +129,12 @@ export function formatCompletionTimelineTraceForClipboard(
                 : []),
             `handler_entered_at_ms=${trace.server_edge_details.handler_entered_at_ms}`,
             `response_sent_at_ms=${trace.server_edge_details.response_sent_at_ms}`,
+            ...(typeof trace.server_edge_details.response_output_handoff_started_at_ms === 'number'
+                ? [`response_output_handoff_started_at_ms=${trace.server_edge_details.response_output_handoff_started_at_ms}`]
+                : []),
+            ...(typeof trace.server_edge_details.response_output_handoff_enqueued_at_ms === 'number'
+                ? [`response_output_handoff_enqueued_at_ms=${trace.server_edge_details.response_output_handoff_enqueued_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.response_output_enqueue_completed_at_ms === 'number'
                 ? [`response_output_enqueue_completed_at_ms=${trace.server_edge_details.response_output_enqueue_completed_at_ms}`]
                 : []),
@@ -216,6 +222,21 @@ export function formatCompletionTimelineTraceForClipboard(
     if (typeof postResponseSplit.client_to_transport_wait_ms === 'number') {
         postResponseBits.push(
             `client_to_transport_wait_ms=${postResponseSplit.client_to_transport_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_ready_to_output_handoff_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_ready_to_output_handoff_wait_ms=${postResponseSplit.response_ready_to_output_handoff_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_output_handoff_send_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_output_handoff_send_wait_ms=${postResponseSplit.response_output_handoff_send_wait_ms}`
+        );
+    }
+    if (typeof postResponseSplit.response_output_handoff_to_writer_wait_ms === 'number') {
+        postResponseBits.push(
+            `response_output_handoff_to_writer_wait_ms=${postResponseSplit.response_output_handoff_to_writer_wait_ms}`
         );
     }
     if (typeof postResponseSplit.response_ready_to_output_enqueue_wait_ms === 'number') {
@@ -441,11 +462,25 @@ function sanitizeTraceForContractVersion(
         contractVersion < 23 &&
         typeof trace.server_edge_details?.response_output_encode_started_at_ms === 'number'
     ) {
-        return {
+        trace = {
             ...trace,
             server_edge_details: {
                 ...trace.server_edge_details,
                 response_output_encode_started_at_ms: undefined,
+            },
+        };
+    }
+
+    if (contractVersion < 24 && trace.server_edge_details) {
+        return {
+            ...trace,
+            server_edge_details: {
+                ...trace.server_edge_details,
+                response_output_handoff_started_at_ms: undefined,
+                response_output_handoff_enqueued_at_ms: undefined,
+                response_ready_to_output_handoff_wait_ms: undefined,
+                response_output_handoff_send_wait_ms: undefined,
+                response_output_handoff_to_writer_wait_ms: undefined,
             },
         };
     }
@@ -518,6 +553,11 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 23) {
         lines.push('v23 truthful encode-start / write-start boundary is unavailable by design on this payload.');
+    }
+    if (state.version < 24) {
+        lines.push('v24 truthful pre-enqueue handoff split is unavailable by design on this payload.');
+    } else {
+        lines.push('response_output_enqueue_completed_at_ms remains a legacy writer-selection compatibility boundary on v24 payloads.');
     }
     const traces = mode === 'average'
         ? (state.average_trace

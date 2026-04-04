@@ -43,6 +43,9 @@ export interface ObservabilityIncidentClientCorrelation {
     client_duration_ms?: number;
     client_terminal_state?: CompletionProbeTerminalState;
     client_to_transport_wait_ms?: number;
+    response_ready_to_output_handoff_wait_ms?: number;
+    response_output_handoff_send_wait_ms?: number;
+    response_output_handoff_to_writer_wait_ms?: number;
     response_ready_to_output_enqueue_wait_ms?: number;
     response_output_queue_wait_ms?: number;
     response_output_encode_exec_ms?: number;
@@ -95,7 +98,13 @@ export interface ObservabilityIncidentRequestSummary {
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     server_handler_exec_ms?: number;
+    response_output_handoff_started_at_ms?: number;
+    response_output_handoff_enqueued_at_ms?: number;
+    response_output_enqueue_completed_at_ms?: number;
     response_output_encode_started_at_ms?: number;
+    response_ready_to_output_handoff_wait_ms?: number;
+    response_output_handoff_send_wait_ms?: number;
+    response_output_handoff_to_writer_wait_ms?: number;
     response_ready_to_output_enqueue_wait_ms?: number;
     response_output_queue_wait_ms?: number;
     response_output_encode_exec_ms?: number;
@@ -236,18 +245,42 @@ export function buildObservabilityIncidentRequestSection(
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
-            response_output_encode_started_at_ms:
-                trace.server_edge_details?.response_output_encode_started_at_ms,
-            response_ready_to_output_enqueue_wait_ms:
-                trace.server_edge_details?.response_ready_to_output_enqueue_wait_ms,
-            response_output_queue_wait_ms:
-                trace.server_edge_details?.response_output_queue_wait_ms,
-            response_output_encode_exec_ms:
-                trace.server_edge_details?.response_output_encode_exec_ms,
-            response_output_write_and_flush_exec_ms:
-                trace.server_edge_details?.response_output_write_and_flush_exec_ms,
-            response_ready_to_flush_wait_ms:
-                trace.server_edge_details?.response_ready_to_flush_wait_ms,
+            response_output_handoff_started_at_ms: contractVersion >= 24
+                ? trace.server_edge_details?.response_output_handoff_started_at_ms
+                : undefined,
+            response_output_handoff_enqueued_at_ms: contractVersion >= 24
+                ? trace.server_edge_details?.response_output_handoff_enqueued_at_ms
+                : undefined,
+            response_output_enqueue_completed_at_ms: contractVersion >= 22
+                ? trace.server_edge_details?.response_output_enqueue_completed_at_ms
+                : undefined,
+            response_output_encode_started_at_ms: contractVersion >= 23
+                ? trace.server_edge_details?.response_output_encode_started_at_ms
+                : undefined,
+            response_ready_to_output_handoff_wait_ms: contractVersion >= 24
+                ? trace.server_edge_details?.response_ready_to_output_handoff_wait_ms
+                : undefined,
+            response_output_handoff_send_wait_ms: contractVersion >= 24
+                ? trace.server_edge_details?.response_output_handoff_send_wait_ms
+                : undefined,
+            response_output_handoff_to_writer_wait_ms: contractVersion >= 24
+                ? trace.server_edge_details?.response_output_handoff_to_writer_wait_ms
+                : undefined,
+            response_ready_to_output_enqueue_wait_ms: contractVersion >= 22
+                ? trace.server_edge_details?.response_ready_to_output_enqueue_wait_ms
+                : undefined,
+            response_output_queue_wait_ms: contractVersion >= 22
+                ? trace.server_edge_details?.response_output_queue_wait_ms
+                : undefined,
+            response_output_encode_exec_ms: contractVersion >= 22
+                ? trace.server_edge_details?.response_output_encode_exec_ms
+                : undefined,
+            response_output_write_and_flush_exec_ms: contractVersion >= 22
+                ? trace.server_edge_details?.response_output_write_and_flush_exec_ms
+                : undefined,
+            response_ready_to_flush_wait_ms: contractVersion >= 21
+                ? trace.server_edge_details?.response_ready_to_flush_wait_ms
+                : undefined,
             bottleneck_verdicts: buildCompletionTraceBottleneckVerdicts(
                 trace,
                 asClientIngressSupplement(clientCorrelation)
@@ -410,8 +443,26 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
             typeof request.server_handler_exec_ms === 'number'
                 ? `server_handler_exec_ms=${request.server_handler_exec_ms}`
                 : undefined,
+            typeof request.response_output_handoff_started_at_ms === 'number'
+                ? `response_output_handoff_started_at_ms=${request.response_output_handoff_started_at_ms}`
+                : undefined,
+            typeof request.response_output_handoff_enqueued_at_ms === 'number'
+                ? `response_output_handoff_enqueued_at_ms=${request.response_output_handoff_enqueued_at_ms}`
+                : undefined,
+            typeof request.response_output_enqueue_completed_at_ms === 'number'
+                ? `response_output_enqueue_completed_at_ms_legacy_writer_selection=${request.response_output_enqueue_completed_at_ms}`
+                : undefined,
             typeof request.response_output_encode_started_at_ms === 'number'
                 ? `response_output_encode_started_at_ms=${request.response_output_encode_started_at_ms}`
+                : undefined,
+            typeof request.response_ready_to_output_handoff_wait_ms === 'number'
+                ? `response_ready_to_output_handoff_wait_ms=${request.response_ready_to_output_handoff_wait_ms}`
+                : undefined,
+            typeof request.response_output_handoff_send_wait_ms === 'number'
+                ? `response_output_handoff_send_wait_ms=${request.response_output_handoff_send_wait_ms}`
+                : undefined,
+            typeof request.response_output_handoff_to_writer_wait_ms === 'number'
+                ? `response_output_handoff_to_writer_wait_ms=${request.response_output_handoff_to_writer_wait_ms}`
                 : undefined,
             typeof request.response_ready_to_output_enqueue_wait_ms === 'number'
                 ? `response_ready_to_output_enqueue_wait_ms=${request.response_ready_to_output_enqueue_wait_ms}`
@@ -538,7 +589,7 @@ function buildClientCorrelation(
                 && probe.probe_id === trace.client_probe_id
         );
         if (exactProbe) {
-            return buildCorrelatedProbe(trace, exactProbe);
+            return buildCorrelatedProbe(trace, exactProbe, contractVersion);
         }
         return {
             status: 'unavailable',
@@ -580,12 +631,13 @@ function buildClientCorrelation(
         };
     }
 
-    return buildCorrelatedProbe(trace, candidates[0]);
+    return buildCorrelatedProbe(trace, candidates[0], contractVersion);
 }
 
 function buildCorrelatedProbe(
     trace: CompletionTimelineTrace,
-    probe: CompletionProbe
+    probe: CompletionProbe,
+    contractVersion: number
 ): ObservabilityIncidentClientCorrelation {
     if (!trace.server_edge_details) {
         return {
@@ -600,13 +652,30 @@ function buildCorrelatedProbe(
         client_duration_ms: probe.client_duration_ms,
         client_terminal_state: probe.client_terminal_state,
         client_to_transport_wait_ms: postResponseSplit.client_to_transport_wait_ms,
-        response_ready_to_output_enqueue_wait_ms:
-            postResponseSplit.response_ready_to_output_enqueue_wait_ms,
-        response_output_queue_wait_ms: postResponseSplit.response_output_queue_wait_ms,
-        response_output_encode_exec_ms: postResponseSplit.response_output_encode_exec_ms,
-        response_output_write_and_flush_exec_ms:
-            postResponseSplit.response_output_write_and_flush_exec_ms,
-        response_ready_to_flush_wait_ms: postResponseSplit.response_ready_to_flush_wait_ms,
+        response_ready_to_output_handoff_wait_ms: contractVersion >= 24
+            ? postResponseSplit.response_ready_to_output_handoff_wait_ms
+            : undefined,
+        response_output_handoff_send_wait_ms: contractVersion >= 24
+            ? postResponseSplit.response_output_handoff_send_wait_ms
+            : undefined,
+        response_output_handoff_to_writer_wait_ms: contractVersion >= 24
+            ? postResponseSplit.response_output_handoff_to_writer_wait_ms
+            : undefined,
+        response_ready_to_output_enqueue_wait_ms: contractVersion >= 22
+            ? postResponseSplit.response_ready_to_output_enqueue_wait_ms
+            : undefined,
+        response_output_queue_wait_ms: contractVersion >= 22
+            ? postResponseSplit.response_output_queue_wait_ms
+            : undefined,
+        response_output_encode_exec_ms: contractVersion >= 22
+            ? postResponseSplit.response_output_encode_exec_ms
+            : undefined,
+        response_output_write_and_flush_exec_ms: contractVersion >= 22
+            ? postResponseSplit.response_output_write_and_flush_exec_ms
+            : undefined,
+        response_ready_to_flush_wait_ms: contractVersion >= 21
+            ? postResponseSplit.response_ready_to_flush_wait_ms
+            : undefined,
         transport_to_client_receive_wait_ms:
             postResponseSplit.transport_to_client_receive_wait_ms,
         client_receive_to_resolve_wait_ms:
@@ -625,6 +694,15 @@ function formatCorrelationForSummary(correlation: ObservabilityIncidentClientCor
                 `correlation=correlated:${correlation.probe_id}`,
                 typeof correlation.client_to_transport_wait_ms === 'number'
                     ? `client_to_transport_wait_ms=${correlation.client_to_transport_wait_ms}`
+                    : undefined,
+                typeof correlation.response_ready_to_output_handoff_wait_ms === 'number'
+                    ? `response_ready_to_output_handoff_wait_ms=${correlation.response_ready_to_output_handoff_wait_ms}`
+                    : undefined,
+                typeof correlation.response_output_handoff_send_wait_ms === 'number'
+                    ? `response_output_handoff_send_wait_ms=${correlation.response_output_handoff_send_wait_ms}`
+                    : undefined,
+                typeof correlation.response_output_handoff_to_writer_wait_ms === 'number'
+                    ? `response_output_handoff_to_writer_wait_ms=${correlation.response_output_handoff_to_writer_wait_ms}`
                     : undefined,
                 typeof correlation.response_ready_to_output_enqueue_wait_ms === 'number'
                     ? `response_ready_to_output_enqueue_wait_ms=${correlation.response_ready_to_output_enqueue_wait_ms}`

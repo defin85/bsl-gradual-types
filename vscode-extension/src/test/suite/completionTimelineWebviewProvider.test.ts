@@ -703,10 +703,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         assert.ok(clipboardPayload.includes('Completion Timeline | mode=average'));
         assert.ok(
             clipboardPayload.includes(
-                'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
+                        'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.'
                     )
             )
         );
@@ -1041,13 +1041,13 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
 
         const rendered = renderTimelineStateInInlineWebview(webview.html, {
             kind: 'ready',
-            version: 22,
+            version: 23,
             updated_at_ms: 1_700_000_000_100,
             traces: [
                 {
-                    trace_id: 'trace-v22',
-                    request_id: 'req-v22',
-                    uri: 'file:///tmp/v22.bsl',
+                    trace_id: 'trace-v23',
+                    request_id: 'req-v23',
+                    uri: 'file:///tmp/v23.bsl',
                     trigger_mode: 'invoked',
                     outcome: 'ok_non_empty',
                     started_at_ms: 1_700_000_000_000,
@@ -1059,6 +1059,8 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         transport_received_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_010,
+                        response_output_handoff_started_at_ms: 1_700_000_000_010,
+                        response_output_handoff_enqueued_at_ms: 1_700_000_000_010,
                         response_output_enqueue_completed_at_ms: 1_700_000_000_011,
                         response_output_encode_started_at_ms: 1_700_000_000_012,
                         response_output_encode_completed_at_ms: 1_700_000_000_013,
@@ -1066,6 +1068,9 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         response_flush_completed_at_ms: 1_700_000_000_014,
                         transport_to_handler_wait_ms: 2,
                         server_handler_exec_ms: 8,
+                        response_ready_to_output_handoff_wait_ms: 0,
+                        response_output_handoff_send_wait_ms: 0,
+                        response_output_handoff_to_writer_wait_ms: 1,
                         response_ready_to_output_enqueue_wait_ms: 1,
                         response_output_queue_wait_ms: 1,
                         response_output_encode_exec_ms: 1,
@@ -1096,10 +1101,10 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
 
         assert.ok(
             rendered.serverHtml.includes(
-                'v23 truthful encode-start / write-start boundary is unavailable by design on this payload.'
+                'v24 truthful pre-enqueue handoff split is unavailable by design on this payload.'
             )
         );
-        assert.ok(!rendered.serverHtml.includes('response_output_encode_started='));
+        assert.ok(!rendered.serverHtml.includes('response_output_handoff_started='));
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

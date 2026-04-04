@@ -11232,7 +11232,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_split() {
+async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edge_split() {
     const FIXTURE: &str =
         "Процедура Тест()\n    ДляCompletion = (Новый Массив()).\nКонецПроцедуры\n";
     const REQUEST_ID: i64 = 50_521;
@@ -11282,8 +11282,8 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     let timeline = live_transport_get_completion_timeline(&mut harness, 50_522, 16).await;
     assert_eq!(
         timeline.get("version").and_then(|value| value.as_u64()),
-        Some(23),
-        "live transport completion timeline must expose v23 payload"
+        Some(24),
+        "live transport completion timeline must expose v24 payload"
     );
     let traces = timeline
         .get("traces")
@@ -11300,6 +11300,12 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
 
     let response_sent_at_ms = completion_timeline_server_edge_u64(&trace, "response_sent_at_ms")
         .expect("response_sent_at_ms");
+    let response_output_handoff_started_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_started_at_ms")
+            .expect("response_output_handoff_started_at_ms");
+    let response_output_handoff_enqueued_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_enqueued_at_ms")
+            .expect("response_output_handoff_enqueued_at_ms");
     let response_output_enqueue_completed_at_ms =
         completion_timeline_server_edge_u64(&trace, "response_output_enqueue_completed_at_ms")
             .expect("response_output_enqueue_completed_at_ms");
@@ -11318,6 +11324,15 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     let response_ready_to_output_enqueue_wait_ms =
         completion_timeline_server_edge_u64(&trace, "response_ready_to_output_enqueue_wait_ms")
             .expect("response_ready_to_output_enqueue_wait_ms");
+    let response_ready_to_output_handoff_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_ready_to_output_handoff_wait_ms")
+            .expect("response_ready_to_output_handoff_wait_ms");
+    let response_output_handoff_send_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_send_wait_ms")
+            .expect("response_output_handoff_send_wait_ms");
+    let response_output_handoff_to_writer_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_to_writer_wait_ms")
+            .expect("response_output_handoff_to_writer_wait_ms");
     let response_output_queue_wait_ms =
         completion_timeline_server_edge_u64(&trace, "response_output_queue_wait_ms")
             .expect("response_output_queue_wait_ms");
@@ -11330,6 +11345,18 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     let response_ready_to_flush_wait_ms =
         completion_timeline_server_edge_u64(&trace, "response_ready_to_flush_wait_ms")
             .expect("response_ready_to_flush_wait_ms");
+    assert!(
+        response_sent_at_ms <= response_output_handoff_started_at_ms,
+        "handoff start must not precede handler-ready boundary, trace={trace:?}"
+    );
+    assert!(
+        response_output_handoff_started_at_ms <= response_output_handoff_enqueued_at_ms,
+        "handoff enqueue acceptance must not precede handoff start, trace={trace:?}"
+    );
+    assert!(
+        response_output_handoff_enqueued_at_ms <= response_output_enqueue_completed_at_ms,
+        "writer-selection seam must not precede send-side handoff acceptance, trace={trace:?}"
+    );
     assert!(
         response_sent_at_ms <= response_output_enqueue_completed_at_ms,
         "egress enqueue must not precede handler-ready boundary, trace={trace:?}"
@@ -11349,6 +11376,23 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     assert!(
         response_output_write_started_at_ms <= response_flush_completed_at_ms,
         "flush completion must not precede literal write-start boundary, trace={trace:?}"
+    );
+    assert_eq!(
+        response_ready_to_output_handoff_wait_ms,
+        response_output_handoff_started_at_ms.saturating_sub(response_sent_at_ms),
+        "response_ready_to_output_handoff_wait_ms must match handler-ready to handoff-start delta, trace={trace:?}"
+    );
+    assert_eq!(
+        response_output_handoff_send_wait_ms,
+        response_output_handoff_enqueued_at_ms
+            .saturating_sub(response_output_handoff_started_at_ms),
+        "response_output_handoff_send_wait_ms must match handoff-start to handoff-accept delta, trace={trace:?}"
+    );
+    assert_eq!(
+        response_output_handoff_to_writer_wait_ms,
+        response_output_enqueue_completed_at_ms
+            .saturating_sub(response_output_handoff_enqueued_at_ms),
+        "response_output_handoff_to_writer_wait_ms must match handoff-accept to writer-selection delta, trace={trace:?}"
     );
     assert_eq!(
         response_ready_to_output_enqueue_wait_ms,

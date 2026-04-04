@@ -2,6 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::num::ParseIntError;
 use std::str::Utf8Error;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
@@ -106,10 +107,14 @@ impl CompletionHandoffTask {
     async fn forward_response(self, mut responses_tx: mpsc::Sender<QueuedTransportMessage>) {
         let request_id = self.request_id;
         if let Some(response) = self.future.await {
+            let response_output_handoff_started_at_ms = super::unix_timestamp_ms();
+            let response_output_handoff_enqueued_at_ms = Arc::new(AtomicU64::new(0));
             if responses_tx
                 .send(QueuedTransportMessage::completion_response(
                     response,
                     request_id.clone(),
+                    response_output_handoff_started_at_ms,
+                    response_output_handoff_enqueued_at_ms.clone(),
                 ))
                 .await
                 .is_err()
@@ -122,6 +127,9 @@ impl CompletionHandoffTask {
                         "failed to forward deferred completion response without request id: transport closed"
                     ),
                 }
+            } else {
+                response_output_handoff_enqueued_at_ms
+                    .store(super::unix_timestamp_ms(), Ordering::Relaxed);
             }
         }
     }
@@ -131,6 +139,8 @@ impl CompletionHandoffTask {
 struct QueuedTransportMessage {
     message: TransportMessage,
     completion_request_id: Option<String>,
+    completion_response_handoff_started_at_ms: Option<u64>,
+    completion_response_handoff_enqueued_at_ms: Option<Arc<AtomicU64>>,
 }
 
 impl QueuedTransportMessage {
@@ -138,6 +148,8 @@ impl QueuedTransportMessage {
         Self {
             message: TransportMessage::Request(request),
             completion_request_id: None,
+            completion_response_handoff_started_at_ms: None,
+            completion_response_handoff_enqueued_at_ms: None,
         }
     }
 
@@ -145,13 +157,26 @@ impl QueuedTransportMessage {
         Self {
             message: TransportMessage::Response(response),
             completion_request_id: None,
+            completion_response_handoff_started_at_ms: None,
+            completion_response_handoff_enqueued_at_ms: None,
         }
     }
 
-    fn completion_response(response: Response, completion_request_id: Option<String>) -> Self {
+    fn completion_response(
+        response: Response,
+        completion_request_id: Option<String>,
+        completion_response_handoff_started_at_ms: u64,
+        completion_response_handoff_enqueued_at_ms: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             message: TransportMessage::Response(response),
             completion_request_id,
+            completion_response_handoff_started_at_ms: Some(
+                completion_response_handoff_started_at_ms,
+            ),
+            completion_response_handoff_enqueued_at_ms: Some(
+                completion_response_handoff_enqueued_at_ms,
+            ),
         }
     }
 }
@@ -640,9 +665,21 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                         }
                     };
                     if let Some(request_id) = queued_message.completion_request_id {
+                        let response_output_handoff_enqueued_at_ms =
+                            resolve_completion_handoff_enqueued_at_ms(
+                                queued_message
+                                    .completion_response_handoff_enqueued_at_ms
+                                    .as_ref(),
+                                response_output_enqueue_completed_at_ms,
+                            )
+                            .await;
                         super::request_context::notify_completion_response_egress(
                             super::request_context::CompletionResponseEgressTracePatch {
                                 request_id,
+                                response_output_handoff_started_at_ms: queued_message
+                                    .completion_response_handoff_started_at_ms
+                                    .unwrap_or(response_output_enqueue_completed_at_ms),
+                                response_output_handoff_enqueued_at_ms,
                                 response_output_enqueue_completed_at_ms,
                                 response_output_encode_started_at_ms: write_milestones.encode_started_at_ms,
                                 response_output_write_started_at_ms: write_milestones.write_started_at_ms,
@@ -1179,6 +1216,25 @@ where
     reader.read_exact(&mut body).await?;
     let message = serde_json::from_slice(&body).map_err(TransportCodecError::Json)?;
     Ok(Some(message))
+}
+
+async fn resolve_completion_handoff_enqueued_at_ms(
+    handoff_enqueued_at_ms: Option<&Arc<AtomicU64>>,
+    fallback_at_ms: u64,
+) -> u64 {
+    let Some(handoff_enqueued_at_ms) = handoff_enqueued_at_ms else {
+        return fallback_at_ms;
+    };
+
+    for _ in 0..4 {
+        let value = handoff_enqueued_at_ms.load(Ordering::Relaxed);
+        if value > 0 {
+            return value;
+        }
+        tokio::task::yield_now().await;
+    }
+
+    fallback_at_ms
 }
 
 async fn write_transport_message<O>(
@@ -3872,5 +3928,52 @@ mod tests {
         drop(client_write);
         server_task.abort();
         let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn completion_handoff_acceptance_can_precede_legacy_writer_selection_seam() {
+        let (responses_tx, mut responses_rx) = mpsc::channel(1);
+        let handoff_task = CompletionHandoffTask::new(
+            Some("req-handoff".to_string()),
+            async {
+                Some(JsonRpcResponse::from_ok(
+                    Id::Number(7),
+                    serde_json::json!({ "items": [] }),
+                ))
+            }
+            .boxed(),
+        );
+
+        handoff_task.forward_response(responses_tx).await;
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let writer_selected_at_ms = super::super::unix_timestamp_ms();
+        let queued_message = responses_rx
+            .next()
+            .await
+            .expect("queued completion response must be available");
+
+        assert_eq!(
+            queued_message.completion_request_id.as_deref(),
+            Some("req-handoff")
+        );
+        let handoff_started_at_ms = queued_message
+            .completion_response_handoff_started_at_ms
+            .expect("handoff started milestone");
+        let handoff_enqueued_at_ms = resolve_completion_handoff_enqueued_at_ms(
+            queued_message
+                .completion_response_handoff_enqueued_at_ms
+                .as_ref(),
+            writer_selected_at_ms,
+        )
+        .await;
+
+        assert!(
+            handoff_started_at_ms <= handoff_enqueued_at_ms,
+            "send-side handoff acceptance must not precede handoff start"
+        );
+        assert!(
+            handoff_enqueued_at_ms < writer_selected_at_ms,
+            "channel acceptance must precede the delayed writer-selection seam"
+        );
     }
 }

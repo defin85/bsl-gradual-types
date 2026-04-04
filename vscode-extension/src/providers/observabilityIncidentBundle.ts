@@ -152,6 +152,11 @@ function buildCompletionTimelineSource(
     files: ObservabilityIncidentBundleFile[]
 ): ObservabilityIncidentBundleSource {
         if (completionTimeline.kind === 'ok') {
+        if (completionTimeline.response.version < 24) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include truthful v24 pre-enqueue handoff split; handoff-start / handoff-enqueued / writer-selection separation is unavailable by design.`
+            );
+        }
         if (completionTimeline.response.version < 22) {
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include finer v22 output-egress split; enqueue/queue/encode/write+flush detail is unavailable by design.`
@@ -338,6 +343,11 @@ function deriveFindings(
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
+        if (input.completionTimeline.response.version < 24) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but truthful v24 pre-enqueue handoff split is unavailable by design.`
+            );
+        }
         if (input.completionTimeline.response.version < 22) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but finer v22 output-egress split is unavailable by design.`

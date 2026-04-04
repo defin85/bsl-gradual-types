@@ -62,7 +62,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -220,6 +220,18 @@ function sanitizeServerEdgeDetailsForContract(
     if (contractVersion < 23) {
         const {
             response_output_encode_started_at_ms: _responseOutputEncodeStartedAtMs,
+            ...legacyDetails
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
+    }
+
+    if (contractVersion < 24) {
+        const {
+            response_output_handoff_started_at_ms: _responseOutputHandoffStartedAtMs,
+            response_output_handoff_enqueued_at_ms: _responseOutputHandoffEnqueuedAtMs,
+            response_ready_to_output_handoff_wait_ms: _responseReadyToOutputHandoffWaitMs,
+            response_output_handoff_send_wait_ms: _responseOutputHandoffSendWaitMs,
+            response_output_handoff_to_writer_wait_ms: _responseOutputHandoffToWriterWaitMs,
             ...legacyDetails
         } = sanitizedDetails;
         sanitizedDetails = legacyDetails;

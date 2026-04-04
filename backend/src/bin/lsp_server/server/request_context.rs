@@ -131,6 +131,8 @@ pub(crate) struct PreDispatchCompletionTerminalTraceInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompletionResponseEgressTracePatch {
     pub(crate) request_id: String,
+    pub(crate) response_output_handoff_started_at_ms: u64,
+    pub(crate) response_output_handoff_enqueued_at_ms: u64,
     pub(crate) response_output_enqueue_completed_at_ms: u64,
     pub(crate) response_output_encode_started_at_ms: u64,
     pub(crate) response_output_write_started_at_ms: u64,

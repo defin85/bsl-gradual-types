@@ -44,7 +44,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 23,
+            version: 24,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -86,6 +86,8 @@ suite('Completion Timeline Model Test Suite', () => {
                         method_entered_at_ms: 1_700_000_000_042,
                         handler_entered_at_ms: 1_700_000_000_042,
                         response_sent_at_ms: 1_700_000_000_090,
+                        response_output_handoff_started_at_ms: 1_700_000_000_090,
+                        response_output_handoff_enqueued_at_ms: 1_700_000_000_090,
                         response_output_enqueue_completed_at_ms: 1_700_000_000_091,
                         response_output_encode_started_at_ms: 1_700_000_000_092,
                         response_output_encode_completed_at_ms: 1_700_000_000_094,
@@ -104,6 +106,9 @@ suite('Completion Timeline Model Test Suite', () => {
                         slot_release_to_response_wait_ms: 49,
                         transport_to_handler_wait_ms: 2,
                         server_handler_exec_ms: 48,
+                        response_ready_to_output_handoff_wait_ms: 0,
+                        response_output_handoff_send_wait_ms: 0,
+                        response_output_handoff_to_writer_wait_ms: 1,
                         response_ready_to_output_enqueue_wait_ms: 1,
                         response_output_queue_wait_ms: 1,
                         response_output_encode_exec_ms: 2,
@@ -194,7 +199,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 23);
+        assert.strictEqual(state.version, 24);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
@@ -226,6 +231,14 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.service_future_first_wake_scheduled_at_ms,
             1_700_000_000_046
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.response_output_handoff_started_at_ms,
+            1_700_000_000_090
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.response_output_handoff_enqueued_at_ms,
+            1_700_000_000_090
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.response_output_enqueue_completed_at_ms,
@@ -325,6 +338,10 @@ suite('Completion Timeline Model Test Suite', () => {
         assert.strictEqual(
             state.traces[0].server_edge_details?.server_handler_exec_ms,
             48
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.response_output_handoff_to_writer_wait_ms,
+            1
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.response_ready_to_output_enqueue_wait_ms,
@@ -921,7 +938,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({
@@ -932,13 +949,13 @@ suite('Completion Timeline Model Test Suite', () => {
         );
     });
 
-    test('v22 payload should sanitize truthful v23 encode-start boundary', () => {
+    test('v23 payload should sanitize truthful v24 handoff split', () => {
         const payload: CompletionTimelineResponse = {
-            version: 22,
+            version: 23,
             traces: [
                 {
-                    trace_id: 'trace-v22',
-                    request_id: 'req-v22',
+                    trace_id: 'trace-v23',
+                    request_id: 'req-v23',
                     uri: 'file:///tmp/test.bsl',
                     trigger_mode: 'invoked',
                     outcome: 'ok_non_empty',
@@ -949,6 +966,8 @@ suite('Completion Timeline Model Test Suite', () => {
                         transport_received_at_ms: 1_700_000_000_000,
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_010,
+                        response_output_handoff_started_at_ms: 1_700_000_000_010,
+                        response_output_handoff_enqueued_at_ms: 1_700_000_000_010,
                         response_output_enqueue_completed_at_ms: 1_700_000_000_011,
                         response_output_encode_started_at_ms: 1_700_000_000_012,
                         response_output_write_started_at_ms: 1_700_000_000_013,
@@ -956,6 +975,9 @@ suite('Completion Timeline Model Test Suite', () => {
                         response_flush_completed_at_ms: 1_700_000_000_014,
                         transport_to_handler_wait_ms: 2,
                         server_handler_exec_ms: 8,
+                        response_ready_to_output_handoff_wait_ms: 0,
+                        response_output_handoff_send_wait_ms: 0,
+                        response_output_handoff_to_writer_wait_ms: 1,
                         response_ready_to_output_enqueue_wait_ms: 1,
                         response_output_queue_wait_ms: 1,
                         response_output_encode_exec_ms: 0,
@@ -981,8 +1003,12 @@ suite('Completion Timeline Model Test Suite', () => {
         }
 
         assert.strictEqual(
-            state.traces[0].server_edge_details?.response_output_encode_started_at_ms,
+            state.traces[0].server_edge_details?.response_output_handoff_started_at_ms,
             undefined
+        );
+        assert.strictEqual(
+            state.traces[0].server_edge_details?.response_output_encode_started_at_ms,
+            1_700_000_000_012
         );
         assert.strictEqual(
             state.traces[0].server_edge_details?.response_output_queue_wait_ms,

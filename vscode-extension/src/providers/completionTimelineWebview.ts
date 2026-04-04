@@ -841,6 +841,11 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 23) {
                 notices.push('v23 truthful encode-start / write-start boundary is unavailable by design on this payload.');
             }
+            if (contractVersion < 24) {
+                notices.push('v24 truthful pre-enqueue handoff split is unavailable by design on this payload.');
+            } else {
+                notices.push('response_output_enqueue_completed_at_ms remains a legacy writer-selection compatibility boundary on v24 payloads.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -1010,8 +1015,14 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'handler_entered=' + escapeHtml(new Date(details.handler_entered_at_ms).toLocaleTimeString()),
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
+                ...(typeof details.response_output_handoff_started_at_ms === 'number'
+                    ? ['response_output_handoff_started=' + escapeHtml(new Date(details.response_output_handoff_started_at_ms).toLocaleTimeString())]
+                    : []),
+                ...(typeof details.response_output_handoff_enqueued_at_ms === 'number'
+                    ? ['response_output_handoff_enqueued=' + escapeHtml(new Date(details.response_output_handoff_enqueued_at_ms).toLocaleTimeString())]
+                    : []),
                 ...(typeof details.response_output_enqueue_completed_at_ms === 'number'
-                    ? ['response_output_enqueue_completed=' + escapeHtml(new Date(details.response_output_enqueue_completed_at_ms).toLocaleTimeString())]
+                    ? ['response_output_enqueue_completed_legacy_writer_selection=' + escapeHtml(new Date(details.response_output_enqueue_completed_at_ms).toLocaleTimeString())]
                     : []),
                 ...(typeof details.response_output_encode_started_at_ms === 'number'
                     ? ['response_output_encode_started=' + escapeHtml(new Date(details.response_output_encode_started_at_ms).toLocaleTimeString())]
@@ -1065,6 +1076,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     : []),
                 'transport_to_handler_wait=' + escapeHtml(details.transport_to_handler_wait_ms) + 'ms',
                 'server_handler_exec=' + escapeHtml(details.server_handler_exec_ms) + 'ms',
+                ...(typeof details.response_ready_to_output_handoff_wait_ms === 'number'
+                    ? ['response_ready_to_output_handoff_wait=' + escapeHtml(details.response_ready_to_output_handoff_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.response_output_handoff_send_wait_ms === 'number'
+                    ? ['response_output_handoff_send_wait=' + escapeHtml(details.response_output_handoff_send_wait_ms) + 'ms']
+                    : []),
+                ...(typeof details.response_output_handoff_to_writer_wait_ms === 'number'
+                    ? ['response_output_handoff_to_writer_wait=' + escapeHtml(details.response_output_handoff_to_writer_wait_ms) + 'ms']
+                    : []),
                 ...(typeof details.response_ready_to_output_enqueue_wait_ms === 'number'
                     ? ['response_ready_to_output_enqueue_wait=' + escapeHtml(details.response_ready_to_output_enqueue_wait_ms) + 'ms']
                     : []),
@@ -1108,6 +1128,12 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     probe && typeof serverIngressAtMs === 'number'
                         ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
                         : undefined,
+                response_ready_to_output_handoff_wait_ms:
+                    details?.response_ready_to_output_handoff_wait_ms,
+                response_output_handoff_send_wait_ms:
+                    details?.response_output_handoff_send_wait_ms,
+                response_output_handoff_to_writer_wait_ms:
+                    details?.response_output_handoff_to_writer_wait_ms,
                 response_ready_to_output_enqueue_wait_ms:
                     details?.response_ready_to_output_enqueue_wait_ms,
                 response_output_queue_wait_ms: details?.response_output_queue_wait_ms,
@@ -1146,6 +1172,15 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const bits = [];
             if (typeof split.client_to_transport_wait_ms === 'number') {
                 bits.push('client_to_transport_wait=' + escapeHtml(split.client_to_transport_wait_ms) + 'ms');
+            }
+            if (typeof split.response_ready_to_output_handoff_wait_ms === 'number') {
+                bits.push('response_ready_to_output_handoff_wait=' + escapeHtml(split.response_ready_to_output_handoff_wait_ms) + 'ms');
+            }
+            if (typeof split.response_output_handoff_send_wait_ms === 'number') {
+                bits.push('response_output_handoff_send_wait=' + escapeHtml(split.response_output_handoff_send_wait_ms) + 'ms');
+            }
+            if (typeof split.response_output_handoff_to_writer_wait_ms === 'number') {
+                bits.push('response_output_handoff_to_writer_wait=' + escapeHtml(split.response_output_handoff_to_writer_wait_ms) + 'ms');
             }
             if (typeof split.response_ready_to_output_enqueue_wait_ms === 'number') {
                 bits.push('response_ready_to_output_enqueue_wait=' + escapeHtml(split.response_ready_to_output_enqueue_wait_ms) + 'ms');
@@ -1201,11 +1236,24 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 contractVersion < 23 &&
                 typeof trace?.server_edge_details?.response_output_encode_started_at_ms === 'number'
             ) {
-                return {
+                trace = {
                     ...trace,
                     server_edge_details: {
                         ...trace.server_edge_details,
                         response_output_encode_started_at_ms: undefined,
+                    },
+                };
+            }
+            if (contractVersion < 24 && trace?.server_edge_details) {
+                return {
+                    ...trace,
+                    server_edge_details: {
+                        ...trace.server_edge_details,
+                        response_output_handoff_started_at_ms: undefined,
+                        response_output_handoff_enqueued_at_ms: undefined,
+                        response_ready_to_output_handoff_wait_ms: undefined,
+                        response_output_handoff_send_wait_ms: undefined,
+                        response_output_handoff_to_writer_wait_ms: undefined,
                     },
                 };
             }

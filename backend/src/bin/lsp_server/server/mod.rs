@@ -109,8 +109,84 @@ pub(crate) type CompletionParityKeyV2 = (V2FileId, i32, u32, u32);
 pub(crate) type CompletionParityStoreV2 =
     Arc<RwLock<HashMap<CompletionParityKeyV2, CompletionParityStateV2>>>;
 
-pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 23;
+pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 24;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompletionResponseEgressTraceInputs {
+    pub response_sent_at_ms: u64,
+    pub response_output_handoff_started_at_ms: Option<u64>,
+    pub response_output_handoff_enqueued_at_ms: Option<u64>,
+    pub response_output_enqueue_completed_at_ms: Option<u64>,
+    pub response_output_encode_started_at_ms: Option<u64>,
+    pub response_output_write_started_at_ms: Option<u64>,
+    pub response_output_encode_completed_at_ms: Option<u64>,
+    pub response_flush_completed_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct CompletionResponseEgressDerivedTrace {
+    pub response_ready_to_output_handoff_wait_ms: Option<u64>,
+    pub response_output_handoff_send_wait_ms: Option<u64>,
+    pub response_output_handoff_to_writer_wait_ms: Option<u64>,
+    pub response_ready_to_output_enqueue_wait_ms: Option<u64>,
+    pub response_output_queue_wait_ms: Option<u64>,
+    pub response_output_encode_exec_ms: Option<u64>,
+    pub response_output_write_and_flush_exec_ms: Option<u64>,
+    pub response_ready_to_flush_wait_ms: Option<u64>,
+}
+
+pub(crate) fn derive_completion_response_egress_trace(
+    inputs: CompletionResponseEgressTraceInputs,
+) -> CompletionResponseEgressDerivedTrace {
+    CompletionResponseEgressDerivedTrace {
+        response_ready_to_output_handoff_wait_ms: inputs.response_output_handoff_started_at_ms.map(
+            |handoff_started_at_ms| {
+                handoff_started_at_ms.saturating_sub(inputs.response_sent_at_ms)
+            },
+        ),
+        response_output_handoff_send_wait_ms: inputs
+            .response_output_handoff_started_at_ms
+            .zip(inputs.response_output_handoff_enqueued_at_ms)
+            .map(|(handoff_started_at_ms, handoff_enqueued_at_ms)| {
+                handoff_enqueued_at_ms.saturating_sub(handoff_started_at_ms)
+            }),
+        response_output_handoff_to_writer_wait_ms: inputs
+            .response_output_handoff_enqueued_at_ms
+            .zip(inputs.response_output_enqueue_completed_at_ms)
+            .map(|(handoff_enqueued_at_ms, enqueue_completed_at_ms)| {
+                enqueue_completed_at_ms.saturating_sub(handoff_enqueued_at_ms)
+            }),
+        response_ready_to_output_enqueue_wait_ms: inputs
+            .response_output_enqueue_completed_at_ms
+            .map(|enqueue_completed_at_ms| {
+                enqueue_completed_at_ms.saturating_sub(inputs.response_sent_at_ms)
+            }),
+        response_output_queue_wait_ms: inputs
+            .response_output_enqueue_completed_at_ms
+            .zip(inputs.response_output_encode_started_at_ms)
+            .map(|(enqueue_completed_at_ms, encode_started_at_ms)| {
+                encode_started_at_ms.saturating_sub(enqueue_completed_at_ms)
+            }),
+        response_output_encode_exec_ms: inputs
+            .response_output_encode_started_at_ms
+            .zip(inputs.response_output_encode_completed_at_ms)
+            .map(|(encode_started_at_ms, encode_completed_at_ms)| {
+                encode_completed_at_ms.saturating_sub(encode_started_at_ms)
+            }),
+        response_output_write_and_flush_exec_ms: inputs
+            .response_output_write_started_at_ms
+            .zip(inputs.response_flush_completed_at_ms)
+            .map(|(write_started_at_ms, flush_completed_at_ms)| {
+                flush_completed_at_ms.saturating_sub(write_started_at_ms)
+            }),
+        response_ready_to_flush_wait_ms: inputs.response_flush_completed_at_ms.map(
+            |flush_completed_at_ms| {
+                flush_completed_at_ms.saturating_sub(inputs.response_sent_at_ms)
+            },
+        ),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FullIndexStateKind {

@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 20,
+    "lsp-completion-timeline": 21,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }
@@ -352,6 +352,17 @@ REQUIRED_V20_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
     REQUIRED_V19_TIMELINE_SERVER_EDGE_DETAILS_FIELDS
     | {
         "response_output_encode_started_at_ms",
+    }
+)
+
+REQUIRED_V21_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
+    REQUIRED_V20_TIMELINE_SERVER_EDGE_DETAILS_FIELDS
+    | {
+        "response_output_handoff_started_at_ms",
+        "response_output_handoff_enqueued_at_ms",
+        "response_ready_to_output_handoff_wait_ms",
+        "response_output_handoff_send_wait_ms",
+        "response_output_handoff_to_writer_wait_ms",
     }
 )
 
@@ -2418,6 +2429,17 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 response,
                 expected_version=23,
                 expected_server_edge_details_fields=REQUIRED_V20_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+                expected_query_bundle_stage_names=REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
+            )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 21:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            validate_lsp_completion_timeline_response_fields(
+                contract_path,
+                response,
+                expected_version=24,
+                expected_server_edge_details_fields=REQUIRED_V21_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
                 expected_query_bundle_stage_names=REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
             )
 

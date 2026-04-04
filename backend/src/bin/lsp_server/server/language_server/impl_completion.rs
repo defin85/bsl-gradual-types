@@ -330,6 +330,8 @@ struct CompletionTimelineCapture {
     method_entered_at_ms: Option<u64>,
     handler_entered_at_ms: Option<u64>,
     response_sent_at_ms: Option<u64>,
+    response_output_handoff_started_at_ms: Option<u64>,
+    response_output_handoff_enqueued_at_ms: Option<u64>,
     response_output_enqueue_completed_at_ms: Option<u64>,
     response_output_encode_started_at_ms: Option<u64>,
     response_output_write_started_at_ms: Option<u64>,
@@ -381,6 +383,8 @@ impl CompletionTimelineCapture {
             method_entered_at_ms: Some(method_entered_at_ms),
             handler_entered_at_ms: Some(handler_entered_at_ms),
             response_sent_at_ms: None,
+            response_output_handoff_started_at_ms: None,
+            response_output_handoff_enqueued_at_ms: None,
             response_output_enqueue_completed_at_ms: None,
             response_output_encode_started_at_ms: None,
             response_output_write_started_at_ms: None,
@@ -641,6 +645,22 @@ impl CompletionTimelineCapture {
     }
 
     #[cfg(test)]
+    fn set_response_output_handoff_started_at_ms(
+        &mut self,
+        response_output_handoff_started_at_ms: u64,
+    ) {
+        self.response_output_handoff_started_at_ms = Some(response_output_handoff_started_at_ms);
+    }
+
+    #[cfg(test)]
+    fn set_response_output_handoff_enqueued_at_ms(
+        &mut self,
+        response_output_handoff_enqueued_at_ms: u64,
+    ) {
+        self.response_output_handoff_enqueued_at_ms = Some(response_output_handoff_enqueued_at_ms);
+    }
+
+    #[cfg(test)]
     fn set_response_output_enqueue_completed_at_ms(
         &mut self,
         response_output_enqueue_completed_at_ms: u64,
@@ -710,6 +730,8 @@ impl CompletionTimelineCapture {
                 method_entered_at_ms: self.method_entered_at_ms,
                 handler_entered_at_ms: self.handler_entered_at_ms,
                 response_sent_at_ms: self.response_sent_at_ms,
+                response_output_handoff_started_at_ms: self.response_output_handoff_started_at_ms,
+                response_output_handoff_enqueued_at_ms: self.response_output_handoff_enqueued_at_ms,
                 response_output_enqueue_completed_at_ms: self
                     .response_output_enqueue_completed_at_ms,
                 response_output_encode_started_at_ms: self.response_output_encode_started_at_ms,
@@ -4152,11 +4174,13 @@ mod tests {
         capture.set_transport_received_at_ms_provenance("request_context_call_entry");
         capture.set_handler_entered_at_ms(1_700_000_000_000);
         capture.set_response_sent_at_ms(1_700_000_000_030);
-        capture.set_response_output_enqueue_completed_at_ms(1_700_000_000_032);
-        capture.set_response_output_encode_started_at_ms(1_700_000_000_033);
-        capture.set_response_output_encode_completed_at_ms(1_700_000_000_035);
-        capture.set_response_output_write_started_at_ms(1_700_000_000_036);
-        capture.set_response_flush_completed_at_ms(1_700_000_000_038);
+        capture.set_response_output_handoff_started_at_ms(1_700_000_000_031);
+        capture.set_response_output_handoff_enqueued_at_ms(1_700_000_000_032);
+        capture.set_response_output_enqueue_completed_at_ms(1_700_000_000_034);
+        capture.set_response_output_encode_started_at_ms(1_700_000_000_035);
+        capture.set_response_output_encode_completed_at_ms(1_700_000_000_037);
+        capture.set_response_output_write_started_at_ms(1_700_000_000_038);
+        capture.set_response_flush_completed_at_ms(1_700_000_000_040);
 
         let trace = capture.into_trace(
             "trace-response-flush-split".to_string(),
@@ -4167,30 +4191,41 @@ mod tests {
             .server_edge_details
             .expect("server_edge_details must be present");
         assert_eq!(
-            details.response_flush_completed_at_ms,
-            Some(1_700_000_000_038)
+            details.response_output_handoff_started_at_ms,
+            Some(1_700_000_000_031)
         );
         assert_eq!(
-            details.response_output_enqueue_completed_at_ms,
+            details.response_output_handoff_enqueued_at_ms,
             Some(1_700_000_000_032)
         );
         assert_eq!(
+            details.response_flush_completed_at_ms,
+            Some(1_700_000_000_040)
+        );
+        assert_eq!(
+            details.response_output_enqueue_completed_at_ms,
+            Some(1_700_000_000_034)
+        );
+        assert_eq!(
             details.response_output_encode_started_at_ms,
-            Some(1_700_000_000_033)
+            Some(1_700_000_000_035)
         );
         assert_eq!(
             details.response_output_write_started_at_ms,
-            Some(1_700_000_000_036)
+            Some(1_700_000_000_038)
         );
         assert_eq!(
             details.response_output_encode_completed_at_ms,
-            Some(1_700_000_000_035)
+            Some(1_700_000_000_037)
         );
-        assert_eq!(details.response_ready_to_output_enqueue_wait_ms, Some(2));
+        assert_eq!(details.response_ready_to_output_handoff_wait_ms, Some(1));
+        assert_eq!(details.response_output_handoff_send_wait_ms, Some(1));
+        assert_eq!(details.response_output_handoff_to_writer_wait_ms, Some(2));
+        assert_eq!(details.response_ready_to_output_enqueue_wait_ms, Some(4));
         assert_eq!(details.response_output_queue_wait_ms, Some(1));
         assert_eq!(details.response_output_encode_exec_ms, Some(2));
         assert_eq!(details.response_output_write_and_flush_exec_ms, Some(2));
-        assert_eq!(details.response_ready_to_flush_wait_ms, Some(8));
+        assert_eq!(details.response_ready_to_flush_wait_ms, Some(10));
         assert_eq!(details.response_sent_at_ms, 1_700_000_000_030);
     }
 

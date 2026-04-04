@@ -102,6 +102,34 @@ fn record_completion_response_egress_patch_inner(
         return;
     };
     if server_edge_details.response_flush_completed_at_ms.is_none() {
+        let derived = super::derive_completion_response_egress_trace(
+            super::CompletionResponseEgressTraceInputs {
+                response_sent_at_ms: server_edge_details.response_sent_at_ms,
+                response_output_handoff_started_at_ms: Some(
+                    patch.response_output_handoff_started_at_ms,
+                ),
+                response_output_handoff_enqueued_at_ms: Some(
+                    patch.response_output_handoff_enqueued_at_ms,
+                ),
+                response_output_enqueue_completed_at_ms: Some(
+                    patch.response_output_enqueue_completed_at_ms,
+                ),
+                response_output_encode_started_at_ms: Some(
+                    patch.response_output_encode_started_at_ms,
+                ),
+                response_output_write_started_at_ms: Some(
+                    patch.response_output_write_started_at_ms,
+                ),
+                response_output_encode_completed_at_ms: Some(
+                    patch.response_output_encode_completed_at_ms,
+                ),
+                response_flush_completed_at_ms: Some(patch.response_flush_completed_at_ms),
+            },
+        );
+        server_edge_details.response_output_handoff_started_at_ms =
+            Some(patch.response_output_handoff_started_at_ms);
+        server_edge_details.response_output_handoff_enqueued_at_ms =
+            Some(patch.response_output_handoff_enqueued_at_ms);
         server_edge_details.response_output_enqueue_completed_at_ms =
             Some(patch.response_output_enqueue_completed_at_ms);
         server_edge_details.response_output_encode_started_at_ms =
@@ -112,31 +140,20 @@ fn record_completion_response_egress_patch_inner(
             Some(patch.response_output_encode_completed_at_ms);
         server_edge_details.response_flush_completed_at_ms =
             Some(patch.response_flush_completed_at_ms);
-        server_edge_details.response_ready_to_output_enqueue_wait_ms = Some(
-            patch
-                .response_output_enqueue_completed_at_ms
-                .saturating_sub(server_edge_details.response_sent_at_ms),
-        );
-        server_edge_details.response_output_queue_wait_ms = Some(
-            patch
-                .response_output_encode_started_at_ms
-                .saturating_sub(patch.response_output_enqueue_completed_at_ms),
-        );
-        server_edge_details.response_output_encode_exec_ms = Some(
-            patch
-                .response_output_encode_completed_at_ms
-                .saturating_sub(patch.response_output_encode_started_at_ms),
-        );
-        server_edge_details.response_output_write_and_flush_exec_ms = Some(
-            patch
-                .response_flush_completed_at_ms
-                .saturating_sub(patch.response_output_write_started_at_ms),
-        );
-        server_edge_details.response_ready_to_flush_wait_ms = Some(
-            patch
-                .response_flush_completed_at_ms
-                .saturating_sub(server_edge_details.response_sent_at_ms),
-        );
+        server_edge_details.response_ready_to_output_handoff_wait_ms =
+            derived.response_ready_to_output_handoff_wait_ms;
+        server_edge_details.response_output_handoff_send_wait_ms =
+            derived.response_output_handoff_send_wait_ms;
+        server_edge_details.response_output_handoff_to_writer_wait_ms =
+            derived.response_output_handoff_to_writer_wait_ms;
+        server_edge_details.response_ready_to_output_enqueue_wait_ms =
+            derived.response_ready_to_output_enqueue_wait_ms;
+        server_edge_details.response_output_queue_wait_ms = derived.response_output_queue_wait_ms;
+        server_edge_details.response_output_encode_exec_ms = derived.response_output_encode_exec_ms;
+        server_edge_details.response_output_write_and_flush_exec_ms =
+            derived.response_output_write_and_flush_exec_ms;
+        server_edge_details.response_ready_to_flush_wait_ms =
+            derived.response_ready_to_flush_wait_ms;
     }
 }
 

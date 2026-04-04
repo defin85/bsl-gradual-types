@@ -47,6 +47,8 @@ pub(super) struct RequestServerEdgeTraceInputs {
     pub method_entered_at_ms: Option<u64>,
     pub handler_entered_at_ms: Option<u64>,
     pub response_sent_at_ms: Option<u64>,
+    pub response_output_handoff_started_at_ms: Option<u64>,
+    pub response_output_handoff_enqueued_at_ms: Option<u64>,
     pub response_output_enqueue_completed_at_ms: Option<u64>,
     pub response_output_encode_started_at_ms: Option<u64>,
     pub response_output_write_started_at_ms: Option<u64>,
@@ -78,12 +80,26 @@ pub(super) fn build_server_edge_details_trace(
     let method_entered_at_ms = inputs.method_entered_at_ms;
     let handler_entered_at_ms = inputs.handler_entered_at_ms?;
     let response_sent_at_ms = inputs.response_sent_at_ms?;
+    let response_output_handoff_started_at_ms = inputs.response_output_handoff_started_at_ms;
+    let response_output_handoff_enqueued_at_ms = inputs.response_output_handoff_enqueued_at_ms;
     let response_output_enqueue_completed_at_ms = inputs.response_output_enqueue_completed_at_ms;
     let response_output_encode_started_at_ms = inputs.response_output_encode_started_at_ms;
     let response_output_write_started_at_ms = inputs.response_output_write_started_at_ms;
     let response_output_encode_completed_at_ms = inputs.response_output_encode_completed_at_ms;
     let response_flush_completed_at_ms = inputs.response_flush_completed_at_ms;
     let cancel_observed_at_ms = inputs.cancel_observed_at_ms;
+    let egress = super::super::derive_completion_response_egress_trace(
+        super::super::CompletionResponseEgressTraceInputs {
+            response_sent_at_ms,
+            response_output_handoff_started_at_ms,
+            response_output_handoff_enqueued_at_ms,
+            response_output_enqueue_completed_at_ms,
+            response_output_encode_started_at_ms,
+            response_output_write_started_at_ms,
+            response_output_encode_completed_at_ms,
+            response_flush_completed_at_ms,
+        },
+    );
 
     Some(crate::types::CompletionTimelineServerEdgeDetailsTrace {
         adapter_read_at_ms,
@@ -105,6 +121,8 @@ pub(super) fn build_server_edge_details_trace(
         method_entered_at_ms,
         handler_entered_at_ms,
         response_sent_at_ms,
+        response_output_handoff_started_at_ms,
+        response_output_handoff_enqueued_at_ms,
         response_output_enqueue_completed_at_ms,
         response_output_encode_started_at_ms,
         response_output_write_started_at_ms,
@@ -152,26 +170,14 @@ pub(super) fn build_server_edge_details_trace(
         transport_to_handler_wait_ms: handler_entered_at_ms
             .saturating_sub(transport_received_at_ms),
         server_handler_exec_ms: response_sent_at_ms.saturating_sub(handler_entered_at_ms),
-        response_ready_to_output_enqueue_wait_ms: response_output_enqueue_completed_at_ms.map(
-            |enqueue_completed_at_ms| enqueue_completed_at_ms.saturating_sub(response_sent_at_ms),
-        ),
-        response_output_queue_wait_ms: response_output_enqueue_completed_at_ms
-            .zip(response_output_encode_started_at_ms)
-            .map(|(enqueue_completed_at_ms, encode_started_at_ms)| {
-                encode_started_at_ms.saturating_sub(enqueue_completed_at_ms)
-            }),
-        response_output_encode_exec_ms: response_output_encode_started_at_ms
-            .zip(response_output_encode_completed_at_ms)
-            .map(|(encode_started_at_ms, encode_completed_at_ms)| {
-                encode_completed_at_ms.saturating_sub(encode_started_at_ms)
-            }),
-        response_output_write_and_flush_exec_ms: response_output_write_started_at_ms
-            .zip(response_flush_completed_at_ms)
-            .map(|(write_started_at_ms, flush_completed_at_ms)| {
-                flush_completed_at_ms.saturating_sub(write_started_at_ms)
-            }),
-        response_ready_to_flush_wait_ms: response_flush_completed_at_ms
-            .map(|flush_completed_at_ms| flush_completed_at_ms.saturating_sub(response_sent_at_ms)),
+        response_ready_to_output_handoff_wait_ms: egress.response_ready_to_output_handoff_wait_ms,
+        response_output_handoff_send_wait_ms: egress.response_output_handoff_send_wait_ms,
+        response_output_handoff_to_writer_wait_ms: egress.response_output_handoff_to_writer_wait_ms,
+        response_ready_to_output_enqueue_wait_ms: egress.response_ready_to_output_enqueue_wait_ms,
+        response_output_queue_wait_ms: egress.response_output_queue_wait_ms,
+        response_output_encode_exec_ms: egress.response_output_encode_exec_ms,
+        response_output_write_and_flush_exec_ms: egress.response_output_write_and_flush_exec_ms,
+        response_ready_to_flush_wait_ms: egress.response_ready_to_flush_wait_ms,
         cancel_observed_after_handler_enter_ms: cancel_observed_at_ms
             .map(|cancel_ms| cancel_ms.saturating_sub(handler_entered_at_ms)),
     })
@@ -222,6 +228,8 @@ pub(super) fn record_current_request_server_edge_trace_for_testing(
         method_entered_at_ms: Some(method_entered_at_ms),
         handler_entered_at_ms: Some(handler_entered_at_ms),
         response_sent_at_ms: Some(response_sent_at_ms),
+        response_output_handoff_started_at_ms: None,
+        response_output_handoff_enqueued_at_ms: None,
         response_output_enqueue_completed_at_ms: None,
         response_output_encode_started_at_ms: None,
         response_output_write_started_at_ms: None,

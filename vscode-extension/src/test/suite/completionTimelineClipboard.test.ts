@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 22,
+            version: 23,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -82,8 +82,9 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         handler_entered_at_ms: 1_700_000_000_002,
                         response_sent_at_ms: 1_700_000_000_030,
                         response_output_enqueue_completed_at_ms: 1_700_000_000_031,
-                        response_output_write_started_at_ms: 1_700_000_000_032,
+                        response_output_encode_started_at_ms: 1_700_000_000_032,
                         response_output_encode_completed_at_ms: 1_700_000_000_033,
+                        response_output_write_started_at_ms: 1_700_000_000_033,
                         response_flush_completed_at_ms: 1_700_000_000_034,
                         cancel_observed_at_ms: 1_700_000_000_021,
                         dispatch_to_request_context_wait_ms: 4,
@@ -268,7 +269,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v22'));
+        assert.ok(text!.includes('contract=v23'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -292,7 +293,8 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('handler_entered_at_ms=1700000000002'));
         assert.ok(text!.includes('response_sent_at_ms=1700000000030'));
         assert.ok(text!.includes('response_output_enqueue_completed_at_ms=1700000000031'));
-        assert.ok(text!.includes('response_output_write_started_at_ms=1700000000032'));
+        assert.ok(text!.includes('response_output_encode_started_at_ms=1700000000032'));
+        assert.ok(text!.includes('response_output_write_started_at_ms=1700000000033'));
         assert.ok(text!.includes('response_output_encode_completed_at_ms=1700000000033'));
         assert.ok(text!.includes('dispatch_to_request_context_wait_ms=4'));
         assert.ok(text!.includes('transport_to_slot_release_wait_ms=29'));
@@ -426,12 +428,30 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, and v22 finer output-egress split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.'
                     )
             )
         );
         assert.ok(!text!.includes('bottleneck_verdict=server_before_method_entry_dominant'));
         assert.ok(!text!.includes('trace-1 (invoked)'));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should mark v22 payload as missing truthful v23 boundary by design', () => {
+        const state = buildReadyState();
+        if (state.kind !== 'ready') {
+            throw new Error('expected ready state fixture');
+        }
+        state.version = 22;
+
+        const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('contract=v22'));
+        assert.ok(
+            text!.includes(
+                'v23 truthful encode-start / write-start boundary is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(!text!.includes('response_output_encode_started_at_ms=1700000000032'));
     });
 
     test('formatVisibleCompletionTimelineForClipboard should mark v11 payload as missing v12 contention attribution by design', () => {

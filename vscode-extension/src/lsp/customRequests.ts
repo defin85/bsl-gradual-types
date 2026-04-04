@@ -667,6 +667,7 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     handler_entered_at_ms: number;
     response_sent_at_ms: number;
     response_output_enqueue_completed_at_ms?: number;
+    response_output_encode_started_at_ms?: number;
     response_output_write_started_at_ms?: number;
     response_output_encode_completed_at_ms?: number;
     response_flush_completed_at_ms?: number;

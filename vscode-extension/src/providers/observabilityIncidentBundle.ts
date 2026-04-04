@@ -157,6 +157,11 @@ function buildCompletionTimelineSource(
                 `Completion timeline contract v${completionTimeline.response.version} does not include finer v22 output-egress split; enqueue/queue/encode/write+flush detail is unavailable by design.`
             );
         }
+        if (completionTimeline.response.version < 23) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include truthful v23 output-egress boundary; encode-start vs literal write-start detail is unavailable by design.`
+            );
+        }
         if (completionTimeline.response.version < 21) {
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include v21 flush-aware post-handler egress split; response_ready_to_flush_wait_ms is unavailable by design.`
@@ -336,6 +341,11 @@ function deriveFindings(
         if (input.completionTimeline.response.version < 22) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but finer v22 output-egress split is unavailable by design.`
+            );
+        }
+        if (input.completionTimeline.response.version < 23) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but truthful v23 output-egress boundary is unavailable by design.`
             );
         }
         if (input.completionTimeline.response.version < 21) {

@@ -42,7 +42,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 22,
+                version: 23,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -111,6 +111,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             handler_entered_at_ms: 1_700_000_003_000,
                             response_sent_at_ms: 1_700_000_003_172,
                             response_output_enqueue_completed_at_ms: 1_700_000_003_172,
+                            response_output_encode_started_at_ms: 1_700_000_003_172,
                             response_output_write_started_at_ms: 1_700_000_003_172,
                             response_output_encode_completed_at_ms: 1_700_000_003_172,
                             response_flush_completed_at_ms: 1_700_000_003_172,
@@ -281,7 +282,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 22);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 23);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -316,6 +317,13 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(
             bundle.incidentReport.requests[0].transport_received_at_ms_provenance,
             'jsonrpc_dispatch_received'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].response_output_encode_started_at_ms,
+            1_700_000_003_172
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('response_output_encode_started_at_ms=1700000003172')
         );
         assert.strictEqual(
             bundle.incidentReport.requests[0].jsonrpc_dispatch_received_at_ms,
@@ -861,6 +869,28 @@ suite('Observability Incident Bundle Test Suite', () => {
             bundle.incidentReport.findings.some((finding) => finding.includes('finer v22 output-egress split'))
         );
         assert.ok(bundle.summaryMarkdown.includes('finer v22 output-egress split'));
+    });
+
+    test('v22 completion timeline should mark truthful v23 output-egress boundary as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 22;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('truthful v23 output-egress boundary')));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) => finding.includes('truthful v23 output-egress boundary'))
+        );
+        assert.ok(bundle.summaryMarkdown.includes('truthful v23 output-egress boundary'));
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

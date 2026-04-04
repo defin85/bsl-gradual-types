@@ -706,7 +706,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                 'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, and v22 finer output-egress split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.'
                     )
             )
         );
@@ -1008,6 +1008,98 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
         );
         assert.ok(rendered.serverHtml.includes('query_bundle'));
         assert.ok(!rendered.serverHtml.includes('query_bundle_ir_query_dominant'));
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('inline webview script should mark v22 payload as missing truthful v23 boundary by design', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: false,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+
+        const rendered = renderTimelineStateInInlineWebview(webview.html, {
+            kind: 'ready',
+            version: 22,
+            updated_at_ms: 1_700_000_000_100,
+            traces: [
+                {
+                    trace_id: 'trace-v22',
+                    request_id: 'req-v22',
+                    uri: 'file:///tmp/v22.bsl',
+                    trigger_mode: 'invoked',
+                    outcome: 'ok_non_empty',
+                    started_at_ms: 1_700_000_000_000,
+                    total_duration_ms: 12,
+                    max_stage_end_ms: 12,
+                    unattributed_overhead_ms: 0,
+                    dominant_stage: 'query_bundle_ir_query',
+                    server_edge_details: {
+                        transport_received_at_ms: 1_700_000_000_000,
+                        handler_entered_at_ms: 1_700_000_000_002,
+                        response_sent_at_ms: 1_700_000_000_010,
+                        response_output_enqueue_completed_at_ms: 1_700_000_000_011,
+                        response_output_encode_started_at_ms: 1_700_000_000_012,
+                        response_output_encode_completed_at_ms: 1_700_000_000_013,
+                        response_output_write_started_at_ms: 1_700_000_000_013,
+                        response_flush_completed_at_ms: 1_700_000_000_014,
+                        transport_to_handler_wait_ms: 2,
+                        server_handler_exec_ms: 8,
+                        response_ready_to_output_enqueue_wait_ms: 1,
+                        response_output_queue_wait_ms: 1,
+                        response_output_encode_exec_ms: 1,
+                        response_output_write_and_flush_exec_ms: 1,
+                        response_ready_to_flush_wait_ms: 4,
+                    },
+                    bottleneck_verdicts: [],
+                    stages: [
+                        {
+                            name: 'query_bundle_ir_query',
+                            status: 'completed',
+                            started_offset_ms: 0,
+                            end_offset_ms: 12,
+                            duration_ms: 12,
+                            width_percent: 100,
+                            duration_percent: 100,
+                            is_dominant: true,
+                        },
+                    ],
+                },
+            ],
+            average_trace: null,
+            client_probe_feed: {
+                updated_at_ms: 1_700_000_000_100,
+                probes: [],
+            },
+        });
+
+        assert.ok(
+            rendered.serverHtml.includes(
+                'v23 truthful encode-start / write-start boundary is unavailable by design on this payload.'
+            )
+        );
+        assert.ok(!rendered.serverHtml.includes('response_output_encode_started='));
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

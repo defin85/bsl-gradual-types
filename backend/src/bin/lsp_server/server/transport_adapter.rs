@@ -158,6 +158,7 @@ impl QueuedTransportMessage {
 
 #[derive(Debug, Clone, Copy)]
 struct TransportMessageWriteMilestones {
+    encode_started_at_ms: u64,
     write_started_at_ms: u64,
     encode_completed_at_ms: u64,
     flush_completed_at_ms: u64,
@@ -617,7 +618,10 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     let transport_shutdown_for_output = transport_shutdown.clone();
     let print_output = async move {
         let mut stdout = BufWriter::new(stdout);
-        let outbound = stream::select(responses_rx, client_requests.map(QueuedTransportMessage::request));
+        let outbound = stream::select(
+            responses_rx,
+            client_requests.map(QueuedTransportMessage::request),
+        );
         pin_mut!(outbound);
 
         loop {
@@ -640,6 +644,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                             super::request_context::CompletionResponseEgressTracePatch {
                                 request_id,
                                 response_output_enqueue_completed_at_ms,
+                                response_output_encode_started_at_ms: write_milestones.encode_started_at_ms,
                                 response_output_write_started_at_ms: write_milestones.write_started_at_ms,
                                 response_output_encode_completed_at_ms: write_milestones.encode_completed_at_ms,
                                 response_flush_completed_at_ms: write_milestones.flush_completed_at_ms,
@@ -1183,14 +1188,16 @@ async fn write_transport_message<O>(
 where
     O: AsyncWrite + Unpin,
 {
-    let write_started_at_ms = super::unix_timestamp_ms();
+    let encode_started_at_ms = super::unix_timestamp_ms();
     let body = serde_json::to_vec(message).map_err(TransportCodecError::Json)?;
     let encode_completed_at_ms = super::unix_timestamp_ms();
     let header = format!("Content-Length: {}\r\n\r\n", body.len());
+    let write_started_at_ms = super::unix_timestamp_ms();
     writer.write_all(header.as_bytes()).await?;
     writer.write_all(&body).await?;
     writer.flush().await?;
     Ok(TransportMessageWriteMilestones {
+        encode_started_at_ms,
         write_started_at_ms,
         encode_completed_at_ms,
         flush_completed_at_ms: super::unix_timestamp_ms(),

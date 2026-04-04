@@ -838,6 +838,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             if (contractVersion < 22) {
                 notices.push('v22 finer output-egress split is unavailable by design on this payload.');
             }
+            if (contractVersion < 23) {
+                notices.push('v23 truthful encode-start / write-start boundary is unavailable by design on this payload.');
+            }
             return notices.map((notice) => '<div class="placeholder">' + escapeHtml(notice) + '</div>').join('');
         }
 
@@ -1009,6 +1012,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 'response_sent=' + escapeHtml(new Date(details.response_sent_at_ms).toLocaleTimeString()),
                 ...(typeof details.response_output_enqueue_completed_at_ms === 'number'
                     ? ['response_output_enqueue_completed=' + escapeHtml(new Date(details.response_output_enqueue_completed_at_ms).toLocaleTimeString())]
+                    : []),
+                ...(typeof details.response_output_encode_started_at_ms === 'number'
+                    ? ['response_output_encode_started=' + escapeHtml(new Date(details.response_output_encode_started_at_ms).toLocaleTimeString())]
                     : []),
                 ...(typeof details.response_output_write_started_at_ms === 'number'
                     ? ['response_output_write_started=' + escapeHtml(new Date(details.response_output_write_started_at_ms).toLocaleTimeString())]
@@ -1188,6 +1194,18 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     server_edge_details: {
                         ...trace.server_edge_details,
                         first_poll_contention_attribution: undefined,
+                    },
+                };
+            }
+            if (
+                contractVersion < 23 &&
+                typeof trace?.server_edge_details?.response_output_encode_started_at_ms === 'number'
+            ) {
+                return {
+                    ...trace,
+                    server_edge_details: {
+                        ...trace.server_edge_details,
+                        response_output_encode_started_at_ms: undefined,
                     },
                 };
             }

@@ -2,38 +2,38 @@
 
 После `investigate-completion-transport-gap` completion timeline уже честно показывает coarse server egress tail как интервал между `response_sent_at_ms` и `response_flush_completed_at_ms`.
 
-Однако текущий payload не отделяет:
+Первый shipped шаг `v22` добавил finer split, но acceptance-review обнаружил semantic mismatch:
 
-- enqueue wait до успешной постановки completion response в outbound response path;
-- queue wait до начала фактического write;
-- encode/serialize exec;
-- write+flush exec.
+- `response_output_write_started_at_ms` сейчас фиксируется до `serde_json::to_vec(...)`;
+- `response_output_queue_wait_ms` поэтому включает encode time, хотя promised wording говорит про literal write start;
+- исправить это задним числом в `v22` нельзя без скрытого breaking reinterpretation.
 
-При этом архитектурное ревью показало, что truthful backlog attribution требует отдельного transport refactor и не должно смешиваться с этим шагом.
+При этом truthful backlog attribution по-прежнему требует отдельного transport refactor и не должно смешиваться с этим шагом.
 
 ## Versioning Note
 
-Текущий target-state после `investigate-completion-transport-gap`:
-
-- `response.version = 21`;
-- `contracts/lsp-completion-timeline/v18`.
-
-Эта фаза строится поверх него и целится в:
+Текущий shipped state после первой реализации этого change:
 
 - `response.version = 22`;
 - `contracts/lsp-completion-timeline/v19`.
 
+Доведение до 100% строится поверх него и целится в:
+
+- `response.version = 23`;
+- `contracts/lsp-completion-timeline/v20`.
+
 ## Goals
 
-- Разложить `response_ready_to_flush_wait_ms` на bounded server-only clocks и derived waits.
-- Сохранить additive/backward-compatible semantics для уже shipped `v21` полей.
-- Избежать partial `v22` state при immediate follow-up `bsl.getCompletionTimeline`.
+- Разложить coarse server egress tail на truthful `v23` server-only clocks и derived waits.
+- Сохранить shipped `v22` как compatibility surface без retroactive reinterpretation.
+- Избежать partial `v23` state при immediate follow-up `bsl.getCompletionTimeline`.
 
 ## Non-Goals
 
 - Не публиковать queue backlog snapshot в этой фазе.
 - Не рефакторить merged outbound path в unified queue/envelope.
 - Не менять scheduling/fairness output writer.
+- Не делать hidden breaking reinterpretation для already shipped `v22`.
 
 ## Решения
 
@@ -42,57 +42,81 @@
 `response_sent_at_ms` остаётся handler-local response-ready boundary.
 `response_flush_completed_at_ms` остаётся flush completion boundary.
 
-`v22` добавляет только intermediate milestones:
+`v23` добавляет intermediate milestones:
 
 - `response_output_enqueue_completed_at_ms`;
+- `response_output_encode_started_at_ms`;
+- `response_output_encode_completed_at_ms`;
 - `response_output_write_started_at_ms`;
-- `response_output_encode_completed_at_ms`.
 
-Derived поля:
+`response_output_encode_started_at_ms` означает старт output encode phase.
+`response_output_write_started_at_ms` означает первый фактический write в transport writer.
+
+Derived `v23` поля:
 
 - `response_ready_to_output_enqueue_wait_ms`;
 - `response_output_queue_wait_ms`;
 - `response_output_encode_exec_ms`;
 - `response_output_write_and_flush_exec_ms`.
 
-### 2. Все egress milestones публикуются одним atomic patch carrier
+Границы вычисления:
 
-Текущий `v21` path уже синхронно патчит flush completion в trace store.
-Для `v22` этого недостаточно: несколько разрозненных callbacks создадут partial trace state.
+- `response_ready_to_output_enqueue_wait_ms = enqueue_completed - response_sent`;
+- `response_output_queue_wait_ms = encode_started - enqueue_completed`;
+- `response_output_encode_exec_ms = encode_completed - encode_started`;
+- `response_output_write_and_flush_exec_ms = flush_completed - write_started`.
+
+Compatibility umbrella `response_ready_to_flush_wait_ms` сохраняется, но consumers MUST NOT использовать его как exact checksum суммы finer buckets.
+
+### 2. `v22` остаётся shipped compatibility surface, truthful redesign идёт только в `v23`
+
+`v22` уже опубликован и остаётся поддерживаемым legacy surface.
+Новый truthful split должен появиться только в additive `v23`.
+
+На `v22` surfaces и evidence bundles:
+
+- прямо говорят, что literal encode-start/write-start split unavailable by design;
+- не переименовывают shipped `response_output_write_started_at_ms` задним числом;
+- не пытаются выводить truthful first-write semantics из `v22`.
+
+### 3. Все `v23` egress milestones публикуются одним atomic patch carrier
+
+Текущий path уже синхронно патчит flush completion в trace store.
+Для `v23` несколько разрозненных callbacks всё ещё недопустимы: они создадут partial trace state.
 
 Поэтому transport path должен передавать в trace store единый bounded patch carrier, содержащий:
 
 - `request_id`;
-- observed enqueue/write/encode/flush milestones для completion response.
+- observed enqueue/encode-start/encode-complete/write-start/flush milestones для completion response.
 
-Trace store применяет patch синхронно и idempotent, чтобы immediate `bsl.getCompletionTimeline` видел целостный `v22` split.
+Trace store применяет patch синхронно и idempotent, чтобы immediate `bsl.getCompletionTimeline` видел целостный `v23` split.
 
-### 3. Queue wait в этой фазе остаётся timing-only, без blocker attribution
+### 4. Queue wait в этой фазе остаётся timing-only, без blocker attribution
 
-`response_output_queue_wait_ms` в этой фазе означает только delay между completion enqueue completion и фактическим write start.
+`response_output_queue_wait_ms` в `v23` означает только delay между completion enqueue completion и encode-start boundary.
 
 Payload и human-readable surfaces:
 
 - MAY продолжать показывать umbrella `response_ready_to_flush_wait_ms`;
 - MUST NOT называть queue wait “backlog от notification”, “executeCommand blocker” или иным более точным culprit без новых bounded snapshot fields.
 
-### 4. `v21` degradation остаётся fail-closed
+### 5. `v22` degradation остаётся fail-closed
 
-На `v21` surfaces:
+На `v22` surfaces:
 
-- не выдумывают enqueue/queue/encode/write buckets;
-- прямо говорят, что finer output-egress split unavailable by design;
-- не переименовывают coarse `response_ready_to_flush_wait_ms` в queue backlog или flush bottleneck.
+- не выдумывают literal encode-start/write-start split;
+- прямо говорят, что truthful `v23` split unavailable by design;
+- не переименовывают shipped `response_output_write_started_at_ms` в literal first write boundary.
 
 ## Alternatives Considered
 
-### Сразу включить backlog snapshot в `v22`
+### Переосмыслить `v22` задним числом
 
-Отклонено. Текущий merged outbound path не даёт truthful blocker metadata без отдельного transport refactor.
+Отклонено. Это превратит additive shipped fields в скрыто переопределённый контракт.
 
-### Ограничиться только новыми timestamps без derived waits
+### Ограничиться только исправлением docs без нового contract bump
 
-Отклонено. Тогда consumers снова вынуждены вручную вычитать timestamp'ы.
+Отклонено. Тогда accepted semantic mismatch останется в runtime payload и human-readable surfaces.
 
 ## Риски и Trade-offs
 
@@ -103,16 +127,16 @@ Payload и human-readable surfaces:
 - единый bounded patch carrier вместо набора несвязанных hooks;
 - только completion response path, без generic payload inspection.
 
-### Риск: encode timestamp исказит наблюдение
+### Риск: finer buckets не будут суммироваться в compatibility umbrella
 
 Смягчение:
 
-- фиксировать `response_output_encode_completed_at_ms` вокруг реального `serde_json::to_vec(...)`;
-- включать header/body write и flush только в `response_output_write_and_flush_exec_ms`.
+- трактовать `response_ready_to_flush_wait_ms` как compatibility umbrella, а не checksum;
+- тестировать truthful ordering и individual bucket derivation отдельно.
 
 ### Риск: surfaces станут перегруженными
 
 Смягчение:
 
-- показывать finer split только при `response.version >= 22`;
+- показывать truthful split только при `response.version >= 23`;
 - сохранять umbrella `response_ready_to_flush_wait_ms` как компактную сводку.

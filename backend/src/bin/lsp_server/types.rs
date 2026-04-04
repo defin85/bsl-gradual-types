@@ -309,6 +309,8 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_output_enqueue_completed_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_output_encode_started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub response_output_write_started_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_output_encode_completed_at_ms: Option<u64>,

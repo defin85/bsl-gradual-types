@@ -95,6 +95,7 @@ export interface ObservabilityIncidentRequestSummary {
     transport_to_method_wait_ms?: number;
     method_prelude_exec_ms?: number;
     server_handler_exec_ms?: number;
+    response_output_encode_started_at_ms?: number;
     response_ready_to_output_enqueue_wait_ms?: number;
     response_output_queue_wait_ms?: number;
     response_output_encode_exec_ms?: number;
@@ -235,6 +236,8 @@ export function buildObservabilityIncidentRequestSection(
             transport_to_method_wait_ms: trace.server_edge_details?.transport_to_method_wait_ms,
             method_prelude_exec_ms: trace.server_edge_details?.method_prelude_exec_ms,
             server_handler_exec_ms: trace.server_edge_details?.server_handler_exec_ms,
+            response_output_encode_started_at_ms:
+                trace.server_edge_details?.response_output_encode_started_at_ms,
             response_ready_to_output_enqueue_wait_ms:
                 trace.server_edge_details?.response_ready_to_output_enqueue_wait_ms,
             response_output_queue_wait_ms:
@@ -406,6 +409,9 @@ export function renderRequestSummaryLines(section: ObservabilityIncidentRequestS
                 : undefined,
             typeof request.server_handler_exec_ms === 'number'
                 ? `server_handler_exec_ms=${request.server_handler_exec_ms}`
+                : undefined,
+            typeof request.response_output_encode_started_at_ms === 'number'
+                ? `response_output_encode_started_at_ms=${request.response_output_encode_started_at_ms}`
                 : undefined,
             typeof request.response_ready_to_output_enqueue_wait_ms === 'number'
                 ? `response_ready_to_output_enqueue_wait_ms=${request.response_ready_to_output_enqueue_wait_ms}`

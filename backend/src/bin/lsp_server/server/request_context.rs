@@ -132,6 +132,7 @@ pub(crate) struct PreDispatchCompletionTerminalTraceInput {
 pub(crate) struct CompletionResponseEgressTracePatch {
     pub(crate) request_id: String,
     pub(crate) response_output_enqueue_completed_at_ms: u64,
+    pub(crate) response_output_encode_started_at_ms: u64,
     pub(crate) response_output_write_started_at_ms: u64,
     pub(crate) response_output_encode_completed_at_ms: u64,
     pub(crate) response_flush_completed_at_ms: u64,

@@ -104,6 +104,8 @@ fn record_completion_response_egress_patch_inner(
     if server_edge_details.response_flush_completed_at_ms.is_none() {
         server_edge_details.response_output_enqueue_completed_at_ms =
             Some(patch.response_output_enqueue_completed_at_ms);
+        server_edge_details.response_output_encode_started_at_ms =
+            Some(patch.response_output_encode_started_at_ms);
         server_edge_details.response_output_write_started_at_ms =
             Some(patch.response_output_write_started_at_ms);
         server_edge_details.response_output_encode_completed_at_ms =
@@ -117,18 +119,18 @@ fn record_completion_response_egress_patch_inner(
         );
         server_edge_details.response_output_queue_wait_ms = Some(
             patch
-                .response_output_write_started_at_ms
+                .response_output_encode_started_at_ms
                 .saturating_sub(patch.response_output_enqueue_completed_at_ms),
         );
         server_edge_details.response_output_encode_exec_ms = Some(
             patch
                 .response_output_encode_completed_at_ms
-                .saturating_sub(patch.response_output_write_started_at_ms),
+                .saturating_sub(patch.response_output_encode_started_at_ms),
         );
         server_edge_details.response_output_write_and_flush_exec_ms = Some(
             patch
                 .response_flush_completed_at_ms
-                .saturating_sub(patch.response_output_encode_completed_at_ms),
+                .saturating_sub(patch.response_output_write_started_at_ms),
         );
         server_edge_details.response_ready_to_flush_wait_ms = Some(
             patch
@@ -372,14 +374,12 @@ impl BslLanguageServer {
         )));
 
         let completion_timeline_traces_for_egress_hook = completion_timeline_traces.clone();
-        super::request_context::set_completion_response_egress_hook(Some(Arc::new(
-            move |patch| {
-                record_completion_response_egress_patch_inner(
-                    completion_timeline_traces_for_egress_hook.as_ref(),
-                    &patch,
-                );
-            },
-        )));
+        super::request_context::set_completion_response_egress_hook(Some(Arc::new(move |patch| {
+            record_completion_response_egress_patch_inner(
+                completion_timeline_traces_for_egress_hook.as_ref(),
+                &patch,
+            );
+        })));
 
         server
     }

@@ -132,6 +132,9 @@ export function formatCompletionTimelineTraceForClipboard(
             ...(typeof trace.server_edge_details.response_output_enqueue_completed_at_ms === 'number'
                 ? [`response_output_enqueue_completed_at_ms=${trace.server_edge_details.response_output_enqueue_completed_at_ms}`]
                 : []),
+            ...(typeof trace.server_edge_details.response_output_encode_started_at_ms === 'number'
+                ? [`response_output_encode_started_at_ms=${trace.server_edge_details.response_output_encode_started_at_ms}`]
+                : []),
             ...(typeof trace.server_edge_details.response_output_write_started_at_ms === 'number'
                 ? [`response_output_write_started_at_ms=${trace.server_edge_details.response_output_write_started_at_ms}`]
                 : []),
@@ -434,6 +437,19 @@ function sanitizeTraceForContractVersion(
         };
     }
 
+    if (
+        contractVersion < 23 &&
+        typeof trace.server_edge_details?.response_output_encode_started_at_ms === 'number'
+    ) {
+        return {
+            ...trace,
+            server_edge_details: {
+                ...trace.server_edge_details,
+                response_output_encode_started_at_ms: undefined,
+            },
+        };
+    }
+
     return trace;
 }
 
@@ -499,6 +515,9 @@ function formatServerTimelineSectionForClipboard(
     }
     if (state.version < 22) {
         lines.push('v22 finer output-egress split is unavailable by design on this payload.');
+    }
+    if (state.version < 23) {
+        lines.push('v23 truthful encode-start / write-start boundary is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace

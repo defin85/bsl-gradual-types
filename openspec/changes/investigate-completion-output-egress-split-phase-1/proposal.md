@@ -1,4 +1,4 @@
-# Change: phase 1 разложить completion output egress на clocks и derived waits
+# Change: phase 1 довести completion output egress split до truthful `v23`
 
 ## Why
 
@@ -11,29 +11,37 @@ Bundle `2026-04-03T22:08:07Z` показывает:
 - `request=34`: кроме `query_bundle_ir_query=3491`, ещё `response_ready_to_flush_wait_ms=2229`;
 - post-flush transport и client-after-receive хвост уже почти нулевые.
 
-Текущий `v21` payload честно показывает coarse server egress tail, но не отделяет:
+Первый shipped шаг (`v22`/`v19`) закрыл bounded clocks и surfaces, но acceptance-review показал semantic mismatch:
+
+- `response_output_write_started_at_ms` сейчас фиксируется до `serde_json::to_vec(...)`, а не перед первым фактическим `write`;
+- из-за этого `response_output_queue_wait_ms` фактически включает encode time, хотя spec обещает literal wait до write start;
+- retroactive reinterpretation `v22` недопустима, потому что downstream уже может полагаться на shipped field names.
+
+Текущий `v22` payload по-прежнему полезен как compatibility surface, но для truthful split должен появиться новый additive контракт, который честно отделяет:
 
 - wait до постановки completion response в outbound path;
-- queue wait до фактического write start;
+- queue wait до старта output encode/write phase;
 - encode/serialize exec;
-- write+flush exec.
+- first actual write и write+flush exec.
 
-Этот шаг должен дать bounded authoritative clocks без transport refactor и без guessed backlog attribution.
+Этот шаг должен довести change до 100% без transport refactor и без guessed backlog attribution: сохранить shipped `v22` как legacy compatibility layer и добавить truthful `v23`.
 
 ## What Changes
 
-- authoritative completion timeline поднимается `21 -> 22`, а contiguous contract baseline поднимается `contracts/lsp-completion-timeline/v18 -> v19`;
-- `v22` сохраняет semantics `response_sent_at_ms` и `response_flush_completed_at_ms`, но добавляет intermediate output-egress milestones и derived waits:
+- authoritative completion timeline поднимается `22 -> 23`, а contiguous contract baseline поднимается `contracts/lsp-completion-timeline/v19 -> v20`;
+- `v23` сохраняет semantics `response_sent_at_ms` и `response_flush_completed_at_ms`, а `v22` остаётся shipped compatibility surface без retroactive reinterpretation;
+- `v23` добавляет новый intermediate milestone `response_output_encode_started_at_ms` и фиксирует truthful output-egress boundaries:
   - `response_output_enqueue_completed_at_ms`;
+  - `response_output_encode_started_at_ms`;
   - `response_output_write_started_at_ms`;
   - `response_output_encode_completed_at_ms`;
   - `response_ready_to_output_enqueue_wait_ms`;
   - `response_output_queue_wait_ms`;
   - `response_output_encode_exec_ms`;
   - `response_output_write_and_flush_exec_ms`;
-- backend публикует эти поля атомарно для completion trace, без partial `v22` patches;
-- Completion Timeline panel, clipboard export и incident bundle summary переносят новый `v22` split в человекочитаемом виде;
-- на `v21` surfaces деградируют явно, отмечая, что finer egress split unavailable by design.
+- backend публикует `v23` egress milestones атомарно для completion trace, без partial patches;
+- Completion Timeline panel, clipboard export и incident bundle summary переносят новый `v23` split в человекочитаемом виде;
+- на `v22` surfaces деградируют явно, отмечая, что literal encode-start/write-start split unavailable by design.
 
 ## Impact
 
@@ -46,7 +54,7 @@ Bundle `2026-04-03T22:08:07Z` показывает:
   - `backend/src/bin/lsp_server/server/core.rs`
   - `backend/src/bin/lsp_server/server/language_server/helpers.rs`
   - `backend/src/bin/lsp_server/types.rs`
-  - `contracts/lsp-completion-timeline/v19/*`
+  - `contracts/lsp-completion-timeline/v20/*`
   - `scripts/check-versioned-contracts.py`
   - `scripts/test-versioned-contracts.py`
   - `vscode-extension/src/lsp/customRequests.ts`
@@ -60,4 +68,5 @@ Bundle `2026-04-03T22:08:07Z` показывает:
 
 - не публиковать backlog snapshot (`output_messages_ahead_count`, `output_bytes_ahead_*`, `output_head_blocker_class`) в этой фазе;
 - не менять fairness/ordering output path;
-- не снижать сам output backlog latency в рамках этого change.
+- не снижать сам output backlog latency в рамках этого change;
+- не переопределять shipped `v22` semantics задним числом.

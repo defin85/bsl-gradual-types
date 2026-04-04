@@ -331,6 +331,7 @@ struct CompletionTimelineCapture {
     handler_entered_at_ms: Option<u64>,
     response_sent_at_ms: Option<u64>,
     response_output_enqueue_completed_at_ms: Option<u64>,
+    response_output_encode_started_at_ms: Option<u64>,
     response_output_write_started_at_ms: Option<u64>,
     response_output_encode_completed_at_ms: Option<u64>,
     response_flush_completed_at_ms: Option<u64>,
@@ -381,6 +382,7 @@ impl CompletionTimelineCapture {
             handler_entered_at_ms: Some(handler_entered_at_ms),
             response_sent_at_ms: None,
             response_output_enqueue_completed_at_ms: None,
+            response_output_encode_started_at_ms: None,
             response_output_write_started_at_ms: None,
             response_output_encode_completed_at_ms: None,
             response_flush_completed_at_ms: None,
@@ -656,12 +658,19 @@ impl CompletionTimelineCapture {
     }
 
     #[cfg(test)]
+    fn set_response_output_encode_started_at_ms(
+        &mut self,
+        response_output_encode_started_at_ms: u64,
+    ) {
+        self.response_output_encode_started_at_ms = Some(response_output_encode_started_at_ms);
+    }
+
+    #[cfg(test)]
     fn set_response_output_encode_completed_at_ms(
         &mut self,
         response_output_encode_completed_at_ms: u64,
     ) {
-        self.response_output_encode_completed_at_ms =
-            Some(response_output_encode_completed_at_ms);
+        self.response_output_encode_completed_at_ms = Some(response_output_encode_completed_at_ms);
     }
 
     #[cfg(test)]
@@ -703,9 +712,9 @@ impl CompletionTimelineCapture {
                 response_sent_at_ms: self.response_sent_at_ms,
                 response_output_enqueue_completed_at_ms: self
                     .response_output_enqueue_completed_at_ms,
+                response_output_encode_started_at_ms: self.response_output_encode_started_at_ms,
                 response_output_write_started_at_ms: self.response_output_write_started_at_ms,
-                response_output_encode_completed_at_ms: self
-                    .response_output_encode_completed_at_ms,
+                response_output_encode_completed_at_ms: self.response_output_encode_completed_at_ms,
                 response_flush_completed_at_ms: self.response_flush_completed_at_ms,
                 cancel_observed_at_ms: self.cancel_observed_at_ms,
             },
@@ -4144,9 +4153,10 @@ mod tests {
         capture.set_handler_entered_at_ms(1_700_000_000_000);
         capture.set_response_sent_at_ms(1_700_000_000_030);
         capture.set_response_output_enqueue_completed_at_ms(1_700_000_000_032);
-        capture.set_response_output_write_started_at_ms(1_700_000_000_033);
+        capture.set_response_output_encode_started_at_ms(1_700_000_000_033);
         capture.set_response_output_encode_completed_at_ms(1_700_000_000_035);
-        capture.set_response_flush_completed_at_ms(1_700_000_000_037);
+        capture.set_response_output_write_started_at_ms(1_700_000_000_036);
+        capture.set_response_flush_completed_at_ms(1_700_000_000_038);
 
         let trace = capture.into_trace(
             "trace-response-flush-split".to_string(),
@@ -4158,15 +4168,19 @@ mod tests {
             .expect("server_edge_details must be present");
         assert_eq!(
             details.response_flush_completed_at_ms,
-            Some(1_700_000_000_037)
+            Some(1_700_000_000_038)
         );
         assert_eq!(
             details.response_output_enqueue_completed_at_ms,
             Some(1_700_000_000_032)
         );
         assert_eq!(
-            details.response_output_write_started_at_ms,
+            details.response_output_encode_started_at_ms,
             Some(1_700_000_000_033)
+        );
+        assert_eq!(
+            details.response_output_write_started_at_ms,
+            Some(1_700_000_000_036)
         );
         assert_eq!(
             details.response_output_encode_completed_at_ms,
@@ -4176,7 +4190,7 @@ mod tests {
         assert_eq!(details.response_output_queue_wait_ms, Some(1));
         assert_eq!(details.response_output_encode_exec_ms, Some(2));
         assert_eq!(details.response_output_write_and_flush_exec_ms, Some(2));
-        assert_eq!(details.response_ready_to_flush_wait_ms, Some(7));
+        assert_eq!(details.response_ready_to_flush_wait_ms, Some(8));
         assert_eq!(details.response_sent_at_ms, 1_700_000_000_030);
     }
 

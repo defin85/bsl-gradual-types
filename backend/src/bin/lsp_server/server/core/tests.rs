@@ -11282,8 +11282,8 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     let timeline = live_transport_get_completion_timeline(&mut harness, 50_522, 16).await;
     assert_eq!(
         timeline.get("version").and_then(|value| value.as_u64()),
-        Some(22),
-        "live transport completion timeline must expose v22 payload"
+        Some(23),
+        "live transport completion timeline must expose v23 payload"
     );
     let traces = timeline
         .get("traces")
@@ -11300,40 +11300,33 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
 
     let response_sent_at_ms = completion_timeline_server_edge_u64(&trace, "response_sent_at_ms")
         .expect("response_sent_at_ms");
-    let response_output_enqueue_completed_at_ms = completion_timeline_server_edge_u64(
-        &trace,
-        "response_output_enqueue_completed_at_ms",
-    )
-    .expect("response_output_enqueue_completed_at_ms");
-    let response_output_write_started_at_ms = completion_timeline_server_edge_u64(
-        &trace,
-        "response_output_write_started_at_ms",
-    )
-    .expect("response_output_write_started_at_ms");
-    let response_output_encode_completed_at_ms = completion_timeline_server_edge_u64(
-        &trace,
-        "response_output_encode_completed_at_ms",
-    )
-    .expect("response_output_encode_completed_at_ms");
+    let response_output_enqueue_completed_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_enqueue_completed_at_ms")
+            .expect("response_output_enqueue_completed_at_ms");
+    let response_output_encode_started_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_encode_started_at_ms")
+            .expect("response_output_encode_started_at_ms");
+    let response_output_write_started_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_write_started_at_ms")
+            .expect("response_output_write_started_at_ms");
+    let response_output_encode_completed_at_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_encode_completed_at_ms")
+            .expect("response_output_encode_completed_at_ms");
     let response_flush_completed_at_ms =
         completion_timeline_server_edge_u64(&trace, "response_flush_completed_at_ms")
             .expect("response_flush_completed_at_ms");
-    let response_ready_to_output_enqueue_wait_ms = completion_timeline_server_edge_u64(
-        &trace,
-        "response_ready_to_output_enqueue_wait_ms",
-    )
-    .expect("response_ready_to_output_enqueue_wait_ms");
+    let response_ready_to_output_enqueue_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_ready_to_output_enqueue_wait_ms")
+            .expect("response_ready_to_output_enqueue_wait_ms");
     let response_output_queue_wait_ms =
         completion_timeline_server_edge_u64(&trace, "response_output_queue_wait_ms")
             .expect("response_output_queue_wait_ms");
     let response_output_encode_exec_ms =
         completion_timeline_server_edge_u64(&trace, "response_output_encode_exec_ms")
             .expect("response_output_encode_exec_ms");
-    let response_output_write_and_flush_exec_ms = completion_timeline_server_edge_u64(
-        &trace,
-        "response_output_write_and_flush_exec_ms",
-    )
-    .expect("response_output_write_and_flush_exec_ms");
+    let response_output_write_and_flush_exec_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_write_and_flush_exec_ms")
+            .expect("response_output_write_and_flush_exec_ms");
     let response_ready_to_flush_wait_ms =
         completion_timeline_server_edge_u64(&trace, "response_ready_to_flush_wait_ms")
             .expect("response_ready_to_flush_wait_ms");
@@ -11342,16 +11335,20 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
         "egress enqueue must not precede handler-ready boundary, trace={trace:?}"
     );
     assert!(
-        response_output_enqueue_completed_at_ms <= response_output_write_started_at_ms,
-        "egress write-start must not precede enqueue completion, trace={trace:?}"
+        response_output_enqueue_completed_at_ms <= response_output_encode_started_at_ms,
+        "egress encode-start must not precede enqueue completion, trace={trace:?}"
     );
     assert!(
-        response_output_write_started_at_ms <= response_output_encode_completed_at_ms,
-        "egress encode completion must not precede write-start boundary, trace={trace:?}"
+        response_output_encode_started_at_ms <= response_output_encode_completed_at_ms,
+        "egress encode completion must not precede encode-start boundary, trace={trace:?}"
     );
     assert!(
-        response_output_encode_completed_at_ms <= response_flush_completed_at_ms,
-        "flush completion must not precede encode completion, trace={trace:?}"
+        response_output_encode_completed_at_ms <= response_output_write_started_at_ms,
+        "egress write-start must not precede encode completion, trace={trace:?}"
+    );
+    assert!(
+        response_output_write_started_at_ms <= response_flush_completed_at_ms,
+        "flush completion must not precede literal write-start boundary, trace={trace:?}"
     );
     assert_eq!(
         response_ready_to_output_enqueue_wait_ms,
@@ -11360,20 +11357,20 @@ async fn p22_live_transport_completion_timeline_exposes_flush_aware_server_edge_
     );
     assert_eq!(
         response_output_queue_wait_ms,
-        response_output_write_started_at_ms
+        response_output_encode_started_at_ms
             .saturating_sub(response_output_enqueue_completed_at_ms),
-        "response_output_queue_wait_ms must match outbound enqueue to write-start delta, trace={trace:?}"
+        "response_output_queue_wait_ms must match outbound enqueue to encode-start delta, trace={trace:?}"
     );
     assert_eq!(
         response_output_encode_exec_ms,
         response_output_encode_completed_at_ms
-            .saturating_sub(response_output_write_started_at_ms),
-        "response_output_encode_exec_ms must match write-start to encode-complete delta, trace={trace:?}"
+            .saturating_sub(response_output_encode_started_at_ms),
+        "response_output_encode_exec_ms must match encode-start to encode-complete delta, trace={trace:?}"
     );
     assert_eq!(
         response_output_write_and_flush_exec_ms,
-        response_flush_completed_at_ms.saturating_sub(response_output_encode_completed_at_ms),
-        "response_output_write_and_flush_exec_ms must match encode-complete to flush-complete delta, trace={trace:?}"
+        response_flush_completed_at_ms.saturating_sub(response_output_write_started_at_ms),
+        "response_output_write_and_flush_exec_ms must match write-start to flush-complete delta, trace={trace:?}"
     );
     assert_eq!(
         response_ready_to_flush_wait_ms,

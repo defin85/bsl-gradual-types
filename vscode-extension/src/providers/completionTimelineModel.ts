@@ -62,7 +62,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, and v22 finer output-egress split are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, and v23 truthful encode-start/write-start boundary are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -205,12 +205,21 @@ function sanitizeServerEdgeDetailsForContract(
     if (contractVersion < 22) {
         const {
             response_output_enqueue_completed_at_ms: _responseOutputEnqueueCompletedAtMs,
+            response_output_encode_started_at_ms: _responseOutputEncodeStartedAtMs,
             response_output_write_started_at_ms: _responseOutputWriteStartedAtMs,
             response_output_encode_completed_at_ms: _responseOutputEncodeCompletedAtMs,
             response_ready_to_output_enqueue_wait_ms: _responseReadyToOutputEnqueueWaitMs,
             response_output_queue_wait_ms: _responseOutputQueueWaitMs,
             response_output_encode_exec_ms: _responseOutputEncodeExecMs,
             response_output_write_and_flush_exec_ms: _responseOutputWriteAndFlushExecMs,
+            ...legacyDetails
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
+    }
+
+    if (contractVersion < 23) {
+        const {
+            response_output_encode_started_at_ms: _responseOutputEncodeStartedAtMs,
             ...legacyDetails
         } = sanitizedDetails;
         sanitizedDetails = legacyDetails;

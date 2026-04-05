@@ -391,6 +391,102 @@ async fn delayed_interactive_set_file_burst_still_coalesces_latest_version() {
     runtime.shutdown_for_test().await;
 }
 
+#[tokio::test]
+async fn interleaved_interactive_non_apply_work_does_not_strand_latest_set_file() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "80");
+
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(213);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 1,
+            path: Arc::from("interactive_interleaved_latest.bsl"),
+        }],
+    );
+    let stale_interactive_ack =
+        runtime.enqueue_test_sleep(RuntimeQueuePriority::Interactive, Duration::from_millis(80));
+    for version in 2..=3 {
+        runtime.apply_changes_interactive(
+            ObservabilityOrigin::Lsp,
+            vec![Change::SetFile {
+                file_id,
+                text: Arc::from(format!("x = {version};")),
+                version,
+                path: Arc::from("interactive_interleaved_latest.bsl"),
+            }],
+        );
+    }
+
+    let started = Instant::now();
+    let wait_result = timeout(
+        Duration::from_millis(170),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            3,
+        ),
+    )
+    .await
+    .expect(
+        "latest interactive SetFile should not be stranded behind interleaved stale interactive work",
+    );
+    assert!(
+        wait_result.ready,
+        "wait_for_file_version must observe the latest interleaved revision"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(170),
+        "latest interleaved revision must become applied within a single-delay budget"
+    );
+
+    timeout(Duration::from_secs(1), stale_interactive_ack)
+        .await
+        .expect("stale interactive sleeper ack timeout")
+        .expect("stale interactive sleeper ack");
+
+    let analysis = runtime.snapshot().await;
+    assert_eq!(analysis.file_version(file_id).unwrap(), Some(3));
+
+    runtime.shutdown_for_test().await;
+}
+
 #[test]
 fn coalesced_whitespace_append_burst_preserves_earliest_reuse_base() {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -437,10 +533,10 @@ fn coalesced_whitespace_append_burst_preserves_earliest_reuse_base() {
     }
     drop(tx);
 
-    let mut pending = None;
+    let mut pending = std::collections::VecDeque::new();
     let coalesced = coalesce_interactive_current_revision_apply_command(&rx, first, &mut pending);
     assert!(
-        pending.is_none(),
+        pending.is_empty(),
         "burst should coalesce into a single latest command"
     );
 

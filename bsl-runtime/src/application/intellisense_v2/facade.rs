@@ -1,5 +1,5 @@
 use arc_swap::ArcSwap;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, OnceLock};
 use std::time::{Duration, Instant};
@@ -841,7 +841,7 @@ fn recv_next_writer_command(
 fn coalesce_interactive_current_revision_apply_command(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
     command: Command,
-    pending_interactive_command: &mut Option<Command>,
+    pending_interactive_commands: &mut VecDeque<Command>,
 ) -> Command {
     use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 
@@ -869,20 +869,19 @@ fn coalesce_interactive_current_revision_apply_command(
         };
 
         match next_command {
-            Some(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command)
-            {
-                Ok(next) if current.can_supersede(&next) => {
-                    current.supersede_with(next);
+            Some(next_command) => {
+                match CurrentRevisionApplyCommand::try_from_command(next_command) {
+                    Ok(next) if current.can_supersede(&next) => {
+                        current.supersede_with(next);
+                    }
+                    Ok(next) => {
+                        pending_interactive_commands.push_back(next.into_command());
+                    }
+                    Err(next_command) => {
+                        pending_interactive_commands.push_back(next_command);
+                    }
                 }
-                Ok(next) => {
-                    *pending_interactive_command = Some(next.into_command());
-                    break;
-                }
-                Err(next_command) => {
-                    *pending_interactive_command = Some(next_command);
-                    break;
-                }
-            },
+            }
             None => break,
         }
     }

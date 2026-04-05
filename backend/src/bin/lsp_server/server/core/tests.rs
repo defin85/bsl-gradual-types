@@ -26984,7 +26984,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         const PROFILE_NAME: &str = "p39_real_conf_big_document_symbol_mixed_load_gate_live";
         let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-lsp-auxiliary-runtime-isolation".to_string());
+            .unwrap_or_else(|_| "refactor-completion-current-revision-readiness-fast-lane".to_string());
         const WARMUP_REQUESTS: usize = 1;
         const MEASURE_REQUESTS: usize = 10;
         const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 4;
@@ -27400,6 +27400,11 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                             "route": completion_timeline_prepare_detail_str(trace, "route"),
                             "prepare_kind": completion_timeline_prepare_detail_str(trace, "kind"),
                             "fail_closed_cause": completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+                            "timeout_phase": trace
+                                .get("prepare_details")
+                                .and_then(|value| value.get("timeout_attribution"))
+                                .and_then(|value| value.get("phase"))
+                                .and_then(|value| value.as_str()),
                             "total_duration_ms": trace.get("total_duration_ms").and_then(|value| value.as_u64()),
                     "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
                     "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
@@ -27442,6 +27447,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                             ),
                             "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                             "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+                            "query_bundle_total_ms": completion_timeline_query_bundle_total_ms(trace),
                             "query_bundle": completion_timeline_query_bundle_breakdown(trace),
                             "collect_ms": completion_timeline_trace_stage_duration_ms(trace, "collect"),
                             "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
@@ -27844,6 +27850,37 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     && transport_to_handler_wait > interactive_wait_budget_ms
             })
             .count();
+        let measured_prepare_timeout_wait_for_file_version_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("fail_closed_cause"))
+                    .and_then(|value| value.as_str())
+                    == Some("prepare_timeout")
+                    && sample
+                        .get("trace")
+                        .and_then(|trace| trace.get("timeout_phase"))
+                        .and_then(|value| value.as_str())
+                        == Some("wait_for_file_version")
+            })
+            .count();
+        let measured_cold_query_bundle_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                let query_bundle_total_ms = sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("query_bundle_total_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0);
+                let fail_closed_cause = sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("fail_closed_cause"))
+                    .and_then(|value| value.as_str());
+                query_bundle_total_ms > interactive_wait_budget_ms
+                    && fail_closed_cause != Some("prepare_timeout")
+            })
+            .count();
 
         let report = serde_json::json!({
             "change_id": change_id,
@@ -27901,6 +27938,8 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_document_symbol_superseded_total_delta": measured_document_symbol_superseded_total_delta,
                 "measured_document_symbol_total_outcome_delta": measured_document_symbol_total_outcome_delta,
                 "measured_ingress_regression_samples": measured_ingress_regression_samples,
+                "measured_prepare_timeout_wait_for_file_version_samples": measured_prepare_timeout_wait_for_file_version_samples,
+                "measured_cold_query_bundle_samples": measured_cold_query_bundle_samples,
                 "measured_pre_dispatch_wait_over_budget_samples": measured_pre_dispatch_wait_over_budget_samples,
                 "measured_pre_dispatch_wait_over_hard_cap_samples": measured_pre_dispatch_wait_over_hard_cap_samples,
                 "interactive_wait_budget_ms": interactive_wait_budget_ms,
@@ -28059,6 +28098,11 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "mixed-load gate must keep first-response fail-closed cause buckets at zero, prepare_timeout_total_delta={}, exact_deadline_total_delta={}, counters={counters:?}",
             counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"),
             counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+        );
+        assert!(
+            measured_prepare_timeout_wait_for_file_version_samples == 0,
+            "mixed-load gate must fail on post-edit/save readiness timeout separately from cold query-body cost, prepare_timeout_wait_for_file_version_samples={}, measured_samples={measured_samples:?}",
+            measured_prepare_timeout_wait_for_file_version_samples
         );
         assert!(
             measured_head_hit_traces + measured_exact_hit_traces == MEASURE_REQUESTS,

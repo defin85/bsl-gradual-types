@@ -55,7 +55,7 @@ impl IntellisenseV2Facade {
                 let mut interactive_streak = 0usize;
                 let mut interactive_closed = false;
                 let mut background_closed = false;
-                let mut pending_interactive_command = None;
+                let mut pending_interactive_commands = VecDeque::new();
 
                 let wake_waiters_for_file =
                     |file_id: FileId,
@@ -135,7 +135,7 @@ impl IntellisenseV2Facade {
                     };
 
                 while let Some((queue_priority, cmd)) =
-                    if let Some(command) = pending_interactive_command.take() {
+                    if let Some(command) = pending_interactive_commands.pop_front() {
                         interactive_streak = interactive_streak.saturating_add(1);
                         Some((RuntimeQueuePriority::Interactive, command))
                     } else {
@@ -152,7 +152,7 @@ impl IntellisenseV2Facade {
                         coalesce_interactive_current_revision_apply_command(
                             &interactive_rx,
                             cmd,
-                            &mut pending_interactive_command,
+                            &mut pending_interactive_commands,
                         )
                     } else {
                         cmd

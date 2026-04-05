@@ -2593,7 +2593,10 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "server-edge output queue wait histogram must be exported"
     );
     assert!(
-        histogram_count(histograms, "completion_stage_response_output_encode_exec_ms") > 0,
+        histogram_count(
+            histograms,
+            "completion_stage_response_output_encode_exec_ms"
+        ) > 0,
         "server-edge output encode histogram must be exported"
     );
     assert!(
@@ -2604,7 +2607,10 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "server-edge output write-and-flush histogram must be exported"
     );
     assert!(
-        histogram_count(histograms, "completion_stage_response_ready_to_flush_wait_ms") > 0,
+        histogram_count(
+            histograms,
+            "completion_stage_response_ready_to_flush_wait_ms"
+        ) > 0,
         "server-edge ready-to-flush histogram must be exported"
     );
     assert!(

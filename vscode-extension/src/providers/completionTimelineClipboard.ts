@@ -219,6 +219,11 @@ export function formatCompletionTimelineTraceForClipboard(
         trace.correlated_probe,
     );
     const postResponseBits: string[] = [];
+    if (typeof postResponseSplit.client_before_transport_write_wait_ms === 'number') {
+        postResponseBits.push(
+            `client_before_transport_write_wait_ms=${postResponseSplit.client_before_transport_write_wait_ms}`
+        );
+    }
     if (typeof postResponseSplit.client_to_transport_wait_ms === 'number') {
         postResponseBits.push(
             `client_to_transport_wait_ms=${postResponseSplit.client_to_transport_wait_ms}`
@@ -607,15 +612,21 @@ function formatClientProbeForClipboard(
     const supersededAfterSuffix = typeof probe.superseded_after_ms === 'number'
         ? ` | superseded_after_ms=${probe.superseded_after_ms}ms`
         : '';
-    const dispatchDeltaMs = Math.max(
+    const transportWriteDeltaMs = typeof probe.transport_request_written_at_ms === 'number'
+        ? Math.max(0, probe.transport_request_written_at_ms - probe.request_started_at_ms)
+        : undefined;
+    const transportDispatchDeltaMs = Math.max(
         0,
         probe.lsp_request_started_at_ms - probe.request_started_at_ms
     );
+    const transportRoundtripStartAtMs = typeof probe.transport_request_written_at_ms === 'number'
+        ? probe.transport_request_written_at_ms
+        : probe.lsp_request_started_at_ms;
     const transportRoundtripMs = probe.transport_response_receive_state === 'observed'
         && typeof probe.transport_response_received_at_ms === 'number'
         ? Math.max(
             0,
-            probe.transport_response_received_at_ms - probe.lsp_request_started_at_ms
+            probe.transport_response_received_at_ms - transportRoundtripStartAtMs
         )
         : undefined;
     const clientReceiveToResolveWaitMs = probe.transport_response_receive_state === 'observed'
@@ -637,14 +648,25 @@ function formatClientProbeForClipboard(
         && typeof probe.transport_response_received_at_ms === 'number'
         ? `transport_response_received_at_ms=${probe.transport_response_received_at_ms}`
         : 'transport_response_received_at_ms=unavailable';
+    const transportWriteTrace = typeof probe.transport_request_written_at_ms === 'number'
+        ? `transport_request_written_at_ms=${probe.transport_request_written_at_ms}`
+        : undefined;
+    const transportDispatchTrace = typeof transportWriteDeltaMs === 'number'
+        ? `transport_write_delta_ms=${transportWriteDeltaMs}`
+        : `transport_dispatch_delta_ms=${transportDispatchDeltaMs}`;
 
     return [
         `${probe.probe_id} (${probe.trigger_mode})`,
         `started=${new Date(probe.request_started_at_ms).toLocaleTimeString()} | uri=${probe.uri} | document_version=${probe.document_version} | document_version_at_terminal=${probe.document_version_at_terminal}`,
         `client_terminal_state=${probe.client_terminal_state} | client_duration=${probe.client_duration_ms}ms | cancel_reason_hint=${probe.cancel_reason_hint}${supersededBySuffix}${supersededAfterSuffix}`,
         `result_kind=${probe.result_kind} | item_count_bucket=${probe.item_count_bucket}${incompleteSuffix}`,
-        `${transportReceiveTrace} | lsp_response_resolved_at_ms=${probe.lsp_response_received_at_ms} | request_completed_at_ms=${probe.request_completed_at_ms}`,
-        `transport_dispatch_delta_ms=${dispatchDeltaMs} | transport_roundtrip_ms=${transportRoundtripMs ?? 'unavailable'} | client_receive_to_resolve_wait_ms=${clientReceiveToResolveWaitMs ?? 'unavailable'} | lsp_resolve_ms=${lspResolveMs} | client_post_response_ms=${postResponseMs}`,
+        [
+            transportWriteTrace,
+            transportReceiveTrace,
+            `lsp_response_resolved_at_ms=${probe.lsp_response_received_at_ms}`,
+            `request_completed_at_ms=${probe.request_completed_at_ms}`,
+        ].filter((value): value is string => Boolean(value)).join(' | '),
+        `${transportDispatchTrace} | transport_roundtrip_ms=${transportRoundtripMs ?? 'unavailable'} | client_receive_to_resolve_wait_ms=${clientReceiveToResolveWaitMs ?? 'unavailable'} | lsp_resolve_ms=${lspResolveMs} | client_post_response_ms=${postResponseMs}`,
         `time_since_last_local_edit_ms=${probe.time_since_last_local_edit_ms} | time_since_last_did_change_sent_ms=${didChangeDelta} | did_change_count_during_probe=${probe.did_change_count_during_probe}`,
         `cursor_moved_during_probe=${probe.cursor_moved_during_probe} | active_completion_count_at_start=${probe.active_completion_count_at_start} | same_uri_probe_overlap_count=${probe.same_uri_probe_overlap_count} | newer_probe_started_before_terminal=${probe.newer_probe_started_before_terminal}`,
         `is_after_dot=${probe.is_after_dot}${triggerCharacter} | identifier_tail_length=${probe.identifier_tail_length}`,

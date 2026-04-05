@@ -254,6 +254,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                     trigger_mode: 'invoked',
                     request_started_at_ms: 1_700_000_000_000,
                     lsp_request_started_at_ms: 1_700_000_000_000,
+                    transport_request_written_at_ms: 1_700_000_000_005,
                     transport_response_receive_state: 'observed',
                     transport_response_received_at_ms: 1_700_000_003_173,
                     lsp_response_received_at_ms: 1_700_000_003_173,
@@ -302,6 +303,10 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.status, 'correlated');
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.probe_id, 'probe-1');
+        assert.strictEqual(
+            bundle.incidentReport.requests[0].client_correlation?.client_before_transport_write_wait_ms,
+            5
+        );
         assert.strictEqual(bundle.incidentReport.requests[0].client_correlation?.client_to_transport_wait_ms, 0);
         assert.strictEqual(
             bundle.incidentReport.requests[0].client_correlation?.response_output_handoff_to_writer_wait_ms,

@@ -11354,9 +11354,16 @@ async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edg
         "handoff enqueue acceptance must not precede handoff start, trace={trace:?}"
     );
     assert!(
-        response_output_handoff_enqueued_at_ms <= response_output_enqueue_completed_at_ms,
-        "writer-selection seam must not precede send-side handoff acceptance, trace={trace:?}"
+        response_output_handoff_enqueued_at_ms <= response_flush_completed_at_ms,
+        "handoff acceptance must not outlive flush completion, trace={trace:?}"
     );
+    assert!(
+        response_sent_at_ms <= response_output_handoff_enqueued_at_ms,
+        "handoff acceptance must not precede handler-ready boundary, trace={trace:?}"
+    );
+    // `response_output_enqueue_completed_at_ms` remains a legacy writer-selection compatibility
+    // seam on v24 payloads. It is not a truthful acceptance boundary and can precede the
+    // separately recorded handoff acceptance timestamp on live transport.
     assert!(
         response_sent_at_ms <= response_output_enqueue_completed_at_ms,
         "egress enqueue must not precede handler-ready boundary, trace={trace:?}"
@@ -11421,6 +11428,29 @@ async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edg
         response_flush_completed_at_ms.saturating_sub(response_sent_at_ms),
         "response_ready_to_flush_wait_ms must match handler-ready to flush delta, trace={trace:?}"
     );
+
+    let metrics = live_transport_get_observability_metrics(&mut harness, 50_523).await;
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    for key in [
+        "completion_stage_response_ready_to_output_handoff_wait_ms",
+        "completion_stage_response_output_handoff_send_wait_ms",
+        "completion_stage_response_output_handoff_to_writer_wait_ms",
+        "completion_stage_response_ready_to_output_enqueue_wait_ms",
+        "completion_stage_response_output_queue_wait_ms",
+        "completion_stage_response_output_encode_exec_ms",
+        "completion_stage_response_output_write_and_flush_exec_ms",
+        "completion_stage_response_ready_to_flush_wait_ms",
+    ] {
+        let count = histograms
+            .get(key)
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0);
+        assert!(count > 0, "{key} must be exported after live completion response");
+    }
 
     live_transport_close_document(&mut harness, &uri).await;
     harness.shutdown().await;

@@ -23,6 +23,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         trigger_character: '.',
                         request_started_at_ms: 1_700_000_000_090,
                         lsp_request_started_at_ms: 1_700_000_000_091,
+                        transport_request_written_at_ms: 1_700_000_000_094,
                         transport_response_receive_state: 'observed',
                         transport_response_received_at_ms: 1_700_000_000_097,
                         lsp_response_received_at_ms: 1_700_000_000_098,
@@ -193,6 +194,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         trigger_character: '.',
                         request_started_at_ms: 1_700_000_000_090,
                         lsp_request_started_at_ms: 1_700_000_000_091,
+                        transport_request_written_at_ms: 1_700_000_000_094,
                         transport_response_receive_state: 'observed',
                         transport_response_received_at_ms: 1_700_000_000_097,
                         lsp_response_received_at_ms: 1_700_000_000_098,
@@ -318,13 +320,14 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('transport_to_handler_wait_ms=42'));
         assert.ok(text!.includes('server_handler_exec_ms=28'));
         assert.ok(text!.includes('cancel_observed_after_handler_enter_ms=19'));
-        assert.ok(text!.includes('post_response_split | client_to_transport_wait_ms=0 | response_ready_to_output_handoff_wait_ms=0 | response_output_handoff_send_wait_ms=0 | response_output_handoff_to_writer_wait_ms=1 | response_ready_to_output_enqueue_wait_ms=1 | response_output_queue_wait_ms=1 | response_output_encode_exec_ms=1 | response_output_write_and_flush_exec_ms=1 | response_ready_to_flush_wait_ms=4 | transport_to_client_receive_wait_ms=63 | client_receive_to_resolve_wait_ms=1 | client_post_response_ms=2 | server_to_client_post_response_ms=70'));
+        assert.ok(text!.includes('post_response_split | client_before_transport_write_wait_ms=4 | client_to_transport_wait_ms=0 | response_ready_to_output_handoff_wait_ms=0 | response_output_handoff_send_wait_ms=0 | response_output_handoff_to_writer_wait_ms=1 | response_ready_to_output_enqueue_wait_ms=1 | response_output_queue_wait_ms=1 | response_output_encode_exec_ms=1 | response_output_write_and_flush_exec_ms=1 | response_ready_to_flush_wait_ms=4 | transport_to_client_receive_wait_ms=63 | client_receive_to_resolve_wait_ms=1 | client_post_response_ms=2 | server_to_client_post_response_ms=70'));
         assert.ok(text!.includes('document_version_at_terminal=10'));
         assert.ok(text!.includes('cancel_reason_hint=superseded_newer_version'));
         assert.ok(text!.includes('superseded_by_probe_id=probe-2'));
-        assert.ok(text!.includes('transport_dispatch_delta_ms=1'));
+        assert.ok(text!.includes('transport_request_written_at_ms=1700000000094'));
+        assert.ok(text!.includes('transport_write_delta_ms=4'));
         assert.ok(text!.includes('transport_response_received_at_ms=1700000000097'));
-        assert.ok(text!.includes('transport_roundtrip_ms=6'));
+        assert.ok(text!.includes('transport_roundtrip_ms=3'));
         assert.ok(text!.includes('client_receive_to_resolve_wait_ms=1'));
         assert.ok(text!.includes('lsp_resolve_ms=7'));
         assert.ok(text!.includes('client_post_response_ms=2'));

@@ -18,6 +18,7 @@ export interface CompletionTraceClientIngressSupplement {
 }
 
 export interface CompletionTracePostResponseSplit {
+    client_before_transport_write_wait_ms?: number;
     client_to_transport_wait_ms?: number;
     response_ready_to_output_handoff_wait_ms?: number;
     response_output_handoff_send_wait_ms?: number;
@@ -219,7 +220,9 @@ export function deriveCompletionTracePostResponseSplit(
     trace: Pick<CompletionTimelineTrace, 'server_edge_details'>,
     probe?: Pick<
         CompletionProbe,
+        | 'request_started_at_ms'
         | 'lsp_request_started_at_ms'
+        | 'transport_request_written_at_ms'
         | 'transport_response_receive_state'
         | 'transport_response_received_at_ms'
         | 'lsp_response_received_at_ms'
@@ -230,10 +233,17 @@ export function deriveCompletionTracePostResponseSplit(
     const serverIngressAtMs = typeof serverEdgeDetails?.adapter_read_at_ms === 'number'
         ? serverEdgeDetails.adapter_read_at_ms
         : serverEdgeDetails?.transport_received_at_ms;
+    const transportWriteAtMs = typeof probe?.transport_request_written_at_ms === 'number'
+        ? probe.transport_request_written_at_ms
+        : probe?.lsp_request_started_at_ms;
     const split: CompletionTracePostResponseSplit = {
+        client_before_transport_write_wait_ms:
+            probe && typeof probe.transport_request_written_at_ms === 'number'
+                ? Math.max(0, probe.transport_request_written_at_ms - probe.request_started_at_ms)
+                : undefined,
         client_to_transport_wait_ms:
-            probe && typeof serverIngressAtMs === 'number'
-                ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
+            typeof transportWriteAtMs === 'number' && typeof serverIngressAtMs === 'number'
+                ? Math.max(0, serverIngressAtMs - transportWriteAtMs)
                 : undefined,
         response_ready_to_output_handoff_wait_ms:
             serverEdgeDetails?.response_ready_to_output_handoff_wait_ms,

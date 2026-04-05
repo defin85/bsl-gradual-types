@@ -2357,6 +2357,38 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
         "cancel_observed_after_handler_enter",
         std::time::Duration::from_millis(9),
     );
+    observability.record_completion_stage_latency(
+        "response_ready_to_output_handoff_wait",
+        std::time::Duration::from_millis(1),
+    );
+    observability.record_completion_stage_latency(
+        "response_output_handoff_send_wait",
+        std::time::Duration::from_millis(2),
+    );
+    observability.record_completion_stage_latency(
+        "response_output_handoff_to_writer_wait",
+        std::time::Duration::from_millis(3),
+    );
+    observability.record_completion_stage_latency(
+        "response_ready_to_output_enqueue_wait",
+        std::time::Duration::from_millis(4),
+    );
+    observability.record_completion_stage_latency(
+        "response_output_queue_wait",
+        std::time::Duration::from_millis(5),
+    );
+    observability.record_completion_stage_latency(
+        "response_output_encode_exec",
+        std::time::Duration::from_millis(6),
+    );
+    observability.record_completion_stage_latency(
+        "response_output_write_and_flush_exec",
+        std::time::Duration::from_millis(7),
+    );
+    observability.record_completion_stage_latency(
+        "response_ready_to_flush_wait",
+        std::time::Duration::from_millis(8),
+    );
     observability.record_intellisense_v2_completion_cancel_observed();
 
     let exported = observability.get_metrics().export_metrics();
@@ -2527,6 +2559,53 @@ fn completion_owner_hint_metrics_are_exported_with_bounded_reasons() {
             "completion_stage_cancel_observed_after_handler_enter_ms"
         ) > 0,
         "server-edge cancel observation histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_response_ready_to_output_handoff_wait_ms"
+        ) > 0,
+        "server-edge handoff start wait histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_response_output_handoff_send_wait_ms"
+        ) > 0,
+        "server-edge handoff send wait histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_response_output_handoff_to_writer_wait_ms"
+        ) > 0,
+        "server-edge handoff-to-writer wait histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_response_ready_to_output_enqueue_wait_ms"
+        ) > 0,
+        "server-edge enqueue readiness histogram must be exported"
+    );
+    assert!(
+        histogram_count(histograms, "completion_stage_response_output_queue_wait_ms") > 0,
+        "server-edge output queue wait histogram must be exported"
+    );
+    assert!(
+        histogram_count(histograms, "completion_stage_response_output_encode_exec_ms") > 0,
+        "server-edge output encode histogram must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "completion_stage_response_output_write_and_flush_exec_ms"
+        ) > 0,
+        "server-edge output write-and-flush histogram must be exported"
+    );
+    assert!(
+        histogram_count(histograms, "completion_stage_response_ready_to_flush_wait_ms") > 0,
+        "server-edge ready-to-flush histogram must be exported"
     );
     assert!(
         histogram_count(

@@ -42,6 +42,7 @@ export interface ObservabilityIncidentClientCorrelation {
     probe_id?: string;
     client_duration_ms?: number;
     client_terminal_state?: CompletionProbeTerminalState;
+    client_before_transport_write_wait_ms?: number;
     client_to_transport_wait_ms?: number;
     response_ready_to_output_handoff_wait_ms?: number;
     response_output_handoff_send_wait_ms?: number;
@@ -651,6 +652,8 @@ function buildCorrelatedProbe(
         probe_id: probe.probe_id,
         client_duration_ms: probe.client_duration_ms,
         client_terminal_state: probe.client_terminal_state,
+        client_before_transport_write_wait_ms:
+            postResponseSplit.client_before_transport_write_wait_ms,
         client_to_transport_wait_ms: postResponseSplit.client_to_transport_wait_ms,
         response_ready_to_output_handoff_wait_ms: contractVersion >= 24
             ? postResponseSplit.response_ready_to_output_handoff_wait_ms
@@ -692,6 +695,9 @@ function formatCorrelationForSummary(correlation: ObservabilityIncidentClientCor
         case 'correlated':
             return [
                 `correlation=correlated:${correlation.probe_id}`,
+                typeof correlation.client_before_transport_write_wait_ms === 'number'
+                    ? `client_before_transport_write_wait_ms=${correlation.client_before_transport_write_wait_ms}`
+                    : undefined,
                 typeof correlation.client_to_transport_wait_ms === 'number'
                     ? `client_to_transport_wait_ms=${correlation.client_to_transport_wait_ms}`
                     : undefined,

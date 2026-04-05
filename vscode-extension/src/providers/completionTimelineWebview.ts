@@ -1123,10 +1123,17 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const serverIngressAtMs = typeof details?.adapter_read_at_ms === 'number'
                 ? details.adapter_read_at_ms
                 : details?.transport_received_at_ms;
+            const transportWriteAtMs = typeof probe?.transport_request_written_at_ms === 'number'
+                ? probe.transport_request_written_at_ms
+                : probe?.lsp_request_started_at_ms;
             return {
+                client_before_transport_write_wait_ms:
+                    probe && typeof probe.transport_request_written_at_ms === 'number'
+                        ? Math.max(0, probe.transport_request_written_at_ms - probe.request_started_at_ms)
+                        : undefined,
                 client_to_transport_wait_ms:
-                    probe && typeof serverIngressAtMs === 'number'
-                        ? Math.max(0, serverIngressAtMs - probe.lsp_request_started_at_ms)
+                    typeof transportWriteAtMs === 'number' && typeof serverIngressAtMs === 'number'
+                        ? Math.max(0, serverIngressAtMs - transportWriteAtMs)
                         : undefined,
                 response_ready_to_output_handoff_wait_ms:
                     details?.response_ready_to_output_handoff_wait_ms,
@@ -1170,6 +1177,9 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                 return '';
             }
             const bits = [];
+            if (typeof split.client_before_transport_write_wait_ms === 'number') {
+                bits.push('client_before_transport_write_wait=' + escapeHtml(split.client_before_transport_write_wait_ms) + 'ms');
+            }
             if (typeof split.client_to_transport_wait_ms === 'number') {
                 bits.push('client_to_transport_wait=' + escapeHtml(split.client_to_transport_wait_ms) + 'ms');
             }
@@ -1331,10 +1341,16 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
             const triggerCharacter = probe.trigger_character
                 ? ' | trigger_character=' + escapeHtml(probe.trigger_character)
                 : '';
+            const transportWriteDeltaMs = typeof probe.transport_request_written_at_ms === 'number'
+                ? Math.max(0, probe.transport_request_written_at_ms - probe.request_started_at_ms)
+                : undefined;
             const dispatchDeltaMs = Math.max(0, probe.lsp_request_started_at_ms - probe.request_started_at_ms);
+            const transportRoundtripStartAtMs = typeof probe.transport_request_written_at_ms === 'number'
+                ? probe.transport_request_written_at_ms
+                : probe.lsp_request_started_at_ms;
             const transportRoundtripMs = probe.transport_response_receive_state === 'observed'
                 && typeof probe.transport_response_received_at_ms === 'number'
-                ? Math.max(0, probe.transport_response_received_at_ms - probe.lsp_request_started_at_ms)
+                ? Math.max(0, probe.transport_response_received_at_ms - transportRoundtripStartAtMs)
                 : undefined;
             const clientReceiveToResolveWaitMs = probe.transport_response_receive_state === 'observed'
                 && typeof probe.transport_response_received_at_ms === 'number'
@@ -1367,18 +1383,29 @@ export class CompletionTimelineWebviewProvider implements vscode.WebviewViewProv
                     ' | uri=' + escapeHtml(probe.uri) +
                     ' | version=' + escapeHtml(probe.document_version) +
                     ' | terminal_version=' + escapeHtml(probe.document_version_at_terminal) + '</div>' +
-                '<div class="meta">transport_response_received=' + (
-                    probe.transport_response_receive_state === 'observed'
-                    && typeof probe.transport_response_received_at_ms === 'number'
-                        ? escapeHtml(new Date(probe.transport_response_received_at_ms).toLocaleTimeString())
-                        : 'unavailable'
-                ) +
-                    ' | lsp_response_resolved=' + escapeHtml(new Date(probe.lsp_response_received_at_ms).toLocaleTimeString()) +
-                    ' | request_completed=' + escapeHtml(new Date(probe.request_completed_at_ms).toLocaleTimeString()) + '</div>' +
+                '<div class="meta">' +
+                    [
+                        typeof probe.transport_request_written_at_ms === 'number'
+                            ? 'transport_request_written=' + escapeHtml(new Date(probe.transport_request_written_at_ms).toLocaleTimeString())
+                            : '',
+                        'transport_response_received=' + (
+                            probe.transport_response_receive_state === 'observed'
+                            && typeof probe.transport_response_received_at_ms === 'number'
+                                ? escapeHtml(new Date(probe.transport_response_received_at_ms).toLocaleTimeString())
+                                : 'unavailable'
+                        ),
+                        'lsp_response_resolved=' + escapeHtml(new Date(probe.lsp_response_received_at_ms).toLocaleTimeString()),
+                        'request_completed=' + escapeHtml(new Date(probe.request_completed_at_ms).toLocaleTimeString()),
+                    ].filter(Boolean).join(' | ') +
+                '</div>' +
                 '<div class="probe-grid">' +
                     '<div class="probe-cell"><strong>Local edit</strong><br>' + escapeHtml(probe.time_since_last_local_edit_ms) + 'ms</div>' +
                     '<div class="probe-cell"><strong>didChange sent</strong><br>' + escapeHtml(didChangeDelta) + '</div>' +
-                    '<div class="probe-cell"><strong>Transport</strong><br>dispatch=' + escapeHtml(dispatchDeltaMs) + 'ms | receive=' + escapeHtml(transportRoundtripMs ?? 'unavailable') + 'ms | receive_to_resolve=' + escapeHtml(clientReceiveToResolveWaitMs ?? 'unavailable') + 'ms | resolve=' + escapeHtml(lspResolveMs) + 'ms | post=' + escapeHtml(postResponseMs) + 'ms</div>' +
+                    '<div class="probe-cell"><strong>Transport</strong><br>' +
+                        (typeof transportWriteDeltaMs === 'number'
+                            ? 'write=' + escapeHtml(transportWriteDeltaMs) + 'ms'
+                            : 'dispatch=' + escapeHtml(dispatchDeltaMs) + 'ms') +
+                        ' | receive=' + escapeHtml(transportRoundtripMs ?? 'unavailable') + 'ms | receive_to_resolve=' + escapeHtml(clientReceiveToResolveWaitMs ?? 'unavailable') + 'ms | resolve=' + escapeHtml(lspResolveMs) + 'ms | post=' + escapeHtml(postResponseMs) + 'ms</div>' +
                     '<div class="probe-cell"><strong>Result</strong><br>' + escapeHtml(probe.result_kind) + ' | bucket=' + escapeHtml(probe.item_count_bucket) + incompleteSuffix + '</div>' +
                     '<div class="probe-cell"><strong>Cancel hint</strong><br>' + escapeHtml(probe.cancel_reason_hint) + supersededSuffix + supersededAfterSuffix + '</div>' +
                     '<div class="probe-cell"><strong>Drift</strong><br>did_change=' + escapeHtml(probe.did_change_count_during_probe) + ' | cursor_moved=' + escapeHtml(probe.cursor_moved_during_probe) + '</div>' +

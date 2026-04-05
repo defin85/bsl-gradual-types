@@ -43,6 +43,7 @@ export interface CompletionProbeInput {
     trigger_character?: string | null;
     request_started_at_ms: number;
     lsp_request_started_at_ms: number;
+    transport_request_written_at_ms?: number | null;
     transport_response_receive_state: CompletionProbeTransportReceiveState;
     transport_response_received_at_ms?: number | null;
     lsp_response_received_at_ms: number;
@@ -74,6 +75,7 @@ export interface CompletionProbe {
     trigger_character?: string;
     request_started_at_ms: number;
     lsp_request_started_at_ms: number;
+    transport_request_written_at_ms?: number;
     transport_response_receive_state: CompletionProbeTransportReceiveState;
     transport_response_received_at_ms?: number;
     lsp_response_received_at_ms: number;
@@ -149,6 +151,12 @@ export function buildCompletionProbe(input: CompletionProbeInput): CompletionPro
     if (typeof input.transport_response_received_at_ms === 'number') {
         probe.transport_response_received_at_ms = clampNonNegativeInteger(
             input.transport_response_received_at_ms
+        );
+    }
+
+    if (typeof input.transport_request_written_at_ms === 'number') {
+        probe.transport_request_written_at_ms = clampNonNegativeInteger(
+            input.transport_request_written_at_ms
         );
     }
 

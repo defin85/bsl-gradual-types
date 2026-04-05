@@ -40,6 +40,7 @@ interface ActiveCompletionProbeSession {
     supersededByProbeId?: string;
     supersededAfterMs?: number;
     lspRequestStartedAtMs: number;
+    transportRequestWrittenAtMs?: number;
     transportResponseReceiveState: 'observed' | 'unavailable';
     transportResponseReceivedAtMs?: number;
     lspResponseReceivedAtMs: number;
@@ -250,6 +251,18 @@ export class CompletionProbeRecorder {
         session.transportResponseReceivedAtMs = clampTimestamp(timestampMs);
     }
 
+    recordCompletionTransportRequestWritten(
+        probeId: string,
+        timestampMs: number = this.now()
+    ): void {
+        const session = this.activeSessionsByProbeId.get(probeId);
+        if (!session) {
+            return;
+        }
+
+        session.transportRequestWrittenAtMs = clampTimestamp(timestampMs);
+    }
+
     recordCompletionLspResponseResolved(
         token: vscode.CancellationToken,
         timestampMs: number = this.now()
@@ -294,6 +307,7 @@ export class CompletionProbeRecorder {
             trigger_character: session?.triggerCharacter ?? input.context.triggerCharacter,
             request_started_at_ms: requestStartedAtMs,
             lsp_request_started_at_ms: session?.lspRequestStartedAtMs ?? requestStartedAtMs,
+            transport_request_written_at_ms: session?.transportRequestWrittenAtMs,
             transport_response_receive_state:
                 session?.transportResponseReceiveState ?? 'unavailable',
             transport_response_received_at_ms:

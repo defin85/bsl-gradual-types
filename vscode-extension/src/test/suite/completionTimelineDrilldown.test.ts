@@ -1,5 +1,8 @@
 import * as assert from 'assert';
-import { buildCompletionTraceBottleneckVerdicts } from '../../providers/completionTimelineDrilldown';
+import {
+    buildCompletionTraceBottleneckVerdicts,
+    deriveCompletionTracePostResponseSplit,
+} from '../../providers/completionTimelineDrilldown';
 
 suite('Completion Timeline Drilldown Test Suite', () => {
     test('buildCompletionTraceBottleneckVerdicts should not mark hot path with zero ingress or prelude wait', () => {
@@ -166,5 +169,28 @@ suite('Completion Timeline Drilldown Test Suite', () => {
         });
 
         assert.ok(!verdicts.includes('client_before_transport_dominant'));
+    });
+
+    test('deriveCompletionTracePostResponseSplit should separate client pre-write wait from transport ingress', () => {
+        const split = deriveCompletionTracePostResponseSplit({
+            server_edge_details: {
+                adapter_read_at_ms: 200,
+                transport_received_at_ms: 230,
+                handler_entered_at_ms: 240,
+                response_sent_at_ms: 260,
+                transport_to_handler_wait_ms: 0,
+                server_handler_exec_ms: 60,
+            },
+        }, {
+            request_started_at_ms: 100,
+            lsp_request_started_at_ms: 110,
+            transport_request_written_at_ms: 150,
+            transport_response_receive_state: 'unavailable',
+            lsp_response_received_at_ms: 270,
+            request_completed_at_ms: 275,
+        });
+
+        assert.strictEqual(split.client_before_transport_write_wait_ms, 50);
+        assert.strictEqual(split.client_to_transport_wait_ms, 50);
     });
 });

@@ -75,6 +75,7 @@ suite('Completion Probe Runtime Test Suite', () => {
             const snapshot = recorder.snapshot();
             assert.strictEqual(snapshot.length, 1);
             assert.strictEqual(snapshot[0].lsp_request_started_at_ms, 1_700_000_100_000);
+            assert.strictEqual(snapshot[0].transport_request_written_at_ms, undefined);
             assert.strictEqual(snapshot[0].transport_response_receive_state, 'unavailable');
             assert.strictEqual(snapshot[0].lsp_response_received_at_ms, 1_700_000_100_020);
         } finally {
@@ -219,6 +220,7 @@ suite('Completion Probe Runtime Test Suite', () => {
 
             const snapshot = recorder.snapshot();
             assert.strictEqual(snapshot.length, 1);
+            assert.strictEqual(snapshot[0].transport_request_written_at_ms, 1_700_000_200_000);
             assert.strictEqual(snapshot[0].transport_response_receive_state, 'observed');
             assert.strictEqual(snapshot[0].transport_response_received_at_ms, 1_700_000_200_007);
             assert.strictEqual(snapshot[0].lsp_response_received_at_ms, 1_700_000_200_012);

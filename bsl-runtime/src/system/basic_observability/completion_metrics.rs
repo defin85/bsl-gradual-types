@@ -153,6 +153,24 @@ impl BasicObservability {
             "cancel_observed_after_handler_enter" => {
                 "completion_stage_cancel_observed_after_handler_enter_ms"
             }
+            "response_ready_to_output_handoff_wait" => {
+                "completion_stage_response_ready_to_output_handoff_wait_ms"
+            }
+            "response_output_handoff_send_wait" => {
+                "completion_stage_response_output_handoff_send_wait_ms"
+            }
+            "response_output_handoff_to_writer_wait" => {
+                "completion_stage_response_output_handoff_to_writer_wait_ms"
+            }
+            "response_ready_to_output_enqueue_wait" => {
+                "completion_stage_response_ready_to_output_enqueue_wait_ms"
+            }
+            "response_output_queue_wait" => "completion_stage_response_output_queue_wait_ms",
+            "response_output_encode_exec" => "completion_stage_response_output_encode_exec_ms",
+            "response_output_write_and_flush_exec" => {
+                "completion_stage_response_output_write_and_flush_exec_ms"
+            }
+            "response_ready_to_flush_wait" => "completion_stage_response_ready_to_flush_wait_ms",
             "response_build" => "completion_stage_response_build_ms",
             "cache_store" => "completion_stage_cache_store_ms",
             _ => "completion_stage_other_ms",

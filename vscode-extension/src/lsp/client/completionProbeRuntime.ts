@@ -165,6 +165,8 @@ export function instrumentCompletionProbeMessageTransports(
         writer: new CompletionProbeMessageWriter(
             transports.writer,
             transportTracker,
+            recorder,
+            now,
         ),
     };
 }
@@ -285,6 +287,8 @@ class CompletionProbeMessageWriter implements MessageWriter {
     constructor(
         private readonly inner: MessageWriter,
         private readonly transportTracker: CompletionProbeTransportTracker,
+        private readonly recorder: CompletionProbeRecorder,
+        private readonly now: () => number,
     ) {}
 
     get onError() {
@@ -299,6 +303,12 @@ class CompletionProbeMessageWriter implements MessageWriter {
         const requestId = requestIdFromMessage(message);
         const probeId = completionProbeIdFromRequestMessage(message);
         await this.inner.write(message);
+        if (probeId) {
+            this.recorder.recordCompletionTransportRequestWritten(
+                probeId,
+                this.now(),
+            );
+        }
         if (requestId && probeId) {
             this.transportTracker.trackRequest(requestId, probeId);
         }

@@ -16,6 +16,7 @@ suite('Completion Probe Schema Test Suite', () => {
             trigger_character: '::very-long-trigger::',
             request_started_at_ms: 1_700_000_000_000,
             lsp_request_started_at_ms: 1_700_000_000_003,
+            transport_request_written_at_ms: 1_700_000_000_004,
             transport_response_receive_state: 'observed',
             transport_response_received_at_ms: 1_700_000_000_118,
             lsp_response_received_at_ms: 1_700_000_000_120,
@@ -66,6 +67,7 @@ suite('Completion Probe Schema Test Suite', () => {
             'superseded_by_probe_id',
             'time_since_last_did_change_sent_ms',
             'time_since_last_local_edit_ms',
+            'transport_request_written_at_ms',
             'transport_response_receive_state',
             'transport_response_received_at_ms',
             'trigger_character',
@@ -73,6 +75,7 @@ suite('Completion Probe Schema Test Suite', () => {
             'uri',
         ]);
         assert.strictEqual(probe.trigger_character?.length, COMPLETION_PROBE_MAX_TRIGGER_CHARACTER_LENGTH);
+        assert.strictEqual(probe.transport_request_written_at_ms, 1_700_000_000_004);
         assert.strictEqual(probe.time_since_last_did_change_sent_ms, 'unknown');
         assert.ok(!('raw_document_text' in probe));
         assert.ok(!('line_prefix' in probe));
@@ -88,6 +91,7 @@ suite('Completion Probe Schema Test Suite', () => {
             trigger_mode: 'invoked',
             request_started_at_ms: 1_700_000_000_250,
             lsp_request_started_at_ms: 1_700_000_000_240,
+            transport_request_written_at_ms: -1,
             transport_response_receive_state: 'unavailable',
             lsp_response_received_at_ms: Number.NaN,
             request_completed_at_ms: 1_700_000_000_200,
@@ -111,6 +115,7 @@ suite('Completion Probe Schema Test Suite', () => {
         assert.strictEqual(probe.document_version_at_terminal, 0);
         assert.strictEqual(probe.client_duration_ms, 0);
         assert.strictEqual(probe.lsp_request_started_at_ms, 1_700_000_000_240);
+        assert.strictEqual(probe.transport_request_written_at_ms, 0);
         assert.strictEqual(probe.transport_response_receive_state, 'unavailable');
         assert.strictEqual(probe.lsp_response_received_at_ms, 0);
         assert.strictEqual(probe.time_since_last_local_edit_ms, 0);

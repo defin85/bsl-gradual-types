@@ -88,7 +88,7 @@ fn record_completion_timeline_trace_inner(
 fn record_completion_response_egress_patch_inner(
     traces: &StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>,
     patch: &super::request_context::CompletionResponseEgressTracePatch,
-) {
+) -> Option<super::CompletionResponseEgressDerivedTrace> {
     let mut traces = traces
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -96,10 +96,10 @@ fn record_completion_response_egress_patch_inner(
         .iter_mut()
         .rfind(|trace| trace.request_id.as_deref() == Some(patch.request_id.as_str()))
     else {
-        return;
+        return None;
     };
     let Some(server_edge_details) = trace.server_edge_details.as_mut() else {
-        return;
+        return None;
     };
     if server_edge_details.response_flush_completed_at_ms.is_none() {
         let derived = super::derive_completion_response_egress_trace(
@@ -154,6 +154,50 @@ fn record_completion_response_egress_patch_inner(
             derived.response_output_write_and_flush_exec_ms;
         server_edge_details.response_ready_to_flush_wait_ms =
             derived.response_ready_to_flush_wait_ms;
+        return Some(derived);
+    }
+
+    None
+}
+
+fn record_completion_response_egress_metrics(
+    coordinator: &SystemCoordinator,
+    derived: &super::CompletionResponseEgressDerivedTrace,
+) {
+    for (stage, value_ms) in [
+        (
+            "response_ready_to_output_handoff_wait",
+            derived.response_ready_to_output_handoff_wait_ms,
+        ),
+        (
+            "response_output_handoff_send_wait",
+            derived.response_output_handoff_send_wait_ms,
+        ),
+        (
+            "response_output_handoff_to_writer_wait",
+            derived.response_output_handoff_to_writer_wait_ms,
+        ),
+        (
+            "response_ready_to_output_enqueue_wait",
+            derived.response_ready_to_output_enqueue_wait_ms,
+        ),
+        ("response_output_queue_wait", derived.response_output_queue_wait_ms),
+        (
+            "response_output_encode_exec",
+            derived.response_output_encode_exec_ms,
+        ),
+        (
+            "response_output_write_and_flush_exec",
+            derived.response_output_write_and_flush_exec_ms,
+        ),
+        (
+            "response_ready_to_flush_wait",
+            derived.response_ready_to_flush_wait_ms,
+        ),
+    ] {
+        if let Some(value_ms) = value_ms {
+            coordinator.record_completion_stage_latency(stage, Duration::from_millis(value_ms));
+        }
     }
 }
 
@@ -391,11 +435,17 @@ impl BslLanguageServer {
         )));
 
         let completion_timeline_traces_for_egress_hook = completion_timeline_traces.clone();
+        let coordinator_for_egress_hook = server.coordinator.clone();
         super::request_context::set_completion_response_egress_hook(Some(Arc::new(move |patch| {
-            record_completion_response_egress_patch_inner(
+            if let Some(derived) = record_completion_response_egress_patch_inner(
                 completion_timeline_traces_for_egress_hook.as_ref(),
                 &patch,
-            );
+            ) {
+                record_completion_response_egress_metrics(
+                    coordinator_for_egress_hook.as_ref(),
+                    &derived,
+                );
+            }
         })));
 
         server

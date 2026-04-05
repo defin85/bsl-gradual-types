@@ -53,7 +53,7 @@
     }
   },
   "openspec_validation": {
-    "command": "openspec validate refactor-document-symbol-interactive-isolation --strict --no-interactive",
+    "command": "openspec validate --all --strict --no-interactive",
     "log": "backend/tests/perf/reports/refactor-document-symbol-interactive-isolation-openspec-validate.log",
     "pass": true
   },

@@ -10373,7 +10373,7 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
             .get("version")
             .and_then(|value| value.as_u64())
             .expect("version"),
-        21
+        crate::server::COMPLETION_TIMELINE_VERSION as u64
     );
     assert!(
         result

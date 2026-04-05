@@ -1,1 +1,20 @@
-Change 'refactor-document-symbol-interactive-isolation' is valid
+✓ change/add-bsl-agent-compact-diagnostics-mode
+✓ change/add-lsp-functional-ga-readiness
+✓ change/add-platform-config-parser-type-coverage-research
+✓ change/add-sales-readiness-ga
+✓ change/add-tpm-lease-licensing
+✓ spec/bsl-intellisense
+✓ spec/bsl-intellisense-ide-grade
+✓ spec/bsl-intellisense-v2
+✓ spec/bsl-runtime-config
+✓ spec/dev-workflow
+✓ change/investigate-completion-output-backlog-attribution-phase-2
+✓ change/investigate-completion-output-egress-split-phase-1
+✓ change/investigate-completion-output-handoff-split-phase-2
+✓ spec/mcp-bsl-agent
+✓ change/refactor-bsl-agent-index-backed-search
+✓ change/refactor-current-revision-head-detached-snapshot
+✓ change/rewrite-v2-observability-perf-pipeline
+✓ change/update-bsl-agent-mcp-ergonomics
+✓ change/update-form-thisobject-platform-context-filtering
+Totals: 19 passed, 0 failed (19 items)

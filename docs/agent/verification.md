@@ -140,6 +140,9 @@ CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completi
 `./scripts/validate-document-symbol-interactive-isolation.sh` is the canonical
 default entry point for the document-symbol isolation evidence bundle; it wraps
 the generic readiness script with the correct `CHANGE_ID`.
+If the referenced OpenSpec change has already been archived, the wrapper falls
+back to `openspec validate --all --strict --no-interactive`, because the CLI no
+longer resolves the archived change by its old active `change-id`.
 `./scripts/validate-isolate-completion-pre-dispatch-ingress.sh` is the
 canonical default entry point for the truthful pre-dispatch ingress evidence
 bundle; it wraps the generic readiness script with the correct `CHANGE_ID` and

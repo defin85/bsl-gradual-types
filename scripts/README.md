@@ -301,6 +301,9 @@ Default smoke path уже покрывает mandatory `documentSymbol` isolatio
 wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит
 default change-specific entry point для representative report и aggregate
 readiness artifacts.
+Если соответствующий OpenSpec change уже архивирован, wrapper автоматически
+переключает strict validation на `openspec validate --all --strict --no-interactive`,
+потому что CLI больше не резолвит архивный change по старому active `change-id`.
 Wrapper `./scripts/validate-isolate-completion-pre-dispatch-ingress.sh` служит
 default change-specific entry point для truthful pre-dispatch ingress bundle и
 aggregate readiness artifacts; он использует тот же `outline` representative

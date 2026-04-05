@@ -15,4 +15,12 @@
 - documentSymbol superseded delta: `0`
 - documentSymbol present responses: `40`
 - documentSymbol null responses: `0`
-- ingress regression samples: `0`
+- legacy ingress-regression samples: `0`
+- pre-dispatch samples over budget: `0`
+- pre-dispatch samples over hard cap: `0`
+`p95(adapter_to_dispatch_wait_ms)=1ms`
+`max(adapter_to_dispatch_wait_ms)=1ms`
+`p95(service_future_to_first_poll_wait_ms)=3ms`
+`max(service_future_to_first_poll_wait_ms)=3ms`
+`p95(transport_to_handler_wait_ms)=3ms`
+`max(transport_to_handler_wait_ms)=3ms`

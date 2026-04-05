@@ -10,6 +10,25 @@ import unittest
 from pathlib import Path
 
 
+def resolve_change_dir(repo_root: Path, change_id: str) -> Path:
+    active_dir = repo_root / "openspec" / "changes" / change_id
+    if active_dir.exists():
+        return active_dir
+
+    archive_root = repo_root / "openspec" / "changes" / "archive"
+    matches = sorted(
+        path for path in archive_root.glob(f"*-{change_id}") if path.is_dir()
+    )
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"ambiguous archived OpenSpec change for {change_id!r}: "
+            f"{[str(path) for path in matches]}"
+        )
+    if matches:
+        return matches[0]
+    return active_dir
+
+
 class IntellisenseReadinessAssetsTest(unittest.TestCase):
     REPO_ROOT = Path(__file__).resolve().parents[1]
     SMOKE_SCRIPT = REPO_ROOT / "scripts" / "run-intellisense-tests.sh"
@@ -36,13 +55,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "validation"
         / "quality-gates.json"
     )
+    DOCUMENT_SYMBOL_CHANGE_DIR = resolve_change_dir(REPO_ROOT, DOCUMENT_SYMBOL_CHANGE_ID)
     DOCUMENT_SYMBOL_MIXED_LOAD_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / DOCUMENT_SYMBOL_CHANGE_ID
-        / "validation"
-        / "mixed-load-gate.md"
+        DOCUMENT_SYMBOL_CHANGE_DIR / "validation" / "mixed-load-gate.md"
     )
     DOCUMENT_SYMBOL_MIXED_LOAD_REPORT = (
         REPO_ROOT
@@ -55,27 +70,17 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     PRE_DISPATCH_INGRESS_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-isolate-completion-pre-dispatch-ingress.sh"
     )
+    PRE_DISPATCH_INGRESS_CHANGE_DIR = resolve_change_dir(
+        REPO_ROOT, PRE_DISPATCH_INGRESS_CHANGE_ID
+    )
     PRE_DISPATCH_INGRESS_GATE_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / PRE_DISPATCH_INGRESS_CHANGE_ID
-        / "validation"
-        / "mixed-load-gate.md"
+        PRE_DISPATCH_INGRESS_CHANGE_DIR / "validation" / "mixed-load-gate.md"
     )
     PRE_DISPATCH_INGRESS_TRACEABILITY_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / PRE_DISPATCH_INGRESS_CHANGE_ID
-        / "validation"
-        / "traceability.md"
+        PRE_DISPATCH_INGRESS_CHANGE_DIR / "validation" / "traceability.md"
     )
     PRE_DISPATCH_INGRESS_PROTECTED_ASSETS_OVERRIDE = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / PRE_DISPATCH_INGRESS_CHANGE_ID
+        PRE_DISPATCH_INGRESS_CHANGE_DIR
         / "governance"
         / "protected_assets_override.json"
     )
@@ -119,13 +124,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{PRE_DISPATCH_INGRESS_CHANGE_ID}-openspec-validate.log"
     )
+    OVERLAP_CHANGE_DIR = resolve_change_dir(REPO_ROOT, OVERLAP_CHANGE_ID)
     OVERLAP_GATE_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / OVERLAP_CHANGE_ID
-        / "validation"
-        / "overlap-gate.md"
+        OVERLAP_CHANGE_DIR / "validation" / "overlap-gate.md"
     )
     OVERLAP_GATE_REPORT = (
         REPO_ROOT
@@ -135,13 +136,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{OVERLAP_CHANGE_ID}-real-conf-big-overlap-completion-perf-live.json"
     )
+    TURN_WAIT_CHANGE_DIR = resolve_change_dir(REPO_ROOT, TURN_WAIT_CHANGE_ID)
     TURN_WAIT_GATE_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / TURN_WAIT_CHANGE_ID
-        / "validation"
-        / "pre-active-overlap-gate.md"
+        TURN_WAIT_CHANGE_DIR / "validation" / "pre-active-overlap-gate.md"
     )
     TURN_WAIT_GATE_REPORT = (
         REPO_ROOT
@@ -151,29 +148,15 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
         / "reports"
         / f"{TURN_WAIT_CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
     )
+    SLOT_RELEASE_CHANGE_DIR = resolve_change_dir(REPO_ROOT, SLOT_RELEASE_CHANGE_ID)
     SLOT_RELEASE_ARCHITECTURAL_REVIEW = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / SLOT_RELEASE_CHANGE_ID
-        / "validation"
-        / "architectural-review.md"
+        SLOT_RELEASE_CHANGE_DIR / "validation" / "architectural-review.md"
     )
     SLOT_RELEASE_TRACEABILITY_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / SLOT_RELEASE_CHANGE_ID
-        / "validation"
-        / "traceability.md"
+        SLOT_RELEASE_CHANGE_DIR / "validation" / "traceability.md"
     )
     SLOT_RELEASE_GATE_DOC = (
-        REPO_ROOT
-        / "openspec"
-        / "changes"
-        / SLOT_RELEASE_CHANGE_ID
-        / "validation"
-        / "pre-active-overlap-gate.md"
+        SLOT_RELEASE_CHANGE_DIR / "validation" / "pre-active-overlap-gate.md"
     )
     SLOT_RELEASE_CHURN_REPORT = (
         REPO_ROOT

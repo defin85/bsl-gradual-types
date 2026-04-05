@@ -8,6 +8,7 @@ READINESS_REPORT="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.json"
 READINESS_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.md"
 OPENSPEC_LOG="${REPORT_DIR}/${CHANGE_ID}-openspec-validate.log"
 PERF_PROFILES="${PERF_PROFILES:-small large churn}"
+OPENSPEC_VALIDATE_SCOPE="change"
 if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
   if [[ "${CHANGE_ID}" == "refactor-completion-prepare-lightweight-exact-split" ]]; then
     REAL_MODULE_PROFILES="warm churn"
@@ -31,6 +32,25 @@ mkdir -p "${REPORT_DIR}"
 if ! command -v openspec >/dev/null 2>&1; then
   echo "openspec CLI is required for strict change validation (command not found)." >&2
   exit 1
+fi
+
+active_change_dir="${ROOT_DIR}/openspec/changes/${CHANGE_ID}"
+archive_glob=("${ROOT_DIR}"/openspec/changes/archive/*-"${CHANGE_ID}")
+if [[ ! -d "${active_change_dir}" ]]; then
+  archive_matches=()
+  for candidate in "${archive_glob[@]}"; do
+    if [[ -d "${candidate}" ]]; then
+      archive_matches+=("${candidate}")
+    fi
+  done
+  if (( ${#archive_matches[@]} > 1 )); then
+    printf 'Ambiguous archived OpenSpec change for %s:\n' "${CHANGE_ID}" >&2
+    printf '  %s\n' "${archive_matches[@]}" >&2
+    exit 1
+  fi
+  if (( ${#archive_matches[@]} == 1 )); then
+    OPENSPEC_VALIDATE_SCOPE="all"
+  fi
 fi
 
 echo "[gate] Running shipped cross-adapter smoke..."
@@ -98,10 +118,15 @@ for profile in ${REAL_MODULE_PROFILES}; do
 done
 
 echo "[gate] Running OpenSpec strict validation..."
-openspec validate "${CHANGE_ID}" --strict --no-interactive \
-  | tee "${OPENSPEC_LOG}"
+if [[ "${OPENSPEC_VALIDATE_SCOPE}" == "all" ]]; then
+  openspec validate --all --strict --no-interactive \
+    | tee "${OPENSPEC_LOG}"
+else
+  openspec validate "${CHANGE_ID}" --strict --no-interactive \
+    | tee "${OPENSPEC_LOG}"
+fi
 
-python3 - "${REPORT_DIR}" "${READINESS_REPORT}" "${READINESS_SUMMARY}" "${OPENSPEC_LOG}" "${CHANGE_ID}" "${PERF_PROFILES}" "${REAL_MODULE_PROFILES}" "${real_module_specs[@]}" <<'PY'
+python3 - "${REPORT_DIR}" "${READINESS_REPORT}" "${READINESS_SUMMARY}" "${OPENSPEC_LOG}" "${CHANGE_ID}" "${PERF_PROFILES}" "${REAL_MODULE_PROFILES}" "${OPENSPEC_VALIDATE_SCOPE}" "${real_module_specs[@]}" <<'PY'
 import json
 import pathlib
 import sys
@@ -113,8 +138,9 @@ openspec_log_path = pathlib.Path(sys.argv[4])
 expected_change_id = sys.argv[5]
 perf_profiles = sys.argv[6].split()
 real_module_profiles = sys.argv[7].split()
+openspec_validate_scope = sys.argv[8]
 real_module_specs = {}
-for raw_spec in sys.argv[8:]:
+for raw_spec in sys.argv[9:]:
     profile, profile_title, test_name, report_path, profile_summary_path = raw_spec.split("::", 4)
     real_module_specs[profile] = {
         "title": profile_title,
@@ -140,7 +166,11 @@ aggregate = {
     },
     "real_module_gates": {},
     "openspec_validation": {
-        "command": f"openspec validate {expected_change_id} --strict --no-interactive",
+        "command": (
+            "openspec validate --all --strict --no-interactive"
+            if openspec_validate_scope == "all"
+            else f"openspec validate {expected_change_id} --strict --no-interactive"
+        ),
         "log": str(openspec_log_path.relative_to(repo_root)),
         "pass": True,
     },

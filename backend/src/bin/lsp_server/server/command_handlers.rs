@@ -27,6 +27,20 @@ use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
 
 const ATTACHED_MESSAGE: &str = "already running (attached)";
 
+#[cfg(test)]
+fn maybe_inject_get_current_context_parse_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_inject_get_current_context_parse_delay_for_test() {}
+
 #[derive(Debug, Clone)]
 pub(crate) enum BeginFullIndexOutcome {
     Started {
@@ -200,52 +214,97 @@ impl BslLanguageServer {
             return Ok(CurrentContextResponse::empty());
         };
 
-        let parsed = self
-            .coordinator
-            .parser_coordinator()
-            .and_then(|parser| {
-                parser
-                    .parse_incremental_with_report(
-                        PathBuf::from(path.as_str()),
-                        file_text.to_string(),
-                        Vec::new(),
-                    )
-                    .ok()
-            })
-            .map(|report| (report.parse_result, report.line_index))
-            .or_else(|| {
-                bsl_syntax::parse(file_text.as_ref(), &bsl_syntax::ParseOptions::default())
-                    .ok()
-                    .map(|parse_result| {
-                        (parse_result, Arc::new(LineIndex::new(file_text.as_ref())))
-                    })
-            });
-        let Some((parse_result, line_index)) = parsed else {
-            warn!(
-                uri = %uri,
-                file_id = file_id.0,
-                "getCurrentContext: parse snapshot is unavailable"
-            );
-            return Ok(CurrentContextResponse::empty());
-        };
+        let coordinator = self.coordinator.clone();
+        let path_for_parse = PathBuf::from(path.as_str());
+        let file_text_for_parse = file_text.clone();
+        let current_context =
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                Some(self.coordinator.as_ref()),
+                move || -> Result<CurrentContextResponse, &'static str> {
+                    maybe_inject_get_current_context_parse_delay_for_test();
+                    let parsed = coordinator
+                        .parser_coordinator()
+                        .and_then(|parser| {
+                            parser
+                                .parse_incremental_with_report(
+                                    path_for_parse.clone(),
+                                    file_text_for_parse.to_string(),
+                                    Vec::new(),
+                                )
+                                .ok()
+                        })
+                        .map(|report| (report.parse_result, report.line_index))
+                        .or_else(|| {
+                            bsl_syntax::parse(
+                                file_text_for_parse.as_ref(),
+                                &bsl_syntax::ParseOptions::default(),
+                            )
+                            .ok()
+                            .map(|parse_result| {
+                                (
+                                    parse_result,
+                                    Arc::new(LineIndex::new(file_text_for_parse.as_ref())),
+                                )
+                            })
+                        });
+                    let Some((parse_result, line_index)) = parsed else {
+                        return Err("parse_unavailable");
+                    };
 
-        Ok(
-            match find_containing_function_in_parse_result(
-                &parse_result,
-                file_text.as_ref(),
-                line_index.as_ref(),
-                params.line,
-                params.character,
-            ) {
-                Some((name, kind, params_list, return_type)) => CurrentContextResponse {
-                    function_name: Some(name),
-                    function_kind: kind,
-                    params: Some(params_list),
-                    return_type,
+                    Ok(
+                        match find_containing_function_in_parse_result(
+                            &parse_result,
+                            file_text_for_parse.as_ref(),
+                            line_index.as_ref(),
+                            params.line,
+                            params.character,
+                        ) {
+                            Some((name, kind, params_list, return_type)) => {
+                                CurrentContextResponse {
+                                    function_name: Some(name),
+                                    function_kind: kind,
+                                    params: Some(params_list),
+                                    return_type,
+                                }
+                            }
+                            None => CurrentContextResponse::empty(),
+                        },
+                    )
                 },
-                None => CurrentContextResponse::empty(),
-            },
-        )
+            )
+            .await;
+
+        match current_context {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err("parse_unavailable")) => {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    "getCurrentContext: parse snapshot is unavailable"
+                );
+                Ok(CurrentContextResponse::empty())
+            }
+            Ok(Err(reason)) => {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    reason,
+                    "getCurrentContext: auxiliary parse returned an unexpected failure"
+                );
+                Ok(CurrentContextResponse::empty())
+            }
+            Err(err) => {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    error = %err,
+                    "getCurrentContext: auxiliary parse task failed"
+                );
+                Ok(CurrentContextResponse::empty())
+            }
+        }
     }
 
     /// Custom request: bsl/buildIndex

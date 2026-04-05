@@ -388,6 +388,10 @@ impl LiveLspTransportHarness {
     }
 
     async fn write_message(&mut self, message: &serde_json::Value) {
+        let _ = self.write_message_and_record_flush_at_ms(message).await;
+    }
+
+    async fn write_message_and_record_flush_at_ms(&mut self, message: &serde_json::Value) -> u64 {
         let body = serde_json::to_vec(message).expect("serialize LSP transport message");
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
         self.writer
@@ -399,6 +403,7 @@ impl LiveLspTransportHarness {
             .await
             .expect("write LSP message body");
         self.writer.flush().await.expect("flush LSP client stream");
+        crate::server::unix_timestamp_ms()
     }
 
     async fn wait_for_response(&mut self, expected_id: i64) -> serde_json::Value {
@@ -625,9 +630,9 @@ async fn live_transport_write_completion_request(
     uri: &Url,
     position: Position,
     context: Option<CompletionContext>,
-) {
+) -> u64 {
     harness
-        .write_message(&serde_json::json!({
+        .write_message_and_record_flush_at_ms(&serde_json::json!({
             "jsonrpc": "2.0",
             "id": request_id,
             "method": "textDocument/completion",
@@ -641,7 +646,26 @@ async fn live_transport_write_completion_request(
                 context,
             },
         }))
-        .await;
+        .await
+}
+
+async fn live_transport_write_execute_command_request(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    command: &str,
+    arguments: Vec<serde_json::Value>,
+) -> u64 {
+    harness
+        .write_message_and_record_flush_at_ms(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "workspace/executeCommand",
+            "params": {
+                "command": command,
+                "arguments": arguments,
+            },
+        }))
+        .await
 }
 
 async fn live_transport_get_completion_timeline(
@@ -11449,7 +11473,10 @@ async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edg
             .and_then(|value| value.get("count"))
             .and_then(|value| value.as_u64())
             .unwrap_or(0);
-        assert!(count > 0, "{key} must be exported after live completion response");
+        assert!(
+            count > 0,
+            "{key} must be exported after live completion response"
+        );
     }
 
     live_transport_close_document(&mut harness, &uri).await;
@@ -21505,6 +21532,205 @@ async fn p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn p33_get_current_context_parse_delay_does_not_delay_concurrent_completion_live_transport() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const CURRENT_CONTEXT_DELAY_MS: u64 = 1_500;
+    const CURRENT_CONTEXT_REQUEST_ID: i64 = 50_533;
+    const COMPLETION_REQUEST_ID: i64 = 50_534;
+    const RUNTIME_ISOLATION_BUDGET_MS: u64 = 250;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _current_context_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
+        &CURRENT_CONTEXT_DELAY_MS.to_string(),
+    );
+
+    let mut fixture = String::new();
+    for index in 0..256 {
+        fixture.push_str(&format!(
+            "Процедура Вспомогательная{}()\n    Сообщить(\"{}\");\nКонецПроцедуры\n\n",
+            index, index
+        ));
+    }
+    fixture.push_str(
+        "Процедура ТестКонтекста(ПараметрКонтекста)\n    ДляCompletion = Объект.\n    Сообщить(ПараметрКонтекста);\nКонецПроцедуры\n",
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///current_context_runtime_isolation_fixture.bsl").expect("uri");
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.clone(),
+            },
+        })
+        .await;
+    server.sync_v2_globals().await;
+
+    let completion_position = find_utf16_position_after_marker(&fixture, "ДляCompletion = Объект.");
+    let current_context_position =
+        find_utf16_position_after_marker(&fixture, "Сообщить(ПараметрКонтекста");
+
+    live_transport_write_execute_command_request(
+        &mut harness,
+        CURRENT_CONTEXT_REQUEST_ID,
+        "bsl.getCurrentContext",
+        vec![serde_json::json!({
+            "uri": uri.to_string(),
+            "line": current_context_position.line,
+            "character": current_context_position.character,
+        })],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let completion_request_written_at_ms = live_transport_write_completion_request(
+        &mut harness,
+        COMPLETION_REQUEST_ID,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+
+    let (completion_response, completion_elapsed_ms, current_context_response) =
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let completion_started = Instant::now();
+            let mut completion_response = None;
+            let mut completion_elapsed_ms = None;
+            let mut current_context_response = None;
+            loop {
+                let response = harness.read_message().await;
+                let Some(response_id) = response.get("id").and_then(|value| value.as_i64()) else {
+                    continue;
+                };
+                if response_id == COMPLETION_REQUEST_ID {
+                    completion_elapsed_ms = Some(
+                        completion_started
+                            .elapsed()
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64,
+                    );
+                    completion_response = Some(response);
+                } else if response_id == CURRENT_CONTEXT_REQUEST_ID {
+                    current_context_response = Some(response);
+                }
+                if completion_response.is_some() && current_context_response.is_some() {
+                    break (
+                        completion_response.expect("completion response"),
+                        completion_elapsed_ms.expect("completion elapsed"),
+                        current_context_response.expect("current context response"),
+                    );
+                }
+            }
+        })
+        .await
+        .expect("completion and current-context responses must arrive");
+
+    assert!(
+        completion_response.get("result").is_some(),
+        "completion must still return a response while getCurrentContext parse is delayed"
+    );
+    assert!(
+        completion_elapsed_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "concurrent getCurrentContext parse delay must not stall completion end-to-end latency, completion_elapsed_ms={}ms, completion_response={completion_response:?}",
+        completion_elapsed_ms
+    );
+    assert_eq!(
+        current_context_response
+            .get("result")
+            .and_then(|result| result.get("functionName"))
+            .and_then(|value| value.as_str()),
+        Some("ТестКонтекста"),
+        "getCurrentContext must preserve user-visible routine resolution after runtime isolation"
+    );
+
+    let trace = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 50_535, 32).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&COMPLETION_REQUEST_ID.to_string())
+            }) {
+                break trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("concurrent completion trace must appear in timeline");
+
+    let client_to_transport_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "adapter_read_at_ms")
+            .expect("adapter_read_at_ms")
+            .saturating_sub(completion_request_written_at_ms);
+    let service_future_to_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "service_future_to_first_poll_wait_ms")
+            .expect("service_future_to_first_poll_wait_ms");
+    let response_output_handoff_send_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_send_wait_ms")
+            .expect("response_output_handoff_send_wait_ms");
+    assert!(
+        client_to_transport_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "concurrent getCurrentContext parse delay must not cause ingress starvation before adapter_read, client_to_transport_wait_ms={}ms, trace={trace:?}",
+        client_to_transport_wait_ms
+    );
+    assert!(
+        service_future_to_first_poll_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "concurrent getCurrentContext parse delay must not delay completion first poll, trace={trace:?}"
+    );
+    assert!(
+        response_output_handoff_send_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "concurrent getCurrentContext parse delay must not strand completion response on output handoff, trace={trace:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    drop(server);
+    harness.shutdown().await;
+}
+
 fn message_has_unknown_member(message: &str, member_name: &str) -> bool {
     let lower_message = message.to_lowercase();
     lower_message.contains(&member_name.to_lowercase())
@@ -26758,11 +26984,15 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         const PROFILE_NAME: &str = "p39_real_conf_big_document_symbol_mixed_load_gate_live";
         let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-document-symbol-interactive-isolation".to_string());
+            .unwrap_or_else(|_| "refactor-lsp-auxiliary-runtime-isolation".to_string());
         const WARMUP_REQUESTS: usize = 1;
         const MEASURE_REQUESTS: usize = 10;
         const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 4;
         const ADAPTER_TO_DISPATCH_MAX_FACTOR: u64 = 4;
+        const TRUTHFUL_WAIT_P95_FACTOR: f64 = 1.0;
+        const TRUTHFUL_WAIT_MAX_FACTOR: u64 = 4;
+        const SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS: f64 = 250.0;
+        const SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS: u64 = 1_000;
         let interactive_wait_budget_ms = bsl_runtime::system::global_runtime_config()
             .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
             .unwrap_or(120);
@@ -26977,7 +27207,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
 
             let completion_request_id = 39_300_000_i64 + index as i64;
             let completion_started = Instant::now();
-            live_transport_write_completion_request(
+            let completion_request_written_at_ms = live_transport_write_completion_request(
                 &mut harness,
                 completion_request_id,
                 &uri,
@@ -27080,6 +27310,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "label_count": labels.len(),
                 "labels": labels,
                 "version": current_version,
+                "completion_request_written_at_ms": completion_request_written_at_ms,
                 "fresh_outline_name": outline_probe_name,
                 "document_symbol_request_ids": document_symbol_request_ids,
                 "document_symbol_response_summaries": document_symbol_response_summaries,
@@ -27205,6 +27436,10 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                                 trace,
                                 "service_future_to_first_poll_wait_ms",
                             ),
+                            "response_output_handoff_send_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "response_output_handoff_send_wait_ms",
+                            ),
                             "prepare_stateful_ms": completion_timeline_trace_stage_duration_ms(trace, "prepare_stateful"),
                             "wait_exact_type_index_ms": completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
                             "query_bundle": completion_timeline_query_bundle_breakdown(trace),
@@ -27212,10 +27447,25 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                             "response_build_ms": completion_timeline_trace_stage_duration_ms(trace, "response_build"),
                         })
                     });
+                    let client_to_transport_wait_ms = trace.and_then(|trace| {
+                        sample
+                            .get("completion_request_written_at_ms")
+                            .and_then(|value| value.as_u64())
+                            .zip(completion_timeline_server_edge_u64(trace, "adapter_read_at_ms"))
+                            .map(|(request_written_at_ms, adapter_read_at_ms)| {
+                                adapter_read_at_ms.saturating_sub(request_written_at_ms)
+                            })
+                    });
                     let mut sample_object = sample
                         .as_object()
                         .cloned()
                         .expect("sample must be json object");
+                    if let Some(client_to_transport_wait_ms) = client_to_transport_wait_ms {
+                        sample_object.insert(
+                            "client_to_transport_wait_ms".to_string(),
+                            serde_json::json!(client_to_transport_wait_ms),
+                        );
+                    }
                     sample_object.insert(
                         "trace".to_string(),
                         trace_summary.unwrap_or(serde_json::json!(null)),
@@ -27291,6 +27541,14 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             let values = samples
                 .iter()
                 .filter_map(|sample| sample.get("elapsed_ms").and_then(|value| value.as_u64()))
+                .map(|value| value as f64)
+                .collect::<Vec<_>>();
+            sample_histogram_value(&values)
+        };
+        let sample_scalar_histogram = |samples: &[serde_json::Value], field: &str| {
+            let values = samples
+                .iter()
+                .filter_map(|sample| sample.get(field).and_then(|value| value.as_u64()))
                 .map(|value| value as f64)
                 .collect::<Vec<_>>();
             sample_histogram_value(&values)
@@ -27437,6 +27695,10 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
         let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
         let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
+        let truthful_wait_p95_budget_ms =
+            (interactive_wait_budget_ms as f64) * TRUTHFUL_WAIT_P95_FACTOR;
+        let truthful_wait_max_budget_ms =
+            interactive_wait_budget_ms.saturating_mul(TRUTHFUL_WAIT_MAX_FACTOR);
         let measured_adapter_to_dispatch_histogram = sample_trace_server_edge_histogram(
             &measured_samples,
             "adapter_to_dispatch_wait_ms",
@@ -27476,10 +27738,44 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                         .saturating_mul(ADAPTER_TO_DISPATCH_MAX_FACTOR)
             })
             .count();
+        let measured_client_to_transport_histogram =
+            sample_scalar_histogram(&measured_samples, "client_to_transport_wait_ms");
+        let measured_client_to_transport_p95_ms =
+            read_numeric_metric(measured_client_to_transport_histogram.get("p95"));
+        let measured_client_to_transport_present_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("client_to_transport_wait_ms")
+                    .and_then(|value| value.as_u64())
+                    .is_some()
+            })
+            .count();
+        let measured_client_to_transport_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("client_to_transport_wait_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_client_to_transport_over_hard_cap_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("client_to_transport_wait_ms")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > truthful_wait_max_budget_ms
+            })
+            .count();
         let measured_service_future_first_poll_histogram = sample_trace_server_edge_histogram(
             &measured_samples,
             "service_future_to_first_poll_wait_ms",
         );
+        let measured_service_future_first_poll_p95_ms =
+            read_numeric_metric(measured_service_future_first_poll_histogram.get("p95"));
         let measured_service_future_first_poll_max_ms = measured_samples
             .iter()
             .filter_map(|sample| {
@@ -27490,6 +27786,33 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             })
             .max()
             .unwrap_or(0);
+        let measured_response_output_handoff_send_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "response_output_handoff_send_wait_ms",
+        );
+        let measured_response_output_handoff_send_p95_ms =
+            read_numeric_metric(measured_response_output_handoff_send_histogram.get("p95"));
+        let measured_response_output_handoff_send_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("response_output_handoff_send_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_response_output_handoff_send_over_hard_cap_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("response_output_handoff_send_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+                    > truthful_wait_max_budget_ms
+            })
+            .count();
         let measured_transport_to_handler_histogram = sample_trace_server_edge_histogram(
             &measured_samples,
             "transport_to_handler_wait_ms",
@@ -27581,12 +27904,21 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_pre_dispatch_wait_over_budget_samples": measured_pre_dispatch_wait_over_budget_samples,
                 "measured_pre_dispatch_wait_over_hard_cap_samples": measured_pre_dispatch_wait_over_hard_cap_samples,
                 "interactive_wait_budget_ms": interactive_wait_budget_ms,
+                "truthful_wait_p95_budget_ms": truthful_wait_p95_budget_ms,
+                "truthful_wait_max_budget_ms": truthful_wait_max_budget_ms,
                 "warmup_latency_ms": warmup_latency_histogram,
                 "measured_latency_ms": measured_latency_histogram,
                 "measured_adapter_to_dispatch_wait_ms": measured_adapter_to_dispatch_histogram,
                 "measured_adapter_to_dispatch_wait_max_ms": measured_adapter_to_dispatch_max_ms,
+                "measured_client_to_transport_wait_ms": measured_client_to_transport_histogram,
+                "measured_client_to_transport_wait_max_ms": measured_client_to_transport_max_ms,
+                "measured_client_to_transport_present_samples": measured_client_to_transport_present_samples,
+                "measured_client_to_transport_over_hard_cap_samples": measured_client_to_transport_over_hard_cap_samples,
                 "measured_service_future_to_first_poll_wait_ms": measured_service_future_first_poll_histogram,
                 "measured_service_future_to_first_poll_wait_max_ms": measured_service_future_first_poll_max_ms,
+                "measured_response_output_handoff_send_wait_ms": measured_response_output_handoff_send_histogram,
+                "measured_response_output_handoff_send_wait_max_ms": measured_response_output_handoff_send_max_ms,
+                "measured_response_output_handoff_send_over_hard_cap_samples": measured_response_output_handoff_send_over_hard_cap_samples,
                 "measured_transport_to_handler_wait_ms": measured_transport_to_handler_histogram,
                 "measured_transport_to_handler_wait_max_ms": measured_transport_to_handler_max_ms,
                 "measured_dispatch_to_request_context_wait_ms": sample_trace_server_edge_histogram(
@@ -27687,6 +28019,11 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_trace_linked_samples
         );
         assert!(
+            measured_client_to_transport_present_samples == MEASURE_REQUESTS,
+            "expected every measured mixed-load sample to expose harness-derived client_to_transport_wait_ms, measured_client_to_transport_present_samples={}, measured_samples={measured_samples:?}",
+            measured_client_to_transport_present_samples
+        );
+        assert!(
             counter_delta("completion_total") >= MEASURE_REQUESTS as u64,
             "expected measured completion_total delta >= mixed-load request samples, completion_total_delta={}, measured_requests={}",
             counter_delta("completion_total"),
@@ -27754,6 +28091,52 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_pre_dispatch_wait_over_hard_cap_samples == 0,
             "mixed-load gate must fail on seconds-scale pre-dispatch backlog under concurrent outline load, measured_pre_dispatch_wait_over_hard_cap_samples={}, measured_samples={measured_samples:?}",
             measured_pre_dispatch_wait_over_hard_cap_samples
+        );
+        assert!(
+            measured_client_to_transport_p95_ms <= truthful_wait_p95_budget_ms,
+            "mixed-load truthful ingress p95 regression: measured_client_to_transport_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_client_to_transport_p95_ms,
+            truthful_wait_p95_budget_ms
+        );
+        assert!(
+            measured_client_to_transport_max_ms <= truthful_wait_max_budget_ms,
+            "mixed-load truthful ingress max regression: measured_client_to_transport_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_client_to_transport_max_ms,
+            truthful_wait_max_budget_ms
+        );
+        assert!(
+            measured_client_to_transport_over_hard_cap_samples == 0,
+            "mixed-load gate must fail on seconds-scale truthful ingress backlog, measured_client_to_transport_over_hard_cap_samples={}, measured_samples={measured_samples:?}",
+            measured_client_to_transport_over_hard_cap_samples
+        );
+        assert!(
+            measured_service_future_first_poll_p95_ms <= SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS,
+            "mixed-load first-poll p95 regression: measured_service_future_to_first_poll_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_service_future_first_poll_p95_ms,
+            SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS
+        );
+        assert!(
+            measured_service_future_first_poll_max_ms <= SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS,
+            "mixed-load first-poll max regression: measured_service_future_to_first_poll_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_service_future_first_poll_max_ms,
+            SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS
+        );
+        assert!(
+            measured_response_output_handoff_send_p95_ms <= truthful_wait_p95_budget_ms,
+            "mixed-load truthful handoff p95 regression: measured_response_output_handoff_send_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_response_output_handoff_send_p95_ms,
+            truthful_wait_p95_budget_ms
+        );
+        assert!(
+            measured_response_output_handoff_send_max_ms <= truthful_wait_max_budget_ms,
+            "mixed-load truthful handoff max regression: measured_response_output_handoff_send_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+            measured_response_output_handoff_send_max_ms,
+            truthful_wait_max_budget_ms
+        );
+        assert!(
+            measured_response_output_handoff_send_over_hard_cap_samples == 0,
+            "mixed-load gate must fail on seconds-scale truthful output-handoff backlog, measured_response_output_handoff_send_over_hard_cap_samples={}, measured_samples={measured_samples:?}",
+            measured_response_output_handoff_send_over_hard_cap_samples
         );
         assert!(
             measured_document_symbol_total_outcome_delta

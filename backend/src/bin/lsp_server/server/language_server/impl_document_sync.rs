@@ -356,8 +356,23 @@ impl BslLanguageServer {
             else {
                 return;
             };
-            match build_document_symbols(args.text.as_ref(), parse_snapshot.parse_result.as_ref()) {
-                Ok(response) => {
+            let text_for_symbols = args.text.clone();
+            let parse_result_for_symbols = Arc::clone(&parse_snapshot.parse_result);
+            match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                Some(self.coordinator.as_ref()),
+                move || {
+                    build_document_symbols(
+                        text_for_symbols.as_ref(),
+                        parse_result_for_symbols.as_ref(),
+                    )
+                    .map_err(|err| err.to_string())
+                },
+            )
+            .await
+            {
+                Ok(Ok(response)) => {
                     self.record_document_symbol_ready_v2(
                         args.file_id,
                         args.requested_version,
@@ -365,12 +380,20 @@ impl BslLanguageServer {
                     )
                     .await;
                 }
-                Err(err) => {
+                Ok(Err(err)) => {
                     warn!(
                         file_id = args.file_id.0,
                         file_version = args.requested_version,
                         error = %err,
                         "failed to build documentSymbol ready cache from parse snapshot"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        file_id = args.file_id.0,
+                        file_version = args.requested_version,
+                        error = %err,
+                        "documentSymbol ready-cache task failed after parse snapshot"
                     );
                 }
             }

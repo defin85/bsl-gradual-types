@@ -296,6 +296,10 @@ pub struct BslLanguageServer {
     pub(crate) document_symbol_bootstrap_tasks_v2: Arc<Mutex<DocumentSymbolBootstrapTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
+    /// Tracks the freshest file version whose current-revision handoff has already been pushed
+    /// into the runtime writer queue. This is stricter than `latest_received_file_versions_v2`,
+    /// which may advance before the runtime handoff is actually enqueued.
+    pub(crate) latest_current_revision_handoff_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,

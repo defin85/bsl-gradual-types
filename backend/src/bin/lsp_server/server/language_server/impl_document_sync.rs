@@ -548,6 +548,28 @@ impl BslLanguageServer {
             {
                 return;
             }
+            if !server
+                .analysis_v2
+                .wait_for_file_version_for_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                    file_id,
+                    requested_version,
+                )
+                .await
+            {
+                return;
+            }
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                != Some(requested_version)
+            {
+                return;
+            }
 
             let analysis = server
                 .analysis_v2
@@ -557,11 +579,28 @@ impl BslLanguageServer {
                 )
                 .await
                 .analysis;
+            if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
+                return;
+            }
             let _ = analysis.try_publish_completion_head_from_previous_ir_reuse_for_version(
                 file_id,
                 requested_version,
                 previous_version,
             );
+            if !analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false)
+            {
+                server
+                    .run_completion_exact_ir_singleflight_prewarm_v2(
+                        analysis,
+                        file_id,
+                        bsl_runtime::application::CpuWorkClass::Interactive,
+                        false,
+                    )
+                    .await;
+            }
         });
     }
 
@@ -654,14 +693,17 @@ impl BslLanguageServer {
             if requested_version <= 0 {
                 break;
             }
-            if self
+            let latest_received_version = self
                 .latest_received_file_versions_v2
                 .read()
                 .await
                 .get(&file_id)
                 .copied()
-                .is_none()
-            {
+                .unwrap_or(0);
+            if latest_received_version <= 0 {
+                break;
+            }
+            if latest_received_version != requested_version {
                 break;
             }
             if !self
@@ -676,15 +718,15 @@ impl BslLanguageServer {
             {
                 break;
             }
-            if self
+            let latest_received_version = self
                 .latest_received_file_versions_v2
                 .read()
                 .await
                 .get(&file_id)
                 .copied()
-                != Some(requested_version)
-            {
-                continue;
+                .unwrap_or(0);
+            if latest_received_version != requested_version {
+                break;
             }
 
             let analysis = self
@@ -717,17 +759,17 @@ impl BslLanguageServer {
                 continue;
             }
             if requested_version_state.load(Ordering::Relaxed) != requested_version {
-                continue;
+                break;
             }
-            if self
+            let latest_received_version = self
                 .latest_received_file_versions_v2
                 .read()
                 .await
                 .get(&file_id)
                 .copied()
-                != Some(requested_version)
-            {
-                continue;
+                .unwrap_or(0);
+            if latest_received_version != requested_version {
+                break;
             }
 
             self.run_completion_exact_ir_singleflight_prewarm_v2(
@@ -1077,10 +1119,6 @@ impl BslLanguageServer {
                     text: text.clone(),
                 },
             );
-            self.latest_apply_enqueued_at_v2
-                .write()
-                .await
-                .insert(file_id, Instant::now());
             self.analysis_v2.apply_changes_interactive(
                 bsl_runtime::application::ObservabilityOrigin::Lsp,
                 vec![bsl_analysis_v2::Change::SetFile {
@@ -1090,6 +1128,15 @@ impl BslLanguageServer {
                     path: path.clone(),
                 }],
             );
+            let handoff_registered_at = Instant::now();
+            self.latest_current_revision_handoff_versions_v2
+                .write()
+                .await
+                .insert(file_id, version);
+            self.latest_apply_enqueued_at_v2
+                .write()
+                .await
+                .insert(file_id, handoff_registered_at);
         }
         self.schedule_completion_head_precompute_from_current_revision_v2(file_id, version)
             .await;
@@ -1312,10 +1359,6 @@ impl BslLanguageServer {
                     text: updated_text.clone(),
                 },
             );
-            self.latest_apply_enqueued_at_v2
-                .write()
-                .await
-                .insert(file_id, Instant::now());
             let mut current_revision_changes = vec![bsl_analysis_v2::Change::SetFile {
                 file_id,
                 text: updated_text.clone(),
@@ -1337,6 +1380,15 @@ impl BslLanguageServer {
                 bsl_runtime::application::ObservabilityOrigin::Lsp,
                 current_revision_changes,
             );
+            let handoff_registered_at = Instant::now();
+            self.latest_current_revision_handoff_versions_v2
+                .write()
+                .await
+                .insert(file_id, version);
+            self.latest_apply_enqueued_at_v2
+                .write()
+                .await
+                .insert(file_id, handoff_registered_at);
             (
                 updated_text,
                 path,
@@ -1591,6 +1643,10 @@ impl BslLanguageServer {
                 .await;
             self.cancel_document_symbol_bootstrap_v2(file_id).await;
             self.latest_received_file_versions_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.latest_current_revision_handoff_versions_v2
                 .write()
                 .await
                 .remove(&file_id);

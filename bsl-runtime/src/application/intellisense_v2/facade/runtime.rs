@@ -35,6 +35,7 @@ impl IntellisenseV2Facade {
         let initial_snapshot = initial_host.snapshot();
         let initial_deps_id = initial_snapshot.deps_id().expect("initial deps id");
         let initial_deps = initial_snapshot.deps_data().expect("initial deps data");
+        let background_tx_for_writer = background_tx.clone();
         let completion_deps_index_snapshot =
             Arc::new(ArcSwap::from_pointee(CompletionDepsIndexSnapshot {
                 deps: initial_deps,
@@ -134,8 +135,28 @@ impl IntellisenseV2Facade {
                         }
                     };
 
-                while let Some((queue_priority, cmd)) =
-                    if let Some(command) = pending_interactive_commands.pop_front() {
+                while let Some((queue_priority, cmd)) = if !pending_interactive_commands.is_empty()
+                {
+                    if let Some(command) = promote_interactive_current_revision_apply_command(
+                        &interactive_rx,
+                        &mut pending_interactive_commands,
+                    ) {
+                        interactive_streak = interactive_streak.saturating_add(1);
+                        Some((RuntimeQueuePriority::Interactive, command))
+                    } else if let Some(command) = promote_pending_current_revision_apply_command(
+                        &mut pending_interactive_commands,
+                    ) {
+                        interactive_streak = interactive_streak.saturating_add(1);
+                        Some((RuntimeQueuePriority::Interactive, command))
+                    } else if let Some(command) = try_recv_next_writer_command_nonblocking(
+                        &interactive_rx,
+                        &background_rx,
+                        &mut interactive_streak,
+                        &mut interactive_closed,
+                        &mut background_closed,
+                    ) {
+                        Some(command)
+                    } else if let Some(command) = pending_interactive_commands.pop_front() {
                         interactive_streak = interactive_streak.saturating_add(1);
                         Some((RuntimeQueuePriority::Interactive, command))
                     } else {
@@ -147,6 +168,15 @@ impl IntellisenseV2Facade {
                             &mut background_closed,
                         )
                     }
+                } else {
+                    recv_next_writer_command(
+                        &interactive_rx,
+                        &background_rx,
+                        &mut interactive_streak,
+                        &mut interactive_closed,
+                        &mut background_closed,
+                    )
+                }
                 {
                     let cmd = if queue_priority == RuntimeQueuePriority::Interactive {
                         coalesce_interactive_current_revision_apply_command(
@@ -163,6 +193,39 @@ impl IntellisenseV2Facade {
                             enqueued_at,
                             changes,
                         } => {
+                            let should_defer_background_snapshot_apply = queue_priority
+                                == RuntimeQueuePriority::Background
+                                && matches!(
+                                    changes.as_slice(),
+                                    [Change::SetFileWithSnapshot { .. }]
+                                )
+                                && {
+                                    if !pending_interactive_commands.is_empty() {
+                                        true
+                                    } else if interactive_closed {
+                                        false
+                                    } else {
+                                        match interactive_rx.try_recv() {
+                                            Ok(command) => {
+                                                pending_interactive_commands.push_front(command);
+                                                true
+                                            }
+                                            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                                interactive_closed = true;
+                                                false
+                                            }
+                                            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+                                        }
+                                    }
+                                };
+                            if should_defer_background_snapshot_apply {
+                                let _ = background_tx_for_writer.send(Command::ApplyChanges {
+                                    origin,
+                                    enqueued_at: Instant::now(),
+                                    changes,
+                                });
+                                continue;
+                            }
                             let queue_wait_elapsed = enqueued_at.elapsed();
                             if let Some(coordinator) = &observability {
                                 coordinator.record_intellisense_v2_runtime_queue_wait_latency_with_origin(

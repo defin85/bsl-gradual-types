@@ -181,7 +181,10 @@ fn record_completion_response_egress_metrics(
             "response_ready_to_output_enqueue_wait",
             derived.response_ready_to_output_enqueue_wait_ms,
         ),
-        ("response_output_queue_wait", derived.response_output_queue_wait_ms),
+        (
+            "response_output_queue_wait",
+            derived.response_output_queue_wait_ms,
+        ),
         (
             "response_output_encode_exec",
             derived.response_output_encode_exec_ms,
@@ -346,6 +349,7 @@ impl BslLanguageServer {
             document_symbol_bootstrap_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),

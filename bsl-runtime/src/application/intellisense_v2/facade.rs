@@ -767,6 +767,51 @@ impl CurrentRevisionApplyCommand {
 const INTERACTIVE_BURST_QUOTA: usize = 8;
 const CURRENT_REVISION_COALESCE_WINDOW: Duration = Duration::from_millis(4);
 
+fn try_recv_next_writer_command_nonblocking(
+    interactive_rx: &std::sync::mpsc::Receiver<Command>,
+    background_rx: &std::sync::mpsc::Receiver<Command>,
+    interactive_streak: &mut usize,
+    interactive_closed: &mut bool,
+    background_closed: &mut bool,
+) -> Option<(RuntimeQueuePriority, Command)> {
+    use std::sync::mpsc::TryRecvError;
+
+    if *interactive_streak >= INTERACTIVE_BURST_QUOTA {
+        *interactive_streak = 0;
+        if !*background_closed {
+            match background_rx.try_recv() {
+                Ok(command) => return Some((RuntimeQueuePriority::Background, command)),
+                Err(TryRecvError::Disconnected) => *background_closed = true,
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+    }
+
+    if !*interactive_closed {
+        match interactive_rx.try_recv() {
+            Ok(command) => {
+                *interactive_streak = interactive_streak.saturating_add(1);
+                return Some((RuntimeQueuePriority::Interactive, command));
+            }
+            Err(TryRecvError::Disconnected) => *interactive_closed = true,
+            Err(TryRecvError::Empty) => {}
+        }
+    }
+
+    if !*background_closed {
+        match background_rx.try_recv() {
+            Ok(command) => {
+                *interactive_streak = 0;
+                return Some((RuntimeQueuePriority::Background, command));
+            }
+            Err(TryRecvError::Disconnected) => *background_closed = true,
+            Err(TryRecvError::Empty) => {}
+        }
+    }
+
+    None
+}
+
 fn recv_next_writer_command(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
     background_rx: &std::sync::mpsc::Receiver<Command>,
@@ -887,6 +932,54 @@ fn coalesce_interactive_current_revision_apply_command(
     }
 
     current.into_command()
+}
+
+fn promote_interactive_current_revision_apply_command(
+    interactive_rx: &std::sync::mpsc::Receiver<Command>,
+    pending_interactive_commands: &mut VecDeque<Command>,
+) -> Option<Command> {
+    use std::sync::mpsc::TryRecvError;
+
+    let mut promoted: Option<CurrentRevisionApplyCommand> = None;
+    let mut fresh_pending = VecDeque::new();
+    loop {
+        match interactive_rx.try_recv() {
+            Ok(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command) {
+                Ok(next) => match &mut promoted {
+                    Some(current) if current.can_supersede(&next) => {
+                        current.supersede_with(next);
+                    }
+                    Some(_) => fresh_pending.push_back(next.into_command()),
+                    None => promoted = Some(next),
+                },
+                Err(next_command) => fresh_pending.push_back(next_command),
+            },
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        }
+    }
+
+    while let Some(command) = fresh_pending.pop_back() {
+        pending_interactive_commands.push_front(command);
+    }
+
+    promoted.map(CurrentRevisionApplyCommand::into_command)
+}
+
+fn promote_pending_current_revision_apply_command(
+    pending_interactive_commands: &mut VecDeque<Command>,
+) -> Option<Command> {
+    for idx in (0..pending_interactive_commands.len()).rev() {
+        let Some(command) = pending_interactive_commands.remove(idx) else {
+            continue;
+        };
+        match CurrentRevisionApplyCommand::try_from_command(command) {
+            Ok(current) => return Some(current.into_command()),
+            Err(command) => {
+                pending_interactive_commands.insert(idx, command);
+            }
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

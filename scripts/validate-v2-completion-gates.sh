@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORT_DIR="${ROOT_DIR}/backend/tests/perf/reports"
-CHANGE_ID="${CHANGE_ID:-refactor-current-revision-readiness-fast-lane}"
+CHANGE_ID="${CHANGE_ID:-refactor-completion-front-edge-readiness-window}"
 READINESS_REPORT="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.json"
 READINESS_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.md"
 OPENSPEC_LOG="${REPORT_DIR}/${CHANGE_ID}-openspec-validate.log"
@@ -22,6 +22,8 @@ if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
     REAL_MODULE_PROFILES="outline"
   elif [[ "${CHANGE_ID}" == "isolate-completion-pre-dispatch-ingress" ]]; then
     REAL_MODULE_PROFILES="outline"
+  elif [[ "${CHANGE_ID}" == "refactor-completion-front-edge-readiness-window" ]]; then
+    REAL_MODULE_PROFILES="front_edge"
   else
     REAL_MODULE_PROFILES="churn"
   fi
@@ -103,6 +105,13 @@ for profile in ${REAL_MODULE_PROFILES}; do
       report_var="BSL_V2_REAL_CONF_BIG_PRE_ACTIVE_OVERLAP_COMPLETION_PERF_REPORT"
       report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.json"
       summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-pre-active-overlap-completion-perf-live.md"
+      ;;
+    front_edge)
+      profile_title="same-file front-edge readiness window"
+      test_name="p42_real_conf_big_front_edge_completion_perf_report_live"
+      report_var="BSL_V2_REAL_CONF_BIG_FRONT_EDGE_COMPLETION_PERF_REPORT"
+      report_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-front-edge-completion-perf-live.json"
+      summary_path="${REPORT_DIR}/${CHANGE_ID}-real-conf-big-front-edge-completion-perf-live.md"
       ;;
     *)
       echo "Unsupported REAL_MODULE_PROFILES entry: ${profile}" >&2
@@ -233,6 +242,15 @@ for profile in real_module_profiles:
         "exact_hit_traces": summary.get("measured_exact_hit_traces", 0),
         "prepare_timeout_delta": summary.get("measured_prepare_timeout_total_delta", 0),
         "exact_deadline_delta": summary.get("measured_exact_deadline_total_delta", 0),
+        "prepare_timeout_wait_for_file_version_samples": summary.get(
+            "measured_prepare_timeout_wait_for_file_version_samples", 0
+        ),
+        "prepare_timeout_snapshot_with_deps_samples": summary.get(
+            "measured_prepare_timeout_snapshot_with_deps_samples", 0
+        ),
+        "cold_query_bundle_pool_wait_samples": summary.get(
+            "measured_cold_query_bundle_pool_wait_samples", 0
+        ),
     }
     real_module_rows.append(
         (
@@ -339,6 +357,52 @@ for profile in real_module_profiles:
                 (
                     "- trace-linked samples: "
                     f"`{summary.get('measured_trace_linked_samples', 0)}`"
+                ),
+            ]
+        )
+    if "measured_prepare_timeout_wait_for_file_version_samples" in summary:
+        profile_lines.extend(
+            [
+                (
+                    "- prepare_timeout@wait_for_file_version samples: "
+                    f"`{summary.get('measured_prepare_timeout_wait_for_file_version_samples', 0)}`"
+                ),
+                (
+                    "- prepare_timeout@snapshot_with_deps samples: "
+                    f"`{summary.get('measured_prepare_timeout_snapshot_with_deps_samples', 0)}`"
+                ),
+            ]
+        )
+    if "measured_cold_query_bundle_pool_wait_samples" in summary:
+        profile_lines.extend(
+            [
+                (
+                    "- cold `query_bundle_pool_wait` samples: "
+                    f"`{summary.get('measured_cold_query_bundle_pool_wait_samples', 0)}`"
+                ),
+                (
+                    "`p95(client_to_transport_wait_ms)="
+                    f"{summary.get('measured_client_to_transport_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(client_to_transport_wait_ms)="
+                    f"{summary.get('measured_client_to_transport_wait_max_ms', 0)}ms`"
+                ),
+                (
+                    "`p95(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(service_future_to_first_poll_wait_ms)="
+                    f"{summary.get('measured_service_future_to_first_poll_wait_max_ms', 0)}ms`"
+                ),
+                (
+                    "`p95(response_output_handoff_send_wait_ms)="
+                    f"{summary.get('measured_response_output_handoff_send_wait_ms', {}).get('p95', 0):g}ms`"
+                ),
+                (
+                    "`max(response_output_handoff_send_wait_ms)="
+                    f"{summary.get('measured_response_output_handoff_send_wait_max_ms', 0)}ms`"
                 ),
             ]
         )

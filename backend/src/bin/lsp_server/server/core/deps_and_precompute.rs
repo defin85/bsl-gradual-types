@@ -486,7 +486,23 @@ impl BslLanguageServer {
         let deadline = tokio::time::Instant::now() + max_wait;
         let mut waiter_action = TypeIndexPrecomputeWaiterActionV2::None;
         loop {
-            let analysis = self.snapshot_for_completion_wait_v2().await;
+            let analysis =
+                match tokio::time::timeout_at(deadline, self.snapshot_for_completion_wait_v2())
+                    .await
+                {
+                    Ok(analysis) => analysis,
+                    Err(_) => {
+                        let matching_task_trace = self
+                            .current_exact_wait_matching_task_trace_v2(file_id, expected_version)
+                            .await;
+                        return ExactTypeIndexWaitTraceV2 {
+                            outcome: ExactTypeIndexWaitOutcomeV2::Deadline,
+                            waiter_action,
+                            matching_task_state: Some(matching_task_trace.matching_task_state),
+                            task_phase: matching_task_trace.task_phase,
+                        };
+                    }
+                };
             let observed_version = analysis.file_version(file_id).ok().flatten();
             let exact_ready = expected_version
                 .is_none_or(|version| observed_version == Some(version))
@@ -584,7 +600,24 @@ impl BslLanguageServer {
         let started = Instant::now();
         let mut poll_count = 0_u64;
         loop {
-            let analysis = self.snapshot_for_completion_wait_v2().await;
+            let analysis =
+                match tokio::time::timeout_at(deadline, self.snapshot_for_completion_wait_v2())
+                    .await
+                {
+                    Ok(analysis) => analysis,
+                    Err(_) => {
+                        return CompletionArtifactWaitTraceV2 {
+                            outcome: CompletionArtifactWaitOutcomeV2::Deadline,
+                            poll_trace: CompletionArtifactPollTraceV2 {
+                                poll_count,
+                                poll_elapsed: started.elapsed(),
+                                observed_file_version: None,
+                                head_ready: None,
+                                exact_ready: None,
+                            },
+                        };
+                    }
+                };
             let observed_version = analysis.file_version(file_id).ok().flatten();
             let version_matches = expected_version
                 .map(|version| observed_version == Some(version))

@@ -487,6 +487,78 @@ async fn interleaved_interactive_non_apply_work_does_not_strand_latest_set_file(
     runtime.shutdown_for_test().await;
 }
 
+#[tokio::test]
+async fn pending_interactive_backlog_does_not_block_later_lsp_set_file() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(214);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 1,
+            path: Arc::from("interactive_pending_backlog.bsl"),
+        }],
+    );
+    let mut sleepers = Vec::new();
+    for _ in 0..4 {
+        sleepers.push(
+            runtime
+                .enqueue_test_sleep(RuntimeQueuePriority::Interactive, Duration::from_millis(60)),
+        );
+    }
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 2;"),
+            version: 2,
+            path: Arc::from("interactive_pending_backlog.bsl"),
+        }],
+    );
+
+    let started = Instant::now();
+    let wait_result = timeout(
+        Duration::from_millis(140),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            2,
+        ),
+    )
+    .await
+    .expect("later LSP SetFile should not wait behind stale pending interactive backlog");
+    assert!(
+        wait_result.ready,
+        "wait_for_file_version must observe the later LSP SetFile despite pending interactive backlog"
+    );
+    assert!(
+        started.elapsed() < Duration::from_millis(140),
+        "later LSP SetFile must preempt stale pending interactive backlog"
+    );
+
+    for sleeper_ack in sleepers {
+        timeout(Duration::from_secs(1), sleeper_ack)
+            .await
+            .expect("interactive sleeper ack timeout")
+            .expect("interactive sleeper ack");
+    }
+
+    let analysis = runtime.snapshot().await;
+    assert_eq!(analysis.file_version(file_id).unwrap(), Some(2));
+
+    runtime.shutdown_for_test().await;
+}
+
 #[test]
 fn coalesced_whitespace_append_burst_preserves_earliest_reuse_base() {
     let (tx, rx) = std::sync::mpsc::channel();

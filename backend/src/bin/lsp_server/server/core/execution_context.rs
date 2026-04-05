@@ -199,10 +199,19 @@ impl BslLanguageServer {
                         path: Arc::from(path_string.clone()),
                     }],
                 );
+                let handoff_registered_at = Instant::now();
+                self.latest_current_revision_handoff_versions_v2
+                    .write()
+                    .await
+                    .insert(file_id, 0);
                 self.latest_received_file_versions_v2
                     .write()
                     .await
                     .insert(file_id, 0);
+                self.latest_apply_enqueued_at_v2
+                    .write()
+                    .await
+                    .insert(file_id, handoff_registered_at);
                 self.latest_document_shadow_state_v2.write().await.insert(
                     file_id,
                     DocumentShadowStateV2 {

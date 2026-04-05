@@ -197,40 +197,6 @@ impl CompletionPreparedSnapshot {
         }
     }
 
-    fn from_exact_stateful(
-        context: bsl_runtime::application::ExecutionContext,
-        prepared: bsl_runtime::application::PreparedOperationSnapshot,
-        expected_version: i32,
-    ) -> Self {
-        Self {
-            kind: "exact_stateful",
-            context,
-            expected_version,
-            snapshot: Some(
-                bsl_runtime::application::CompletionCurrentRevisionSnapshot {
-                    analysis: prepared.snapshot.analysis,
-                    deps_id: prepared.snapshot.deps_id,
-                    index_snapshot: prepared.index_snapshot,
-                },
-            ),
-            wait_elapsed: prepared.wait_elapsed,
-            snapshot_elapsed: prepared.snapshot_elapsed,
-            wait_for_file_version_runtime: prepared.wait_for_file_version_runtime,
-            snapshot_with_deps_runtime: Some(prepared.snapshot_with_deps_runtime),
-            timeout_attribution: prepared.timeout_attribution,
-            observed_file_version: prepared.observed_file_version,
-            file_content_override: None,
-            file_path_override: None,
-            head_owner_type_hints_override: None,
-            head_ready_override: false,
-            exact_ready_override: false,
-            deps_override: None,
-            deps_id_override: None,
-            index_snapshot_override: None,
-            settings_id_override: None,
-        }
-    }
-
     fn from_shadow_head_fast_path(
         context: bsl_runtime::application::ExecutionContext,
         snapshot: bsl_runtime::application::CompletionCurrentRevisionSnapshot,
@@ -295,6 +261,38 @@ impl CompletionPreparedSnapshot {
             file_path_override: Some(file_path),
             head_owner_type_hints_override: Some(head_owner_type_hints),
             head_ready_override: true,
+            exact_ready_override: false,
+            deps_override: Some(bundle.deps),
+            deps_id_override: Some(bundle.deps_id),
+            index_snapshot_override: Some(bundle.index_snapshot),
+            settings_id_override: Some(settings_id),
+        }
+    }
+
+    fn from_shadow_current_revision_fast_path(
+        context: bsl_runtime::application::ExecutionContext,
+        bundle: bsl_runtime::application::CompletionSupportBundle,
+        expected_version: i32,
+        file_content: Arc<str>,
+        file_path: Arc<str>,
+        snapshot_elapsed: std::time::Duration,
+    ) -> Self {
+        let settings_id = context.settings.settings_id.clone();
+        Self {
+            kind: "shadow_current_revision_fast_path",
+            context,
+            expected_version,
+            snapshot: None,
+            wait_elapsed: None,
+            snapshot_elapsed,
+            wait_for_file_version_runtime: None,
+            snapshot_with_deps_runtime: None,
+            timeout_attribution: None,
+            observed_file_version: Some(expected_version),
+            file_content_override: Some(file_content),
+            file_path_override: Some(file_path),
+            head_owner_type_hints_override: Some(Vec::new()),
+            head_ready_override: false,
             exact_ready_override: false,
             deps_override: Some(bundle.deps),
             deps_id_override: Some(bundle.deps_id),
@@ -1809,6 +1807,68 @@ impl BslLanguageServer {
                     ),
                 ))
             }
+            async fn try_prepare_shadow_current_revision_fast_path(
+                server: &BslLanguageServer,
+                uri: &Url,
+                file_id: bsl_analysis_v2::FileId,
+                flow_sensitive: bool,
+                completion_mode: Option<&'static str>,
+            ) -> Result<Option<CompletionPreparedSnapshot>, bsl_runtime::application::SemanticOutcome>
+            {
+                let expected_version = server
+                    .resolve_or_seed_min_file_version_v2(
+                        uri,
+                        file_id,
+                        bsl_runtime::application::SemanticOperation::Completion,
+                    )
+                    .await?;
+                let handoff_version = server
+                    .latest_current_revision_handoff_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied();
+                if handoff_version != Some(expected_version) {
+                    return Ok(None);
+                }
+                let Some(shadow_state) = server
+                    .latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned()
+                else {
+                    return Ok(None);
+                };
+                if shadow_state.version != expected_version {
+                    return Ok(None);
+                }
+                let file_path = match uri.to_file_path() {
+                    Ok(path) => Arc::<str>::from(path.to_string_lossy().to_string()),
+                    Err(_) => Arc::<str>::from(uri.to_string()),
+                };
+                let context = server
+                    .build_execution_context_v2_with_completion_mode(
+                        bsl_runtime::application::SemanticOperation::Completion,
+                        file_id,
+                        Some(expected_version),
+                        flow_sensitive,
+                        completion_mode,
+                    )
+                    .await;
+                let support_bundle_started = Instant::now();
+                let support_bundle = server.analysis_v2.completion_support_bundle();
+                Ok(Some(
+                    CompletionPreparedSnapshot::from_shadow_current_revision_fast_path(
+                        context,
+                        support_bundle,
+                        expected_version,
+                        shadow_state.text,
+                        file_path,
+                        support_bundle_started.elapsed(),
+                    ),
+                ))
+            }
             if pending_request_cancelled_before_take {
                 if event_driven_guards_enabled {
                     if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
@@ -1906,24 +1966,32 @@ impl BslLanguageServer {
                 )
                 .map(|knobs| knobs.wait_budget);
             timeline_capture.set_prepare_wait_budget(prepare_timeout);
-            timeline_capture.set_prepare_kind(if member_access_request {
-                "lightweight_current_revision"
-            } else {
-                "exact_stateful"
-            });
+            timeline_capture.set_prepare_kind("lightweight_current_revision");
             let prepare_progress = bsl_runtime::application::PrepareStatefulProgress::new();
             set_current_request_completion_phase("prepare_stateful");
-            let guarded_prepare = if member_access_request {
-                match try_prepare_shadow_head_fast_path(
-                    self,
-                    &uri,
-                    file_id,
-                    position,
-                    include_flow_sensitive,
-                    Some(completion_observability_mode),
-                )
-                .await
-                {
+            let guarded_prepare = {
+                let shadow_fast_path = if member_access_request {
+                    try_prepare_shadow_head_fast_path(
+                        self,
+                        &uri,
+                        file_id,
+                        position,
+                        include_flow_sensitive,
+                        Some(completion_observability_mode),
+                    )
+                    .await
+                } else {
+                    try_prepare_shadow_current_revision_fast_path(
+                        self,
+                        &uri,
+                        file_id,
+                        include_flow_sensitive,
+                        Some(completion_observability_mode),
+                    )
+                    .await
+                };
+
+                match shadow_fast_path {
                     Ok(Some(prepared)) => CompletionGuardResult::Completed(Ok(prepared)),
                     Ok(None) => match run_completion_guard(
                         self.prepare_lsp_completion_first_response_v2_with_completion_mode_and_progress(
@@ -1968,45 +2036,6 @@ impl BslLanguageServer {
                         }
                     },
                     Err(outcome) => CompletionGuardResult::Completed(Err(outcome)),
-                }
-            } else {
-                match run_completion_guard(
-                    self.prepare_lsp_stateful_operation_v2_with_completion_mode_and_progress(
-                        &uri,
-                        file_id,
-                        bsl_runtime::application::SemanticOperation::Completion,
-                        include_flow_sensitive,
-                        Some(completion_observability_mode),
-                        Some(&prepare_progress),
-                    ),
-                    prepare_timeout,
-                    event_driven_guards_enabled.then(|| {
-                        wait_for_completion_abort(
-                            self,
-                            file_id,
-                            completion_request_id.as_deref(),
-                            completion_ticket.request_epoch,
-                            completion_cancellation_token.as_ref(),
-                            "prepare",
-                            &mut cancel_event_emitted,
-                        )
-                    }),
-                )
-                .await
-                {
-                    CompletionGuardResult::Completed(prepared) => CompletionGuardResult::Completed(
-                        prepared.map(|(context, prepared, expected_version)| {
-                            CompletionPreparedSnapshot::from_exact_stateful(
-                                context,
-                                prepared,
-                                expected_version,
-                            )
-                        }),
-                    ),
-                    CompletionGuardResult::TimedOut => CompletionGuardResult::TimedOut,
-                    CompletionGuardResult::Aborted(outcome) => {
-                        CompletionGuardResult::Aborted(outcome)
-                    }
                 }
             };
             let prepare_elapsed = prepare_started.elapsed();
@@ -2515,6 +2544,113 @@ impl BslLanguageServer {
                                         "exact_deadline",
                                     );
                             }
+                            self.coordinator
+                                .record_intellisense_v2_completion_fallback_unavailable();
+                            completion_outcome.get_or_insert("wait_not_ready");
+                            break 'completion_flow Some(completion_empty_response(false));
+                        }
+                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
+                        {
+                            self.coordinator.record_completion_stage_latency(
+                                "exact_wait_apply_age_at_terminal",
+                                apply_age,
+                            );
+                        }
+                        self.coordinator
+                            .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                super::super::core::ExactTypeIndexWaitOutcomeV2::Ready.as_str(),
+                            );
+                        exact_hit_candidate = true;
+                        refreshed_snapshot_after_wait = Some(snapshot_after_wait);
+                    }
+                    if !member_access_request
+                        && prepared.kind == "shadow_current_revision_fast_path"
+                        && !exact_ready_before_wait
+                        && !exact_hit_candidate
+                    {
+                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
+                        {
+                            self.coordinator.record_completion_stage_latency(
+                                "exact_wait_apply_age_at_start",
+                                apply_age,
+                            );
+                        }
+                        let exact_wait_started = Instant::now();
+                        set_current_request_completion_phase("wait_exact_type_index");
+                        let exact_wait = self
+                            .wait_for_current_type_index_serve_only_ready_v2(
+                                file_id,
+                                Some(expected_version),
+                                exact_wait_budget,
+                            )
+                            .await;
+                        let exact_wait_elapsed = exact_wait_started.elapsed();
+                        self.coordinator.record_completion_stage_latency(
+                            "wait_exact_type_index",
+                            exact_wait_elapsed,
+                        );
+                        timeline_capture
+                            .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
+                        timeline_capture
+                            .set_exact_wait_type_index_outcome(exact_wait.outcome.as_str());
+                        timeline_capture.set_exact_wait_type_index_waiter_action(
+                            exact_wait.waiter_action.as_str(),
+                        );
+                        if let Some(matching_task_state) = exact_wait.matching_task_state {
+                            timeline_capture
+                                .set_exact_wait_matching_task_state(matching_task_state.as_str());
+                        }
+                        if let Some(task_phase) = exact_wait.task_phase {
+                            timeline_capture.set_exact_wait_task_phase(task_phase.as_str());
+                        }
+
+                        if exact_wait.outcome
+                            != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
+                        {
+                            if let Some(apply_age) =
+                                completion_apply_age_for_file(self, file_id).await
+                            {
+                                self.coordinator.record_completion_stage_latency(
+                                    "exact_wait_apply_age_at_terminal",
+                                    apply_age,
+                                );
+                            }
+                            self.coordinator
+                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                    exact_wait.outcome.as_str(),
+                                );
+                            self.coordinator
+                                .record_intellisense_v2_completion_fallback_unavailable();
+                            completion_outcome.get_or_insert("wait_not_ready");
+                            break 'completion_flow Some(completion_empty_response(false));
+                        }
+
+                        let snapshot_after_wait = self
+                            .analysis_v2
+                            .completion_current_revision_snapshot_for_origin_and_operation(
+                                context.origin,
+                                context.operation,
+                            )
+                            .await;
+                        let exact_ready_after_wait = snapshot_after_wait
+                            .analysis
+                            .current_type_index_serve_only_ready(file_id)
+                            .ok()
+                            .unwrap_or(false);
+                        if !exact_ready_after_wait {
+                            if let Some(apply_age) =
+                                completion_apply_age_for_file(self, file_id).await
+                            {
+                                self.coordinator.record_completion_stage_latency(
+                                    "exact_wait_apply_age_at_terminal",
+                                    apply_age,
+                                );
+                            }
+                            self.coordinator
+                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
+                                    super::super::core::ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
+                                        .as_str(),
+                                );
                             self.coordinator
                                 .record_intellisense_v2_completion_fallback_unavailable();
                             completion_outcome.get_or_insert("wait_not_ready");

@@ -1,6 +1,5 @@
 [mcp_servers.claude-context]
-command = "bash"
-args = ["-lc", 'export NVM_DIR="$HOME/.nvm"; [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"; export OLLAMA_HOST="http://$(awk "/nameserver/{print \$2; exit}" /etc/resolv.conf):11434"; [ -f "/home/egor/code/claude-context/packages/mcp/dist/index.js" ] || { echo "Local MCP build not found: /home/egor/code/claude-context/packages/mcp/dist/index.js" >&2; echo "Run: /home/egor/code/claude-context/scripts/build-local-mcp.sh" >&2; exit 1; }; nvm exec --silent 22 -- node /home/egor/code/claude-context/packages/mcp/dist/index.js']
+command = "/home/egor/.local/bin/claude-context-mcp-local"
 startup_timeout_sec = 60.0
 
 [mcp_servers.claude-context.env]

@@ -50,10 +50,10 @@
 - Parse-gap activation в measured iterations пришла через `didSave` re-arm после
   same-file `didChange`/`didSave` churn.
 - Interactive ingress budget сохранён:
-  `p95(service_future_to_first_poll_wait_ms)=3ms`,
-  `max(service_future_to_first_poll_wait_ms)=3ms`,
-  `p95(transport_to_handler_wait_ms)=3ms`,
-  `max(transport_to_handler_wait_ms)=3ms`,
+  `p95(service_future_to_first_poll_wait_ms)=10ms`,
+  `max(service_future_to_first_poll_wait_ms)=10ms`,
+  `p95(transport_to_handler_wait_ms)=11ms`,
+  `max(transport_to_handler_wait_ms)=11ms`,
   runtime budget `intellisense_v2_interactive_wait_budget_ms=120`.
 - Это даёт acceptance evidence, что auxiliary outline refresh больше не превращает completion ingress в starvation point даже под same-file mixed load.
 

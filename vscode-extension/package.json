@@ -2,7 +2,7 @@
     "name": "bsl-gradual-types",
     "displayName": "BSL Gradual Type System",
     "description": "Production-ready BSL (1C:Enterprise) gradual type system with flow-sensitive analysis, union types, and enhanced LSP server",
-    "version": "0.4.124",
+    "version": "0.4.125",
     "publisher": "bsl-gradual-types-team",
     "icon": "images/bsl-analyzer-logo.png",
     "engines": {

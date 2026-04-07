@@ -31,6 +31,13 @@ pub fn parse_fast(source: &str) -> Result<ast::ParseResult, ParseFatalError> {
     TreeSitterAdapter::convert_tree_fast(&tree, source).map_err(ParseFatalError::Adapter)
 }
 
+pub fn syntax_errors_only(
+    source: &str,
+) -> Result<Vec<bsl_shared::domain::types::ParseError>, ParseFatalError> {
+    let tree = parse_tree(source)?;
+    Ok(TreeSitterAdapter::collect_syntax_errors_only(&tree, source))
+}
+
 pub(crate) fn parse_tree(source: &str) -> Result<tree_sitter::Tree, ParseFatalError> {
     let mut parser = Parser::new();
     parser

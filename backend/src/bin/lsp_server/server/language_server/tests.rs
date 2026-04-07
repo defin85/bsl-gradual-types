@@ -13,6 +13,11 @@ use tower_lsp::lsp_types::{Position, Url};
 
 #[test]
 fn idle_heavy_runs_for_save_trigger_even_when_flow_sensitive_disabled() {
+    assert!(should_schedule_profile(
+        DiagnosticsTrigger::DidSave,
+        DiagnosticsProfile::SaveFastlane,
+        false
+    ));
     assert!(!should_schedule_profile(
         DiagnosticsTrigger::DidChange,
         DiagnosticsProfile::IdleHeavy,

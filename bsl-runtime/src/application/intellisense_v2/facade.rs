@@ -888,7 +888,7 @@ fn coalesce_interactive_current_revision_apply_command(
     command: Command,
     pending_interactive_commands: &mut VecDeque<Command>,
 ) -> Command {
-    use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
+    use std::sync::mpsc::TryRecvError;
 
     let mut current = match CurrentRevisionApplyCommand::try_from_command(command) {
         Ok(current) => current,
@@ -904,10 +904,7 @@ fn coalesce_interactive_current_revision_apply_command(
                 if remaining.is_zero() {
                     None
                 } else {
-                    match interactive_rx.recv_timeout(remaining) {
-                        Ok(next_command) => Some(next_command),
-                        Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-                    }
+                    interactive_rx.recv_timeout(remaining).ok()
                 }
             }
             Err(TryRecvError::Disconnected) => None,
@@ -938,23 +935,18 @@ fn promote_interactive_current_revision_apply_command(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
     pending_interactive_commands: &mut VecDeque<Command>,
 ) -> Option<Command> {
-    use std::sync::mpsc::TryRecvError;
-
     let mut promoted: Option<CurrentRevisionApplyCommand> = None;
     let mut fresh_pending = VecDeque::new();
-    loop {
-        match interactive_rx.try_recv() {
-            Ok(next_command) => match CurrentRevisionApplyCommand::try_from_command(next_command) {
-                Ok(next) => match &mut promoted {
-                    Some(current) if current.can_supersede(&next) => {
-                        current.supersede_with(next);
-                    }
-                    Some(_) => fresh_pending.push_back(next.into_command()),
-                    None => promoted = Some(next),
-                },
-                Err(next_command) => fresh_pending.push_back(next_command),
+    while let Ok(next_command) = interactive_rx.try_recv() {
+        match CurrentRevisionApplyCommand::try_from_command(next_command) {
+            Ok(next) => match &mut promoted {
+                Some(current) if current.can_supersede(&next) => {
+                    current.supersede_with(next);
+                }
+                Some(_) => fresh_pending.push_back(next.into_command()),
+                None => promoted = Some(next),
             },
-            Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            Err(next_command) => fresh_pending.push_back(next_command),
         }
     }
 

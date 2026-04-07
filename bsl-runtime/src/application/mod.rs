@@ -47,4 +47,5 @@ pub use type_system::{
     completion_member_access_owner_type_hints_from_completion_head_for_version,
     completion_member_access_owner_type_hints_from_head_receiver,
     completion_member_access_owner_type_hints_from_static_receiver,
+    CompletionHeadTypeHintsForVersionRequest,
 };

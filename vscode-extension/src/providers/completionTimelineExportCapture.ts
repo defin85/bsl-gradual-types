@@ -1,5 +1,6 @@
 import {
     CompletionTimelineFetchResult,
+    DiagnosticsSaveTimelineFetchResult,
     ObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
@@ -7,6 +8,7 @@ import { CompletionProbe } from './completionProbe';
 export interface CompletionTimelineExportCapture {
     capturedAtMs?: number;
     completionTimeline?: CompletionTimelineFetchResult;
+    diagnosticsSaveTimeline?: DiagnosticsSaveTimelineFetchResult;
     clientProbes?: CompletionProbe[];
     observabilityMetrics?: ObservabilityMetricsFetchResult;
 }
@@ -22,6 +24,7 @@ function cloneCapture(
     return {
         capturedAtMs: capture.capturedAtMs,
         completionTimeline: capture.completionTimeline,
+        diagnosticsSaveTimeline: capture.diagnosticsSaveTimeline,
         clientProbes: capture.clientProbes ? [...capture.clientProbes] : undefined,
         observabilityMetrics: capture.observabilityMetrics,
     };

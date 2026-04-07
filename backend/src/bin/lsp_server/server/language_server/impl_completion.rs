@@ -1094,9 +1094,9 @@ fn derive_pre_method_attribution_provenance(
         &super::super::request_context::PendingCompletionRequestContext,
     >,
 ) -> &'static str {
-    if current_request_id.is_some() && current_request_received_at_ms.is_some() {
-        "same_request_authoritative"
-    } else if exact_request_context.is_some() {
+    if (current_request_id.is_some() && current_request_received_at_ms.is_some())
+        || exact_request_context.is_some()
+    {
         "same_request_authoritative"
     } else if fallback_request_context.is_some() {
         "best_effort_fallback"
@@ -1789,7 +1789,7 @@ impl BslLanguageServer {
                         clear_pre_active_elapsed,
                     );
                     None
-                } else if {
+                } else {
                     let (marked_active, mark_active_elapsed) = timed_completion_future(
                         self.completion_dispatcher_v2.mark_completion_active(
                             file_id,
@@ -1803,16 +1803,16 @@ impl BslLanguageServer {
                         "handler_prelude_mark_active",
                         mark_active_elapsed,
                     );
-                    marked_active
-                } {
-                    Some(super::helpers::CompletionActiveTurnGuard::new(
-                        file_id,
-                        completion_ticket.file_seq,
-                        Arc::clone(&self.completion_dispatcher_v2),
-                    ))
-                } else {
-                    pre_active_terminal_outcome = Some("superseded");
-                    None
+                    if marked_active {
+                        Some(super::helpers::CompletionActiveTurnGuard::new(
+                            file_id,
+                            completion_ticket.file_seq,
+                            Arc::clone(&self.completion_dispatcher_v2),
+                        ))
+                    } else {
+                        pre_active_terminal_outcome = Some("superseded");
+                        None
+                    }
                 }
             } else {
                 None
@@ -1979,12 +1979,14 @@ impl BslLanguageServer {
         completion_member_access_owner_type_hints_from_completion_head_for_version(
             &snapshot.analysis,
             file_id,
-            expected_version,
-            &snapshot.deps_id,
-            &settings_id,
-            shadow_state.text.as_ref(),
-            position.line,
-            position.character,
+            bsl_runtime::application::CompletionHeadTypeHintsForVersionRequest {
+                file_version: expected_version,
+                deps_id: &snapshot.deps_id,
+                settings_id: &settings_id,
+                file_content: shadow_state.text.as_ref(),
+                line: position.line,
+                column: position.character,
+            },
         );
                 if head_owner_type_hints.is_empty() {
                     return Ok(None);
@@ -4314,11 +4316,11 @@ mod tests {
             }
         }
 
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        static ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
         let _env_lock = ENV_LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
+            .get_or_init(|| tokio::sync::Mutex::new(()))
             .lock()
-            .expect("env lock");
+            .await;
         let snapshot_delay_ms = 180_u64;
         let _snapshot_delay_guard = EnvVarGuard::set(
             "BSL_TEST_COMPLETION_CURRENT_REVISION_SNAPSHOT_DELAY_MS",

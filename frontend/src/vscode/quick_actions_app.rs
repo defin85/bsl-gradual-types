@@ -80,9 +80,9 @@ pub fn VsCodeQuickActionsApp() -> impl IntoView {
 
     view! {
         <QuickActionsPanel
-            search_results=search_results.into()
-            is_searching=is_searching.into()
-            sidebar_snapshot=sidebar_snapshot.into()
+            search_results=search_results
+            is_searching=is_searching
+            sidebar_snapshot=sidebar_snapshot
         />
     }
 }

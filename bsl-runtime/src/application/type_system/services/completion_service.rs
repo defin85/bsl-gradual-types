@@ -250,17 +250,22 @@ pub fn completion_member_access_owner_type_hints_from_completion_head(
     resolutions
 }
 
+pub struct CompletionHeadTypeHintsForVersionRequest<'a> {
+    pub file_version: i32,
+    pub deps_id: &'a bsl_analysis_v2::DepsSnapshotId,
+    pub settings_id: &'a bsl_analysis_v2::SettingsId,
+    pub file_content: &'a str,
+    pub line: u32,
+    pub column: u32,
+}
+
 pub fn completion_member_access_owner_type_hints_from_completion_head_for_version(
     analysis: &bsl_analysis_v2::AnalysisV2,
     file_id: bsl_analysis_v2::FileId,
-    file_version: i32,
-    deps_id: &bsl_analysis_v2::DepsSnapshotId,
-    settings_id: &bsl_analysis_v2::SettingsId,
-    file_content: &str,
-    line: u32,
-    column: u32,
+    request: CompletionHeadTypeHintsForVersionRequest<'_>,
 ) -> Vec<TypeResolution> {
-    let Some(receiver_spans) = extract_member_access_receiver_spans(file_content, line, column)
+    let Some(receiver_spans) =
+        extract_member_access_receiver_spans(request.file_content, request.line, request.column)
     else {
         return Vec::new();
     };
@@ -277,9 +282,9 @@ pub fn completion_member_access_owner_type_hints_from_completion_head_for_versio
             let resolution = analysis
                 .completion_head_type_at_byte_offset_for_version(
                     file_id,
-                    file_version,
-                    deps_id,
-                    settings_id,
+                    request.file_version,
+                    request.deps_id,
+                    request.settings_id,
                     *offset,
                 )
                 .ok()

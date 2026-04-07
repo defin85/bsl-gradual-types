@@ -1,7 +1,7 @@
 //! Unit tests for VSCode webview integration
 
 #[cfg(test)]
-mod tests {
+mod vscode_webview_tests {
     use super::super::common::VsCodeMessage;
     use serde::{Deserialize, Serialize};
 

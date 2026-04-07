@@ -484,6 +484,7 @@ pub(super) fn normalize_diagnostics_profile_label(profile: &str) -> &'static str
     match profile {
         "fast" => "fast",
         "debounced_full" => "debounced_full",
+        "save_fastlane" => "save_fastlane",
         "idle_heavy" => "idle_heavy",
         _ => "debounced_full",
     }

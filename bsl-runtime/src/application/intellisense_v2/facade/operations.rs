@@ -395,12 +395,15 @@ impl IntellisenseV2Facade {
                             completion_member_access_owner_type_hints_from_completion_head_for_version(
                                 &snapshot.analysis,
                                 context.file_id,
-                                file_version,
-                                &snapshot.deps_id,
-                                settings_id,
-                                file_content,
-                                line,
-                                column,
+                                crate::application::type_system::
+                                    CompletionHeadTypeHintsForVersionRequest {
+                                        file_version,
+                                        deps_id: &snapshot.deps_id,
+                                        settings_id,
+                                        file_content,
+                                        line,
+                                        column,
+                                    },
                             )
                     },
                 )

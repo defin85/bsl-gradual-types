@@ -9,6 +9,7 @@
   "metrics": {
     "pipeline_counter_prefix": "intellisense_v2_diagnostics_pipeline_total_origin_",
     "cancellation_histogram_prefix": "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_",
+    "publish_latency_histogram_prefix": "intellisense_v2_diagnostics_pipeline_publish_ms_origin_",
     "allowed_origins": [
       "lsp",
       "web",
@@ -26,6 +27,7 @@
     "allowed_profiles": [
       "fast",
       "debounced_full",
+      "save_fastlane",
       "idle_heavy"
     ],
     "allowed_reasons": [

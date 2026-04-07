@@ -1813,6 +1813,7 @@ fn serve_only_matches_legacy_for_incomplete_parenthesized_new_member_access() {
     );
 }
 
+#[test]
 fn incomplete_bare_member_access_does_not_materialize_type_truth_from_parse_recovery() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(214);

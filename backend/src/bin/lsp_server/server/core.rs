@@ -72,6 +72,111 @@ fn next_completion_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64
     format!("completion-trace-{id}")
 }
 
+fn next_diagnostics_save_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64) -> String {
+    let id = counter.fetch_add(1, Ordering::Relaxed);
+    format!("diagnostics-save-trace-{id}")
+}
+
+fn diagnostics_save_timeline_cycle_terminal_outcome(
+    trace: &crate::types::DiagnosticsSaveTimelineTrace,
+) -> Option<String> {
+    if trace.save_fastlane_outcome.is_none() || trace.idle_heavy_outcome.is_none() {
+        return None;
+    }
+
+    trace
+        .idle_heavy_outcome
+        .clone()
+        .or_else(|| {
+            trace
+                .followup_publish
+                .as_ref()
+                .map(|publish| publish.outcome.clone())
+        })
+        .or_else(|| trace.save_fastlane_outcome.clone())
+        .or_else(|| {
+            trace
+                .first_publish
+                .as_ref()
+                .map(|publish| publish.outcome.clone())
+        })
+}
+
+fn archive_diagnostics_save_timeline_trace_inner(
+    store: &mut super::DiagnosticsSaveTimelineStore,
+    trace: crate::types::DiagnosticsSaveTimelineTrace,
+) {
+    store.traces.push_back(trace);
+    while store.traces.len() > super::DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES {
+        let _ = store.traces.pop_front();
+    }
+}
+
+fn diagnostics_save_timeline_terminal_key_is_recorded_inner(
+    store: &super::DiagnosticsSaveTimelineStore,
+    key: super::DiagnosticsSaveTimelineCycleKey,
+) -> bool {
+    store.terminal_keys.keys.contains(&key)
+}
+
+fn remember_diagnostics_save_timeline_terminal_key_inner(
+    store: &mut super::DiagnosticsSaveTimelineStore,
+    key: super::DiagnosticsSaveTimelineCycleKey,
+) {
+    if store.terminal_keys.keys.insert(key) {
+        store.terminal_keys.order.push_back(key);
+    }
+    while store.terminal_keys.order.len() > super::DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES {
+        let Some(oldest_key) = store.terminal_keys.order.pop_front() else {
+            break;
+        };
+        store.terminal_keys.keys.remove(&oldest_key);
+    }
+}
+
+fn snapshot_diagnostics_save_timeline_traces_inner(
+    store: &super::DiagnosticsSaveTimelineStore,
+    limit: usize,
+) -> Vec<crate::types::DiagnosticsSaveTimelineTrace> {
+    let mut traces = store.traces.iter().cloned().collect::<Vec<_>>();
+    traces.extend(store.active_cycles.values().cloned());
+    traces.sort_by(|left, right| {
+        left.started_at_ms
+            .cmp(&right.started_at_ms)
+            .then_with(|| left.save_cycle_sequence.cmp(&right.save_cycle_sequence))
+            .then_with(|| left.trace_id.cmp(&right.trace_id))
+    });
+    if traces.len() > limit {
+        traces = traces.split_off(traces.len().saturating_sub(limit));
+    }
+    traces
+}
+
+fn finalize_diagnostics_save_timeline_trace_for_terminal_outcome(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    terminal_outcome: &str,
+) {
+    let terminal_outcome = terminal_outcome.to_string();
+    if trace.save_fastlane_outcome.is_none() {
+        trace.save_fastlane_outcome = Some(terminal_outcome.clone());
+    }
+    if trace.idle_heavy_outcome.is_none() {
+        trace.idle_heavy_outcome = Some(terminal_outcome.clone());
+    }
+    trace.followup_wait_reason = None;
+    trace.followup_wait_for_file_version_ms = None;
+    trace.followup_snapshot_with_deps_ms = None;
+    trace.terminal_outcome = Some(terminal_outcome);
+}
+
+fn clear_diagnostics_save_timeline_followup_wait_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+) {
+    trace.followup_wait_reason = None;
+    trace.followup_wait_for_file_version_ms = None;
+    trace.followup_snapshot_with_deps_ms = None;
+}
+
 fn append_completion_timeline_completed_stage(
     trace: &mut crate::types::CompletionTimelineTrace,
     name: &str,
@@ -133,15 +238,10 @@ fn record_completion_response_egress_patch_inner(
     let mut traces = traces
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let Some(trace) = traces
+    let trace = traces
         .iter_mut()
-        .rfind(|trace| trace.request_id.as_deref() == Some(patch.request_id.as_str()))
-    else {
-        return None;
-    };
-    let Some(server_edge_details) = trace.server_edge_details.as_mut() else {
-        return None;
-    };
+        .rfind(|trace| trace.request_id.as_deref() == Some(patch.request_id.as_str()))?;
+    let server_edge_details = trace.server_edge_details.as_mut()?;
     if server_edge_details.response_flush_completed_at_ms.is_none() {
         let derived = super::derive_completion_response_egress_trace(
             super::CompletionResponseEgressTraceInputs {
@@ -366,6 +466,10 @@ impl BslLanguageServer {
             Arc::new(super::completion_cancellation::CompletionCancellationRegistry::default());
         let completion_timeline_traces = Arc::new(StdMutex::new(VecDeque::new()));
         let next_completion_timeline_trace_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let diagnostics_save_timeline_store =
+            Arc::new(StdMutex::new(super::DiagnosticsSaveTimelineStore::default()));
+        let next_diagnostics_save_timeline_trace_id =
+            Arc::new(std::sync::atomic::AtomicU64::new(1));
 
         let server = Self {
             client,
@@ -389,10 +493,13 @@ impl BslLanguageServer {
             background_parse_snapshot_apply_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             document_symbol_bootstrap_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             diagnostics_generation_v2: Arc::new(RwLock::new(HashMap::new())),
+            diagnostics_save_cycle_sequence_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_diagnostics_publish_state_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
             document_symbol_ready_cache_v2: Arc::new(RwLock::new(HashMap::new())),
             document_symbol_request_epochs_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -409,6 +516,9 @@ impl BslLanguageServer {
             current_context_latest_generations: Arc::new(StdMutex::new(HashMap::new())),
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
+            diagnostics_save_timeline_store: diagnostics_save_timeline_store.clone(),
+            next_diagnostics_save_timeline_trace_id: next_diagnostics_save_timeline_trace_id
+                .clone(),
             next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             next_type_index_precompute_task_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         };
@@ -506,6 +616,231 @@ impl BslLanguageServer {
         trace: crate::types::CompletionTimelineTrace,
     ) {
         record_completion_timeline_trace_inner(self.completion_timeline_traces.as_ref(), trace);
+    }
+
+    pub(crate) fn begin_diagnostics_save_timeline_cycle(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_wait_reason: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_profile_result(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        result: super::DiagnosticsSaveTimelineProfileResult,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace_completed = {
+            let trace = store.active_cycles.entry(key).or_insert_with(|| {
+                crate::types::DiagnosticsSaveTimelineTrace {
+                    trace_id: next_diagnostics_save_timeline_trace_id_from(
+                        self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                    ),
+                    uri: uri.to_string(),
+                    requested_version: key.requested_version,
+                    diagnostics_generation: key.diagnostics_generation,
+                    save_cycle_sequence: key.save_cycle_sequence,
+                    trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                        .as_str()
+                        .to_string(),
+                    started_at_ms: super::unix_timestamp_ms(),
+                    first_publish: None,
+                    followup_publish: None,
+                    save_fastlane_outcome: None,
+                    idle_heavy_outcome: None,
+                    followup_wait_reason: None,
+                    followup_wait_for_file_version_ms: None,
+                    followup_snapshot_with_deps_ms: None,
+                    terminal_outcome: None,
+                }
+            });
+
+            match result.profile {
+                bsl_runtime::application::DiagnosticsProfile::SaveFastlane => {
+                    trace.save_fastlane_outcome = Some(result.disposition.as_str().to_string());
+                }
+                bsl_runtime::application::DiagnosticsProfile::IdleHeavy => {
+                    trace.idle_heavy_outcome = Some(result.disposition.as_str().to_string());
+                }
+                _ => {}
+            }
+
+            if let Some(publish) = result.publish {
+                if trace.first_publish.is_none() {
+                    trace.first_publish = Some(publish);
+                } else if trace.followup_publish.is_none() {
+                    trace.followup_publish = Some(publish);
+                }
+            }
+
+            if matches!(
+                result.profile,
+                bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+            ) {
+                clear_diagnostics_save_timeline_followup_wait_inner(trace);
+            }
+
+            trace.terminal_outcome = diagnostics_save_timeline_cycle_terminal_outcome(trace);
+            trace.terminal_outcome.is_some()
+        };
+        if trace_completed {
+            let Some(trace) = store.active_cycles.remove(&key) else {
+                return;
+            };
+            remember_diagnostics_save_timeline_terminal_key_inner(&mut store, key);
+            archive_diagnostics_save_timeline_trace_inner(&mut store, trace);
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_profile_disposition(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        profile: bsl_runtime::application::DiagnosticsProfile,
+        disposition: bsl_runtime::application::DiagnosticsDisposition,
+    ) {
+        self.record_diagnostics_save_timeline_profile_result(
+            uri,
+            key,
+            super::DiagnosticsSaveTimelineProfileResult {
+                profile,
+                disposition,
+                publish: None,
+            },
+        );
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_wait_state(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        reason: &'static str,
+        wait_for_file_version_ms: Option<Duration>,
+        snapshot_with_deps_ms: Option<Duration>,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_wait_reason: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+        trace.followup_wait_reason = Some(reason.to_string());
+        trace.followup_wait_for_file_version_ms =
+            wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+        trace.followup_snapshot_with_deps_ms =
+            snapshot_with_deps_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+    }
+
+    pub(crate) fn clear_active_diagnostics_save_timeline_cycles_for_file(&self, file_id: V2FileId) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let keys = store
+            .active_cycles
+            .keys()
+            .copied()
+            .filter(|key| key.file_id == file_id)
+            .collect::<Vec<_>>();
+        for key in keys {
+            let Some(mut trace) = store.active_cycles.remove(&key) else {
+                continue;
+            };
+            finalize_diagnostics_save_timeline_trace_for_terminal_outcome(
+                &mut trace,
+                bsl_runtime::application::DiagnosticsDisposition::ClientCancel.as_str(),
+            );
+            remember_diagnostics_save_timeline_terminal_key_inner(&mut store, key);
+            archive_diagnostics_save_timeline_trace_inner(&mut store, trace);
+        }
+    }
+
+    pub(crate) fn clear_diagnostics_save_timeline_terminal_keys_for_file(&self, file_id: V2FileId) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        store
+            .terminal_keys
+            .order
+            .retain(|key| key.file_id != file_id);
+        store
+            .terminal_keys
+            .keys
+            .retain(|key| key.file_id != file_id);
+    }
+
+    pub(crate) fn snapshot_diagnostics_save_timeline_traces(
+        &self,
+        limit: usize,
+    ) -> Vec<crate::types::DiagnosticsSaveTimelineTrace> {
+        let store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        snapshot_diagnostics_save_timeline_traces_inner(&store, limit)
     }
 
     pub(crate) async fn record_completion_head_hit_v2(

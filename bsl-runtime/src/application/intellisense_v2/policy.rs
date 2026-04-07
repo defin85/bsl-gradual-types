@@ -355,6 +355,7 @@ impl DiagnosticsTrigger {
 pub enum DiagnosticsProfile {
     Fast,
     DebouncedFull,
+    SaveFastlane,
     IdleHeavy,
 }
 
@@ -363,6 +364,7 @@ impl DiagnosticsProfile {
         match self {
             DiagnosticsProfile::Fast => "fast",
             DiagnosticsProfile::DebouncedFull => "debounced_full",
+            DiagnosticsProfile::SaveFastlane => "save_fastlane",
             DiagnosticsProfile::IdleHeavy => "idle_heavy",
         }
     }
@@ -403,7 +405,10 @@ const PROFILES_DID_CHANGE: &[DiagnosticsProfile] = &[
     DiagnosticsProfile::IdleHeavy,
 ];
 const PROFILES_DID_OPEN: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
-const PROFILES_DID_SAVE: &[DiagnosticsProfile] = &[DiagnosticsProfile::IdleHeavy];
+const PROFILES_DID_SAVE: &[DiagnosticsProfile] = &[
+    DiagnosticsProfile::SaveFastlane,
+    DiagnosticsProfile::IdleHeavy,
+];
 const PROFILES_IDLE: &[DiagnosticsProfile] = &[DiagnosticsProfile::IdleHeavy];
 const PROFILES_DOCUMENTS_SET: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
 const PROFILES_JOB_START: &[DiagnosticsProfile] = &[DiagnosticsProfile::DebouncedFull];
@@ -437,6 +442,12 @@ pub fn diagnostics_execution_plan(
             run_semantic: true,
             flow_sensitive_semantic: false,
             cpu_class: CpuWorkClass::Background,
+        },
+        DiagnosticsProfile::SaveFastlane => DiagnosticsExecutionPlan {
+            run_syntax: true,
+            run_semantic: false,
+            flow_sensitive_semantic: false,
+            cpu_class: CpuWorkClass::Interactive,
         },
         DiagnosticsProfile::IdleHeavy => DiagnosticsExecutionPlan {
             run_syntax: true,

@@ -47,6 +47,7 @@
       "required": [
         "pipeline_counter_prefix",
         "cancellation_histogram_prefix",
+        "publish_latency_histogram_prefix",
         "allowed_origins",
         "allowed_triggers",
         "allowed_profiles",
@@ -61,6 +62,10 @@
         "cancellation_histogram_prefix": {
           "type": "string",
           "const": "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_"
+        },
+        "publish_latency_histogram_prefix": {
+          "type": "string",
+          "const": "intellisense_v2_diagnostics_pipeline_publish_ms_origin_"
         },
         "allowed_origins": {
           "type": "array",
@@ -94,13 +99,14 @@
         },
         "allowed_profiles": {
           "type": "array",
-          "minItems": 3,
+          "minItems": 4,
           "uniqueItems": true,
           "items": {
             "type": "string",
             "enum": [
               "fast",
               "debounced_full",
+              "save_fastlane",
               "idle_heavy"
             ]
           }

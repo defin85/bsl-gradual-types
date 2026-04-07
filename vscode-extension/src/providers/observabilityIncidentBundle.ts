@@ -1,5 +1,6 @@
 import {
     CompletionTimelineFetchResult,
+    DiagnosticsSaveTimelineFetchResult,
     ObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
 import { CompletionProbe } from './completionProbe';
@@ -12,9 +13,15 @@ import {
     renderRequestScopeLine,
     renderRequestSummaryLines,
 } from './observabilityIncidentBundleRequests';
+import {
+    ObservabilityIncidentDiagnosticsSaveSummary,
+    buildObservabilityIncidentDiagnosticsSaveSection,
+    renderDiagnosticsSaveSummaryLines,
+} from './observabilityIncidentBundleDiagnosticsSave';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
+const DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH = 'raw/diagnostics_save_timeline.json';
 const CLIENT_PROBES_RAW_PATH = 'raw/client_probes.json';
 const OBSERVABILITY_METRICS_RAW_PATH = 'raw/observability_metrics.json';
 
@@ -28,6 +35,7 @@ type IncidentSourceClassification =
 export interface ObservabilityIncidentBundleInput {
     capturedAtMs: number;
     completionTimeline: CompletionTimelineFetchResult;
+    diagnosticsSaveTimeline?: DiagnosticsSaveTimelineFetchResult;
     completionTraceLimit: number;
     clientProbes: CompletionProbe[];
     observabilityMetrics: ObservabilityMetricsFetchResult;
@@ -58,8 +66,13 @@ export interface ObservabilityIncidentBundleReport {
         request_count: number;
     };
     requests: ObservabilityIncidentRequestSummary[];
+    diagnostics_save_window: {
+        request_count: number;
+    };
+    diagnostics_save_requests: ObservabilityIncidentDiagnosticsSaveSummary[];
     sources: {
         completion_timeline: ObservabilityIncidentBundleSource;
+        diagnostics_save_timeline: ObservabilityIncidentBundleSource;
         client_probes: ObservabilityIncidentBundleSource;
         observability_metrics: ObservabilityIncidentBundleSource;
     };
@@ -67,7 +80,11 @@ export interface ObservabilityIncidentBundleReport {
     gaps: string[];
     raw_attachments: Array<{
         path: string;
-        section: 'completion_timeline' | 'client_probes' | 'observability_metrics';
+        section:
+            | 'completion_timeline'
+            | 'diagnostics_save_timeline'
+            | 'client_probes'
+            | 'observability_metrics';
         classification: IncidentSourceClassification;
     }>;
 }
@@ -83,6 +100,8 @@ export function buildObservabilityIncidentBundle(
     input: ObservabilityIncidentBundleInput
 ): ObservabilityIncidentBundle {
     const capturedAtIso = new Date(input.capturedAtMs).toISOString();
+    const diagnosticsSaveTimeline: DiagnosticsSaveTimelineFetchResult =
+        input.diagnosticsSaveTimeline ?? { kind: 'unsupported' };
     const rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'] = [];
     const files: ObservabilityIncidentBundleFile[] = [];
     const gaps: string[] = [];
@@ -90,10 +109,19 @@ export function buildObservabilityIncidentBundle(
         input.completionTimeline,
         input.clientProbes
     );
+    const diagnosticsSaveSection = buildObservabilityIncidentDiagnosticsSaveSection(
+        diagnosticsSaveTimeline
+    );
     const findings = deriveFindings(input, requestSection);
 
     const completionTimelineSource = buildCompletionTimelineSource(
         input.completionTimeline,
+        rawAttachments,
+        gaps,
+        files
+    );
+    const diagnosticsSaveTimelineSource = buildDiagnosticsSaveTimelineSource(
+        diagnosticsSaveTimeline,
         rawAttachments,
         gaps,
         files
@@ -115,13 +143,18 @@ export function buildObservabilityIncidentBundle(
             request_count: requestSection.requestCount,
         },
         requests: requestSection.requests,
+        diagnostics_save_window: {
+            request_count: diagnosticsSaveSection.requestCount,
+        },
+        diagnostics_save_requests: diagnosticsSaveSection.requests,
         sources: {
             completion_timeline: completionTimelineSource,
+            diagnostics_save_timeline: diagnosticsSaveTimelineSource,
             client_probes: clientProbesSource,
             observability_metrics: observabilityMetricsSource,
         },
         findings: findings.length > 0 ? findings : ['No derived bottleneck heuristic matched this capture window.'],
-        gaps: [...gaps, ...requestSection.gaps],
+        gaps: [...gaps, ...requestSection.gaps, ...diagnosticsSaveSection.gaps],
         raw_attachments: rawAttachments,
     };
 
@@ -291,6 +324,48 @@ function buildClientProbeSource(
         status: 'available',
         raw_attachment: CLIENT_PROBES_RAW_PATH,
         probe_count: clientProbes.length,
+    };
+}
+
+function buildDiagnosticsSaveTimelineSource(
+    diagnosticsSaveTimeline: DiagnosticsSaveTimelineFetchResult,
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    gaps: string[],
+    files: ObservabilityIncidentBundleFile[]
+): ObservabilityIncidentBundleSource {
+    if (diagnosticsSaveTimeline.kind === 'ok') {
+        rawAttachments.push({
+            path: DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH,
+            section: 'diagnostics_save_timeline',
+            classification: 'authoritative_server_trace',
+        });
+        files.push({
+            relativePath: DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH,
+            contents: `${JSON.stringify(diagnosticsSaveTimeline.response, null, 2)}\n`,
+        });
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'available',
+            raw_attachment: DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH,
+            trace_count: diagnosticsSaveTimeline.response.traces.length,
+            contract_version: diagnosticsSaveTimeline.response.version,
+        };
+    }
+
+    if (diagnosticsSaveTimeline.kind === 'unsupported') {
+        gaps.push('Diagnostics save timeline is unsupported by the connected server.');
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'unsupported',
+            message: 'Connected server does not support bsl.getDiagnosticsSaveTimeline.',
+        };
+    }
+
+    gaps.push(`Diagnostics save timeline is unavailable: ${diagnosticsSaveTimeline.message}`);
+    return {
+        classification: 'authoritative_server_trace',
+        status: 'unavailable',
+        message: diagnosticsSaveTimeline.message,
     };
 }
 
@@ -581,8 +656,16 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
             gaps: [],
         }),
         '',
+        '## Diagnostics Save Summary',
+        ...renderDiagnosticsSaveSummaryLines({
+            requestCount: report.diagnostics_save_window.request_count,
+            requests: report.diagnostics_save_requests,
+            gaps: [],
+        }),
+        '',
         '## Source Status',
         renderSourceStatusLine('Completion timeline', report.sources.completion_timeline),
+        renderSourceStatusLine('Diagnostics save timeline', report.sources.diagnostics_save_timeline),
         renderSourceStatusLine('Client probes', report.sources.client_probes),
         renderSourceStatusLine('Observability metrics', report.sources.observability_metrics),
         '',
@@ -598,7 +681,8 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         ...renderBulletSection(report.raw_attachments.map((attachment) => attachment.path)),
         '',
         '## Notes',
-        '- Completion timeline is the only authoritative server trace in this bundle.',
+        '- Completion timeline remains the authoritative completion trace in this bundle.',
+        '- Diagnostics save timeline is an authoritative per-didSave server trace when supported.',
         '- Client probes are local-only extension data and never substitute server stages, routes, or outcomes.',
         '- Observability metrics are cumulative process snapshots, not per-request traces.',
         '',

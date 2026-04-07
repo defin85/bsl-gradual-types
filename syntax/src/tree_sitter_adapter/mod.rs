@@ -39,6 +39,7 @@ mod syntax_errors;
 pub mod utils;
 
 use crate::ast::{ParseResult, Program};
+use bsl_shared::domain::types::ParseError;
 use span::LineIndex;
 use tree_sitter::Tree;
 
@@ -49,6 +50,49 @@ pub use syntax_errors::{collect_syntax_errors, collect_syntax_errors_cached};
 pub struct TreeSitterAdapter;
 
 impl TreeSitterAdapter {
+    pub fn collect_syntax_errors_only(tree: &Tree, source: &str) -> Vec<ParseError> {
+        let root = tree.root_node();
+        let line_index = LineIndex::new(source);
+        let (maybe_semicolon_errors, maybe_incomplete_new_errors) = if root.has_error() {
+            (None, None)
+        } else {
+            let has_missing_semicolons = syntax_errors::has_missing_semicolons(&root);
+            let incomplete_new_errors =
+                syntax_errors::check_incomplete_new_expressions(source, &line_index);
+
+            if !has_missing_semicolons && incomplete_new_errors.is_empty() {
+                return Vec::new();
+            }
+
+            let semicolon_errors = if has_missing_semicolons {
+                None
+            } else {
+                Some(Vec::new())
+            };
+
+            (semicolon_errors, Some(incomplete_new_errors))
+        };
+
+        let parser_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
+        let mut heuristic_errors = maybe_semicolon_errors
+            .unwrap_or_else(|| syntax_errors::check_missing_semicolons(&root, source, &line_index));
+        let new_errors = maybe_incomplete_new_errors.unwrap_or_else(|| {
+            syntax_errors::check_incomplete_new_expressions(source, &line_index)
+        });
+        heuristic_errors.extend(new_errors);
+
+        if parser_errors.is_empty() && heuristic_errors.is_empty() {
+            Vec::new()
+        } else {
+            syntax_error_enhancers::normalize_syntax_errors(
+                source,
+                &line_index,
+                parser_errors,
+                heuristic_errors,
+            )
+        }
+    }
+
     /// Конвертировать дерево tree-sitter в ParseResult с обработкой ошибок (Milestone 2.7 Task 3)
     ///
     /// # Performance Optimization (Milestone 2.19)
@@ -104,20 +148,14 @@ impl TreeSitterAdapter {
             (semicolon_errors, Some(incomplete_new_errors))
         };
 
-        // Собираем синтаксические ошибки из дерева с использованием индекса строк
         let parser_errors = syntax_errors::collect_syntax_errors_cached(&root, source, &line_index);
-
-        // Проверяем отсутствующие точки с запятой (BSL linter)
         let mut heuristic_errors = maybe_semicolon_errors
             .unwrap_or_else(|| syntax_errors::check_missing_semicolons(&root, source, &line_index));
-
-        // Проверяем незавершённые `Новый` без типа/аргументов (IDE-friendly)
         let new_errors = maybe_incomplete_new_errors.unwrap_or_else(|| {
             syntax_errors::check_incomplete_new_expressions(source, &line_index)
         });
         heuristic_errors.extend(new_errors);
 
-        // Нормализация синтаксических diagnostics (rewrite/enrich + строгий line-cap + детерминизм)
         let syntax_errors = if parser_errors.is_empty() && heuristic_errors.is_empty() {
             Vec::new()
         } else {

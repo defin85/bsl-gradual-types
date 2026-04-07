@@ -111,6 +111,8 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 24;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 4;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompletionResponseEgressTraceInputs {
@@ -295,6 +297,7 @@ pub struct BslLanguageServer {
         Arc<Mutex<BackgroundParseSnapshotApplyTasksV2>>,
     pub(crate) document_symbol_bootstrap_tasks_v2: Arc<Mutex<DocumentSymbolBootstrapTasksV2>>,
     pub(crate) diagnostics_generation_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
+    pub(crate) diagnostics_save_cycle_sequence_v2: Arc<RwLock<HashMap<V2FileId, u64>>>,
     pub(crate) latest_received_file_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     /// Tracks the freshest file version whose current-revision handoff has already been pushed
     /// into the runtime writer queue. This is stricter than `latest_received_file_versions_v2`,
@@ -302,7 +305,11 @@ pub struct BslLanguageServer {
     pub(crate) latest_current_revision_handoff_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
     pub(crate) latest_document_shadow_state_v2:
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
+    pub(crate) latest_ready_parse_snapshots_v2:
+        Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,
+    pub(crate) latest_diagnostics_publish_state_v2:
+        Arc<RwLock<HashMap<V2FileId, DiagnosticsPublishedStateV2>>>,
     pub(crate) scale_aware_churn_state_v2: Arc<RwLock<HashMap<V2FileId, ScaleAwareChurnStateV2>>>,
     pub(crate) document_symbol_ready_cache_v2:
         Arc<RwLock<HashMap<V2FileId, DocumentSymbolReadyStateV2>>>,
@@ -323,6 +330,8 @@ pub struct BslLanguageServer {
     pub(crate) completion_timeline_traces:
         Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
+    pub(crate) diagnostics_save_timeline_store: Arc<StdMutex<DiagnosticsSaveTimelineStore>>,
+    pub(crate) next_diagnostics_save_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) next_document_symbol_request_epoch_v2: Arc<AtomicU64>,
     pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,
 }
@@ -338,7 +347,50 @@ pub(crate) struct DiagnosticsSupersessionKeyV2 {
     pub file_id: V2FileId,
     pub profile: bsl_runtime::application::DiagnosticsProfile,
     pub diagnostics_generation: u64,
+    pub save_cycle_sequence: Option<u64>,
     pub requested_version: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DiagnosticsPublishedStateV2 {
+    pub requested_version: i32,
+    pub diagnostics_generation: u64,
+    pub publish_rank: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DiagnosticsSaveTimelineCycleKey {
+    pub file_id: V2FileId,
+    pub diagnostics_generation: u64,
+    pub save_cycle_sequence: u64,
+    pub requested_version: i32,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DiagnosticsSaveTimelineTerminalKeyStore {
+    pub keys: HashSet<DiagnosticsSaveTimelineCycleKey>,
+    pub order: VecDeque<DiagnosticsSaveTimelineCycleKey>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DiagnosticsSaveTimelineStore {
+    pub active_cycles:
+        HashMap<DiagnosticsSaveTimelineCycleKey, crate::types::DiagnosticsSaveTimelineTrace>,
+    pub terminal_keys: DiagnosticsSaveTimelineTerminalKeyStore,
+    pub traces: VecDeque<crate::types::DiagnosticsSaveTimelineTrace>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DiagnosticsSaveTimelineProfileResult {
+    pub profile: bsl_runtime::application::DiagnosticsProfile,
+    pub disposition: bsl_runtime::application::DiagnosticsDisposition,
+    pub publish: Option<crate::types::DiagnosticsSaveTimelinePublishTrace>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ReadyParseSnapshotStateV2 {
+    pub text: Arc<str>,
+    pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

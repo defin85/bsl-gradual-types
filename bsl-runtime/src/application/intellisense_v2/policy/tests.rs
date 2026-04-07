@@ -31,7 +31,10 @@ fn diagnostics_profiles_follow_tiered_trigger_contract() {
     );
     assert_eq!(
         diagnostics_profiles_for_trigger(DiagnosticsTrigger::DidSave),
-        &[DiagnosticsProfile::IdleHeavy]
+        &[
+            DiagnosticsProfile::SaveFastlane,
+            DiagnosticsProfile::IdleHeavy
+        ]
     );
     assert_eq!(
         diagnostics_profiles_for_trigger(DiagnosticsTrigger::Idle),
@@ -60,6 +63,12 @@ fn diagnostics_execution_plan_matches_profile_expectations() {
     assert!(debounced.run_semantic);
     assert!(!debounced.flow_sensitive_semantic);
     assert_eq!(debounced.cpu_class, CpuWorkClass::Background);
+
+    let save_fastlane = diagnostics_execution_plan(DiagnosticsProfile::SaveFastlane, true);
+    assert!(save_fastlane.run_syntax);
+    assert!(!save_fastlane.run_semantic);
+    assert!(!save_fastlane.flow_sensitive_semantic);
+    assert_eq!(save_fastlane.cpu_class, CpuWorkClass::Interactive);
 
     let idle_heavy_flow_off = diagnostics_execution_plan(DiagnosticsProfile::IdleHeavy, false);
     assert!(idle_heavy_flow_off.run_syntax);

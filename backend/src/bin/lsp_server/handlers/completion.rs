@@ -87,13 +87,16 @@ pub struct CompletionResponseWithStats {
     pub response: CompletionResponse,
     #[allow(dead_code)]
     pub stats: Option<CompletionStats>,
+    #[allow(dead_code)]
     pub backend_breakdown: Option<CompletionBackendBreakdown>,
     pub had_error: bool,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CompletionBackendBreakdown {
+    #[allow(dead_code)]
     pub stage_runtime_total: Duration,
+    #[allow(dead_code)]
     pub stage_lsp_materialization: Duration,
 }
 

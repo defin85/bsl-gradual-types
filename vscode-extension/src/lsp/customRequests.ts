@@ -726,6 +726,51 @@ export type CompletionTimelineFetchResult =
     | { kind: 'unsupported' }
     | { kind: 'error'; message: string };
 
+export interface DiagnosticsSaveTimelineRequest {
+    limit?: number;
+}
+
+export interface DiagnosticsSaveTimelinePublishTrace {
+    profile: string;
+    publish_kind: string;
+    outcome: string;
+    elapsed_ms: number;
+    blocking_queue_wait_ms?: number;
+    wait_for_file_version_ms?: number;
+    snapshot_with_deps_ms?: number;
+    syntax_diagnostics_query_ms?: number;
+    semantic_diagnostics_query_ms?: number;
+    publish_wait_ms?: number;
+}
+
+export interface DiagnosticsSaveTimelineTrace {
+    trace_id: string;
+    uri: string;
+    requested_version: number;
+    save_cycle_sequence: number;
+    diagnostics_generation: number;
+    trigger: string;
+    started_at_ms: number;
+    first_publish?: DiagnosticsSaveTimelinePublishTrace;
+    followup_publish?: DiagnosticsSaveTimelinePublishTrace;
+    save_fastlane_outcome?: string;
+    idle_heavy_outcome?: string;
+    followup_wait_reason?: 'apply_lag' | 'semantic_work' | 'pending_publish' | 'superseded';
+    followup_wait_for_file_version_ms?: number;
+    followup_snapshot_with_deps_ms?: number;
+    terminal_outcome?: string;
+}
+
+export interface DiagnosticsSaveTimelineResponse {
+    version: number;
+    traces: DiagnosticsSaveTimelineTrace[];
+}
+
+export type DiagnosticsSaveTimelineFetchResult =
+    | { kind: 'ok'; response: DiagnosticsSaveTimelineResponse }
+    | { kind: 'unsupported' }
+    | { kind: 'error'; message: string };
+
 /**
  * Параметры запроса всех типов
  */
@@ -873,6 +918,7 @@ export function resetObservabilityCapabilityCaches(): void {
     observabilityMetricsUnsupported = false;
     observabilityMetricsUnsupportedNotified = false;
     completionTimelineUnsupported = false;
+    diagnosticsSaveTimelineUnsupported = false;
 }
 
 export async function getObservabilityMetrics(): Promise<ObservabilityMetricsResponse | null> {
@@ -946,6 +992,7 @@ export async function getObservabilityMetricsWithRequest(
 }
 
 let completionTimelineUnsupported = false;
+let diagnosticsSaveTimelineUnsupported = false;
 
 /**
  * Сброс кэша совместимости timeline-контракта (используется только в тестах).
@@ -987,6 +1034,40 @@ export async function getCompletionTimeline(
         }
         const message = error instanceof Error ? error.message : String(error);
         logger.error('Failed to get completion timeline', error);
+        return { kind: 'error', message };
+    }
+}
+
+export async function getDiagnosticsSaveTimeline(
+    request: DiagnosticsSaveTimelineRequest = {}
+): Promise<DiagnosticsSaveTimelineFetchResult> {
+    if (diagnosticsSaveTimelineUnsupported) {
+        return { kind: 'unsupported' };
+    }
+
+    const client = (await import('./client/index')).getLanguageClient();
+    if (!client) {
+        return { kind: 'error', message: 'LSP client not available' };
+    }
+
+    const args = Object.keys(request).length > 0 ? [request] : [];
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getDiagnosticsSaveTimeline',
+            arguments: args
+        });
+        if (!result || typeof result !== 'object') {
+            return { kind: 'error', message: 'Invalid diagnostics save timeline response' };
+        }
+        return { kind: 'ok', response: result as DiagnosticsSaveTimelineResponse };
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            diagnosticsSaveTimelineUnsupported = true;
+            logger.warn('[Diagnostics Save Timeline] LSP server does not support bsl.getDiagnosticsSaveTimeline');
+            return { kind: 'unsupported' };
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to get diagnostics save timeline', error);
         return { kind: 'error', message };
     }
 }

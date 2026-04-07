@@ -822,6 +822,19 @@ impl SystemCoordinator {
             .record_intellisense_v2_diagnostics_pipeline_event(origin, trigger, profile, reason);
     }
 
+    pub fn record_intellisense_v2_diagnostics_pipeline_publish_latency(
+        &self,
+        origin: &str,
+        trigger: &str,
+        profile: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_diagnostics_pipeline_publish_latency(
+                origin, trigger, profile, duration,
+            );
+    }
+
     pub fn record_intellisense_v2_large_churn_transition(&self, origin: &str, state: &str) {
         self.observability
             .record_intellisense_v2_large_churn_transition(origin, state);

@@ -1,6 +1,120 @@
 use super::*;
 
+#[cfg(debug_assertions)]
+fn maybe_inject_save_fastlane_shadow_parse_delay_for_test() {
+    let delay_ms = std::env::var("BSL_TEST_SAVE_FASTLANE_PARSE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0);
+    let Some(delay_ms) = delay_ms else {
+        return;
+    };
+    std::thread::sleep(Duration::from_millis(delay_ms));
+}
+
+#[cfg(not(debug_assertions))]
+fn maybe_inject_save_fastlane_shadow_parse_delay_for_test() {}
+
+struct SaveFollowupReadyArtifactsReply {
+    diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
+    observed_deps_id: String,
+    observed_settings_id: String,
+    syntax_elapsed: Duration,
+    semantic_elapsed: Duration,
+}
+
 impl BslLanguageServer {
+    fn diagnostics_save_timeline_cycle_key_for_supersession_key(
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+    ) -> Option<super::super::DiagnosticsSaveTimelineCycleKey> {
+        supersession_key
+            .save_cycle_sequence
+            .map(
+                |save_cycle_sequence| super::super::DiagnosticsSaveTimelineCycleKey {
+                    file_id: supersession_key.file_id,
+                    diagnostics_generation: supersession_key.diagnostics_generation,
+                    save_cycle_sequence,
+                    requested_version: supersession_key.requested_version,
+                },
+            )
+    }
+
+    async fn finalize_diagnostics_save_profile_result_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        disposition: bsl_runtime::application::DiagnosticsDisposition,
+        publish_kind: Option<&'static str>,
+        blocking_queue_wait_ms: Option<Duration>,
+        wait_for_file_version_ms: Option<Duration>,
+        snapshot_with_deps_ms: Option<Duration>,
+        syntax_diagnostics_query_ms: Option<Duration>,
+        semantic_diagnostics_query_ms: Option<Duration>,
+        publish_wait_ms: Option<Duration>,
+        pipeline_started: Instant,
+    ) -> bsl_runtime::application::DiagnosticsDisposition {
+        if !matches!(
+            trigger,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave
+        ) {
+            return disposition;
+        }
+
+        let publish = (matches!(
+            disposition,
+            bsl_runtime::application::DiagnosticsDisposition::Published
+        ) || publish_kind.is_some()
+            || blocking_queue_wait_ms.is_some()
+            || wait_for_file_version_ms.is_some()
+            || snapshot_with_deps_ms.is_some()
+            || syntax_diagnostics_query_ms.is_some()
+            || semantic_diagnostics_query_ms.is_some()
+            || publish_wait_ms.is_some())
+        .then(|| crate::types::DiagnosticsSaveTimelinePublishTrace {
+            profile: supersession_key.profile.as_str().to_string(),
+            publish_kind: publish_kind.unwrap_or("unknown").to_string(),
+            outcome: disposition.as_str().to_string(),
+            elapsed_ms: pipeline_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            blocking_queue_wait_ms: blocking_queue_wait_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            wait_for_file_version_ms: wait_for_file_version_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            snapshot_with_deps_ms: snapshot_with_deps_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            syntax_diagnostics_query_ms: syntax_diagnostics_query_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            semantic_diagnostics_query_ms: semantic_diagnostics_query_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            publish_wait_ms: publish_wait_ms
+                .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+        });
+
+        let Some(cycle_key) =
+            Self::diagnostics_save_timeline_cycle_key_for_supersession_key(supersession_key)
+        else {
+            return disposition;
+        };
+
+        self.record_diagnostics_save_timeline_profile_result(
+            uri,
+            cycle_key,
+            super::super::DiagnosticsSaveTimelineProfileResult {
+                profile: supersession_key.profile,
+                disposition,
+                publish,
+            },
+        );
+        disposition
+    }
+
+    fn diagnostics_publish_rank(profile: bsl_runtime::application::DiagnosticsProfile) -> u8 {
+        match profile {
+            bsl_runtime::application::DiagnosticsProfile::SaveFastlane => 1,
+            _ => 2,
+        }
+    }
+
     pub(crate) async fn cancel_diagnostics_v2(&self, file_id: V2FileId) {
         let mut tasks = self.diagnostics_tasks_v2.lock().await;
         let keys: Vec<super::super::DiagnosticsTaskKeyV2> = tasks
@@ -33,6 +147,17 @@ impl BslLanguageServer {
         next
     }
 
+    pub(crate) async fn bump_diagnostics_save_cycle_sequence_v2(&self, file_id: V2FileId) -> u64 {
+        let mut sequences = self.diagnostics_save_cycle_sequence_v2.write().await;
+        let next = sequences
+            .get(&file_id)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        sequences.insert(file_id, next);
+        next
+    }
+
     async fn current_diagnostics_generation_v2(&self, file_id: V2FileId) -> Option<u64> {
         self.diagnostics_generation_v2
             .read()
@@ -53,6 +178,21 @@ impl BslLanguageServer {
                 trigger.as_str(),
                 profile.as_str(),
                 reason.as_str(),
+            );
+    }
+
+    fn record_diagnostics_pipeline_publish_latency_v2(
+        &self,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        profile: bsl_runtime::application::DiagnosticsProfile,
+        duration: Duration,
+    ) {
+        self.coordinator
+            .record_intellisense_v2_diagnostics_pipeline_publish_latency(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                trigger.as_str(),
+                profile.as_str(),
+                duration,
             );
     }
 
@@ -152,9 +292,11 @@ impl BslLanguageServer {
             .as_ref()
             .map(|id| id.as_str().to_string());
 
-        if current_deps_id.as_deref() != observed_deps_id
-            || current_settings_id.as_deref() != observed_settings_id
-        {
+        let deps_mismatch =
+            observed_deps_id.is_some() && current_deps_id.as_deref() != observed_deps_id;
+        let settings_mismatch = observed_settings_id.is_some()
+            && current_settings_id.as_deref() != observed_settings_id;
+        if deps_mismatch || settings_mismatch {
             let disposition =
                 bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration;
             self.record_diagnostics_pipeline_event_v2(trigger, key.profile, disposition);
@@ -162,6 +304,731 @@ impl BslLanguageServer {
         }
 
         None
+    }
+
+    async fn publish_diagnostics_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        uri: &Url,
+        diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        profile: bsl_runtime::application::DiagnosticsProfile,
+        pipeline_started: Instant,
+    ) -> bsl_runtime::application::DiagnosticsDisposition {
+        let publish_rank = Self::diagnostics_publish_rank(profile);
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        let diagnostics_generation = supersession_key.diagnostics_generation;
+        {
+            let publish_state = self.latest_diagnostics_publish_state_v2.read().await;
+            if publish_state.get(&file_id).is_some_and(|state| {
+                state.requested_version == requested_version
+                    && state.diagnostics_generation == diagnostics_generation
+                    && state.publish_rank > publish_rank
+            }) {
+                self.record_diagnostics_pipeline_event_v2(
+                    trigger,
+                    profile,
+                    bsl_runtime::application::DiagnosticsDisposition::OtherCancel,
+                );
+                return bsl_runtime::application::DiagnosticsDisposition::OtherCancel;
+            }
+        }
+
+        let diagnostics_len = diagnostics.len();
+        self.client
+            .publish_diagnostics(uri.clone(), diagnostics, Some(requested_version))
+            .await;
+        self.update_diagnostics_count(uri, diagnostics_len).await;
+        self.latest_diagnostics_publish_state_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                super::super::DiagnosticsPublishedStateV2 {
+                    requested_version,
+                    diagnostics_generation,
+                    publish_rank,
+                },
+            );
+        self.record_diagnostics_pipeline_publish_latency_v2(
+            trigger,
+            profile,
+            pipeline_started.elapsed(),
+        );
+        self.record_diagnostics_pipeline_event_v2(
+            trigger,
+            profile,
+            bsl_runtime::application::DiagnosticsDisposition::Published,
+        );
+        bsl_runtime::application::DiagnosticsDisposition::Published
+    }
+
+    async fn try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        requested_version: i32,
+    ) -> Option<(
+        Vec<tower_lsp::lsp_types::Diagnostic>,
+        &'static str,
+        Duration,
+    )> {
+        tokio::time::timeout(Duration::from_millis(20), async {
+            let started = Instant::now();
+            let revision_state = self.analysis_v2.file_revision_state(file_id).await?;
+            if revision_state.version != requested_version {
+                return None;
+            }
+
+            let analysis = self.analysis_v2.snapshot().await;
+            if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
+                return None;
+            }
+            let syntax_errors = analysis.syntax_diagnostics(file_id).ok().flatten()?;
+            let line_index = analysis.line_index(file_id).ok().flatten()?;
+            let mode = analysis
+                .syntax_diagnostics_observability_mode(file_id)
+                .ok()
+                .flatten()
+                .unwrap_or("other");
+            Some((
+                syntax_errors_to_diagnostics(
+                    syntax_errors.as_ref(),
+                    uri,
+                    analysis.file_text(file_id).ok().flatten()?.as_ref(),
+                    line_index.as_ref(),
+                ),
+                mode,
+                started.elapsed(),
+            ))
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
+    fn parse_snapshot_observability_mode_v2(
+        parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
+    ) -> &'static str {
+        if parse_snapshot.incremental {
+            if parse_snapshot.changed_ranges.is_empty() {
+                "reused"
+            } else {
+                "incremental"
+            }
+        } else {
+            "full"
+        }
+    }
+
+    async fn try_collect_save_fastlane_diagnostics_from_ready_parse_snapshot_v2(
+        &self,
+        uri: &Url,
+        file_id: V2FileId,
+        requested_version: i32,
+    ) -> Option<(
+        Vec<tower_lsp::lsp_types::Diagnostic>,
+        &'static str,
+        Duration,
+    )> {
+        let started = Instant::now();
+        let ready_state = self
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()?;
+        let parse_snapshot = ready_state.parse_snapshot;
+        if parse_snapshot.file_version != requested_version {
+            return None;
+        }
+        Some((
+            syntax_errors_to_diagnostics(
+                &parse_snapshot.parse_result.syntax_errors,
+                uri,
+                ready_state.text.as_ref(),
+                parse_snapshot.line_index.as_ref(),
+            ),
+            Self::parse_snapshot_observability_mode_v2(&parse_snapshot),
+            started.elapsed(),
+        ))
+    }
+
+    async fn ready_parse_snapshot_state_for_version_v2(
+        &self,
+        file_id: V2FileId,
+        requested_version: i32,
+    ) -> Option<super::super::ReadyParseSnapshotStateV2> {
+        self.latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
+            .filter(|state| state.parse_snapshot.file_version == requested_version)
+    }
+
+    fn diagnostics_save_cycle_key_from_supersession_key_v2(
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+    ) -> Option<super::super::DiagnosticsSaveTimelineCycleKey> {
+        supersession_key
+            .save_cycle_sequence
+            .map(
+                |save_cycle_sequence| super::super::DiagnosticsSaveTimelineCycleKey {
+                    file_id: supersession_key.file_id,
+                    diagnostics_generation: supersession_key.diagnostics_generation,
+                    save_cycle_sequence,
+                    requested_version: supersession_key.requested_version,
+                },
+            )
+    }
+
+    fn record_diagnostics_save_followup_wait_state_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        reason: &'static str,
+        wait_for_file_version_ms: Option<Duration>,
+        snapshot_with_deps_ms: Option<Duration>,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_wait_state(
+            uri,
+            cycle_key,
+            reason,
+            wait_for_file_version_ms,
+            snapshot_with_deps_ms,
+        );
+    }
+
+    async fn try_execute_save_followup_from_ready_artifacts_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        pipeline_started: Instant,
+        show_hints: bool,
+        flow_sensitive_semantic: bool,
+    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
+        if !matches!(
+            (trigger, supersession_key.profile),
+            (
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+            )
+        ) {
+            return None;
+        }
+
+        let ready_state = self
+            .ready_parse_snapshot_state_for_version_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+            )
+            .await?;
+        let context = self
+            .build_execution_context_v2(
+                bsl_runtime::application::SemanticOperation::Diagnostics,
+                supersession_key.file_id,
+                None,
+                flow_sensitive_semantic,
+            )
+            .await;
+        let support_bundle = self.analysis_v2.completion_support_bundle();
+        let path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => uri.to_string(),
+        };
+        let profile = supersession_key.profile;
+        let uri_for_blocking = uri.clone();
+        let coordinator_for_blocking = self.coordinator.clone();
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        let ready_text = ready_state.text.clone();
+        let parse_snapshot = ready_state.parse_snapshot.clone();
+        let deps_id = support_bundle.deps_id.clone();
+        let deps = support_bundle.deps.clone();
+        let settings_id = context.settings.settings_id.clone();
+        let diagnostics_detail_level = context.settings.diagnostics_detail_level;
+        let context_for_blocking = context.clone();
+        let path_for_blocking: Arc<str> = Arc::from(path);
+        self.record_diagnostics_save_followup_wait_state_v2(
+            uri,
+            supersession_key,
+            "semantic_work",
+            None,
+            None,
+        );
+        let followup_result =
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                bsl_runtime::application::CpuWorkClass::Background,
+                context.origin.as_str(),
+                Some(self.coordinator.as_ref()),
+                move || {
+                    let mut host = bsl_analysis_v2::AnalysisHostV2::default();
+                    host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
+                        deps_id: deps_id.clone(),
+                        deps,
+                    });
+                    host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
+                        settings_id: settings_id.clone(),
+                        diagnostics_detail_level,
+                    });
+                    host.apply_change(bsl_analysis_v2::Change::SetFileWithSnapshot {
+                        file_id,
+                        text: ready_text.clone(),
+                        version: requested_version,
+                        path: path_for_blocking,
+                        parse_snapshot,
+                    });
+
+                    let analysis = host.snapshot();
+                    let file_text = analysis
+                        .file_text(file_id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| ready_text.clone());
+                    let line_index = analysis
+                        .line_index(file_id)
+                        .ok()
+                        .flatten()
+                        .unwrap_or_else(|| Arc::new(bsl_line_index::LineIndex::new(file_text.as_ref())));
+
+                    let syntax_started = Instant::now();
+                    let syntax_errors = bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
+                        &context_for_blocking,
+                        &analysis,
+                        Some(coordinator_for_blocking.as_ref()),
+                        file_id,
+                    )
+                    .map_err(|_| ())?;
+                    let syntax_elapsed = syntax_started.elapsed();
+
+                    let mut diagnostics = Vec::new();
+                    if let Some(syntax_errors) = syntax_errors {
+                        diagnostics.extend(syntax_errors_to_diagnostics(
+                            syntax_errors.as_ref(),
+                            &uri_for_blocking,
+                            file_text.as_ref(),
+                            line_index.as_ref(),
+                        ));
+                    }
+
+                    let semantic_started = Instant::now();
+                    let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context_for_blocking,
+                        bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
+                        &analysis,
+                        Some(coordinator_for_blocking.as_ref()),
+                        |analysis| {
+                            if flow_sensitive_semantic {
+                                analysis.semantic_diagnostics_flow_sensitive_profiled(file_id)
+                            } else {
+                                analysis.semantic_diagnostics_profiled(file_id)
+                            }
+                        },
+                    )
+                    .map_err(|_| ())?;
+                    let semantic_elapsed = semantic_started.elapsed();
+                    let duration_from_profile_ms = |value: u128| {
+                        Duration::from_millis(value.min(u64::MAX as u128) as u64)
+                    };
+                    if let Some(profiled) = query {
+                        coordinator_for_blocking
+                            .record_intellisense_v2_semantic_diagnostics_query_breakdown(
+                                duration_from_profile_ms(profiled.profile.inputs_ms),
+                                duration_from_profile_ms(profiled.profile.parse_result_ms),
+                                duration_from_profile_ms(profiled.profile.ir_ms),
+                                duration_from_profile_ms(profiled.profile.collect_ms),
+                                (profiled.profile.flow_sensitive_ms > 0).then(|| {
+                                    duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
+                                }),
+                            );
+                        for error in profiled.diagnostics.iter() {
+                            if !show_hints
+                                && matches!(
+                                    error.severity,
+                                    bsl_shared::domain::types::DiagnosticSeverity::Hint
+                                )
+                            {
+                                continue;
+                            }
+                            diagnostics.push(semantic_error_to_diagnostic(
+                                error,
+                                file_text.as_ref(),
+                                line_index.as_ref(),
+                            ));
+                        }
+                    }
+
+                    Ok::<SaveFollowupReadyArtifactsReply, ()>(SaveFollowupReadyArtifactsReply {
+                        diagnostics,
+                        observed_deps_id: deps_id.as_str().to_string(),
+                        observed_settings_id: settings_id.as_str().to_string(),
+                        syntax_elapsed,
+                        semantic_elapsed,
+                    })
+                },
+            )
+            .await;
+
+        let reply = match followup_result {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(())) | Err(_) => {
+                return Some(
+                    self.finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        supersession_key,
+                        trigger,
+                        self.diagnostics_cancelled_disposition_v2(
+                            cancel_token,
+                            self.current_diagnostics_generation_v2(supersession_key.file_id)
+                                .await,
+                            supersession_key.diagnostics_generation,
+                            self.latest_received_file_versions_v2
+                                .read()
+                                .await
+                                .get(&supersession_key.file_id)
+                                .copied(),
+                            supersession_key.requested_version,
+                        ),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        pipeline_started,
+                    )
+                    .await,
+                );
+            }
+        };
+
+        if let Some(disposition) = self
+            .diagnostics_publish_checkpoint_v2(
+                supersession_key,
+                trigger,
+                cancel_token,
+                Some(reply.observed_deps_id.as_str()),
+                Some(reply.observed_settings_id.as_str()),
+            )
+            .await
+        {
+            return Some(
+                self.finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    None,
+                    None,
+                    None,
+                    Some(reply.syntax_elapsed),
+                    Some(reply.semantic_elapsed),
+                    None,
+                    pipeline_started,
+                )
+                .await,
+            );
+        }
+
+        self.record_diagnostics_save_followup_wait_state_v2(
+            uri,
+            supersession_key,
+            "pending_publish",
+            None,
+            None,
+        );
+        let publish_started = Instant::now();
+        let disposition = self
+            .publish_diagnostics_v2(
+                supersession_key,
+                uri,
+                reply.diagnostics,
+                trigger,
+                profile,
+                pipeline_started,
+            )
+            .await;
+        Some(
+            self.finalize_diagnostics_save_profile_result_v2(
+                uri,
+                supersession_key,
+                trigger,
+                disposition,
+                Some("full"),
+                None,
+                None,
+                None,
+                Some(reply.syntax_elapsed),
+                Some(reply.semantic_elapsed),
+                Some(publish_started.elapsed()),
+                pipeline_started,
+            )
+            .await,
+        )
+    }
+
+    async fn execute_save_fastlane_profile_once_v2(
+        &self,
+        uri: &Url,
+        supersession_key: super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        pipeline_started: Instant,
+    ) -> bsl_runtime::application::DiagnosticsDisposition {
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        let requested_generation = supersession_key.diagnostics_generation;
+        let profile = supersession_key.profile;
+        let blocking_queue_wait_elapsed = None;
+        let wait_for_file_version_elapsed = None;
+        let snapshot_with_deps_elapsed = None;
+
+        let (diagnostics, syntax_mode, syntax_elapsed) = if let Some(result) = self
+            .try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
+                uri,
+                file_id,
+                requested_version,
+            )
+            .await
+        {
+            result
+        } else if let Some(result) = self
+            .try_collect_save_fastlane_diagnostics_from_ready_parse_snapshot_v2(
+                uri,
+                file_id,
+                requested_version,
+            )
+            .await
+        {
+            result
+        } else {
+            let Some(shadow_state) = self
+                .latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned()
+            else {
+                let disposition = self.diagnostics_cancelled_disposition_v2(
+                    cancel_token,
+                    self.current_diagnostics_generation_v2(file_id).await,
+                    requested_generation,
+                    self.latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied(),
+                    requested_version,
+                );
+                self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+                return self
+                    .finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        disposition,
+                        None,
+                        blocking_queue_wait_elapsed,
+                        wait_for_file_version_elapsed,
+                        snapshot_with_deps_elapsed,
+                        None,
+                        None,
+                        None,
+                        pipeline_started,
+                    )
+                    .await;
+            };
+
+            if shadow_state.version != requested_version {
+                let disposition =
+                    bsl_runtime::application::DiagnosticsDisposition::SupersededVersion;
+                self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+                return self
+                    .finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        disposition,
+                        None,
+                        blocking_queue_wait_elapsed,
+                        wait_for_file_version_elapsed,
+                        snapshot_with_deps_elapsed,
+                        None,
+                        None,
+                        None,
+                        pipeline_started,
+                    )
+                    .await;
+            }
+
+            let uri_for_parse = uri.clone();
+            let shadow_text = shadow_state.text;
+            // Save freshness must not sit behind unrelated shared interactive blocking work.
+            let syntax_result = tokio::task::spawn_blocking(move || {
+                maybe_inject_save_fastlane_shadow_parse_delay_for_test();
+                let started = Instant::now();
+                let syntax_errors = bsl_syntax::syntax_errors_only(shadow_text.as_ref());
+                let elapsed = started.elapsed();
+                match syntax_errors {
+                    Ok(syntax_errors) => {
+                        let line_index = bsl_line_index::LineIndex::new(shadow_text.as_ref());
+                        let diagnostics = syntax_errors_to_diagnostics(
+                            &syntax_errors,
+                            &uri_for_parse,
+                            shadow_text.as_ref(),
+                            &line_index,
+                        );
+                        Ok((diagnostics, elapsed))
+                    }
+                    Err(err) => Err((err, elapsed)),
+                }
+            })
+            .await;
+
+            match syntax_result {
+                Ok(Ok((diagnostics, syntax_elapsed))) => (diagnostics, "other", syntax_elapsed),
+                Ok(Err((err, syntax_elapsed))) => {
+                    self.coordinator
+                        .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+                            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                            "other",
+                            syntax_elapsed,
+                        );
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = requested_version,
+                        expected_generation = requested_generation,
+                        profile = profile.as_str(),
+                        error = ?err,
+                        "diagnostics_v2: save_fastlane syntax parse failed"
+                    );
+                    let disposition = bsl_runtime::application::DiagnosticsDisposition::OtherCancel;
+                    self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+                    return self
+                        .finalize_diagnostics_save_profile_result_v2(
+                            uri,
+                            &supersession_key,
+                            trigger,
+                            disposition,
+                            None,
+                            blocking_queue_wait_elapsed,
+                            wait_for_file_version_elapsed,
+                            snapshot_with_deps_elapsed,
+                            Some(syntax_elapsed),
+                            None,
+                            None,
+                            pipeline_started,
+                        )
+                        .await;
+                }
+                Err(err) => {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        expected_version = requested_version,
+                        expected_generation = requested_generation,
+                        profile = profile.as_str(),
+                        error = ?err,
+                        "diagnostics_v2: save_fastlane spawn_blocking failed"
+                    );
+                    let disposition = self.diagnostics_cancelled_disposition_v2(
+                        cancel_token,
+                        self.current_diagnostics_generation_v2(file_id).await,
+                        requested_generation,
+                        self.latest_received_file_versions_v2
+                            .read()
+                            .await
+                            .get(&file_id)
+                            .copied(),
+                        requested_version,
+                    );
+                    self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
+                    return self
+                        .finalize_diagnostics_save_profile_result_v2(
+                            uri,
+                            &supersession_key,
+                            trigger,
+                            disposition,
+                            None,
+                            blocking_queue_wait_elapsed,
+                            wait_for_file_version_elapsed,
+                            snapshot_with_deps_elapsed,
+                            None,
+                            None,
+                            None,
+                            pipeline_started,
+                        )
+                        .await;
+                }
+            }
+        };
+
+        self.coordinator
+            .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                syntax_mode,
+                syntax_elapsed,
+            );
+
+        if let Some(disposition) = self
+            .diagnostics_publish_checkpoint_v2(&supersession_key, trigger, cancel_token, None, None)
+            .await
+        {
+            return self
+                .finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    blocking_queue_wait_elapsed,
+                    wait_for_file_version_elapsed,
+                    snapshot_with_deps_elapsed,
+                    Some(syntax_elapsed),
+                    None,
+                    None,
+                    pipeline_started,
+                )
+                .await;
+        }
+
+        let publish_started = Instant::now();
+        let disposition = self
+            .publish_diagnostics_v2(
+                &supersession_key,
+                uri,
+                diagnostics,
+                trigger,
+                profile,
+                pipeline_started,
+            )
+            .await;
+        self.finalize_diagnostics_save_profile_result_v2(
+            uri,
+            &supersession_key,
+            trigger,
+            disposition,
+            Some("syntax_only"),
+            blocking_queue_wait_elapsed,
+            wait_for_file_version_elapsed,
+            snapshot_with_deps_elapsed,
+            Some(syntax_elapsed),
+            None,
+            Some(publish_started.elapsed()),
+            pipeline_started,
+        )
+        .await
     }
 
     fn configured_workspace_root_for_semantic_v2(
@@ -229,6 +1096,7 @@ impl BslLanguageServer {
             file_id,
             profile,
             diagnostics_generation,
+            save_cycle_sequence: None,
             requested_version: expected_version,
         };
         let _ = self
@@ -243,6 +1111,7 @@ impl BslLanguageServer {
         file_id: V2FileId,
         expected_version: i32,
         diagnostics_generation: u64,
+        save_cycle_sequence: Option<u64>,
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         profile: bsl_runtime::application::DiagnosticsProfile,
         debounce: bool,
@@ -252,6 +1121,7 @@ impl BslLanguageServer {
             file_id,
             profile,
             diagnostics_generation,
+            save_cycle_sequence,
             requested_version: expected_version,
         };
         let mut tasks = self.diagnostics_tasks_v2.lock().await;
@@ -268,6 +1138,19 @@ impl BslLanguageServer {
                     task.supersession_key.profile,
                     reason.to_disposition(),
                 );
+                if let Some(save_cycle_sequence) = task.supersession_key.save_cycle_sequence {
+                    self.record_diagnostics_save_timeline_profile_disposition(
+                        &uri,
+                        super::super::DiagnosticsSaveTimelineCycleKey {
+                            file_id: task.supersession_key.file_id,
+                            diagnostics_generation: task.supersession_key.diagnostics_generation,
+                            save_cycle_sequence,
+                            requested_version: task.supersession_key.requested_version,
+                        },
+                        task.supersession_key.profile,
+                        reason.to_disposition(),
+                    );
+                }
                 task.cancel_token = super::super::DiagnosticsCancellationTokenV2::new();
                 task.supersession_key = supersession_key;
             }
@@ -372,6 +1255,7 @@ impl BslLanguageServer {
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
+        let pipeline_started = Instant::now();
         if let Some(disposition) = self
             .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
             .await
@@ -382,6 +1266,20 @@ impl BslLanguageServer {
         let requested_version = supersession_key.requested_version;
         let requested_generation = supersession_key.diagnostics_generation;
         let profile = supersession_key.profile;
+        if matches!(
+            profile,
+            bsl_runtime::application::DiagnosticsProfile::SaveFastlane
+        ) {
+            return self
+                .execute_save_fastlane_profile_once_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    cancel_token,
+                    pipeline_started,
+                )
+                .await;
+        }
 
         let (show_hints, flow_sensitive_enabled) = {
             let settings = self.settings.read().await;
@@ -394,13 +1292,59 @@ impl BslLanguageServer {
             bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled);
         let run_semantic =
             plan.run_semantic && self.should_run_semantic_diagnostics_for_uri_v2(uri).await;
+        let save_followup_from_did_save = matches!(
+            (trigger, profile),
+            (
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+            )
+        );
         if !plan.run_syntax && !run_semantic {
             self.record_diagnostics_pipeline_event_v2(
                 trigger,
                 profile,
                 bsl_runtime::application::DiagnosticsDisposition::Published,
             );
-            return bsl_runtime::application::DiagnosticsDisposition::Published;
+            return self
+                .finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    bsl_runtime::application::DiagnosticsDisposition::Published,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    pipeline_started,
+                )
+                .await;
+        }
+
+        if save_followup_from_did_save && run_semantic {
+            if let Some(disposition) = self
+                .try_execute_save_followup_from_ready_artifacts_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    cancel_token,
+                    pipeline_started,
+                    show_hints,
+                    plan.flow_sensitive_semantic,
+                )
+                .await
+            {
+                return disposition;
+            }
+            self.record_diagnostics_save_followup_wait_state_v2(
+                uri,
+                &supersession_key,
+                "apply_lag",
+                None,
+                None,
+            );
         }
 
         let context = self
@@ -450,11 +1394,37 @@ impl BslLanguageServer {
                     "diagnostics_v2: skip publish (stateful operation not ready)"
                 );
                 self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
-                return disposition;
+                return self
+                    .finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        disposition,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        pipeline_started,
+                    )
+                    .await;
             }
         };
 
         let wait_elapsed = prepared.wait_elapsed.unwrap_or(Duration::ZERO);
+        let mut syntax_stage_elapsed = None;
+        let mut semantic_stage_elapsed = None;
+        if save_followup_from_did_save && run_semantic {
+            self.record_diagnostics_save_followup_wait_state_v2(
+                uri,
+                &supersession_key,
+                "semantic_work",
+                Some(wait_elapsed),
+                Some(prepared.snapshot_elapsed),
+            );
+        }
         if wait_elapsed > Duration::ZERO {
             if let Some(threshold) = super::super::intellisense_v2_slow_client_log_threshold() {
                 if wait_elapsed >= threshold {
@@ -589,6 +1559,7 @@ impl BslLanguageServer {
                     analysis = Some(next_analysis);
                     diagnostics.extend(syntax_diagnostics);
                     was_cancelled |= syntax_cancelled;
+                    syntax_stage_elapsed = Some(syntax_elapsed);
                     if let Some(threshold) =
                         super::super::intellisense_v2_slow_query_warn_threshold()
                     {
@@ -639,7 +1610,22 @@ impl BslLanguageServer {
                 requested_version,
             );
             self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
-            return disposition;
+            return self
+                .finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    None,
+                    Some(wait_elapsed),
+                    Some(snapshot_elapsed),
+                    syntax_stage_elapsed,
+                    semantic_stage_elapsed,
+                    None,
+                    pipeline_started,
+                )
+                .await;
         }
 
         if run_semantic {
@@ -655,7 +1641,22 @@ impl BslLanguageServer {
                 .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
                 .await
             {
-                return disposition;
+                return self
+                    .finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        disposition,
+                        None,
+                        None,
+                        Some(wait_elapsed),
+                        Some(snapshot_elapsed),
+                        syntax_stage_elapsed,
+                        semantic_stage_elapsed,
+                        None,
+                        pipeline_started,
+                    )
+                    .await;
             }
 
             let analysis_for_blocking = analysis
@@ -730,6 +1731,7 @@ impl BslLanguageServer {
                 Ok((semantic_diagnostics, semantic_cancelled, semantic_elapsed)) => {
                     diagnostics.extend(semantic_diagnostics);
                     was_cancelled |= semantic_cancelled;
+                    semantic_stage_elapsed = Some(semantic_elapsed);
                     if let Some(threshold) =
                         super::super::intellisense_v2_slow_query_warn_threshold()
                     {
@@ -832,7 +1834,22 @@ impl BslLanguageServer {
                 "diagnostics_v2: skip publish (stale)"
             );
             self.record_diagnostics_pipeline_event_v2(trigger, profile, disposition);
-            return disposition;
+            return self
+                .finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    None,
+                    Some(wait_elapsed),
+                    Some(snapshot_elapsed),
+                    syntax_stage_elapsed,
+                    semantic_stage_elapsed,
+                    None,
+                    pipeline_started,
+                )
+                .await;
         }
 
         if let Some(disposition) = self
@@ -855,7 +1872,22 @@ impl BslLanguageServer {
                 disposition = disposition.as_str(),
                 "diagnostics_v2: skip publish (final checkpoint)"
             );
-            return disposition;
+            return self
+                .finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    &supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    None,
+                    Some(wait_elapsed),
+                    Some(snapshot_elapsed),
+                    syntax_stage_elapsed,
+                    semantic_stage_elapsed,
+                    None,
+                    pipeline_started,
+                )
+                .await;
         }
 
         debug!(
@@ -872,15 +1904,41 @@ impl BslLanguageServer {
             "diagnostics_v2: publish diagnostics"
         );
 
-        self.client
-            .publish_diagnostics(uri.clone(), diagnostics, Some(requested_version))
+        if save_followup_from_did_save && run_semantic {
+            self.record_diagnostics_save_followup_wait_state_v2(
+                uri,
+                &supersession_key,
+                "pending_publish",
+                Some(wait_elapsed),
+                Some(snapshot_elapsed),
+            );
+        }
+        let publish_kind = if run_semantic { "full" } else { "syntax_only" };
+        let publish_started = Instant::now();
+        let disposition = self
+            .publish_diagnostics_v2(
+                &supersession_key,
+                uri,
+                diagnostics,
+                trigger,
+                profile,
+                pipeline_started,
+            )
             .await;
-        self.update_diagnostics_count(uri, diagnostics_len).await;
-        self.record_diagnostics_pipeline_event_v2(
+        self.finalize_diagnostics_save_profile_result_v2(
+            uri,
+            &supersession_key,
             trigger,
-            profile,
-            bsl_runtime::application::DiagnosticsDisposition::Published,
-        );
-        bsl_runtime::application::DiagnosticsDisposition::Published
+            disposition,
+            Some(publish_kind),
+            None,
+            Some(wait_elapsed),
+            Some(snapshot_elapsed),
+            syntax_stage_elapsed,
+            semantic_stage_elapsed,
+            Some(publish_started.elapsed()),
+            pipeline_started,
+        )
+        .await
     }
 }

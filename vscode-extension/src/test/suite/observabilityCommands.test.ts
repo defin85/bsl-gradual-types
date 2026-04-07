@@ -55,6 +55,13 @@ suite('Observability Commands Test Suite', () => {
                 traces: [],
             },
         });
+        sinon.stub(customRequestsModule, 'getDiagnosticsSaveTimeline').resolves({
+            kind: 'ok',
+            response: {
+                version: 4,
+                traces: [],
+            },
+        });
         sinon.stub(customRequestsModule, 'getObservabilityMetricsFetchResult').resolves({
             kind: 'ok',
             response: {
@@ -86,12 +93,18 @@ suite('Observability Commands Test Suite', () => {
         const rawDirEntries = await fs.readdir(path.join(bundleRoot, 'raw'));
         assert.deepStrictEqual(
             rawDirEntries.sort(),
-            ['client_probes.json', 'completion_timeline.json', 'observability_metrics.json']
+            [
+                'client_probes.json',
+                'completion_timeline.json',
+                'diagnostics_save_timeline.json',
+                'observability_metrics.json',
+            ]
         );
         assert.deepStrictEqual(incident.capture_scope, { kind: 'empty' });
         assert.strictEqual(incident.request_window.request_count, 0);
         assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'available');
+        assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(incident.sources.observability_metrics.status, 'available');
     });
 
@@ -102,6 +115,9 @@ suite('Observability Commands Test Suite', () => {
 
         const getCompletionTimelineStub = sinon
             .stub(customRequestsModule, 'getCompletionTimeline')
+            .rejects(new Error('unexpected refetch'));
+        const getDiagnosticsSaveTimelineStub = sinon
+            .stub(customRequestsModule, 'getDiagnosticsSaveTimeline')
             .rejects(new Error('unexpected refetch'));
         const getMetricsStub = sinon
             .stub(customRequestsModule, 'getObservabilityMetricsFetchResult')
@@ -124,6 +140,9 @@ suite('Observability Commands Test Suite', () => {
             completionTimeline: {
                 kind: 'unsupported',
             },
+            diagnosticsSaveTimeline: {
+                kind: 'unsupported',
+            },
             clientProbes: [],
             observabilityMetrics: {
                 kind: 'unsupported',
@@ -131,6 +150,7 @@ suite('Observability Commands Test Suite', () => {
         });
 
         assert.strictEqual(getCompletionTimelineStub.callCount, 0);
+        assert.strictEqual(getDiagnosticsSaveTimelineStub.callCount, 0);
         assert.strictEqual(getMetricsStub.callCount, 0);
 
         const bundleFolders = await fs.readdir(tempRootDir);
@@ -141,6 +161,7 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(incident.request_window.request_count, 0);
         assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'unsupported');
+        assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });
 
@@ -151,6 +172,9 @@ suite('Observability Commands Test Suite', () => {
 
         const getCompletionTimelineStub = sinon
             .stub(customRequestsModule, 'getCompletionTimeline')
+            .rejects(new Error('unexpected refetch'));
+        const getDiagnosticsSaveTimelineStub = sinon
+            .stub(customRequestsModule, 'getDiagnosticsSaveTimeline')
             .rejects(new Error('unexpected refetch'));
         const getMetricsStub = sinon
             .stub(customRequestsModule, 'getObservabilityMetricsFetchResult')
@@ -167,6 +191,9 @@ suite('Observability Commands Test Suite', () => {
                     version: 20,
                     traces: [],
                 },
+            },
+            diagnosticsSaveTimeline: {
+                kind: 'unsupported',
             },
             clientProbes: [],
             observabilityMetrics: {
@@ -186,6 +213,7 @@ suite('Observability Commands Test Suite', () => {
         await command!();
 
         assert.strictEqual(getCompletionTimelineStub.callCount, 0);
+        assert.strictEqual(getDiagnosticsSaveTimelineStub.callCount, 0);
         assert.strictEqual(getMetricsStub.callCount, 0);
 
         const bundleFolders = await fs.readdir(tempRootDir);
@@ -193,6 +221,7 @@ suite('Observability Commands Test Suite', () => {
         const bundleRoot = path.join(tempRootDir, bundleFolders[0]);
         const incident = JSON.parse(await fs.readFile(path.join(bundleRoot, 'incident.json'), 'utf8'));
         assert.strictEqual(incident.sources.completion_timeline.status, 'available');
+        assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });
 });

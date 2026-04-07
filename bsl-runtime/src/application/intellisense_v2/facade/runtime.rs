@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(test)]
+#[cfg(debug_assertions)]
 fn maybe_inject_apply_change_delay_for_test(change: &Change) {
     let env_key = match change {
         Change::SetFile { .. } => Some("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS"),
@@ -21,7 +21,7 @@ fn maybe_inject_apply_change_delay_for_test(change: &Change) {
     }
 }
 
-#[cfg(not(test))]
+#[cfg(not(debug_assertions))]
 fn maybe_inject_apply_change_delay_for_test(_change: &Change) {}
 
 impl IntellisenseV2Facade {

@@ -215,6 +215,29 @@ fn parse_unclosed_try_is_rewritten_and_preserves_related_info() {
 }
 
 #[test]
+fn syntax_errors_only_matches_parse_for_broken_code() {
+    let source = "Процедура Тест(\nКонецПроцедуры";
+    let parsed = parse(source, &ParseOptions::default()).unwrap();
+    let syntax_only = syntax_errors_only(source).unwrap();
+
+    let project =
+        |e: &bsl_shared::domain::types::ParseError| (e.error_type, e.message.clone(), e.span);
+
+    let parsed_projected: Vec<_> = parsed.syntax_errors.iter().map(project).collect();
+    let syntax_only_projected: Vec<_> = syntax_only.iter().map(project).collect();
+    assert_eq!(syntax_only_projected, parsed_projected);
+}
+
+#[test]
+fn syntax_errors_only_keeps_heuristic_semicolon_diagnostics() {
+    let source = "Функция Тест()\n    МассивДанных = Новый Массив()\n    Возврат 1\nКонецФункции";
+    let syntax_only = syntax_errors_only(source).unwrap();
+    assert!(syntax_only.iter().any(|error| {
+        error.message.contains("точка с запятой") || error.message.contains("точки с запятой")
+    }));
+}
+
+#[test]
 fn parse_strict_line_cap_keeps_parser_error_over_heuristics_on_same_line() {
     let source = "Процедура Тест()\n    x = (1 + ) = Новый\n    y = 1;\nКонецПроцедуры";
     let result = parse(source, &ParseOptions::default()).unwrap();

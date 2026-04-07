@@ -54,16 +54,30 @@ fn init_test_tracing() {
     });
 }
 
-static PRECOMPUTE_DELAY_ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+static TEST_ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+static PRECOMPUTE_DELAY_ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
     std::sync::OnceLock::new();
 
-fn lock_test_env_mutex(
-    mutex: &'static std::sync::OnceLock<std::sync::Mutex<()>>,
-) -> std::sync::MutexGuard<'static, ()> {
-    mutex
-        .get_or_init(|| std::sync::Mutex::new(()))
+async fn lock_test_env() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_ENV_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .await
+}
+
+fn lock_test_env_blocking() -> tokio::sync::MutexGuard<'static, ()> {
+    TEST_ENV_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .blocking_lock()
+}
+
+async fn lock_test_env_mutex(
+    mutex: &'static std::sync::OnceLock<tokio::sync::Mutex<()>>,
+) -> tokio::sync::MutexGuard<'static, ()> {
+    mutex
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
 }
 
 fn parse_backend_tree_for_test(text: &str) -> Arc<Tree> {
@@ -757,6 +771,35 @@ async fn live_transport_get_observability_metrics(
         .expect("result.metrics field")
 }
 
+async fn live_transport_wait_publish_diagnostics(
+    harness: &mut LiveLspTransportHarness,
+    uri: &Url,
+    version: i32,
+    timeout_duration: Duration,
+) -> PublishDiagnosticsParams {
+    tokio::time::timeout(timeout_duration, async {
+        loop {
+            let message = harness.read_message().await;
+            if message.get("method").and_then(|value| value.as_str())
+                != Some("textDocument/publishDiagnostics")
+            {
+                continue;
+            }
+            let Some(params) = message.get("params").cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            if parsed.uri == *uri && parsed.version == Some(version) {
+                break parsed;
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for live publishDiagnostics")
+}
+
 async fn shutdown_lsp_service(
     service: &mut LspService<BslLanguageServer>,
     close_uri: Option<&Url>,
@@ -979,7 +1022,7 @@ async fn p33_did_open_returns_before_blocking_parse_snapshot_finishes() {
 
     const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS", "1500");
 
@@ -1808,6 +1851,2177 @@ async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
 }
 
 #[tokio::test]
+async fn p6_did_save_fastlane_publishes_same_version_syntax_diagnostics_before_delayed_apply() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+    const FIRST_PUBLISH_BUDGET_MS: u64 = 800;
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///did_save_fastlane_same_version_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let did_save_started = Instant::now();
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let first_publish = tokio::time::timeout(
+        Duration::from_millis(FIRST_PUBLISH_BUDGET_MS),
+        async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri != uri {
+                    continue;
+                }
+                if params.version != Some(2) {
+                    panic!(
+                        "didSave fastlane must not publish stale diagnostics after save, got version={:?}",
+                        params.version
+                    );
+                }
+                if params.diagnostics.is_empty() {
+                    continue;
+                }
+                break params;
+            }
+        },
+    )
+    .await
+    .expect("didSave first publish must stay bounded under delayed apply");
+
+    let first_publish_elapsed = did_save_started.elapsed();
+    assert!(
+        first_publish_elapsed <= Duration::from_millis(FIRST_PUBLISH_BUDGET_MS),
+        "didSave first publish must stay bounded under delayed apply (elapsed={first_publish_elapsed:?})"
+    );
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "save fastlane must stay syntax-only for same-version first publish, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    assert!(
+        read_u64_metric(
+            counters.get(
+                "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_save_profile_save_fastlane_reason_published"
+            )
+        ) > 0,
+        "didSave fastlane publish must be observable via dedicated save_fastlane profile, counters={counters:?}"
+    );
+    assert!(
+        histograms.contains_key(
+            "intellisense_v2_diagnostics_pipeline_publish_ms_origin_lsp_trigger_did_save_profile_save_fastlane"
+        ),
+        "didSave fastlane publish latency histogram must be exported, histograms={:?}",
+        histograms.keys().collect::<Vec<_>>()
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_did_save_fastlane_does_not_erase_richer_idle_heavy_publish() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _save_fastlane_delay_guard =
+        EnvVarGuard::set("BSL_TEST_SAVE_FASTLANE_PARSE_DELAY_MS", "1200");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri =
+        Url::parse("file:///did_save_fastlane_monotonic_publish_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let heavy_publish = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("idle_heavy publish with semantic diagnostics must arrive first");
+
+    assert!(
+        heavy_publish
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2")),
+        "didSave heavy publish must surface semantic diagnostics, diagnostics={:?}",
+        heavy_publish.diagnostics
+    );
+
+    let regressing_publish = tokio::time::timeout(Duration::from_millis(1800), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            let syntax_only = !params.diagnostics.is_empty()
+                && params
+                    .diagnostics
+                    .iter()
+                    .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax"));
+            if params.diagnostics.is_empty() || syntax_only {
+                break params;
+            }
+        }
+    })
+    .await
+    .ok();
+    assert!(
+        regressing_publish.is_none(),
+        "late save_fastlane publish must not erase richer same-generation idle_heavy diagnostics, publish={regressing_publish:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p6_did_save_fastlane_uses_ready_parse_snapshot_when_shadow_is_missing() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+    const FIRST_PUBLISH_BUDGET_MS: u64 = 400;
+
+    let _env_lock = lock_test_env().await;
+    let _save_fastlane_delay_guard =
+        EnvVarGuard::set("BSL_TEST_SAVE_FASTLANE_PARSE_DELAY_MS", "1500");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "1500");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_fastlane_ready_parse_snapshot_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must materialize same-version ready parse snapshot");
+    while published_rx.try_recv().is_ok() {}
+
+    server
+        .latest_document_shadow_state_v2
+        .write()
+        .await
+        .remove(&file_id);
+
+    let did_save_started = Instant::now();
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let first_publish =
+        tokio::time::timeout(Duration::from_millis(FIRST_PUBLISH_BUDGET_MS), async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri != uri || params.version != Some(2) {
+                    continue;
+                }
+                if params.diagnostics.is_empty() {
+                    continue;
+                }
+                break params;
+            }
+        })
+        .await
+        .expect("ready parse snapshot fastlane must publish before delayed shadow/apply path");
+
+    let first_publish_elapsed = did_save_started.elapsed();
+    assert!(
+        first_publish_elapsed <= Duration::from_millis(FIRST_PUBLISH_BUDGET_MS),
+        "ready parse snapshot fastlane must stay bounded without shadow state (elapsed={first_publish_elapsed:?})"
+    );
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "ready parse snapshot fastlane must stay syntax-only, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_artifacts_before_delayed_apply(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 2500;
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_followup_ready_artifacts_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must materialize same-version ready parse snapshot");
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_started = Instant::now();
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("same-version ready artifacts must publish full follow-up before delayed apply");
+
+    let followup_elapsed = did_save_started.elapsed();
+    assert!(
+        followup_elapsed <= Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS),
+        "heavy follow-up must stay bounded when same-version ready artifacts already exist (elapsed={followup_elapsed:?})"
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_706, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let full_publish = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .filter(|publish| {
+            publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+        })
+        .or_else(|| {
+            trace
+                .get("first_publish")
+                .and_then(|value| value.as_object())
+                .filter(|publish| {
+                    publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+                })
+        })
+        .expect("idle_heavy full publish trace");
+    assert_eq!(
+        full_publish.get("profile").and_then(|value| value.as_str()),
+        Some("idle_heavy")
+    );
+    assert_eq!(
+        full_publish
+            .get("publish_kind")
+            .and_then(|value| value.as_str()),
+        Some("full")
+    );
+    assert!(
+        full_publish.get("wait_for_file_version_ms").is_none(),
+        "ready-artifact follow-up must not expose wait_for_file_version as primary gate, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("semantic_diagnostics_query_ms").is_some(),
+        "ready-artifact follow-up must expose semantic query timing, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
+    let _did_save_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS", "4000");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_followup_apply_lag_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must materialize same-version ready parse snapshot");
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri && params.version == Some(2) && !params.diagnostics.is_empty() {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane must still publish before apply-lagged follow-up");
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_707, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    assert_eq!(
+        trace
+            .get("save_fastlane_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+    assert!(
+        trace.get("followup_publish").is_none(),
+        "apply-lagged heavy follow-up must not look published yet, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str()),
+        Some("apply_lag")
+    );
+    assert!(
+        trace.get("idle_heavy_outcome").is_none(),
+        "idle_heavy must still be in-flight while apply lag is the primary blocker, trace={trace:?}"
+    );
+    assert!(
+        trace.get("terminal_outcome").is_none(),
+        "timeline must keep stalled heavy follow-up visible as active, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_fastlane_fallback_bypasses_shared_queue_wait() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "1500");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_fastlane_blocking_queue_wait_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must materialize same-version ready parse snapshot");
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
+    while published_rx.try_recv().is_ok() {}
+
+    let blocker_count = std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get().saturating_mul(4))
+        .unwrap_or(16)
+        .clamp(16, 128);
+    let blocking_tasks = (0..blocker_count)
+        .map(|_| {
+            tokio::spawn(async move {
+                let _ = bsl_runtime::application::spawn_bounded_blocking_with_class(
+                    bsl_runtime::application::CpuWorkClass::Interactive,
+                    move || {
+                        std::thread::sleep(Duration::from_millis(350));
+                    },
+                )
+                .await;
+            })
+        })
+        .collect::<Vec<_>>();
+    tokio::time::sleep(Duration::from_millis(40)).await;
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let Some(params) = published_rx.recv().await else {
+                panic!("publish stream closed before fastlane publish");
+            };
+            if params.uri == uri && params.version == Some(2) && !params.diagnostics.is_empty() {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("queued fastlane fallback must still publish");
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_704, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let first_publish = trace
+        .get("first_publish")
+        .and_then(|value| value.as_object())
+        .expect("first publish trace");
+    let blocking_queue_wait_ms = first_publish
+        .get("blocking_queue_wait_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or_default();
+    let first_publish_elapsed_ms = first_publish
+        .get("elapsed_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(u64::MAX);
+    assert!(
+        blocking_queue_wait_ms == 0,
+        "save_fastlane bypass must not inherit shared interactive queue wait, trace={trace:?}"
+    );
+    assert!(
+        first_publish_elapsed_ms < 1_000,
+        "save_fastlane first publish must stay bounded under shared queue saturation, trace={trace:?}"
+    );
+    assert_eq!(
+        first_publish
+            .get("profile")
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        first_publish
+            .get("publish_kind")
+            .and_then(|value| value.as_str()),
+        Some("syntax_only")
+    );
+    assert!(
+        first_publish.contains_key("syntax_diagnostics_query_ms"),
+        "first publish must still expose syntax query timing field, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        Some(1),
+        "first didSave cycle must expose dedicated monotonic save cycle sequence"
+    );
+
+    for task in blocking_tasks {
+        let _ = task.await;
+    }
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_before_idle_heavy_terminal(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "1500");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///did_save_timeline_inflight_cycle_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_millis(800), async {
+        loop {
+            let Some(params) = published_rx.recv().await else {
+                panic!("publish stream closed before fastlane publish");
+            };
+            if params.uri == uri && params.version == Some(2) && !params.diagnostics.is_empty() {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane must publish before delayed idle_heavy terminal");
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_702, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching inflight didSave diagnostics trace");
+
+    assert_eq!(
+        trace.get("trigger").and_then(|value| value.as_str()),
+        Some("did_save")
+    );
+    assert_eq!(
+        trace
+            .get("save_fastlane_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+    assert!(
+        trace.get("idle_heavy_outcome").is_none(),
+        "idle_heavy must stay pending while active didSave cycle is still in-flight, trace={trace:?}"
+    );
+    assert!(
+        trace.get("terminal_outcome").is_none(),
+        "in-flight save cycle must stay visible before terminal outcome, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("first_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        trace
+            .get("first_publish")
+            .and_then(|value| value.get("publish_kind"))
+            .and_then(|value| value.as_str()),
+        Some("syntax_only")
+    );
+    assert!(
+        trace.get("followup_publish").is_none(),
+        "follow-up publish must remain absent before idle_heavy completes, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_save_supersedes_followup(
+) {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let holder = holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+    initialize_lsp_service(&mut service).await;
+
+    let server = holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_timeline_overlapping_cycles_fixture.bsl").expect("fixture");
+    let first_key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(41),
+        diagnostics_generation: 3,
+        save_cycle_sequence: 1,
+        requested_version: 2,
+    };
+    let second_key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: first_key.file_id,
+        diagnostics_generation: 5,
+        save_cycle_sequence: 2,
+        requested_version: 3,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, first_key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        first_key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 15,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(7),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, second_key);
+    server.record_diagnostics_save_timeline_profile_disposition(
+        &uri,
+        first_key,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+    );
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        second_key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 11,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(5),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_703, 12).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace_v2 = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("trace for first didSave cycle must be preserved");
+    let trace_v3 = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(3)
+        })
+        .expect("trace for second didSave cycle must be preserved");
+
+    assert_ne!(
+        trace_v2.get("trace_id"),
+        trace_v3.get("trace_id"),
+        "sequential didSave cycles must keep distinct trace identities"
+    );
+    assert_eq!(
+        trace_v2
+            .get("first_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        trace_v2
+            .get("save_fastlane_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+    assert_eq!(
+        trace_v2
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation")
+    );
+    assert_eq!(
+        trace_v2
+            .get("terminal_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation")
+    );
+    assert_eq!(
+        trace_v3
+            .get("first_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        trace_v2
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        trace_v3
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert!(
+        trace_v3
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default()
+            > trace_v2
+                .get("save_cycle_sequence")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+        "new didSave cycle must keep a fresher dedicated save cycle sequence"
+    );
+    assert!(
+        trace_v3.get("terminal_outcome").is_none(),
+        "newer overlapping didSave cycle must remain independently visible while still active"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_sequence_for_correlation(
+) {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let holder = holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+    initialize_lsp_service(&mut service).await;
+
+    let server = holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_timeline_same_requested_version_fixture.bsl")
+        .expect("fixture");
+    let first_key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(42),
+        diagnostics_generation: 13,
+        save_cycle_sequence: 1,
+        requested_version: 11,
+    };
+    let second_key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: first_key.file_id,
+        diagnostics_generation: 12,
+        save_cycle_sequence: 2,
+        requested_version: 11,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, first_key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        first_key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 18,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(8),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+    server.record_diagnostics_save_timeline_profile_disposition(
+        &uri,
+        first_key,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+    );
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, second_key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        second_key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 12,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(5),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_705, 12).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let matching = traces
+        .iter()
+        .filter(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(11)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching.len(),
+        2,
+        "same requested_version must still preserve two distinct didSave cycles"
+    );
+
+    let first_trace = matching
+        .iter()
+        .find(|trace| {
+            trace
+                .get("save_cycle_sequence")
+                .and_then(|value| value.as_u64())
+                == Some(1)
+        })
+        .expect("first save cycle sequence trace");
+    let second_trace = matching
+        .iter()
+        .find(|trace| {
+            trace
+                .get("save_cycle_sequence")
+                .and_then(|value| value.as_u64())
+                == Some(2)
+        })
+        .expect("second save cycle sequence trace");
+
+    assert_eq!(
+        first_trace
+            .get("diagnostics_generation")
+            .and_then(|value| value.as_u64()),
+        Some(13)
+    );
+    assert_eq!(
+        second_trace
+            .get("diagnostics_generation")
+            .and_then(|value| value.as_u64()),
+        Some(12)
+    );
+    assert_eq!(
+        second_trace
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert!(
+        second_trace
+            .get("diagnostics_generation")
+            .and_then(|value| value.as_u64())
+            .unwrap_or_default()
+            < first_trace
+                .get("diagnostics_generation")
+                .and_then(|value| value.as_u64())
+                .unwrap_or_default(),
+        "test fixture must prove save ordering no longer depends on diagnostics generation"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_groups_fastlane_and_idle_heavy_under_one_save_cycle() {
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///did_save_timeline_grouping_fixture.bsl").expect("fixture");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: V1_FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: V2_FIXTURE.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let mut version_two_publish_count = 0usize;
+    let publish_deadline = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < publish_deadline && version_two_publish_count < 2 {
+        let remaining = publish_deadline.saturating_duration_since(Instant::now());
+        let Ok(next) = tokio::time::timeout(remaining, published_rx.recv()).await else {
+            break;
+        };
+        let Some(params) = next else {
+            break;
+        };
+        if params.uri == uri && params.version == Some(2) {
+            version_two_publish_count += 1;
+        }
+    }
+    assert!(
+        version_two_publish_count >= 2,
+        "expected save_fastlane and idle_heavy publishes for didSave cycle"
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_701, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching didSave diagnostics trace");
+
+    assert_eq!(
+        trace.get("trigger").and_then(|value| value.as_str()),
+        Some("did_save")
+    );
+    assert_eq!(
+        trace
+            .get("diagnostics_generation")
+            .and_then(|value| value.as_u64()),
+        Some(3),
+        "didOpen, didChange, didSave generation sequence must group under save generation"
+    );
+    assert_eq!(
+        trace
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        Some(1),
+        "first didSave for file must expose save cycle sequence independent from diagnostics generation"
+    );
+    assert_eq!(
+        trace
+            .get("first_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        trace
+            .get("followup_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("idle_heavy")
+    );
+    assert_eq!(
+        trace
+            .get("save_fastlane_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+    assert_eq!(
+        trace
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+    assert_eq!(
+        trace
+            .get("terminal_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p6_type_index_precompute_slot_tracks_latest_version_and_clears_on_did_close() {
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -2439,7 +4653,7 @@ async fn p28_cancel_request_stops_completion_and_prevents_late_publish() {
         }
     }
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_DELAY_MS", "40");
 
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -2789,11 +5003,7 @@ async fn p28_newer_completion_proactively_cancels_older_active_completion_on_sam
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let _delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_DELAY_MS", "80");
 
     let fixture =
@@ -3216,11 +5426,7 @@ async fn p29_completion_mode_matrix_parity_on_fixed_revision() {
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let env_guard = CompletionModeEnvGuard::new();
 
     let scenarios = [
@@ -10839,9 +13045,8 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 jsonrpc_dispatch_received_at_ms.saturating_sub(adapter_read_at_ms),
                 "adapter_to_dispatch_wait_ms must match adapter-read to dispatch delta"
             );
-            assert_eq!(
+            assert!(
                 dispatch_to_request_context_wait_ms <= transport_to_method_wait_ms,
-                true,
                 "dispatch_to_request_context_wait_ms must not exceed transport_to_method_wait_ms"
             );
         } else {
@@ -14327,6 +16532,35 @@ where
     value.get("result").cloned().expect("result field")
 }
 
+async fn lsp_get_diagnostics_save_timeline<S>(
+    service: &mut S,
+    request_id: i64,
+    limit: usize,
+) -> serde_json::Value
+where
+    S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
+    S::Future: Send,
+    S::Error: std::fmt::Debug,
+{
+    let execute = Request::build("workspace/executeCommand")
+        .id(request_id)
+        .params(serde_json::json!({
+            "command": "bsl.getDiagnosticsSaveTimeline",
+            "arguments": [{ "limit": limit }],
+        }))
+        .finish();
+    let execute_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(execute)
+        .await
+        .expect("workspace/executeCommand request")
+        .expect("workspace/executeCommand response");
+    let value = serde_json::to_value(&execute_response).expect("serialize response");
+    value.get("result").cloned().expect("result field")
+}
+
 async fn lsp_get_observability_metrics<S>(service: &mut S, request_id: i64) -> serde_json::Value
 where
     S: Service<Request, Response = Option<JsonRpcResponse>> + Send,
@@ -15378,11 +17612,7 @@ async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_rea
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let _ir_delay_guard = EnvVarGuard::set("BSL_TEST_COMPLETION_IR_QUERY_DELAY_MS", "400");
 
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -15519,7 +17749,7 @@ async fn p33_non_member_form_completion_ages_out_of_shadow_empty_success_window(
         }
     }
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -15677,7 +17907,7 @@ async fn p33_aged_non_member_completion_skips_blocking_current_revision_snapshot
         }
     }
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -15875,11 +18105,7 @@ async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_de
 
     const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
 
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -16057,11 +18283,7 @@ async fn p33_completion_service_first_poll_ignores_blocking_did_change_parse_del
 
     const FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
 
@@ -16234,11 +18456,7 @@ async fn p33_completion_transport_first_poll_stays_short_under_completion_burst(
     const COMPLETION_DELAY_MS: u64 = 350;
     const FIRST_POLL_BUDGET_MS: u64 = 150;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _completion_delay_guard = EnvVarGuard::set(
         "BSL_TEST_COMPLETION_DELAY_MS",
         &COMPLETION_DELAY_MS.to_string(),
@@ -16386,11 +18604,7 @@ async fn p33_same_file_completion_supersession_releases_active_turn_during_respo
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _response_build_delay_guard =
         EnvVarGuard::set("BSL_TEST_COMPLETION_RESPONSE_BUILD_DELAY_MS", "300");
 
@@ -16612,11 +18826,7 @@ async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_bef
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     super::super::language_server::reset_completion_checkpoint_hits_for_test();
     let checkpoint_delay_guard = EnvVarGuard::set(
         "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
@@ -16859,11 +19069,7 @@ async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_tu
     const FIRST_POLL_BUDGET_MS: u64 = 450;
     const STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS: u64 = 500;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     super::super::language_server::reset_completion_checkpoint_hits_for_test();
     let _checkpoint_delay_guard = EnvVarGuard::set(
         "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
@@ -16949,11 +19155,10 @@ async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_tu
     let last_completion = last_response
         .get("result")
         .cloned()
-        .map(|result| {
+        .and_then(|result| {
             serde_json::from_value::<Option<CompletionResponse>>(result)
                 .expect("parse last completion result")
         })
-        .flatten()
         .expect("last burst completion result present");
     let last_labels = normalize_lsp_member_labels(&last_completion);
     assert!(
@@ -17051,11 +19256,7 @@ async fn p28_cancel_request_releases_pre_active_turn_wait_before_active_registra
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     super::super::language_server::reset_completion_checkpoint_hits_for_test();
     let _checkpoint_delay_guard = EnvVarGuard::set(
         "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
@@ -17236,11 +19437,7 @@ async fn p33_same_file_completion_supersession_releases_active_turn_at_format_ch
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     super::super::language_server::reset_completion_checkpoint_hits_for_test();
     let _checkpoint_delay_guard = EnvVarGuard::set(
         "BSL_TEST_COMPLETION_CHECKPOINT_DELAYS",
@@ -17478,11 +19675,7 @@ async fn p33_document_symbol_returns_latest_ready_from_cache_during_parse_gap() 
         "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 1200;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -17665,11 +19858,7 @@ async fn p33_document_symbol_returns_unavailable_before_ready_outline_from_did_o
         "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 1200;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -17783,11 +19972,7 @@ async fn p33_document_symbol_request_bootstrap_materializes_ready_outline_after_
         "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 5_000;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -17904,11 +20089,7 @@ async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready
         "#Область Public\nПроцедура OnlyProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 5_000;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
@@ -18037,11 +20218,7 @@ async fn p33_document_symbol_supersedes_older_outstanding_refresh() {
         "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 1200;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
@@ -18229,11 +20406,7 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
     const FIRST_POLL_BUDGET_MS: u64 = 200;
     const SATURATING_REQUESTS: i64 = 4;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
@@ -18443,11 +20616,7 @@ async fn p33_live_transport_changed_text_current_revision_survives_document_symb
     const DOCUMENT_SYMBOL_DELAY_MS: u64 = 300;
     const DOCUMENT_SYMBOL_BURST_REQUESTS: i64 = 48;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _document_symbol_delay_guard = EnvVarGuard::set(
         "BSL_TEST_DOCUMENT_SYMBOL_DELAY_MS",
         &DOCUMENT_SYMBOL_DELAY_MS.to_string(),
@@ -18606,11 +20775,7 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
     const INTERACTIVE_BUDGET_MS: u64 = 250;
     const SATURATING_REQUESTS: i64 = 4;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
@@ -18702,12 +20867,10 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
                 .get(&file_id)
                 .copied()
                 == Some(2)
+                && (super::super::language_server::did_change_inline_parse_delay_active_for_test()
+                    || super::super::language_server::did_save_inline_parse_delay_active_for_test())
             {
-                if super::super::language_server::did_change_inline_parse_delay_active_for_test()
-                    || super::super::language_server::did_save_inline_parse_delay_active_for_test()
-                {
-                    break;
-                }
+                break;
             }
             tokio::task::yield_now().await;
         }
@@ -18890,11 +21053,7 @@ async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
         "#Область Public\nПроцедура NewProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\n";
     const PARSE_DELAY_MS: u64 = 1200;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
@@ -19093,11 +21252,7 @@ async fn p33_changed_text_current_revision_head_stays_available_while_parse_snap
     const V2_FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
 
@@ -19284,11 +21439,7 @@ async fn p33_changed_text_current_revision_head_waits_for_delayed_runtime_apply(
     const V2_FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "300");
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
@@ -19451,11 +21602,7 @@ async fn p33_changed_text_burst_supersedes_obsolete_current_revision_head_precom
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
 
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
@@ -19630,7 +21777,7 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -19842,7 +21989,7 @@ async fn p33_same_version_exact_wait_keeps_completed_task_observable_until_clean
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
         "BSL_TEST_TYPE_INDEX_PRECOMPUTE_POST_COMPUTE_DELAY_MS",
         "250",
@@ -20004,7 +22151,7 @@ async fn p33_shutdown_cleans_retained_same_version_exact_task_entry() {
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
         "BSL_TEST_TYPE_INDEX_PRECOMPUTE_POST_COMPUTE_DELAY_MS",
         "250",
@@ -20163,7 +22310,7 @@ async fn p33_same_version_invoked_completion_keeps_completed_task_visible_on_def
     const FIXTURE: &str =
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
         "BSL_TEST_TYPE_INDEX_PRECOMPUTE_POST_COMPUTE_DELAY_MS",
         "250",
@@ -20528,7 +22675,7 @@ async fn p33_completion_head_hit_emits_exact_upgrade_when_background_exact_finis
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -20685,7 +22832,7 @@ async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_
     const SHARED_IR_METRIC: &str =
         "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "500");
     let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
 
@@ -20871,7 +23018,7 @@ async fn p33_current_revision_exact_prewarm_reuses_request_started_ir_singleflig
     const SHARED_IR_METRIC: &str =
         "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
 
     let (_service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
@@ -21100,7 +23247,7 @@ async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -21274,7 +23421,7 @@ async fn p33_completion_resolve_stays_bound_to_origin_revision() {
 
     const FIXTURE: &str = "Процедура Тест()\n    Результат = (Новый Массив()).\nКонецПроцедуры\n";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _precompute_delay_guard =
         EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "200");
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -21450,7 +23597,7 @@ async fn p33_completion_head_upgrade_perf_report() {
         "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
     const PROFILE_NAME: &str = "p33_completion_head_upgrade_perf_report";
 
-    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
         .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
         .unwrap_or(120);
@@ -21922,11 +24069,7 @@ async fn p33_get_current_context_parse_delay_does_not_delay_concurrent_completio
     const COMPLETION_REQUEST_ID: i64 = 50_534;
     const RUNTIME_ISOLATION_BUDGET_MS: u64 = 250;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _current_context_delay_guard = EnvVarGuard::set(
         "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
         &CURRENT_CONTEXT_DELAY_MS.to_string(),
@@ -22014,9 +24157,11 @@ async fn p33_get_current_context_parse_delay_does_not_delay_concurrent_completio
                 }
                 if completion_response.is_some() && current_context_response.is_some() {
                     break (
-                        completion_response.expect("completion response"),
+                        completion_response.take().expect("completion response"),
                         completion_elapsed_ms.expect("completion elapsed"),
-                        current_context_response.expect("current context response"),
+                        current_context_response
+                            .take()
+                            .expect("current context response"),
                     );
                 }
             }
@@ -22121,11 +24266,7 @@ async fn p33_get_current_context_superseded_generation_skips_obsolete_parse_and_
     const SECOND_REQUEST_ID: i64 = 50_542;
     const SESSION_ID: &str = "file:///current_context_latest_only_fixture.bsl::1";
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _current_context_delay_guard = EnvVarGuard::set(
         "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
         &CURRENT_CONTEXT_DELAY_MS.to_string(),
@@ -22208,8 +24349,8 @@ async fn p33_get_current_context_superseded_generation_skips_obsolete_parse_and_
             }
             if first_response.is_some() && second_response.is_some() {
                 break (
-                    first_response.expect("first response"),
-                    second_response.expect("second response"),
+                    first_response.take().expect("first response"),
+                    second_response.take().expect("second response"),
                 );
             }
         }
@@ -22285,11 +24426,7 @@ async fn p33_get_current_context_superseded_generation_keeps_completion_bounded_
     const SESSION_ID: &str = "file:///current_context_mixed_load_fixture.bsl::1";
     const RUNTIME_ISOLATION_BUDGET_MS: u64 = 250;
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _current_context_delay_guard = EnvVarGuard::set(
         "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
         &CURRENT_CONTEXT_DELAY_MS.to_string(),
@@ -22404,10 +24541,10 @@ async fn p33_get_current_context_superseded_generation_keeps_completion_bounded_
                     && second_response.is_some()
                 {
                     break (
-                        completion_response.expect("completion response"),
+                        completion_response.take().expect("completion response"),
                         completion_elapsed_ms.expect("completion elapsed"),
-                        first_response.expect("first response"),
-                        second_response.expect("second response"),
+                        first_response.take().expect("first response"),
+                        second_response.take().expect("second response"),
                     );
                 }
             }
@@ -23801,11 +25938,7 @@ fn scale_aware_phase_plan_defaults_match_acceptance_contract() {
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let _guards = [
         EnvVarGuard::unset("BSL_V2_SCALE_AWARE_START_ITERATIONS"),
         EnvVarGuard::unset("BSL_V2_SCALE_AWARE_COLD_ITERATIONS"),
@@ -23855,11 +25988,7 @@ fn scale_aware_phase_plan_accepts_local_debug_overrides() {
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env_blocking();
     let _guards = [
         EnvVarGuard::set("BSL_V2_SCALE_AWARE_START_ITERATIONS", "2"),
         EnvVarGuard::set("BSL_V2_SCALE_AWARE_COLD_ITERATIONS", "1"),
@@ -25299,11 +27428,7 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
         }
     }
 
-    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-    let _env_lock = ENV_LOCK
-        .get_or_init(|| std::sync::Mutex::new(()))
-        .lock()
-        .expect("env lock");
+    let _env_lock = lock_test_env().await;
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
 
@@ -26214,10 +28339,6 @@ fn p38_real_conf_big_revision_churn_completion_perf_report_live() {
     println!("{PROFILE_NAME}_path={}", report_path.display());
 
     assert!(
-        MEASURE_REQUESTS >= 10,
-        "revision-churn representative gate must collect at least 10 measured samples"
-    );
-    assert!(
         trace_matching_mode == "request_id",
         "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
         trace_matching_mode,
@@ -26402,11 +28523,7 @@ fn p40_real_conf_big_same_file_overlap_completion_perf_report_live() {
             }
         }
 
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        let _env_lock = ENV_LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _env_lock = lock_test_env().await;
         let _response_build_delay_guard =
             EnvVarGuard::set("BSL_TEST_COMPLETION_RESPONSE_BUILD_DELAY_MS", "300");
 
@@ -27002,11 +29119,7 @@ fn p41_real_conf_big_pre_active_turn_wait_overlap_completion_perf_report_live() 
             }
         }
 
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        let _env_lock = ENV_LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _env_lock = lock_test_env().await;
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         const PROFILE_NAME: &str =
@@ -27735,11 +29848,7 @@ fn p42_real_conf_big_front_edge_completion_perf_report_live() {
             }
         }
 
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        let _env_lock = ENV_LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _env_lock = lock_test_env().await;
         let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
         let _did_save_parse_delay_guard =
             EnvVarGuard::set("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", "1500");
@@ -28491,10 +30600,6 @@ fn p42_real_conf_big_front_edge_completion_perf_report_live() {
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         assert!(
-            MEASURE_REQUESTS >= 10,
-            "front-edge representative gate must collect at least 10 measured samples"
-        );
-        assert!(
             trace_matching_mode == "request_id",
             "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
             trace_matching_mode,
@@ -28628,11 +30733,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             }
         }
 
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        let _env_lock = ENV_LOCK
-            .get_or_init(|| std::sync::Mutex::new(()))
-            .lock()
-            .expect("env lock");
+        let _env_lock = lock_test_env().await;
         let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "1500");
         let _did_save_parse_delay_guard =
             EnvVarGuard::set("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", "1500");
@@ -28892,15 +30993,14 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                         } else if document_symbol_request_ids.contains(&response_id) {
                             document_symbol_responses.push(response);
                         }
-                        if completion_response.is_some()
-                            && document_symbol_responses.len()
-                                == document_symbol_request_ids.len()
-                        {
-                            break (
-                                completion_response.expect("completion response"),
-                                completion_elapsed_ms.expect("completion elapsed"),
-                                document_symbol_responses,
-                            );
+                        if document_symbol_responses.len() == document_symbol_request_ids.len() {
+                            if let Some(completion_response) = completion_response {
+                                break (
+                                    completion_response,
+                                    completion_elapsed_ms.expect("completion elapsed"),
+                                    document_symbol_responses,
+                                );
+                            }
                         }
                     }
                 })
@@ -29694,10 +31794,6 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         assert!(
-            MEASURE_REQUESTS >= 10,
-            "mixed-load representative gate must collect at least 10 measured samples"
-        );
-        assert!(
             trace_matching_mode == "request_id",
             "expected request-context parity to expose JSON-RPC request ids in completion timeline, trace_matching_mode={}, trace_request_id_present_total={}, filtered_traces={filtered_traces:?}",
             trace_matching_mode,
@@ -29866,6 +31962,282 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_document_symbol_present_responses_total > 0,
             "mixed-load gate must keep at least one non-null outline response across measured samples, measured_samples={measured_samples:?}"
         );
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p43_real_conf_big_did_save_diagnostics_fastlane_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p43 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+            reload_runtime_config: bool,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                Self::set_with_reload(key, value, false)
+            }
+
+            fn set_with_reload(
+                key: &'static str,
+                value: &str,
+                reload_runtime_config: bool,
+            ) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                if reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+                Self {
+                    key,
+                    previous,
+                    reload_runtime_config,
+                }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+                if self.reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+            }
+        }
+
+        let _env_lock = lock_test_env().await;
+        const PROFILE_NAME: &str = "p43_real_conf_big_did_save_diagnostics_fastlane_report_live";
+        const APPLY_DELAY_MS: u64 = 4_000;
+        const FIRST_PUBLISH_BUDGET_MS: u64 = 2_500;
+        let _apply_delay_guard =
+            EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", &APPLY_DELAY_MS.to_string());
+        let _debounce_guard = EnvVarGuard::set_with_reload(
+            "BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS",
+            "1200",
+            true,
+        );
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        let change_id = std::env::var("CHANGE_ID")
+            .unwrap_or_else(|_| "refactor-03-diagnostics-save-freshness-fastlane".to_string());
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p43 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p43_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
+                },
+            )
+            .await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must register version 1 for p43");
+
+        let broken_suffix = "\nПроцедура SaveFastlaneBroken(\n";
+        let next_version = 2;
+        live_transport_append_text_change(
+            &mut harness,
+            &uri,
+            &module_text,
+            next_version,
+            broken_suffix,
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(next_version)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didChange must register version 2 for p43");
+
+        let did_save_started = Instant::now();
+        live_transport_save_document(&mut harness, &uri).await;
+        let first_publish = live_transport_wait_publish_diagnostics(
+            &mut harness,
+            &uri,
+            next_version,
+            Duration::from_millis(FIRST_PUBLISH_BUDGET_MS),
+        )
+        .await;
+        let first_publish_elapsed_ms =
+            did_save_started.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let syntax_only = first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax"));
+
+        assert!(
+            !first_publish.diagnostics.is_empty(),
+            "save fastlane live report must observe non-empty diagnostics on broken conf_big revision"
+        );
+        assert!(
+            syntax_only,
+            "save fastlane live report must keep first publish syntax-only, diagnostics={:?}",
+            first_publish.diagnostics
+        );
+        assert!(
+            first_publish_elapsed_ms <= FIRST_PUBLISH_BUDGET_MS,
+            "save fastlane live report exceeded bounded first-publish budget: first_publish_elapsed_ms={}ms > {}ms",
+            first_publish_elapsed_ms,
+            FIRST_PUBLISH_BUDGET_MS
+        );
+        assert!(
+            first_publish_elapsed_ms < APPLY_DELAY_MS,
+            "save fastlane live report must beat apply-lag delay: first_publish_elapsed_ms={}ms >= apply_delay_ms={}ms",
+            first_publish_elapsed_ms,
+            APPLY_DELAY_MS
+        );
+
+        let observability_metrics =
+            live_transport_get_observability_metrics(&mut harness, 43_100_901).await;
+        let counters = observability_metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let histograms = observability_metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("metrics.histograms object");
+        let save_fastlane_published_total = read_u64_metric(
+            counters.get(
+                "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_save_profile_save_fastlane_reason_published",
+            ),
+        );
+        assert!(
+            save_fastlane_published_total > 0,
+            "save fastlane live report must export dedicated published counter, counters={counters:?}"
+        );
+        assert!(
+            histograms.contains_key(
+                "intellisense_v2_diagnostics_pipeline_publish_ms_origin_lsp_trigger_did_save_profile_save_fastlane"
+            ),
+            "save fastlane live report must export publish latency histogram, histograms={:?}",
+            histograms.keys().collect::<Vec<_>>()
+        );
+
+        let report = serde_json::json!({
+            "profile": PROFILE_NAME,
+            "change_id": change_id,
+            "module_path": module_path.display().to_string(),
+            "uri": uri.to_string(),
+            "apply_delay_ms": APPLY_DELAY_MS,
+            "first_publish_budget_ms": FIRST_PUBLISH_BUDGET_MS,
+            "first_publish_elapsed_ms": first_publish_elapsed_ms,
+            "first_publish_version": first_publish.version,
+            "first_publish_diagnostics_count": first_publish.diagnostics.len(),
+            "first_publish_syntax_only": syntax_only,
+            "save_fastlane_published_total": save_fastlane_published_total,
+        });
+        let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_DID_SAVE_DIAGNOSTICS_FASTLANE_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!(
+                        "{change_id}-real-conf-big-did-save-diagnostics-fastlane-live.json"
+                    ))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p43 real conf_big diagnostics report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("serialize p43 real conf_big diagnostics report"),
+        )
+        .expect("write p43 real conf_big diagnostics report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
 
         live_transport_close_document(&mut harness, &uri).await;
         drop(server);

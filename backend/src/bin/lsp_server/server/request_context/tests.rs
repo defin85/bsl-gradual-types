@@ -11,9 +11,9 @@ impl Wake for NoopWake {
     fn wake(self: Arc<Self>) {}
 }
 
-fn inflight_registry_test_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+fn inflight_registry_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 #[tokio::test]
@@ -526,9 +526,7 @@ async fn request_context_service_clears_inflight_entry_when_pending_future_later
         }
     }
 
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
 
     let state = Arc::new(Mutex::new(PendingOnceState::default()));
@@ -815,11 +813,10 @@ async fn cancel_request_marks_pending_completion_request_cancelled_before_take()
     let cancel_request = Request::build("$/cancelRequest")
         .params(json!({ "id": "req-cancel-before-take" }))
         .finish();
-    let cancel_response = service
+    service
         .call(cancel_request)
         .await
         .expect("cancel notification");
-    assert_eq!(cancel_response, ());
 
     let by_position = take_completion_request_id(&uri, position);
     assert_eq!(
@@ -859,9 +856,7 @@ fn cancelled_request_id_extracted_for_numeric_and_string_ids() {
 
 #[test]
 fn first_poll_contention_snapshot_reports_same_uri_document_sync() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
     let uri = Url::parse("file:///contention_same_uri.bsl").expect("url");
     let completion_request = Request::build("textDocument/completion")
@@ -901,9 +896,7 @@ fn first_poll_contention_snapshot_reports_same_uri_document_sync() {
 
 #[test]
 fn first_poll_contention_snapshot_reports_top_visible_contenders() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
     let current_uri = Url::parse("file:///contention_current.bsl").expect("url");
     let other_uri = Url::parse("file:///contention_other.bsl").expect("url");
@@ -1001,9 +994,7 @@ fn first_poll_contention_snapshot_reports_top_visible_contenders() {
 
 #[tokio::test]
 async fn current_request_inflight_phase_updates_registered_completion_entry() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().lock().await;
     clear_inflight_request_registry_for_testing();
     let uri = Url::parse("file:///contention_phase_scope.bsl").expect("url");
     let current_request = Request::build("textDocument/completion")
@@ -1064,9 +1055,7 @@ async fn current_request_inflight_phase_updates_registered_completion_entry() {
 
 #[test]
 fn first_poll_contention_snapshot_uses_mixed_for_multiple_visible_classes() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
     let uri = Url::parse("file:///contention_mixed_uri.bsl").expect("url");
     let completion_request = Request::build("textDocument/completion")
@@ -1109,9 +1098,7 @@ fn first_poll_contention_snapshot_uses_mixed_for_multiple_visible_classes() {
 
 #[test]
 fn first_poll_contention_snapshot_uses_none_visible_when_no_contenders() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
     let uri = Url::parse("file:///contention_none_visible.bsl").expect("url");
     let completion_request = Request::build("textDocument/completion")
@@ -1142,9 +1129,7 @@ fn first_poll_contention_snapshot_uses_none_visible_when_no_contenders() {
 
 #[test]
 fn first_poll_contention_snapshot_uses_unavailable_when_current_completion_is_missing() {
-    let _guard = inflight_registry_test_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = inflight_registry_test_lock().blocking_lock();
     clear_inflight_request_registry_for_testing();
     let uri = Url::parse("file:///contention_unavailable.bsl").expect("url");
     let missing_current = InflightRequestMetadata {

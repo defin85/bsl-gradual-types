@@ -403,6 +403,66 @@ pub struct CompletionTimelineResponse {
     pub traces: Vec<CompletionTimelineTrace>,
 }
 
+/// Custom request: bsl/getDiagnosticsSaveTimeline - per-save diagnostics refresh traces
+#[derive(Debug, Deserialize, Default)]
+pub struct DiagnosticsSaveTimelineRequest {
+    #[serde(default)]
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnosticsSaveTimelinePublishTrace {
+    pub profile: String,
+    pub publish_kind: String,
+    pub outcome: String,
+    pub elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocking_queue_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_for_file_version_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_with_deps_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub syntax_diagnostics_query_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_query_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publish_wait_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnosticsSaveTimelineTrace {
+    pub trace_id: String,
+    pub uri: String,
+    pub requested_version: i32,
+    pub save_cycle_sequence: u64,
+    pub diagnostics_generation: u64,
+    pub trigger: String,
+    pub started_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first_publish: Option<DiagnosticsSaveTimelinePublishTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_publish: Option<DiagnosticsSaveTimelinePublishTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub save_fastlane_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idle_heavy_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_wait_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_wait_for_file_version_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_snapshot_with_deps_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal_outcome: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiagnosticsSaveTimelineResponse {
+    pub version: u32,
+    pub traces: Vec<DiagnosticsSaveTimelineTrace>,
+}
+
 /// Custom request: bsl/validateMethod - method call validation
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]

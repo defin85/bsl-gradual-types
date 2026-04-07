@@ -1507,13 +1507,12 @@ mod tests {
                         let cancelled_request_id = params
                             .as_ref()
                             .and_then(|value| value.get("id"))
-                            .map(|value| {
+                            .and_then(|value| {
                                 value
                                     .as_i64()
                                     .map(|id| id.to_string())
                                     .or_else(|| value.as_str().map(ToString::to_string))
                             })
-                            .flatten()
                             .expect("cancel request id");
                         let notify = {
                             let pending = state
@@ -2213,14 +2212,14 @@ mod tests {
 
         tokio::time::timeout(std::time::Duration::from_millis(150), async {
             loop {
-                let pending = cancel_state
+                let is_registered = cancel_state
                     .pending_cancellations
                     .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner());
-                if pending.contains_key("1") {
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .contains_key("1");
+                if is_registered {
                     break;
                 }
-                drop(pending);
                 cancel_state.registered.notified().await;
             }
         })

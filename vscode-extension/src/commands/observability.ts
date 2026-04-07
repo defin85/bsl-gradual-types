@@ -2,9 +2,8 @@ import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
 import { getLanguageClient } from '../lsp';
 import {
-    CompletionTimelineFetchResult,
-    ObservabilityMetricsFetchResult,
     getCompletionTimeline,
+    getDiagnosticsSaveTimeline,
     getObservabilityMetrics,
     getObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
@@ -49,6 +48,8 @@ function mergeExportCaptures(
         capturedAtMs: explicitCapture.capturedAtMs ?? sharedCapture?.capturedAtMs,
         completionTimeline:
             explicitCapture.completionTimeline ?? sharedCapture?.completionTimeline,
+        diagnosticsSaveTimeline:
+            explicitCapture.diagnosticsSaveTimeline ?? sharedCapture?.diagnosticsSaveTimeline,
         clientProbes: explicitCapture.clientProbes ?? sharedCapture?.clientProbes,
         observabilityMetrics:
             explicitCapture.observabilityMetrics ?? sharedCapture?.observabilityMetrics,
@@ -70,17 +71,22 @@ async function exportObservabilityIncidentBundleToFolder(
     const completionTimelinePromise = resolvedCapture.completionTimeline
         ? Promise.resolve(resolvedCapture.completionTimeline)
         : getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
+    const diagnosticsSaveTimelinePromise = resolvedCapture.diagnosticsSaveTimeline
+        ? Promise.resolve(resolvedCapture.diagnosticsSaveTimeline)
+        : getDiagnosticsSaveTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
     const observabilityMetricsPromise = resolvedCapture.observabilityMetrics
         ? Promise.resolve(resolvedCapture.observabilityMetrics)
         : getObservabilityMetricsFetchResult({ shape: 'full' });
-    const [completionTimeline, observabilityMetrics] = await Promise.all([
+    const [completionTimeline, diagnosticsSaveTimeline, observabilityMetrics] = await Promise.all([
         completionTimelinePromise,
+        diagnosticsSaveTimelinePromise,
         observabilityMetricsPromise,
     ]);
 
     const bundle = buildObservabilityIncidentBundle({
         capturedAtMs,
         completionTimeline,
+        diagnosticsSaveTimeline,
         completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
         clientProbes,
         observabilityMetrics,

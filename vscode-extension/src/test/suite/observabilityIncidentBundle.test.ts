@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import {
     CompletionTimelineFetchResult,
+    DiagnosticsSaveTimelineFetchResult,
     ObservabilityMetricsFetchResult,
     ObservabilityMetricsResponse,
 } from '../../lsp/customRequests';
@@ -243,6 +244,82 @@ suite('Observability Incident Bundle Test Suite', () => {
         };
     }
 
+    function sampleDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 4,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-1',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 9,
+                        save_cycle_sequence: 2,
+                        diagnostics_generation: 4,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_020_000,
+                        first_publish: {
+                            profile: 'save_fastlane',
+                            publish_kind: 'syntax_only',
+                            outcome: 'published',
+                            elapsed_ms: 84,
+                            blocking_queue_wait_ms: 17,
+                            syntax_diagnostics_query_ms: 12,
+                            publish_wait_ms: 1,
+                        },
+                        followup_publish: {
+                            profile: 'idle_heavy',
+                            publish_kind: 'full',
+                            outcome: 'published',
+                            elapsed_ms: 143,
+                            wait_for_file_version_ms: 9,
+                            snapshot_with_deps_ms: 7,
+                            syntax_diagnostics_query_ms: 11,
+                            semantic_diagnostics_query_ms: 40,
+                            publish_wait_ms: 2,
+                        },
+                        save_fastlane_outcome: 'published',
+                        idle_heavy_outcome: 'published',
+                        followup_wait_reason: 'pending_publish',
+                        followup_wait_for_file_version_ms: 9,
+                        followup_snapshot_with_deps_ms: 7,
+                        terminal_outcome: 'published',
+                    },
+                ],
+            },
+        };
+    }
+
+    function sampleInFlightDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 4,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-2',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 11,
+                        save_cycle_sequence: 5,
+                        diagnostics_generation: 7,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_030_000,
+                        first_publish: {
+                            profile: 'save_fastlane',
+                            publish_kind: 'syntax_only',
+                            outcome: 'published',
+                            elapsed_ms: 1771,
+                            blocking_queue_wait_ms: 1600,
+                            syntax_diagnostics_query_ms: 35,
+                        },
+                        save_fastlane_outcome: 'published',
+                        followup_wait_reason: 'apply_lag',
+                        },
+                ],
+            },
+        };
+    }
+
     test('happy path bundle should contain request-centric incident report and all raw attachments', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
@@ -273,6 +350,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                     client_duration_ms: 2989,
                 }),
             ],
+            diagnosticsSaveTimeline: sampleDiagnosticsSaveTimeline(),
             observabilityMetrics: sampleMetrics(),
         });
 
@@ -283,12 +361,15 @@ suite('Observability Incident Bundle Test Suite', () => {
                 'summary.md',
                 'incident.json',
                 'raw/completion_timeline.json',
+                'raw/diagnostics_save_timeline.json',
                 'raw/client_probes.json',
                 'raw/observability_metrics.json',
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 4);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -298,6 +379,16 @@ suite('Observability Incident Bundle Test Suite', () => {
         });
         assert.strictEqual(bundle.incidentReport.request_window.request_count, 2);
         assert.strictEqual(bundle.incidentReport.requests.length, 2);
+        assert.strictEqual(bundle.incidentReport.diagnostics_save_window.request_count, 1);
+        assert.strictEqual(bundle.incidentReport.diagnostics_save_requests.length, 1);
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0].first_publish?.profile,
+            'save_fastlane'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0].followup_publish?.profile,
+            'idle_heavy'
+        );
         assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('exact_deadline@artifact_poll'));
         assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
         assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
@@ -445,6 +536,13 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('## Request Scope'));
         assert.ok(bundle.summaryMarkdown.includes('scope=single_uri | uri=file:///tmp/test.bsl | request_count=2'));
         assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
+        assert.ok(bundle.summaryMarkdown.includes('## Diagnostics Save Summary'));
+        assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-1'));
+        assert.ok(bundle.summaryMarkdown.includes('save_cycle_sequence=2'));
+        assert.ok(bundle.summaryMarkdown.includes('first_publish=save_fastlane:syntax_only:published@84ms'));
+        assert.ok(bundle.summaryMarkdown.includes('blocking_queue_wait_ms=17'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_publish=idle_heavy:full:published@143ms'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_wait=pending_publish'));
         assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
         assert.ok(bundle.summaryMarkdown.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(bundle.summaryMarkdown.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -477,6 +575,7 @@ suite('Observability Incident Bundle Test Suite', () => {
             )
         );
         assert.ok(bundle.summaryMarkdown.includes('correlation=correlated:probe-1'));
+        assert.ok(bundle.summaryMarkdown.includes('raw/diagnostics_save_timeline.json'));
         assert.ok(bundle.summaryMarkdown.includes('raw/completion_timeline.json'));
     });
 
@@ -484,18 +583,58 @@ suite('Observability Incident Bundle Test Suite', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
             completionTimeline: { kind: 'unsupported' },
+            diagnosticsSaveTimeline: { kind: 'unsupported' },
             completionTraceLimit: 50,
             clientProbes: [sampleProbe()],
             observabilityMetrics: sampleMetrics(),
         });
 
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'unsupported');
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'unsupported');
         assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('unsupported')));
         assert.ok(
             !bundle.files.some((file) => file.relativePath === 'raw/completion_timeline.json'),
             'unsupported server timeline must not create a fake raw attachment'
         );
+        assert.ok(
+            !bundle.files.some((file) => file.relativePath === 'raw/diagnostics_save_timeline.json'),
+            'unsupported diagnostics save timeline must not create a fake raw attachment'
+        );
         assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
+    });
+
+    test('diagnostics save summary should render active cycle as in_flight with pending followup', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleInFlightDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-2'));
+        assert.ok(bundle.summaryMarkdown.includes('save_cycle_sequence=5'));
+        assert.ok(bundle.summaryMarkdown.includes('save_fastlane_outcome=published'));
+        assert.ok(bundle.summaryMarkdown.includes('idle_heavy_outcome=pending'));
+        assert.ok(bundle.summaryMarkdown.includes('terminal=in_flight'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_publish=pending'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_wait=apply_lag'));
+    });
+
+    test('unavailable diagnostics save timeline should stay explicit in bundle status', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: { kind: 'error', message: 'timeout' },
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'unavailable');
+        assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('Diagnostics save timeline is unavailable')));
+        assert.ok(bundle.summaryMarkdown.includes('Diagnostics save timeline: status=unavailable'));
     });
 
     test('v7 completion timeline should stay valid and mark v8 provenance details as unavailable', () => {

@@ -1,8 +1,19 @@
+use super::super::{DocumentShadowStateV2, ReadyParseSnapshotStateV2};
 use super::*;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
+
+struct BuildParseSnapshotRequest {
+    file_id: bsl_analysis_v2::FileId,
+    version: i32,
+    path: Arc<str>,
+    text: Arc<str>,
+    parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+    blocking_delay_env_key: Option<&'static str>,
+    requested_version_state: Option<Arc<std::sync::atomic::AtomicI32>>,
+}
 
 #[cfg(test)]
 static DID_CHANGE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
@@ -141,6 +152,21 @@ struct BackgroundParseSnapshotApplyArgs {
 }
 
 impl BslLanguageServer {
+    async fn record_ready_parse_snapshot_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        text: Arc<str>,
+        parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
+    ) {
+        self.latest_ready_parse_snapshots_v2.write().await.insert(
+            file_id,
+            ReadyParseSnapshotStateV2 {
+                text,
+                parse_snapshot: parse_snapshot.clone(),
+            },
+        );
+    }
+
     fn record_parse_snapshot_report_v2(
         &self,
         report: &bsl_runtime::system::parser_coordinator::ParseSnapshotReport,
@@ -209,20 +235,17 @@ impl BslLanguageServer {
 
     async fn build_parse_snapshot_v2(
         &self,
-        file_id: bsl_analysis_v2::FileId,
-        version: i32,
-        path: Arc<str>,
-        text: Arc<str>,
-        parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
-        blocking_delay_env_key: Option<&'static str>,
-        requested_version_state: Option<Arc<std::sync::atomic::AtomicI32>>,
+        request: BuildParseSnapshotRequest,
     ) -> Option<bsl_analysis_v2::ParseSnapshot> {
         let coordinator = self.coordinator.clone();
-        let path_for_parse = path.clone();
-        let text_for_parse = text.clone();
+        let path_for_parse = request.path.clone();
+        let text_for_parse = request.text.clone();
         let parse_started = Instant::now();
-        let blocking_delay_env_key_for_parse = blocking_delay_env_key;
-        let requested_version_state_for_parse = requested_version_state;
+        let blocking_delay_env_key_for_parse = request.blocking_delay_env_key;
+        let requested_version_state_for_parse = request.requested_version_state;
+        let version = request.version;
+        let file_id = request.file_id;
+        let parser_edits = request.parser_edits;
         let report = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
             bsl_runtime::application::CpuWorkClass::Background,
             bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -343,19 +366,21 @@ impl BslLanguageServer {
             }
 
             let Some(parse_snapshot) = self
-                .build_parse_snapshot_v2(
-                    args.file_id,
-                    args.requested_version,
-                    args.path.clone(),
-                    args.text.clone(),
-                    args.parser_edits,
-                    args.blocking_delay_env_key,
-                    Some(Arc::clone(&requested_version_state)),
-                )
+                .build_parse_snapshot_v2(BuildParseSnapshotRequest {
+                    file_id: args.file_id,
+                    version: args.requested_version,
+                    path: args.path.clone(),
+                    text: args.text.clone(),
+                    parser_edits: args.parser_edits,
+                    blocking_delay_env_key: args.blocking_delay_env_key,
+                    requested_version_state: Some(Arc::clone(&requested_version_state)),
+                })
                 .await
             else {
                 return;
             };
+            self.record_ready_parse_snapshot_v2(args.file_id, args.text.clone(), &parse_snapshot)
+                .await;
             let text_for_symbols = args.text.clone();
             let parse_result_for_symbols = Arc::clone(&parse_snapshot.parse_result);
             match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
@@ -1061,6 +1086,9 @@ impl BslLanguageServer {
             }
 
             let parse_snapshot = parse_snapshot_from_report(file_id, requested_version, report);
+            server
+                .record_ready_parse_snapshot_v2(file_id, text.clone(), &parse_snapshot)
+                .await;
             let analysis = server.analysis_v2.snapshot().await;
             let _ = analysis.try_publish_completion_head_from_parse_snapshot_reuse(
                 file_id,
@@ -1163,6 +1191,7 @@ impl BslLanguageServer {
                 file_id,
                 version,
                 diagnostics_generation,
+                None,
                 bsl_runtime::application::DiagnosticsTrigger::DidOpen,
                 *profile,
                 false,
@@ -1488,6 +1517,7 @@ impl BslLanguageServer {
                     file_id,
                     version,
                     diagnostics_generation,
+                    None,
                     bsl_runtime::application::DiagnosticsTrigger::Idle,
                     *profile,
                     true,
@@ -1519,6 +1549,7 @@ impl BslLanguageServer {
                         file_id,
                         version,
                         diagnostics_generation,
+                        None,
                         trigger,
                         *profile,
                         true,
@@ -1543,16 +1574,27 @@ impl BslLanguageServer {
         else {
             return;
         };
-        let Some(shadow_state) = self
+        let shadow_state = self
             .latest_document_shadow_state_v2
             .read()
             .await
             .get(&file_id)
-            .cloned()
-        else {
-            return;
+            .cloned();
+        let save_text = params.text.map(Arc::<str>::from);
+        let save_text = match shadow_state.as_ref() {
+            Some(shadow_state) if shadow_state.version == version => {
+                Some(shadow_state.text.clone())
+            }
+            _ => save_text,
         };
-        if shadow_state.version == version {
+        if let Some(text) = save_text {
+            self.latest_document_shadow_state_v2.write().await.insert(
+                file_id,
+                DocumentShadowStateV2 {
+                    version,
+                    text: text.clone(),
+                },
+            );
             let path = match uri.to_file_path() {
                 Ok(path) => path.to_string_lossy().to_string(),
                 Err(_) => uri.to_string(),
@@ -1564,7 +1606,7 @@ impl BslLanguageServer {
                 file_id,
                 requested_version: version,
                 path: Arc::from(path),
-                text: shadow_state.text,
+                text,
                 parser_edits: Vec::new(),
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
@@ -1578,6 +1620,16 @@ impl BslLanguageServer {
             settings.enable_flow_sensitive
         };
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
+        let save_cycle_sequence = self.bump_diagnostics_save_cycle_sequence_v2(file_id).await;
+        self.begin_diagnostics_save_timeline_cycle(
+            &uri,
+            super::super::DiagnosticsSaveTimelineCycleKey {
+                file_id,
+                diagnostics_generation,
+                save_cycle_sequence,
+                requested_version: version,
+            },
+        );
         for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
             bsl_runtime::application::DiagnosticsTrigger::DidSave,
         ) {
@@ -1593,6 +1645,7 @@ impl BslLanguageServer {
                 file_id,
                 version,
                 diagnostics_generation,
+                Some(save_cycle_sequence),
                 bsl_runtime::application::DiagnosticsTrigger::DidSave,
                 *profile,
                 false,
@@ -1654,10 +1707,20 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.latest_ready_parse_snapshots_v2
+                .write()
+                .await
+                .remove(&file_id);
             self.latest_apply_enqueued_at_v2
                 .write()
                 .await
                 .remove(&file_id);
+            self.latest_diagnostics_publish_state_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.clear_active_diagnostics_save_timeline_cycles_for_file(file_id);
+            self.clear_diagnostics_save_timeline_terminal_keys_for_file(file_id);
             self.document_symbol_ready_cache_v2
                 .write()
                 .await
@@ -1671,6 +1734,10 @@ impl BslLanguageServer {
                 .await
                 .retain(|(tracked_file_id, _, _, _), _| *tracked_file_id != file_id);
             self.diagnostics_generation_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.diagnostics_save_cycle_sequence_v2
                 .write()
                 .await
                 .remove(&file_id);

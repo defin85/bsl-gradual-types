@@ -1,7 +1,10 @@
 # Source files (не включаем в VSIX)
 src/**
 **/*.ts
-!out/**/*.js
+
+# Runtime bundle - в VSIX нужен только основной bundled entrypoint
+out/**
+!out/extension.js
 
 # Development files
 .vscode/
@@ -12,6 +15,7 @@ src/**
 
 # Test files
 test/**
+out/test/**
 **/*.test.ts
 **/*.spec.ts
 coverage/
@@ -41,6 +45,7 @@ node_modules/**
 # Старые VSIX и dist файлы
 dist/**
 *.vsix
+test-lsp-vscode.js
 
 # Misc
 .eslintrc.json

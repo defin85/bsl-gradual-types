@@ -88,14 +88,14 @@ fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
     observability.record_intellisense_v2_ir_query_latency("completion", Duration::from_millis(21));
 
     let exported = observability.get_metrics().export_metrics_sidebar();
-    let histograms = histograms(&exported);
+    let exported_histograms = histograms(&exported);
 
     assert!(
-        histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
+        exported_histograms.contains_key("intellisense_v2_ir_query_completion_ms"),
         "sidebar export must keep key observability latency histograms"
     );
     assert!(
-        !histograms.contains_key("completion_duration_ms"),
+        !exported_histograms.contains_key("completion_duration_ms"),
         "sidebar export must skip unrelated histogram summaries to stay lightweight"
     );
     let config = exported
@@ -1102,6 +1102,26 @@ fn diagnostics_pipeline_event_normalizes_unknown_dimensions() {
 }
 
 #[test]
+fn diagnostics_pipeline_publish_latency_uses_bounded_dimensions() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_diagnostics_pipeline_publish_latency(
+        "lsp",
+        "did_save",
+        "save_fastlane",
+        Duration::from_millis(42),
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let histograms = histograms(&exported);
+    let key =
+        "intellisense_v2_diagnostics_pipeline_publish_ms_origin_lsp_trigger_did_save_profile_save_fastlane";
+    assert!(
+        histogram_count(histograms, key) > 0,
+        "publish latency histogram must be exported with canonical trigger/profile dimensions"
+    );
+}
+
+#[test]
 fn large_churn_transition_metric_is_low_cardinality() {
     let observability = BasicObservability::default();
     observability.record_intellisense_v2_large_churn_transition("lsp", "enter");
@@ -1965,6 +1985,10 @@ fn observability_diagnostics_v1_contract_matches_runtime_metric_labels() {
         .get("cancellation_histogram_prefix")
         .and_then(|value| value.as_str())
         .expect("cancellation histogram prefix");
+    let publish_histogram_prefix = metrics_contract
+        .get("publish_latency_histogram_prefix")
+        .and_then(|value| value.as_str())
+        .expect("publish latency histogram prefix");
     assert_eq!(
         counter_prefix,
         "intellisense_v2_diagnostics_pipeline_total_origin_"
@@ -1972,6 +1996,10 @@ fn observability_diagnostics_v1_contract_matches_runtime_metric_labels() {
     assert_eq!(
         histogram_prefix,
         "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_"
+    );
+    assert_eq!(
+        publish_histogram_prefix,
+        "intellisense_v2_diagnostics_pipeline_publish_ms_origin_"
     );
 
     let origins: Vec<String> = metrics_contract
@@ -2085,7 +2113,7 @@ fn observability_diagnostics_v1_contract_matches_runtime_metric_labels() {
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
-    let histograms = histograms(&exported);
+    let exported_histograms = histograms(&exported);
     for reason in &reasons {
         let counter_key =
             format!("{counter_prefix}{origin}_trigger_{trigger}_profile_{profile}_reason_{reason}");
@@ -2099,17 +2127,37 @@ fn observability_diagnostics_v1_contract_matches_runtime_metric_labels() {
         );
         if cancellation_reasons_set.contains(reason) {
             assert!(
-                histogram_count(histograms, &histogram_key) > 0,
+                histogram_count(exported_histograms, &histogram_key) > 0,
                 "diagnostics pipeline cancellation histogram must be exported for reason {reason}"
             );
         } else {
             assert_eq!(
-                histogram_count(histograms, &histogram_key),
+                histogram_count(exported_histograms, &histogram_key),
                 0,
                 "non-cancellation reason {reason} must not emit cancellation histogram sample"
             );
         }
     }
+
+    let publish_profile = profiles
+        .iter()
+        .find(|profile| profile.as_str() == "save_fastlane")
+        .map(String::as_str)
+        .unwrap_or(profiles[0].as_str());
+    observability.record_intellisense_v2_diagnostics_pipeline_publish_latency(
+        origin,
+        "did_save",
+        publish_profile,
+        Duration::from_millis(17),
+    );
+    let publish_exported = observability.get_metrics().export_metrics();
+    let publish_histograms = histograms(&publish_exported);
+    let publish_key =
+        format!("{publish_histogram_prefix}{origin}_trigger_did_save_profile_{publish_profile}");
+    assert!(
+        histogram_count(publish_histograms, &publish_key) > 0,
+        "diagnostics publish latency histogram must be exported for bounded profile {publish_profile}"
+    );
 }
 
 #[test]

@@ -573,6 +573,23 @@ impl BasicObservability {
         }
     }
 
+    pub fn record_intellisense_v2_diagnostics_pipeline_publish_latency(
+        &self,
+        origin: &str,
+        trigger: &str,
+        profile: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let trigger = normalize_diagnostics_trigger_label(trigger);
+        let profile = normalize_diagnostics_profile_label(profile);
+        let key = format!(
+            "intellisense_v2_diagnostics_pipeline_publish_ms_origin_{origin}_trigger_{trigger}_profile_{profile}"
+        );
+        self.metrics
+            .observe_histogram(&key, duration.as_millis() as f64);
+    }
+
     pub fn record_intellisense_v2_large_churn_transition(&self, origin: &str, state: &str) {
         let origin = normalize_observability_origin_label(origin);
         let state = normalize_large_churn_state_label(state);

@@ -9,6 +9,7 @@ import {
     getObservabilityMetricsFetchResult,
     getObservabilityMetricsWithRequest,
     getCompletionTimeline,
+    getDiagnosticsSaveTimeline,
     resetObservabilityCapabilityCaches,
     validateMethod,
     checkTypeCompatibility,
@@ -315,6 +316,49 @@ suite('LSP Custom Requests Test Suite', () => {
                                         duration_ms: 18
                                     }
                                 ]
+                            }
+                        ]
+                    });
+                }
+
+                if (command === 'bsl.getDiagnosticsSaveTimeline') {
+                    return Promise.resolve({
+                        version: 4,
+                        traces: [
+                            {
+                                trace_id: 'diagnostics-save-trace-1',
+                                uri: 'file:///test.bsl',
+                                requested_version: 9,
+                                save_cycle_sequence: 2,
+                                diagnostics_generation: 4,
+                                trigger: 'did_save',
+                                started_at_ms: 1_700_000_000_100,
+                                first_publish: {
+                                    profile: 'save_fastlane',
+                                    publish_kind: 'syntax_only',
+                                    outcome: 'published',
+                                    elapsed_ms: 32,
+                                    blocking_queue_wait_ms: 14,
+                                    syntax_diagnostics_query_ms: 9,
+                                    publish_wait_ms: 1,
+                                },
+                                followup_publish: {
+                                    profile: 'idle_heavy',
+                                    publish_kind: 'full',
+                                    outcome: 'published',
+                                    elapsed_ms: 87,
+                                    wait_for_file_version_ms: 12,
+                                    snapshot_with_deps_ms: 8,
+                                    syntax_diagnostics_query_ms: 10,
+                                    semantic_diagnostics_query_ms: 40,
+                                    publish_wait_ms: 2,
+                                },
+                                save_fastlane_outcome: 'published',
+                                idle_heavy_outcome: 'published',
+                                followup_wait_reason: 'pending_publish',
+                                followup_wait_for_file_version_ms: 12,
+                                followup_snapshot_with_deps_ms: 8,
+                                terminal_outcome: 'published',
                             }
                         ]
                     });
@@ -650,6 +694,48 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(sendRequestStub.callCount, callCountBefore);
     });
 
+    test('getDiagnosticsSaveTimeline should work via executeCommand', async function() {
+        this.timeout(5000);
+
+        const result = await getDiagnosticsSaveTimeline({ limit: 10 });
+        assert.strictEqual(result.kind, 'ok');
+        if (result.kind !== 'ok') {
+            return;
+        }
+
+        assert.strictEqual(result.response.version, 4);
+        assert.strictEqual(result.response.traces.length, 1);
+        assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
+        assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
+        assert.strictEqual(result.response.traces[0].first_publish?.profile, 'save_fastlane');
+        assert.strictEqual(result.response.traces[0].first_publish?.blocking_queue_wait_ms, 14);
+        assert.strictEqual(result.response.traces[0].followup_publish?.profile, 'idle_heavy');
+        assert.strictEqual(result.response.traces[0].followup_wait_reason, 'pending_publish');
+    });
+
+    test('getDiagnosticsSaveTimeline should fail-closed on Method not found', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.callsFake((method: string, params: any) => {
+            if (
+                method === 'workspace/executeCommand'
+                && params?.command === 'bsl.getDiagnosticsSaveTimeline'
+            ) {
+                return Promise.reject({ code: -32601, message: 'Method not found' });
+            }
+            return Promise.resolve(null);
+        });
+
+        const first = await getDiagnosticsSaveTimeline({ limit: 1 });
+        assert.strictEqual(first.kind, 'unsupported');
+
+        const callCountBefore = sendRequestStub.callCount;
+        const second = await getDiagnosticsSaveTimeline({ limit: 1 });
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBefore);
+    });
+
     test('resetObservabilityCapabilityCaches should clear completion timeline unsupported cache', async function() {
         this.timeout(5000);
 
@@ -671,6 +757,31 @@ suite('LSP Custom Requests Test Suite', () => {
         resetObservabilityCapabilityCaches();
 
         const third = await getCompletionTimeline({ limit: 1 });
+        assert.strictEqual(third.kind, 'ok');
+        assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry + 1);
+    });
+
+    test('resetObservabilityCapabilityCaches should clear diagnostics save timeline unsupported cache', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
+        sendRequestStub.onSecondCall().resolves({
+            version: 4,
+            traces: [],
+        });
+
+        const first = await getDiagnosticsSaveTimeline({ limit: 1 });
+        assert.strictEqual(first.kind, 'unsupported');
+
+        const callCountBeforeCachedRetry = sendRequestStub.callCount;
+        const second = await getDiagnosticsSaveTimeline({ limit: 1 });
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry);
+
+        resetObservabilityCapabilityCaches();
+
+        const third = await getDiagnosticsSaveTimeline({ limit: 1 });
         assert.strictEqual(third.kind, 'ok');
         assert.strictEqual(sendRequestStub.callCount, callCountBeforeCachedRetry + 1);
     });

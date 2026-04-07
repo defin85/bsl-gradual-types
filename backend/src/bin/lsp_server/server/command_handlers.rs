@@ -9,9 +9,11 @@ use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
+
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
@@ -19,8 +21,9 @@ use crate::commands::{
 use crate::handlers::{find_containing_function_in_parse_result, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
-    CompletionTimelineRequest, CompletionTimelineResponse, GetCurrentContextParams,
-    GetIndexStateParams, GetIndexStateResponse, IncrementalUpdateParams, IncrementalUpdateResponse,
+    CompletionTimelineRequest, CompletionTimelineResponse, DiagnosticsSaveTimelineRequest,
+    DiagnosticsSaveTimelineResponse, GetCurrentContextParams, GetIndexStateParams,
+    GetIndexStateResponse, IncrementalUpdateParams, IncrementalUpdateResponse,
     ObservabilityMetricsRequest, ObservabilityMetricsResponse, WorkspaceStatsResponse,
 };
 
@@ -672,6 +675,21 @@ impl BslLanguageServer {
             traces: traces.into_iter().rev().collect(),
         })
     }
+
+    pub(crate) async fn handle_get_diagnostics_save_timeline(
+        &self,
+        params: DiagnosticsSaveTimelineRequest,
+    ) -> JsonRpcResult<DiagnosticsSaveTimelineResponse> {
+        let limit = params
+            .limit
+            .unwrap_or(super::DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES)
+            .clamp(1, super::DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES);
+
+        Ok(DiagnosticsSaveTimelineResponse {
+            version: super::DIAGNOSTICS_SAVE_TIMELINE_VERSION,
+            traces: self.snapshot_diagnostics_save_timeline_traces(limit),
+        })
+    }
 }
 
 fn resolve_workspace_root(config: Option<crate::config::LspConfig>) -> Option<PathBuf> {
@@ -1081,6 +1099,40 @@ mod tests {
         }
     }
 
+    fn sample_diagnostics_save_trace(
+        trace_id: &str,
+        requested_version: i32,
+    ) -> crate::types::DiagnosticsSaveTimelineTrace {
+        crate::types::DiagnosticsSaveTimelineTrace {
+            trace_id: trace_id.to_string(),
+            uri: "file:///timeline.bsl".to_string(),
+            requested_version,
+            save_cycle_sequence: requested_version as u64,
+            diagnostics_generation: requested_version as u64,
+            trigger: "did_save".to_string(),
+            started_at_ms: 1_700_000_000_000 + requested_version as u64,
+            first_publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 42,
+                blocking_queue_wait_ms: Some(7),
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(9),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+            followup_publish: None,
+            save_fastlane_outcome: Some("published".to_string()),
+            idle_heavy_outcome: Some("published".to_string()),
+            followup_wait_reason: None,
+            followup_wait_for_file_version_ms: None,
+            followup_snapshot_with_deps_ms: None,
+            terminal_outcome: Some("published".to_string()),
+        }
+    }
+
     #[tokio::test]
     async fn completion_timeline_retention_evicts_oldest_first() {
         let server = create_test_server();
@@ -1145,6 +1197,171 @@ mod tests {
         assert!(trace.server_edge_details.is_none());
         assert_eq!(trace.stages.len(), 1);
         assert_eq!(trace.stages[0].status, "cancelled");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_save_timeline_retention_evicts_oldest_first() {
+        let server = create_test_server();
+        {
+            let mut store = server
+                .diagnostics_save_timeline_store
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for idx in 0..205_i32 {
+                store.traces.push_back(sample_diagnostics_save_trace(
+                    &format!("save-trace-{idx}"),
+                    idx,
+                ));
+            }
+        }
+
+        let response = server
+            .handle_get_diagnostics_save_timeline(
+                crate::types::DiagnosticsSaveTimelineRequest::default(),
+            )
+            .await
+            .expect("timeline response");
+        assert_eq!(
+            response.version,
+            crate::server::DIAGNOSTICS_SAVE_TIMELINE_VERSION
+        );
+        assert_eq!(response.traces.len(), 200);
+        assert_eq!(
+            response.traces.first().map(|trace| trace.trace_id.as_str()),
+            Some("save-trace-5")
+        );
+        assert_eq!(
+            response.traces.last().map(|trace| trace.trace_id.as_str()),
+            Some("save-trace-204")
+        );
+    }
+
+    #[tokio::test]
+    async fn diagnostics_save_timeline_late_terminal_result_does_not_resurrect_duplicate_trace() {
+        let server = create_test_server();
+        let uri = Url::parse("file:///timeline-duplicate.bsl").expect("uri");
+        let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+            file_id: bsl_analysis_v2::FileId(71),
+            diagnostics_generation: 11,
+            save_cycle_sequence: 4,
+            requested_version: 9,
+        };
+
+        server.begin_diagnostics_save_timeline_cycle(&uri, key);
+        server.record_diagnostics_save_timeline_profile_result(
+            &uri,
+            key,
+            crate::server::DiagnosticsSaveTimelineProfileResult {
+                profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+                disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+                publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                    profile: "save_fastlane".to_string(),
+                    publish_kind: "syntax_only".to_string(),
+                    outcome: "published".to_string(),
+                    elapsed_ms: 33,
+                    blocking_queue_wait_ms: Some(9),
+                    wait_for_file_version_ms: None,
+                    snapshot_with_deps_ms: None,
+                    syntax_diagnostics_query_ms: Some(12),
+                    semantic_diagnostics_query_ms: None,
+                    publish_wait_ms: Some(1),
+                }),
+            },
+        );
+        server.record_diagnostics_save_timeline_profile_disposition(
+            &uri,
+            key,
+            bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+        );
+        server.record_diagnostics_save_timeline_profile_disposition(
+            &uri,
+            key,
+            bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+        );
+
+        let response = server
+            .handle_get_diagnostics_save_timeline(crate::types::DiagnosticsSaveTimelineRequest {
+                limit: Some(10),
+            })
+            .await
+            .expect("timeline response");
+        let traces = response
+            .traces
+            .into_iter()
+            .filter(|trace| {
+                trace.uri == uri.as_str()
+                    && trace.requested_version == key.requested_version
+                    && trace.save_cycle_sequence == key.save_cycle_sequence
+                    && trace.diagnostics_generation == key.diagnostics_generation
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            traces.len(),
+            1,
+            "late terminal result must not resurrect duplicate diagnostics save trace"
+        );
+        assert_eq!(
+            traces[0].terminal_outcome.as_deref(),
+            Some("superseded_generation")
+        );
+        assert_eq!(traces[0].trace_id, "diagnostics-save-trace-1");
+    }
+
+    #[tokio::test]
+    async fn diagnostics_save_timeline_begin_after_terminal_does_not_resurrect_duplicate_trace() {
+        let server = create_test_server();
+        let uri = Url::parse("file:///timeline-begin-after-terminal.bsl").expect("uri");
+        let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+            file_id: bsl_analysis_v2::FileId(72),
+            diagnostics_generation: 14,
+            save_cycle_sequence: 5,
+            requested_version: 11,
+        };
+
+        server.begin_diagnostics_save_timeline_cycle(&uri, key);
+        server.record_diagnostics_save_timeline_profile_disposition(
+            &uri,
+            key,
+            bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+        );
+        server.record_diagnostics_save_timeline_profile_disposition(
+            &uri,
+            key,
+            bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+        );
+
+        server.begin_diagnostics_save_timeline_cycle(&uri, key);
+
+        let response = server
+            .handle_get_diagnostics_save_timeline(crate::types::DiagnosticsSaveTimelineRequest {
+                limit: Some(10),
+            })
+            .await
+            .expect("timeline response");
+        let traces = response
+            .traces
+            .into_iter()
+            .filter(|trace| {
+                trace.uri == uri.as_str()
+                    && trace.requested_version == key.requested_version
+                    && trace.save_cycle_sequence == key.save_cycle_sequence
+                    && trace.diagnostics_generation == key.diagnostics_generation
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            traces.len(),
+            1,
+            "begin after terminal archive must not resurrect duplicate diagnostics save trace"
+        );
+        assert_eq!(
+            traces[0].terminal_outcome.as_deref(),
+            Some("superseded_generation")
+        );
+        assert_eq!(traces[0].trace_id, "diagnostics-save-trace-1");
     }
 
     #[tokio::test]

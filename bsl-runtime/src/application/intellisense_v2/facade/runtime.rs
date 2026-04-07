@@ -43,6 +43,8 @@ impl IntellisenseV2Facade {
                 index_snapshot: initial_index_snapshot.clone(),
             }));
         let completion_deps_index_snapshot_for_writer = completion_deps_index_snapshot.clone();
+        let applied_file_revisions = Arc::new(std::sync::RwLock::new(HashMap::new()));
+        let applied_file_revisions_for_writer = applied_file_revisions.clone();
 
         let join_handle = std::thread::Builder::new()
             .name("analysis-v2-writer".to_string())
@@ -286,33 +288,44 @@ impl IntellisenseV2Facade {
                                     continue;
                                 }
                                 maybe_inject_apply_change_delay_for_test(&change);
-                                match &change {
+                                let applied_revision_update = match &change {
                                     Change::SetFile { file_id, version, .. }
                                     | Change::SetFileWithSnapshot {
                                         file_id, version, ..
-                                    } => {
-                                        applied_file_revisions.insert(
-                                            *file_id,
-                                            FileRevisionState {
-                                                version: *version,
-                                                updated_at: Instant::now(),
-                                            },
-                                        );
-                                        changed_files.push(*file_id);
-                                    }
-                                    Change::RemoveFile { file_id } => {
-                                        applied_file_revisions.remove(file_id);
-                                        changed_files.push(*file_id);
-                                    }
-                                    Change::ReuseCompletionHeadFromPreviousVersion { .. } => {}
+                                    } => Some((*file_id, Some(*version))),
+                                    Change::RemoveFile { file_id } => Some((*file_id, None)),
+                                    Change::ReuseCompletionHeadFromPreviousVersion { .. } => None,
                                     Change::SetDepsSnapshot { .. } => {
                                         warn!("analysis_v2_runtime: ignoring SetDepsSnapshot in ApplyChanges; use ApplyDepsBundle to keep index_snapshot in sync");
                                         continue;
                                     }
-                                    Change::SetSettingsSnapshot { .. } => {}
-                                }
+                                    Change::SetSettingsSnapshot { .. } => None,
+                                };
 
                                 let cache_effects = host.apply_change(change);
+                                if let Some((file_id, version)) = applied_revision_update {
+                                    match version {
+                                        Some(version) => {
+                                            let revision_state = FileRevisionState {
+                                                version,
+                                                updated_at: Instant::now(),
+                                            };
+                                            applied_file_revisions.insert(file_id, revision_state);
+                                            applied_file_revisions_for_writer
+                                                .write()
+                                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                                .insert(file_id, revision_state);
+                                        }
+                                        None => {
+                                            applied_file_revisions.remove(&file_id);
+                                            applied_file_revisions_for_writer
+                                                .write()
+                                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                                .remove(&file_id);
+                                        }
+                                    }
+                                    changed_files.push(file_id);
+                                }
                                 if let Some(coordinator) = &observability {
                                     if cache_effects.invalidated_deps_total > 0 {
                                         coordinator.record_intellisense_v2_type_index_reason(
@@ -586,6 +599,7 @@ impl IntellisenseV2Facade {
                 interactive_tx,
                 background_tx,
                 completion_deps_index_snapshot,
+                applied_file_revisions,
                 #[cfg(test)]
                 join_handle: std::sync::Mutex::new(Some(join_handle)),
             }),
@@ -824,6 +838,15 @@ impl IntellisenseV2Facade {
                 None
             }
         }
+    }
+
+    pub fn cached_file_revision_state(&self, file_id: FileId) -> Option<FileRevisionState> {
+        self.inner
+            .applied_file_revisions
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&file_id)
+            .copied()
     }
 
     #[cfg(test)]

@@ -15,3 +15,4 @@
 - [x] 2.3 `npm --prefix /home/egor/code/bsl-gradual-types/vscode-extension run compile:fast`
 - [x] 2.4 `cd /home/egor/code/bsl-gradual-types/vscode-extension && BSL_TEST_GREP='LSP Custom Requests Test Suite|Observability Incident Bundle Test Suite|Observability Commands Test Suite' node ./out/test/runTest.js`
 - [x] 2.5 `openspec validate refactor-07-diagnostics-save-followup-apply-lag-bounding --strict --no-interactive`
+- [x] 2.6 `CHANGE_ID=refactor-07-diagnostics-save-followup-apply-lag-bounding cargo test -p bsl-backend --bin bsl-lsp-server p44_real_conf_big_did_save_diagnostics_followup_report_live -- --nocapture`

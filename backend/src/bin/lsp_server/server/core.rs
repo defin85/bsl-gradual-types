@@ -177,6 +177,40 @@ fn clear_diagnostics_save_timeline_followup_wait_inner(
     trace.followup_snapshot_with_deps_ms = None;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DiagnosticsSaveTimelineFastlaneProgress {
+    Pending,
+    SuccessfulFirstPublish,
+    TerminalWithoutPublish,
+}
+
+fn diagnostics_save_timeline_fastlane_progress_inner(
+    store: &super::DiagnosticsSaveTimelineStore,
+    key: super::DiagnosticsSaveTimelineCycleKey,
+) -> DiagnosticsSaveTimelineFastlaneProgress {
+    let Some(trace) = store.active_cycles.get(&key) else {
+        return DiagnosticsSaveTimelineFastlaneProgress::Pending;
+    };
+
+    if trace.requested_version != key.requested_version {
+        return DiagnosticsSaveTimelineFastlaneProgress::Pending;
+    }
+
+    if trace.save_fastlane_outcome.as_deref() == Some("published")
+        && trace.first_publish.as_ref().is_some_and(|publish| {
+            publish.profile == "save_fastlane" && publish.outcome == "published"
+        })
+    {
+        return DiagnosticsSaveTimelineFastlaneProgress::SuccessfulFirstPublish;
+    }
+
+    if trace.save_fastlane_outcome.is_some() {
+        return DiagnosticsSaveTimelineFastlaneProgress::TerminalWithoutPublish;
+    }
+
+    DiagnosticsSaveTimelineFastlaneProgress::Pending
+}
+
 fn append_completion_timeline_completed_stage(
     trace: &mut crate::types::CompletionTimelineTrace,
     name: &str,
@@ -791,6 +825,17 @@ impl BslLanguageServer {
             wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
         trace.followup_snapshot_with_deps_ms =
             snapshot_with_deps_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+    }
+
+    pub(crate) fn diagnostics_save_timeline_fastlane_progress(
+        &self,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+    ) -> DiagnosticsSaveTimelineFastlaneProgress {
+        let store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        diagnostics_save_timeline_fastlane_progress_inner(&store, key)
     }
 
     pub(crate) fn clear_active_diagnostics_save_timeline_cycles_for_file(&self, file_id: V2FileId) {

@@ -594,6 +594,7 @@ struct Inner {
     interactive_tx: std::sync::mpsc::Sender<Command>,
     background_tx: std::sync::mpsc::Sender<Command>,
     completion_deps_index_snapshot: Arc<ArcSwap<CompletionDepsIndexSnapshot>>,
+    applied_file_revisions: Arc<std::sync::RwLock<HashMap<FileId, FileRevisionState>>>,
     #[cfg(test)]
     join_handle: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }

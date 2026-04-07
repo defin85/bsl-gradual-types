@@ -7,8 +7,14 @@ CHANGE_ID="${CHANGE_ID:-refactor-completion-front-edge-readiness-window}"
 READINESS_REPORT="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.json"
 READINESS_SUMMARY="${REPORT_DIR}/${CHANGE_ID}-readiness-gate.md"
 OPENSPEC_LOG="${REPORT_DIR}/${CHANGE_ID}-openspec-validate.log"
-PERF_PROFILES="${PERF_PROFILES:-small large churn}"
 OPENSPEC_VALIDATE_SCOPE="change"
+if [[ -z "${PERF_PROFILES:-}" ]]; then
+  if [[ "${CHANGE_ID}" == "refactor-completion-front-edge-exact-deadline-removal" ]]; then
+    PERF_PROFILES="large churn"
+  else
+    PERF_PROFILES="small large churn"
+  fi
+fi
 if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
   if [[ "${CHANGE_ID}" == "refactor-completion-prepare-lightweight-exact-split" ]]; then
     REAL_MODULE_PROFILES="warm churn"
@@ -22,6 +28,8 @@ if [[ -z "${REAL_MODULE_PROFILES:-}" ]]; then
     REAL_MODULE_PROFILES="outline"
   elif [[ "${CHANGE_ID}" == "isolate-completion-pre-dispatch-ingress" ]]; then
     REAL_MODULE_PROFILES="outline"
+  elif [[ "${CHANGE_ID}" == "refactor-completion-front-edge-exact-deadline-removal" ]]; then
+    REAL_MODULE_PROFILES="front_edge"
   elif [[ "${CHANGE_ID}" == "refactor-completion-front-edge-readiness-window" ]]; then
     REAL_MODULE_PROFILES="front_edge"
   else
@@ -238,6 +246,8 @@ for profile in real_module_profiles:
         or summary.get("measured_requests")
         or summary.get("measured_trace_linked_samples")
         or summary.get("measured_non_empty_samples", 0),
+        "successful_traces": summary.get("measured_successful_traces", 0),
+        "fail_closed_traces": summary.get("measured_fail_closed_traces", 0),
         "head_hit_traces": summary.get("measured_head_hit_traces", 0),
         "exact_hit_traces": summary.get("measured_exact_hit_traces", 0),
         "prepare_timeout_delta": summary.get("measured_prepare_timeout_total_delta", 0),
@@ -258,10 +268,13 @@ for profile in real_module_profiles:
             "yes" if pass_flag else "no",
             report_change_id,
             aggregate["real_module_gates"][profile]["measured_samples"],
+            aggregate["real_module_gates"][profile]["successful_traces"],
+            aggregate["real_module_gates"][profile]["fail_closed_traces"],
             aggregate["real_module_gates"][profile]["head_hit_traces"],
             aggregate["real_module_gates"][profile]["exact_hit_traces"],
             aggregate["real_module_gates"][profile]["prepare_timeout_delta"],
             aggregate["real_module_gates"][profile]["exact_deadline_delta"],
+            aggregate["real_module_gates"][profile]["cold_query_bundle_pool_wait_samples"],
         )
     )
     profile_lines = [
@@ -272,6 +285,8 @@ for profile in real_module_profiles:
         f"- report: `{report_path}`",
         f"- report change_id: `{report_change_id}`",
         f"- measured samples: `{aggregate['real_module_gates'][profile]['measured_samples']}`",
+        f"- successful traces: `{aggregate['real_module_gates'][profile]['successful_traces']}`",
+        f"- fail_closed traces: `{aggregate['real_module_gates'][profile]['fail_closed_traces']}`",
         f"- head_hit traces: `{aggregate['real_module_gates'][profile]['head_hit_traces']}`",
         f"- exact_hit traces: `{aggregate['real_module_gates'][profile]['exact_hit_traces']}`",
         f"- prepare_timeout delta: `{aggregate['real_module_gates'][profile]['prepare_timeout_delta']}`",
@@ -437,8 +452,8 @@ lines.extend(
     [
         "",
         "## Real-module representative gates",
-        "| profile | pass | report change_id | measured samples | head_hit traces | exact_hit traces | prepare_timeout delta | exact_deadline delta |",
-        "|---|---|---|---:|---:|---:|---:|---:|",
+        "| profile | pass | report change_id | measured samples | successful traces | fail_closed traces | head_hit traces | exact_hit traces | prepare_timeout delta | exact_deadline delta | cold query_bundle_pool_wait samples |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
 )
 for (
@@ -446,13 +461,16 @@ for (
     pass_flag,
     report_change_id,
     measured_samples,
+    successful_traces,
+    fail_closed_traces,
     head_hit_traces,
     exact_hit_traces,
     prepare_timeout_delta,
     exact_deadline_delta,
+    cold_query_bundle_pool_wait_samples,
 ) in real_module_rows:
     lines.append(
-        f"| {profile_title} | {pass_flag} | {report_change_id} | {measured_samples} | {head_hit_traces} | {exact_hit_traces} | {prepare_timeout_delta} | {exact_deadline_delta} |"
+        f"| {profile_title} | {pass_flag} | {report_change_id} | {measured_samples} | {successful_traces} | {fail_closed_traces} | {head_hit_traces} | {exact_hit_traces} | {prepare_timeout_delta} | {exact_deadline_delta} | {cold_query_bundle_pool_wait_samples} |"
     )
 
 lines.extend(

@@ -593,6 +593,46 @@ async fn completion_non_member_test_helper_without_ir_uses_snapshot_modules_but_
     );
 }
 
+#[tokio::test]
+async fn completion_non_member_without_ir_includes_form_implicit_context_symbols() {
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let index_snapshot = index.snapshot();
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo);
+    let content = "Процедура Тест()\n    Этот\nКонецПроцедуры\n";
+    let line = 1;
+    let column = "    Этот".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let result = get_completion_with_trigger_hint_and_owner_hints_without_ir(
+        content,
+        line,
+        column,
+        Some("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl"),
+        &index_snapshot,
+        &metadata_lookup,
+        "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl",
+        resolver.as_ref(),
+        Vec::new(),
+        false,
+        None,
+    )
+    .await
+    .expect("completion ok");
+    let labels: Vec<String> = result
+        .items
+        .into_iter()
+        .map(|candidate| candidate.item.label)
+        .collect();
+
+    assert!(
+        labels.iter().any(|label| label == "ЭтотОбъект"),
+        "labels: {:?}",
+        labels
+    );
+}
+
 fn build_non_member_completion_fixture(
     content: &str,
     file_path: &str,

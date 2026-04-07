@@ -72,13 +72,54 @@ fn next_completion_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64
     format!("completion-trace-{id}")
 }
 
+fn append_completion_timeline_completed_stage(
+    trace: &mut crate::types::CompletionTimelineTrace,
+    name: &str,
+    duration: Duration,
+) {
+    let duration_ms = duration.as_millis().min(u64::MAX as u128) as u64;
+    if duration_ms == 0 {
+        return;
+    }
+
+    let started_offset_ms = trace
+        .stages
+        .iter()
+        .map(|stage| stage.started_offset_ms.saturating_add(stage.duration_ms))
+        .max()
+        .unwrap_or(0);
+    trace
+        .stages
+        .push(crate::types::CompletionTimelineStageTrace {
+            name: name.to_string(),
+            status: "completed".to_string(),
+            started_offset_ms,
+            duration_ms,
+        });
+    trace.total_duration_ms = trace
+        .total_duration_ms
+        .max(started_offset_ms.saturating_add(duration_ms));
+    trace.dominant_stage = trace
+        .stages
+        .iter()
+        .filter(|stage| stage.status != "skipped")
+        .max_by_key(|stage| stage.duration_ms)
+        .map(|stage| stage.name.clone());
+}
+
 fn record_completion_timeline_trace_inner(
     traces: &StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>,
-    trace: crate::types::CompletionTimelineTrace,
+    mut trace: crate::types::CompletionTimelineTrace,
 ) {
+    let record_started = Instant::now();
     let mut traces = traces
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    append_completion_timeline_completed_stage(
+        &mut trace,
+        "handler_epilogue_trace_record",
+        record_started.elapsed(),
+    );
     traces.push_back(trace);
     while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
         let _ = traces.pop_front();

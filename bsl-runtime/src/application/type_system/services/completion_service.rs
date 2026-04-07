@@ -1097,11 +1097,51 @@ fn collect_non_member_candidates(
     candidates: &mut Vec<Candidate>,
 ) {
     add_local_symbols_from_ir(Some(analysis), file_content, line, column, candidates, 0);
+    add_contextual_non_member_symbols_without_ir(analysis, candidates, 0);
     add_module_routines_from_ir(Some(analysis), file_content, line, column, candidates, 1);
     add_global_functions_from_lookup(metadata_lookup, candidates, 1);
     add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
     add_repository_types_from_lookup(metadata_lookup, candidates, 3);
     add_default_keywords(candidates, 4);
+}
+
+fn add_contextual_non_member_symbols_without_ir(
+    analysis: &CompletionAnalysisContext<'_>,
+    candidates: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    if analysis.ir_program.is_some() {
+        return;
+    }
+
+    const IMPLICIT_CONTEXT_COMPLETION_LABELS: [&str; 6] = [
+        "ЭтотОбъект",
+        "ЭтаФорма",
+        "Форма",
+        "Объект",
+        "Элементы",
+        "Параметры",
+    ];
+
+    for label in IMPLICIT_CONTEXT_COMPLETION_LABELS {
+        let Some(descriptor) =
+            completion_member_access_implicit_context_descriptor(analysis.file_path, label)
+        else {
+            continue;
+        };
+        candidates.push(Candidate::new(
+            CompletionItem::with_details(
+                label.to_string(),
+                CompletionKind::Variable,
+                Some(descriptor.user_facing_type_name()),
+                None,
+            ),
+            priority,
+            None,
+            None,
+            Some(SymbolScope::Local),
+        ));
+    }
 }
 
 #[allow(dead_code)]

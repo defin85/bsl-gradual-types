@@ -566,6 +566,7 @@ pub(super) fn completion_empty_response(
             items: Vec::new(),
         }),
         stats: None,
+        backend_breakdown: None,
         had_error: false,
     }
 }
@@ -573,6 +574,25 @@ pub(super) fn completion_empty_response(
 pub(super) fn completion_incomplete_empty_response() -> crate::handlers::CompletionResponseWithStats
 {
     completion_empty_response(true)
+}
+
+pub(super) fn completion_response_outcome(
+    response: &crate::handlers::CompletionResponseWithStats,
+) -> &'static str {
+    if response.had_error {
+        return "handler_error";
+    }
+
+    let item_count = match &response.response {
+        CompletionResponse::Array(items) => items.len(),
+        CompletionResponse::List(list) => list.items.len(),
+    };
+
+    if item_count == 0 {
+        "ok_empty"
+    } else {
+        "ok_non_empty"
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -829,27 +849,48 @@ pub(super) async fn resolve_completion_without_ir(
     _observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
     _observed_file_version: Option<i32>,
     _member_access_context: bool,
-    _file_content: Arc<str>,
-    _file_path: Arc<str>,
-    _member_access_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
-    _deps: Arc<bsl_analysis_v2::SemanticDeps>,
-    _position: Position,
-    _uri: &Url,
-    _index_snapshot: &bsl_backend::system::IndexSnapshot,
-    _snippet_support: bool,
-    _include_flow_sensitive: bool,
-    _trigger_char_hint: Option<char>,
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    member_access_owner_type_hints: Vec<bsl_shared::domain::types::TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    uri: &Url,
+    index_snapshot: &bsl_backend::system::IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    trigger_char_hint: Option<char>,
+    allow_current_revision_empty_success: bool,
 ) -> (
     &'static str,
     Option<crate::handlers::CompletionResponseWithStats>,
 ) {
-    let decision =
-        bsl_runtime::application::completion_missing_ir_policy_decision(false, false, false, false);
+    if allow_current_revision_empty_success {
+        return ("ok_empty", Some(completion_empty_response(false)));
+    }
 
-    match decision {
-        bsl_runtime::application::CompletionMissingIrPolicyDecision::FailClosedUnavailable => {
-            ("missing_ir", Some(completion_empty_response(false)))
+    match crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+        file_content,
+        file_path,
+        None,
+        member_access_owner_type_hints,
+        deps,
+        position,
+        uri,
+        index_snapshot,
+        snippet_support,
+        include_flow_sensitive,
+        trigger_char_hint,
+    )
+    .await
+    {
+        Some(response) => {
+            let outcome = completion_response_outcome(&response);
+            (outcome, Some(response))
         }
+        None => (
+            "fallback_unavailable",
+            Some(completion_empty_response(false)),
+        ),
     }
 }
 

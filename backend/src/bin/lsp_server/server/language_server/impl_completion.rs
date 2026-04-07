@@ -348,6 +348,25 @@ struct CompletionResponseBuildBreakdown {
     collect: std::time::Duration,
     rank: std::time::Duration,
     format: std::time::Duration,
+    runtime_other: std::time::Duration,
+    lsp_materialization: std::time::Duration,
+    resolve_context_attach: std::time::Duration,
+}
+
+fn allow_shadow_current_revision_empty_success(
+    member_access_request: bool,
+    prepared_kind: &str,
+    exact_ready_before_wait: bool,
+    exact_hit_candidate: bool,
+    prepare_apply_age_at_start: Option<std::time::Duration>,
+    exact_wait_budget: std::time::Duration,
+) -> bool {
+    !member_access_request
+        && prepared_kind == "shadow_current_revision_fast_path"
+        && !exact_ready_before_wait
+        && !exact_hit_candidate
+        && !exact_wait_budget.is_zero()
+        && prepare_apply_age_at_start.is_some_and(|apply_age| apply_age <= exact_wait_budget)
 }
 
 impl CompletionTimelineCapture {
@@ -516,6 +535,18 @@ impl CompletionTimelineCapture {
             ("collect", Self::duration_to_ms(breakdown.collect)),
             ("rank", Self::duration_to_ms(breakdown.rank)),
             ("format", Self::duration_to_ms(breakdown.format)),
+            (
+                "runtime_other",
+                Self::duration_to_ms(breakdown.runtime_other),
+            ),
+            (
+                "lsp_materialization",
+                Self::duration_to_ms(breakdown.lsp_materialization),
+            ),
+            (
+                "resolve_context_attach",
+                Self::duration_to_ms(breakdown.resolve_context_attach),
+            ),
         ];
         let breakdown_total_ms = stage_durations_ms
             .iter()
@@ -1192,6 +1223,87 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn timed_completion_checkpoint_outcome_if_enabled(
+    event_driven_guards_enabled: bool,
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    request_id: Option<&str>,
+    request_epoch: u64,
+    cancellation_token: Option<&super::super::completion_cancellation::CompletionCancellationToken>,
+    checkpoint: &'static str,
+    cancel_event_emitted: &mut bool,
+) -> (Option<&'static str>, std::time::Duration) {
+    let started = Instant::now();
+    let outcome = completion_checkpoint_outcome_if_enabled(
+        event_driven_guards_enabled,
+        server,
+        file_id,
+        request_id,
+        request_epoch,
+        cancellation_token,
+        checkpoint,
+        cancel_event_emitted,
+    )
+    .await;
+    (outcome, started.elapsed())
+}
+
+async fn timed_completion_future<T, F>(future: F) -> (T, std::time::Duration)
+where
+    F: std::future::Future<Output = T>,
+{
+    let started = Instant::now();
+    let output = future.await;
+    (output, started.elapsed())
+}
+
+fn push_timeline_stage_if_nonzero(
+    timeline_capture: &mut CompletionTimelineCapture,
+    stage_name: &'static str,
+    elapsed: std::time::Duration,
+) {
+    if elapsed > std::time::Duration::ZERO {
+        timeline_capture.push_completed_stage(stage_name, elapsed);
+    }
+}
+
+fn append_trace_stage_if_nonzero(
+    trace: &mut crate::types::CompletionTimelineTrace,
+    stage_name: &'static str,
+    status: CompletionTimelineStageStatus,
+    elapsed: std::time::Duration,
+) {
+    let duration_ms = CompletionTimelineCapture::duration_to_ms(elapsed);
+    if duration_ms == 0 {
+        return;
+    }
+
+    let started_offset_ms = trace
+        .stages
+        .iter()
+        .map(|stage| stage.started_offset_ms.saturating_add(stage.duration_ms))
+        .max()
+        .unwrap_or(0);
+    trace
+        .stages
+        .push(crate::types::CompletionTimelineStageTrace {
+            name: stage_name.to_string(),
+            status: status.as_str().to_string(),
+            started_offset_ms,
+            duration_ms,
+        });
+    trace.total_duration_ms = trace
+        .total_duration_ms
+        .max(started_offset_ms.saturating_add(duration_ms));
+    trace.dominant_stage = trace
+        .stages
+        .iter()
+        .filter(|stage| stage.status != "skipped")
+        .max_by_key(|stage| stage.duration_ms)
+        .map(|stage| stage.name.clone());
+}
+
 fn release_completion_active_turn(
     completion_active_turn_guard: &mut Option<super::helpers::CompletionActiveTurnGuard>,
 ) {
@@ -1458,13 +1570,19 @@ impl BslLanguageServer {
             timeline_capture.set_service_scope_entered_at_ms(service_scope_entered_at_ms);
         }
         timeline_capture.set_prepare_min_file_version(version_hint);
-        timeline_capture.set_prepare_shadow_version_at_start(
-            self.latest_document_shadow_state_v2
-                .read()
-                .await
-                .get(&file_id)
-                .map(|state| state.version),
+        let prepare_shadow_version_at_start_started = Instant::now();
+        let prepare_shadow_version_at_start = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.version);
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_prelude_shadow_version",
+            prepare_shadow_version_at_start_started.elapsed(),
         );
+        timeline_capture.set_prepare_shadow_version_at_start(prepare_shadow_version_at_start);
         let (
             completion_ticket,
             completion_turn_outcome,
@@ -1481,15 +1599,22 @@ impl BslLanguageServer {
                     version_hint,
                     trigger_mode: trigger_mode.to_string(),
                 };
-            let completion_dispatch = self
-                .completion_dispatcher_v2
-                .emit_completion_request_with_turn(
-                    file_id,
-                    completion_request_id.clone(),
-                    version_hint,
-                    trigger_mode.to_string(),
-                )
-                .await;
+            set_current_request_completion_phase("dispatch_emit");
+            let (completion_dispatch, dispatch_emit_elapsed) = timed_completion_future(
+                self.completion_dispatcher_v2
+                    .emit_completion_request_with_turn(
+                        file_id,
+                        completion_request_id.clone(),
+                        version_hint,
+                        trigger_mode.to_string(),
+                    ),
+            )
+            .await;
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_dispatch_emit",
+                dispatch_emit_elapsed,
+            );
             let completion_ticket = completion_dispatch.ticket;
             let superseded_request_ids = completion_dispatch.superseded_request_ids;
             let completion_request_registration = completion_request_id.clone().map(|request_id| {
@@ -1514,6 +1639,7 @@ impl BslLanguageServer {
                 Arc::clone(&self.completion_cancellation_registry_v2),
                 Arc::clone(&self.completion_dispatcher_v2),
             ));
+            let cancel_superseded_started = Instant::now();
             for stale_request_id in superseded_request_ids {
                 if self
                     .completion_cancellation_registry_v2
@@ -1530,6 +1656,11 @@ impl BslLanguageServer {
                     );
                 }
             }
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_cancel_superseded",
+                cancel_superseded_started.elapsed(),
+            );
             if completion_queue_enqueue_failed(completion_ticket.queue_outcome) {
                 debug!(
                     uri = %uri,
@@ -1579,45 +1710,80 @@ impl BslLanguageServer {
                 completion_turn_outcome,
                 super::super::completion_dispatcher::CompletionTurnOutcome::Ready
             ) {
+                let before_active_registration_started = Instant::now();
                 maybe_inject_completion_checkpoint_delay_for_test(
                     "before_active_turn_registration",
                 )
                 .await;
+                push_timeline_stage_if_nonzero(
+                    &mut timeline_capture,
+                    "handler_prelude_before_active_registration",
+                    before_active_registration_started.elapsed(),
+                );
             }
             let mut pre_active_terminal_outcome = None;
             let completion_active_turn_guard = if matches!(
                 completion_turn_outcome,
                 super::super::completion_dispatcher::CompletionTurnOutcome::Ready
             ) {
-                let latest_request_epoch = self
-                    .completion_dispatcher_v2
-                    .latest_request_epoch(file_id)
-                    .await;
+                set_current_request_completion_phase("active_registration");
+                let (latest_request_epoch, latest_request_epoch_elapsed) = timed_completion_future(
+                    self.completion_dispatcher_v2.latest_request_epoch(file_id),
+                )
+                .await;
+                push_timeline_stage_if_nonzero(
+                    &mut timeline_capture,
+                    "handler_prelude_latest_request_epoch",
+                    latest_request_epoch_elapsed,
+                );
                 if completion_cancellation_token
                     .as_ref()
                     .is_some_and(|token| token.is_cancelled())
                 {
                     pre_active_terminal_outcome = Some("cancelled");
-                    let _ = self
-                        .completion_dispatcher_v2
-                        .clear_pre_active_completion(file_id, completion_ticket.file_seq)
-                        .await;
+                    let (_, clear_pre_active_elapsed) = timed_completion_future(
+                        self.completion_dispatcher_v2
+                            .clear_pre_active_completion(file_id, completion_ticket.file_seq),
+                    )
+                    .await;
+                    push_timeline_stage_if_nonzero(
+                        &mut timeline_capture,
+                        "handler_prelude_clear_pre_active",
+                        clear_pre_active_elapsed,
+                    );
                     None
                 } else if !super::helpers::completion_publish_allowed(
                     completion_ticket.request_epoch,
                     latest_request_epoch,
                 ) {
                     pre_active_terminal_outcome = Some("superseded");
-                    let _ = self
-                        .completion_dispatcher_v2
-                        .clear_pre_active_completion(file_id, completion_ticket.file_seq)
-                        .await;
+                    let (_, clear_pre_active_elapsed) = timed_completion_future(
+                        self.completion_dispatcher_v2
+                            .clear_pre_active_completion(file_id, completion_ticket.file_seq),
+                    )
+                    .await;
+                    push_timeline_stage_if_nonzero(
+                        &mut timeline_capture,
+                        "handler_prelude_clear_pre_active",
+                        clear_pre_active_elapsed,
+                    );
                     None
-                } else if self
-                    .completion_dispatcher_v2
-                    .mark_completion_active(file_id, completion_ticket, completion_request_metadata)
-                    .await
-                {
+                } else if {
+                    let (marked_active, mark_active_elapsed) = timed_completion_future(
+                        self.completion_dispatcher_v2.mark_completion_active(
+                            file_id,
+                            completion_ticket,
+                            completion_request_metadata,
+                        ),
+                    )
+                    .await;
+                    push_timeline_stage_if_nonzero(
+                        &mut timeline_capture,
+                        "handler_prelude_mark_active",
+                        mark_active_elapsed,
+                    );
+                    marked_active
+                } {
                     Some(super::helpers::CompletionActiveTurnGuard::new(
                         file_id,
                         completion_ticket.file_seq,
@@ -1660,7 +1826,13 @@ impl BslLanguageServer {
         if let Some(turn_attribution) = completion_dispatch_attribution {
             timeline_capture.set_turn_attribution(turn_attribution);
         }
+        let snippet_support_started = Instant::now();
         let snippet_support = *self.completion_snippet_support.read().await;
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_prelude_snippet_support",
+            snippet_support_started.elapsed(),
+        );
         #[cfg(test)]
         if let Some(delay_ms) = std::env::var("BSL_TEST_COMPLETION_DELAY_MS")
             .ok()
@@ -1674,6 +1846,8 @@ impl BslLanguageServer {
         let mut member_access_observed = false;
         let mut cancel_event_emitted = false;
         let mut completion_route: Option<CompletionRouteObservation> = None;
+        let mut post_response_started: Option<Instant> = None;
+        let mut post_response_explicit_elapsed = std::time::Duration::ZERO;
         let mut completion = 'completion_flow: {
             if let Some(turn_outcome) = completion_turn_outcome {
                 match turn_outcome {
@@ -1871,18 +2045,25 @@ impl BslLanguageServer {
             }
             if pending_request_cancelled_before_take {
                 if event_driven_guards_enabled {
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                        event_driven_guards_enabled,
-                        self,
-                        file_id,
-                        completion_request_id.as_deref(),
-                        completion_ticket.request_epoch,
-                        completion_cancellation_token.as_ref(),
-                        "before_sync_globals",
-                        &mut cancel_event_emitted,
-                    )
-                    .await
-                    {
+                    let (outcome, checkpoint_elapsed) =
+                        timed_completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "before_sync_globals",
+                            &mut cancel_event_emitted,
+                        )
+                        .await;
+                    if checkpoint_elapsed > std::time::Duration::ZERO {
+                        timeline_capture.push_completed_stage(
+                            "checkpoint_before_sync_globals",
+                            checkpoint_elapsed,
+                        );
+                    }
+                    if let Some(outcome) = outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
@@ -1895,10 +2076,16 @@ impl BslLanguageServer {
                     break 'completion_flow Some(completion_incomplete_empty_response());
                 }
             }
+            let completion_seen_started = Instant::now();
             let first_completion_for_file = {
                 let mut seen = self.completion_seen_files_v2.write().await;
                 seen.insert(file_id)
             };
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_completion_seen",
+                completion_seen_started.elapsed(),
+            );
             self.coordinator
                 .record_intellisense_v2_completion_temperature(if first_completion_for_file {
                     "first"
@@ -1914,6 +2101,7 @@ impl BslLanguageServer {
             timeline_capture.push_completed_stage("sync_globals", sync_globals_elapsed);
 
             let empty = || Some(completion_empty_response(false));
+            let member_access_probe_started = Instant::now();
             let mut member_access_request = trigger_char_hint == Some('.');
             if !member_access_request {
                 let shadow_text = {
@@ -1928,13 +2116,24 @@ impl BslLanguageServer {
                     );
                 }
             }
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_member_access_probe",
+                member_access_probe_started.elapsed(),
+            );
 
+            let flow_sensitive_settings_started = Instant::now();
             let include_flow_sensitive = {
                 let settings = self.settings.read().await;
                 settings.enable_flow_sensitive
             };
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_flow_sensitive_settings",
+                flow_sensitive_settings_started.elapsed(),
+            );
 
-            if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+            let (outcome, checkpoint_elapsed) = timed_completion_checkpoint_outcome_if_enabled(
                 event_driven_guards_enabled,
                 self,
                 file_id,
@@ -1944,15 +2143,25 @@ impl BslLanguageServer {
                 "before_prepare",
                 &mut cancel_event_emitted,
             )
-            .await
-            {
+            .await;
+            if checkpoint_elapsed > std::time::Duration::ZERO {
+                timeline_capture
+                    .push_completed_stage("checkpoint_before_prepare", checkpoint_elapsed);
+            }
+            if let Some(outcome) = outcome {
                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                 completion_outcome = Some(outcome);
                 release_completion_active_turn(&mut completion_active_turn_guard);
                 break 'completion_flow Some(completion_incomplete_empty_response());
             }
 
+            let prepare_apply_age_started = Instant::now();
             let prepare_apply_age_at_start = completion_apply_age_for_file(self, file_id).await;
+            push_timeline_stage_if_nonzero(
+                &mut timeline_capture,
+                "handler_prelude_prepare_apply_age",
+                prepare_apply_age_started.elapsed(),
+            );
             timeline_capture.set_prepare_apply_age_at_start(prepare_apply_age_at_start);
             if let Some(apply_age) = prepare_apply_age_at_start {
                 self.coordinator
@@ -2136,18 +2345,23 @@ impl BslLanguageServer {
                     if let Some(timeout_attribution) = prepared.timeout_attribution {
                         timeline_capture.set_prepare_timeout_attribution(timeout_attribution);
                     }
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                        event_driven_guards_enabled,
-                        self,
-                        file_id,
-                        completion_request_id.as_deref(),
-                        completion_ticket.request_epoch,
-                        completion_cancellation_token.as_ref(),
-                        "wait",
-                        &mut cancel_event_emitted,
-                    )
-                    .await
-                    {
+                    let (outcome, checkpoint_elapsed) =
+                        timed_completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "wait",
+                            &mut cancel_event_emitted,
+                        )
+                        .await;
+                    if checkpoint_elapsed > std::time::Duration::ZERO {
+                        timeline_capture
+                            .push_completed_stage("checkpoint_wait", checkpoint_elapsed);
+                    }
+                    if let Some(outcome) = outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
@@ -2207,18 +2421,23 @@ impl BslLanguageServer {
                             );
                         }
                     }
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                        event_driven_guards_enabled,
-                        self,
-                        file_id,
-                        completion_request_id.as_deref(),
-                        completion_ticket.request_epoch,
-                        completion_cancellation_token.as_ref(),
-                        "snapshot",
-                        &mut cancel_event_emitted,
-                    )
-                    .await
-                    {
+                    let (outcome, checkpoint_elapsed) =
+                        timed_completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "snapshot",
+                            &mut cancel_event_emitted,
+                        )
+                        .await;
+                    if checkpoint_elapsed > std::time::Duration::ZERO {
+                        timeline_capture
+                            .push_completed_stage("checkpoint_snapshot", checkpoint_elapsed);
+                    }
+                    if let Some(outcome) = outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
@@ -2563,117 +2782,59 @@ impl BslLanguageServer {
                         exact_hit_candidate = true;
                         refreshed_snapshot_after_wait = Some(snapshot_after_wait);
                     }
+                    let allow_shadow_current_revision_empty_success =
+                        allow_shadow_current_revision_empty_success(
+                            member_access_request,
+                            prepared.kind,
+                            exact_ready_before_wait,
+                            exact_hit_candidate,
+                            prepare_apply_age_at_start,
+                            exact_wait_budget,
+                        );
+                    let mut use_non_member_shadow_lightweight_fallback = false;
+                    // Non-member front-edge requests already have current-revision shadow text and
+                    // support-bundle state. After the immediate window, probe the latest snapshot
+                    // once: use exact immediately when it is already ready, otherwise keep the
+                    // first response on bounded lightweight/no-IR fallback instead of blocking on
+                    // exact wait and regressing into exact_deadline.
                     if !member_access_request
                         && prepared.kind == "shadow_current_revision_fast_path"
+                        && !allow_shadow_current_revision_empty_success
                         && !exact_ready_before_wait
                         && !exact_hit_candidate
                     {
-                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
-                        {
-                            self.coordinator.record_completion_stage_latency(
-                                "exact_wait_apply_age_at_start",
-                                apply_age,
-                            );
-                        }
-                        let exact_wait_started = Instant::now();
-                        set_current_request_completion_phase("wait_exact_type_index");
-                        let exact_wait = self
-                            .wait_for_current_type_index_serve_only_ready_v2(
-                                file_id,
-                                Some(expected_version),
-                                exact_wait_budget,
-                            )
-                            .await;
-                        let exact_wait_elapsed = exact_wait_started.elapsed();
-                        self.coordinator.record_completion_stage_latency(
-                            "wait_exact_type_index",
-                            exact_wait_elapsed,
-                        );
-                        timeline_capture
-                            .push_completed_stage("wait_exact_type_index", exact_wait_elapsed);
-                        timeline_capture
-                            .set_exact_wait_type_index_outcome(exact_wait.outcome.as_str());
-                        timeline_capture.set_exact_wait_type_index_waiter_action(
-                            exact_wait.waiter_action.as_str(),
-                        );
-                        if let Some(matching_task_state) = exact_wait.matching_task_state {
-                            timeline_capture
-                                .set_exact_wait_matching_task_state(matching_task_state.as_str());
-                        }
-                        if let Some(task_phase) = exact_wait.task_phase {
-                            timeline_capture.set_exact_wait_task_phase(task_phase.as_str());
-                        }
-
-                        if exact_wait.outcome
-                            != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
-                        {
-                            if let Some(apply_age) =
-                                completion_apply_age_for_file(self, file_id).await
-                            {
-                                self.coordinator.record_completion_stage_latency(
-                                    "exact_wait_apply_age_at_terminal",
-                                    apply_age,
-                                );
-                            }
-                            self.coordinator
-                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
-                                    exact_wait.outcome.as_str(),
-                                );
-                            self.coordinator
-                                .record_intellisense_v2_completion_fallback_unavailable();
-                            completion_outcome.get_or_insert("wait_not_ready");
-                            break 'completion_flow Some(completion_empty_response(false));
-                        }
-
-                        let snapshot_after_wait = self
+                        let snapshot_for_exact = self
                             .analysis_v2
                             .completion_current_revision_snapshot_for_origin_and_operation(
                                 context.origin,
                                 context.operation,
                             )
                             .await;
-                        let exact_ready_after_wait = snapshot_after_wait
+                        let exact_ready_now = snapshot_for_exact
                             .analysis
                             .current_type_index_serve_only_ready(file_id)
                             .ok()
                             .unwrap_or(false);
-                        if !exact_ready_after_wait {
-                            if let Some(apply_age) =
-                                completion_apply_age_for_file(self, file_id).await
-                            {
-                                self.coordinator.record_completion_stage_latency(
-                                    "exact_wait_apply_age_at_terminal",
-                                    apply_age,
-                                );
-                            }
-                            self.coordinator
-                                .record_intellisense_v2_completion_exact_type_index_wait_outcome(
-                                    super::super::core::ExactTypeIndexWaitOutcomeV2::ObservedVersionMismatch
-                                        .as_str(),
-                                );
-                            self.coordinator
-                                .record_intellisense_v2_completion_fallback_unavailable();
-                            completion_outcome.get_or_insert("wait_not_ready");
-                            break 'completion_flow Some(completion_empty_response(false));
+                        let observed_version = snapshot_for_exact
+                            .analysis
+                            .file_version(file_id)
+                            .ok()
+                            .flatten();
+                        if exact_ready_now && observed_version == Some(expected_version) {
+                            exact_hit_candidate = true;
+                            refreshed_snapshot_after_wait = Some(snapshot_for_exact);
+                        } else {
+                            use_non_member_shadow_lightweight_fallback = true;
                         }
-                        if let Some(apply_age) = completion_apply_age_for_file(self, file_id).await
-                        {
-                            self.coordinator.record_completion_stage_latency(
-                                "exact_wait_apply_age_at_terminal",
-                                apply_age,
-                            );
-                        }
-                        self.coordinator
-                            .record_intellisense_v2_completion_exact_type_index_wait_outcome(
-                                super::super::core::ExactTypeIndexWaitOutcomeV2::Ready.as_str(),
-                            );
-                        exact_hit_candidate = true;
-                        refreshed_snapshot_after_wait = Some(snapshot_after_wait);
                     }
+                    let use_lightweight_query_bundle = (head_route_candidate
+                        && !exact_hit_candidate)
+                        || allow_shadow_current_revision_empty_success
+                        || use_non_member_shadow_lightweight_fallback;
 
                     set_current_request_completion_phase("query_bundle");
                     let query_bundle_started = Instant::now();
-                    let exact_snapshot_for_query = if head_route_candidate {
+                    let exact_snapshot_for_query = if use_lightweight_query_bundle {
                         None
                     } else if let Some(snapshot) = refreshed_snapshot_after_wait {
                         Some(snapshot)
@@ -2707,7 +2868,7 @@ impl BslLanguageServer {
                         let file_content_override = prepared.file_content_override.clone();
                         let file_path_override = prepared.file_path_override.clone();
                         let observed_file_version_override = prepared.observed_file_version;
-                        if head_route_candidate {
+                        if use_lightweight_query_bundle {
                             let index_snapshot = prepared
                                 .index_snapshot_override
                                 .clone()
@@ -3187,18 +3348,23 @@ impl BslLanguageServer {
                                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                                 completion_outcome = Some(outcome);
                             }
-                            if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                                event_driven_guards_enabled,
-                                self,
-                                file_id,
-                                completion_request_id.as_deref(),
-                                completion_ticket.request_epoch,
-                                completion_cancellation_token.as_ref(),
-                                "ir",
-                                &mut cancel_event_emitted,
-                            )
-                            .await
-                            {
+                            let (outcome, checkpoint_elapsed) =
+                                timed_completion_checkpoint_outcome_if_enabled(
+                                    event_driven_guards_enabled,
+                                    self,
+                                    file_id,
+                                    completion_request_id.as_deref(),
+                                    completion_ticket.request_epoch,
+                                    completion_cancellation_token.as_ref(),
+                                    "ir",
+                                    &mut cancel_event_emitted,
+                                )
+                                .await;
+                            if checkpoint_elapsed > std::time::Duration::ZERO {
+                                timeline_capture
+                                    .push_completed_stage("checkpoint_ir", checkpoint_elapsed);
+                            }
+                            if let Some(outcome) = outcome {
                                 observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                                 completion_outcome = Some(outcome);
                                 let query_bundle_elapsed = query_bundle_started.elapsed();
@@ -3258,7 +3424,7 @@ impl BslLanguageServer {
                         CompletionTimelineCapture::duration_to_ms(query_bundle_elapsed);
                     self.coordinator
                         .record_completion_stage_latency("query_bundle", query_bundle_elapsed);
-                    let query_bundle_other_ms = if head_route_candidate {
+                    let query_bundle_other_ms = if use_lightweight_query_bundle {
                         query_bundle_elapsed_ms
                     } else {
                         query_bundle_exec_elapsed_ms
@@ -3276,7 +3442,7 @@ impl BslLanguageServer {
                             std::time::Duration::from_millis(query_bundle_other_ms),
                         );
                     }
-                    if head_route_candidate {
+                    if use_lightweight_query_bundle {
                         timeline_capture.push_stage(
                             QueryBundleStageName::Other.as_str(),
                             query_bundle_outer_status,
@@ -3336,18 +3502,23 @@ impl BslLanguageServer {
                         completion_outcome.get_or_insert("wait_not_ready");
                         break 'completion_flow Some(completion_empty_response(false));
                     }
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
-                        event_driven_guards_enabled,
-                        self,
-                        file_id,
-                        completion_request_id.as_deref(),
-                        completion_ticket.request_epoch,
-                        completion_cancellation_token.as_ref(),
-                        "collect",
-                        &mut cancel_event_emitted,
-                    )
-                    .await
-                    {
+                    let (outcome, checkpoint_elapsed) =
+                        timed_completion_checkpoint_outcome_if_enabled(
+                            event_driven_guards_enabled,
+                            self,
+                            file_id,
+                            completion_request_id.as_deref(),
+                            completion_ticket.request_epoch,
+                            completion_cancellation_token.as_ref(),
+                            "collect",
+                            &mut cancel_event_emitted,
+                        )
+                        .await;
+                    if checkpoint_elapsed > std::time::Duration::ZERO {
+                        timeline_capture
+                            .push_completed_stage("checkpoint_collect", checkpoint_elapsed);
+                    }
+                    if let Some(outcome) = outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
@@ -3424,6 +3595,7 @@ impl BslLanguageServer {
                                     snippet_support,
                                     include_flow_sensitive,
                                     trigger_char_hint,
+                                    allow_shadow_current_revision_empty_success,
                                 )
                                 .await;
                                 completion_outcome.get_or_insert(fallback_outcome);
@@ -3466,9 +3638,11 @@ impl BslLanguageServer {
                             break 'completion_flow Some(completion_incomplete_empty_response());
                         }
                     };
+                    let mut resolve_context_attach_elapsed = std::time::Duration::ZERO;
                     if let (Some(response), Some(file_version)) =
                         (completion_response.as_mut(), observed_file_version)
                     {
+                        let resolve_context_attach_started = Instant::now();
                         crate::handlers::attach_completion_resolve_context(
                             &mut response.response,
                             &uri,
@@ -3476,24 +3650,57 @@ impl BslLanguageServer {
                             &observed_deps_id,
                             observed_settings_id.as_ref(),
                         );
+                        resolve_context_attach_elapsed = resolve_context_attach_started.elapsed();
                     }
                     let response_build_elapsed = response_build_started.elapsed();
                     self.coordinator
                         .record_completion_stage_latency("response_build", response_build_elapsed);
-                    let response_build_breakdown = completion_response
-                        .as_ref()
-                        .and_then(|response| response.stats.as_ref())
-                        .map(|stats| CompletionResponseBuildBreakdown {
-                            snapshot_read: stats.stage_snapshot_read,
-                            collect: stats.stage_collect,
-                            rank: stats.stage_rank,
-                            format: stats.stage_format,
-                        });
+                    let response_build_breakdown = completion_response.as_ref().map(|response| {
+                        let stats = response.stats.as_ref();
+                        let snapshot_read = stats
+                            .map(|stats| stats.stage_snapshot_read)
+                            .unwrap_or(std::time::Duration::ZERO);
+                        let collect = stats
+                            .map(|stats| stats.stage_collect)
+                            .unwrap_or(std::time::Duration::ZERO);
+                        let rank = stats
+                            .map(|stats| stats.stage_rank)
+                            .unwrap_or(std::time::Duration::ZERO);
+                        let format = stats
+                            .map(|stats| stats.stage_format)
+                            .unwrap_or(std::time::Duration::ZERO);
+                        let runtime_covered = snapshot_read
+                            .saturating_add(collect)
+                            .saturating_add(rank)
+                            .saturating_add(format);
+                        let runtime_other = response
+                            .backend_breakdown
+                            .map(|backend| {
+                                backend.stage_runtime_total.saturating_sub(runtime_covered)
+                            })
+                            .unwrap_or(std::time::Duration::ZERO);
+                        let lsp_materialization = response
+                            .backend_breakdown
+                            .map(|backend| backend.stage_lsp_materialization)
+                            .unwrap_or(std::time::Duration::ZERO);
+
+                        CompletionResponseBuildBreakdown {
+                            snapshot_read,
+                            collect,
+                            rank,
+                            format,
+                            runtime_other,
+                            lsp_materialization,
+                            resolve_context_attach: resolve_context_attach_elapsed,
+                        }
+                    });
                     timeline_capture.push_response_build_stage(
                         response_build_elapsed,
                         response_build_breakdown,
                     );
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                    post_response_started.get_or_insert_with(Instant::now);
+                    let checkpoint_rank_started = Instant::now();
+                    let checkpoint_rank_outcome = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
                         file_id,
@@ -3503,16 +3710,24 @@ impl BslLanguageServer {
                         "rank",
                         &mut cancel_event_emitted,
                     )
-                    .await
-                    {
+                    .await;
+                    let checkpoint_rank_elapsed = checkpoint_rank_started.elapsed();
+                    if checkpoint_rank_elapsed > std::time::Duration::ZERO {
+                        timeline_capture
+                            .push_completed_stage("checkpoint_rank", checkpoint_rank_elapsed);
+                        post_response_explicit_elapsed =
+                            post_response_explicit_elapsed.saturating_add(checkpoint_rank_elapsed);
+                    }
+                    if let Some(outcome) = checkpoint_rank_outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
                         break 'completion_flow Some(completion_incomplete_empty_response());
                     }
+                    let checkpoint_format_started = Instant::now();
                     maybe_inject_completion_checkpoint_delay_for_test("before_format_checkpoint")
                         .await;
-                    if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+                    let checkpoint_format_outcome = completion_checkpoint_outcome_if_enabled(
                         event_driven_guards_enabled,
                         self,
                         file_id,
@@ -3522,8 +3737,15 @@ impl BslLanguageServer {
                         "format",
                         &mut cancel_event_emitted,
                     )
-                    .await
-                    {
+                    .await;
+                    let checkpoint_format_elapsed = checkpoint_format_started.elapsed();
+                    if checkpoint_format_elapsed > std::time::Duration::ZERO {
+                        timeline_capture
+                            .push_completed_stage("checkpoint_format", checkpoint_format_elapsed);
+                        post_response_explicit_elapsed = post_response_explicit_elapsed
+                            .saturating_add(checkpoint_format_elapsed);
+                    }
+                    if let Some(outcome) = checkpoint_format_outcome {
                         observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
                         completion_outcome = Some(outcome);
                         release_completion_active_turn(&mut completion_active_turn_guard);
@@ -3550,7 +3772,8 @@ impl BslLanguageServer {
         let elapsed = started.elapsed();
         self.coordinator.record_completion_latency(elapsed);
         set_current_request_completion_phase("publish");
-        if let Some(outcome) = completion_checkpoint_outcome_if_enabled(
+        let checkpoint_publish_started = post_response_started.map(|_| Instant::now());
+        let checkpoint_publish_outcome = completion_checkpoint_outcome_if_enabled(
             event_driven_guards_enabled,
             self,
             file_id,
@@ -3560,14 +3783,24 @@ impl BslLanguageServer {
             "publish",
             &mut cancel_event_emitted,
         )
-        .await
-        {
+        .await;
+        if let Some(checkpoint_publish_started) = checkpoint_publish_started {
+            let checkpoint_publish_elapsed = checkpoint_publish_started.elapsed();
+            if checkpoint_publish_elapsed > std::time::Duration::ZERO {
+                timeline_capture
+                    .push_completed_stage("checkpoint_publish", checkpoint_publish_elapsed);
+                post_response_explicit_elapsed =
+                    post_response_explicit_elapsed.saturating_add(checkpoint_publish_elapsed);
+            }
+        }
+        if let Some(outcome) = checkpoint_publish_outcome {
             observe_cancelled_timeline_outcome(&mut timeline_capture, outcome);
             completion_outcome = Some(outcome);
             release_completion_active_turn(&mut completion_active_turn_guard);
             completion = Some(completion_incomplete_empty_response());
         }
 
+        let result_metrics_started = post_response_started.map(|_| Instant::now());
         super::impl_completion_helpers::observe_completion_result_metrics(
             self,
             &completion,
@@ -3581,6 +3814,14 @@ impl BslLanguageServer {
             },
         )
         .await;
+        if let Some(result_metrics_started) = result_metrics_started {
+            let result_metrics_elapsed = result_metrics_started.elapsed();
+            if result_metrics_elapsed > std::time::Duration::ZERO {
+                timeline_capture.push_completed_stage("result_metrics", result_metrics_elapsed);
+                post_response_explicit_elapsed =
+                    post_response_explicit_elapsed.saturating_add(result_metrics_elapsed);
+            }
+        }
 
         if let Some(reason) = completion_outcome.and_then(completion_public_fail_closed_reason) {
             self.coordinator
@@ -3590,6 +3831,7 @@ impl BslLanguageServer {
         let timeline_outcome =
             completion_public_timeline_outcome(completion_outcome.unwrap_or("ok_empty"));
         observe_cancelled_timeline_outcome(&mut timeline_capture, timeline_outcome);
+        let route_record_started = post_response_started.map(|_| Instant::now());
         if matches!(timeline_outcome, "ok_non_empty" | "ok_empty") {
             if let Some(route) = completion_route.take() {
                 match route.kind {
@@ -3617,7 +3859,24 @@ impl BslLanguageServer {
                 }
             }
         }
-        timeline_capture.push_terminal_stage(timeline_outcome);
+        if let Some(route_record_started) = route_record_started {
+            let route_record_elapsed = route_record_started.elapsed();
+            if route_record_elapsed > std::time::Duration::ZERO {
+                timeline_capture.push_completed_stage("route_record", route_record_elapsed);
+                post_response_explicit_elapsed =
+                    post_response_explicit_elapsed.saturating_add(route_record_elapsed);
+            }
+        }
+        if let Some(post_response_started) = post_response_started {
+            let post_response_other_elapsed = post_response_started
+                .elapsed()
+                .saturating_sub(post_response_explicit_elapsed);
+            if post_response_other_elapsed > std::time::Duration::ZERO {
+                timeline_capture
+                    .push_completed_stage("post_response_other", post_response_other_elapsed);
+            }
+        }
+        let handler_epilogue_request_context_started = Instant::now();
         if let Some(service_future_first_poll_entered_at_ms) =
             super::super::request_context::current_request_service_future_first_poll_entered_at_ms()
                 .or_else(|| {
@@ -3672,7 +3931,21 @@ impl BslLanguageServer {
             timeline_capture
                 .set_first_poll_contention_contenders(first_poll_contention_contenders);
         }
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_epilogue_request_context",
+            handler_epilogue_request_context_started.elapsed(),
+        );
+
+        let handler_epilogue_response_sent_started = Instant::now();
         timeline_capture.set_response_sent_at_ms(super::super::unix_timestamp_ms());
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_epilogue_response_sent",
+            handler_epilogue_response_sent_started.elapsed(),
+        );
+
+        let handler_epilogue_server_edge_started = Instant::now();
         if !shadow_internal_request {
             if let Some(server_edge_details) = timeline_capture.server_edge_details_trace() {
                 self.coordinator.record_completion_stage_latency(
@@ -3697,24 +3970,49 @@ impl BslLanguageServer {
                 }
             }
         }
-        if !shadow_internal_request {
-            let trace = timeline_capture.into_trace(
-                self.next_completion_timeline_trace_id(),
-                elapsed,
-                timeline_outcome,
-            );
-            self.record_completion_timeline_trace(trace);
-        }
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_epilogue_server_edge",
+            handler_epilogue_server_edge_started.elapsed(),
+        );
 
+        let handler_epilogue_outcome_record_started = Instant::now();
         if let Some(outcome) = completion_outcome {
             self.coordinator
                 .record_intellisense_v2_completion_outcome(outcome);
         }
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_epilogue_outcome_record",
+            handler_epilogue_outcome_record_started.elapsed(),
+        );
 
+        let handler_epilogue_cleanup_started = Instant::now();
         if let Some(drop_guard) = completion_drop_guard.as_mut() {
             drop_guard.disarm();
         }
         drop(completion_active_turn_guard.take());
+        push_timeline_stage_if_nonzero(
+            &mut timeline_capture,
+            "handler_epilogue_cleanup",
+            handler_epilogue_cleanup_started.elapsed(),
+        );
+        timeline_capture.push_terminal_stage(timeline_outcome);
+        if !shadow_internal_request {
+            let handler_epilogue_trace_materialize_started = Instant::now();
+            let mut trace = timeline_capture.into_trace(
+                self.next_completion_timeline_trace_id(),
+                elapsed,
+                timeline_outcome,
+            );
+            append_trace_stage_if_nonzero(
+                &mut trace,
+                "handler_epilogue_trace_materialize",
+                CompletionTimelineStageStatus::Completed,
+                handler_epilogue_trace_materialize_started.elapsed(),
+            );
+            self.record_completion_timeline_trace(trace);
+        }
         Ok(completion.map(|result| result.response))
     }
 }
@@ -3925,16 +4223,19 @@ mod tests {
     }
 
     #[test]
-    fn response_build_breakdown_replaces_aggregate_without_double_counting() {
+    fn response_build_breakdown_exposes_backend_gaps_without_double_counting() {
         let mut capture = sample_capture();
         capture.push_completed_stage("prepare_stateful", std::time::Duration::from_millis(5));
         capture.push_response_build_stage(
-            std::time::Duration::from_millis(10),
+            std::time::Duration::from_millis(12),
             Some(CompletionResponseBuildBreakdown {
                 snapshot_read: std::time::Duration::from_millis(2),
                 collect: std::time::Duration::from_millis(3),
                 rank: std::time::Duration::from_millis(1),
                 format: std::time::Duration::from_millis(1),
+                runtime_other: std::time::Duration::from_millis(2),
+                lsp_materialization: std::time::Duration::from_millis(1),
+                resolve_context_attach: std::time::Duration::from_millis(1),
             }),
         );
 
@@ -3948,6 +4249,9 @@ mod tests {
         assert!(stage_names.contains(&"collect"));
         assert!(stage_names.contains(&"rank"));
         assert!(stage_names.contains(&"format"));
+        assert!(stage_names.contains(&"runtime_other"));
+        assert!(stage_names.contains(&"lsp_materialization"));
+        assert!(stage_names.contains(&"resolve_context_attach"));
         assert!(stage_names.contains(&"response_build_other"));
 
         let max_stage_end = capture
@@ -3956,7 +4260,7 @@ mod tests {
             .map(|stage| stage.started_offset_ms.saturating_add(stage.duration_ms))
             .max()
             .unwrap_or(0);
-        assert_eq!(max_stage_end, 15);
+        assert_eq!(max_stage_end, 17);
     }
 
     #[test]
@@ -3969,6 +4273,9 @@ mod tests {
                 collect: std::time::Duration::from_millis(2),
                 rank: std::time::Duration::from_millis(1),
                 format: std::time::Duration::from_millis(1),
+                runtime_other: std::time::Duration::from_millis(0),
+                lsp_materialization: std::time::Duration::from_millis(0),
+                resolve_context_attach: std::time::Duration::from_millis(0),
             }),
         );
         assert_eq!(capture.stages.len(), 1);
@@ -4742,6 +5049,47 @@ mod tests {
         assert_eq!(artifact_poll.observed_file_version, Some(9));
         assert_eq!(artifact_poll.head_ready, Some(false));
         assert_eq!(artifact_poll.exact_ready, Some(false));
+    }
+
+    #[test]
+    fn shadow_current_revision_empty_success_requires_immediate_apply_age_window() {
+        assert!(super::allow_shadow_current_revision_empty_success(
+            false,
+            "shadow_current_revision_fast_path",
+            false,
+            false,
+            Some(std::time::Duration::from_millis(25)),
+            std::time::Duration::from_millis(120),
+        ));
+
+        assert!(!super::allow_shadow_current_revision_empty_success(
+            false,
+            "shadow_current_revision_fast_path",
+            false,
+            false,
+            Some(std::time::Duration::from_millis(250)),
+            std::time::Duration::from_millis(120),
+        ));
+    }
+
+    #[test]
+    fn shadow_current_revision_empty_success_stays_disabled_without_proven_front_edge_window() {
+        assert!(!super::allow_shadow_current_revision_empty_success(
+            false,
+            "shadow_current_revision_fast_path",
+            false,
+            false,
+            None,
+            std::time::Duration::from_millis(120),
+        ));
+        assert!(!super::allow_shadow_current_revision_empty_success(
+            true,
+            "shadow_current_revision_fast_path",
+            false,
+            false,
+            Some(std::time::Duration::from_millis(25)),
+            std::time::Duration::from_millis(120),
+        ));
     }
 
     #[test]

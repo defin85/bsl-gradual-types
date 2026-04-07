@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 use tracing::error;
 
@@ -86,7 +87,14 @@ pub struct CompletionResponseWithStats {
     pub response: CompletionResponse,
     #[allow(dead_code)]
     pub stats: Option<CompletionStats>,
+    pub backend_breakdown: Option<CompletionBackendBreakdown>,
     pub had_error: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompletionBackendBreakdown {
+    pub stage_runtime_total: Duration,
+    pub stage_lsp_materialization: Duration,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -197,10 +205,12 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
                 items: vec![],
             }),
             stats: None,
+            backend_breakdown: None,
             had_error: false,
         });
     }
 
+    let runtime_started = Instant::now();
     let completion = if member_access_request {
         bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir(
             file_content.as_ref(),
@@ -217,35 +227,47 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
         )
         .await
     } else {
-        let Some(ir_program) = ir_program else {
-            return Some(CompletionResponseWithStats {
-                response: CompletionResponse::List(CompletionList {
-                    is_incomplete: false,
-                    items: vec![],
-                }),
-                stats: None,
-                had_error: false,
-            });
-        };
-        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
-            file_content.as_ref(),
-            position.line,
-            position.character,
-            Some(file_uri.as_str()),
-            index_snapshot,
-            &metadata_lookup,
-            file_path.as_ref(),
-            resolver.as_ref(),
-            ir_program,
-            member_access_owner_type_hints,
-            include_flow_sensitive,
-            trigger_char_hint,
-        )
-        .await
+        match ir_program {
+            Some(ir_program) => {
+                get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+                    file_content.as_ref(),
+                    position.line,
+                    position.character,
+                    Some(file_uri.as_str()),
+                    index_snapshot,
+                    &metadata_lookup,
+                    file_path.as_ref(),
+                    resolver.as_ref(),
+                    ir_program,
+                    member_access_owner_type_hints,
+                    include_flow_sensitive,
+                    trigger_char_hint,
+                )
+                .await
+            }
+            None => {
+                bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir(
+                    file_content.as_ref(),
+                    position.line,
+                    position.character,
+                    Some(file_uri.as_str()),
+                    index_snapshot,
+                    &metadata_lookup,
+                    file_path.as_ref(),
+                    resolver.as_ref(),
+                    member_access_owner_type_hints,
+                    include_flow_sensitive,
+                    trigger_char_hint,
+                )
+                .await
+            }
+        }
     };
+    let runtime_elapsed = runtime_started.elapsed();
 
     match completion {
         Ok(result) => {
+            let materialization_started = Instant::now();
             let lsp_completions: Vec<CompletionItem> = result
                 .items
                 .into_iter()
@@ -260,12 +282,17 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
                     )
                 })
                 .collect();
+            let materialization_elapsed = materialization_started.elapsed();
             Some(CompletionResponseWithStats {
                 response: CompletionResponse::List(CompletionList {
                     is_incomplete: result.is_incomplete,
                     items: lsp_completions,
                 }),
                 stats: Some(result.stats),
+                backend_breakdown: Some(CompletionBackendBreakdown {
+                    stage_runtime_total: runtime_elapsed,
+                    stage_lsp_materialization: materialization_elapsed,
+                }),
                 had_error: false,
             })
         }
@@ -277,6 +304,10 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
                     items: vec![],
                 }),
                 stats: None,
+                backend_breakdown: Some(CompletionBackendBreakdown {
+                    stage_runtime_total: runtime_elapsed,
+                    stage_lsp_materialization: Duration::ZERO,
+                }),
                 had_error: true,
             })
         }

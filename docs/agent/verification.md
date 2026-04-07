@@ -132,6 +132,7 @@ Expected outcome:
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-front-edge-exact-deadline-removal ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-slot-release ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
@@ -157,6 +158,12 @@ default entry point for the completion front-edge stabilization evidence
 bundle; it wraps the generic readiness script with `CHANGE_ID=stabilize-completion-front-edge`
 and collects the representative `churn` profile for deterministic correlation,
 quiet observability, and trigger parity validation.
+For `refactor-completion-front-edge-exact-deadline-removal`, the generic
+entry point `CHANGE_ID=refactor-completion-front-edge-exact-deadline-removal
+./scripts/validate-v2-completion-gates.sh` is the canonical full-bundle run;
+it auto-selects representative perf profiles `large churn` plus the
+change-specific real-module `front_edge` gate, so the bundle stays scoped to
+the immediate post-edit/save readiness surface that the change actually fixes.
 `./scripts/validate-completion-turn-wait-slot-release.sh` is the canonical
 default entry point for the completion transport-slot-release evidence bundle;
 it wraps the generic readiness script with the correct `CHANGE_ID` and collects

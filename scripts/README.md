@@ -257,6 +257,11 @@ Override для split-prepare evidence:
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 ```
 
+Override для front-edge exact-deadline remediation evidence:
+```bash
+CHANGE_ID=refactor-completion-front-edge-exact-deadline-removal ./scripts/validate-v2-completion-gates.sh
+```
+
 Default wrapper для documentSymbol mixed-load evidence:
 ```bash
 ./scripts/validate-document-symbol-interactive-isolation.sh
@@ -287,6 +292,7 @@ Default wrapper for pre-active turn_wait lifecycle evidence:
 CHANGE_ID=refactor-document-symbol-interactive-isolation ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-front-edge-exact-deadline-removal ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completion-gates.sh
 ```
@@ -295,7 +301,11 @@ CHANGE_ID=refactor-completion-turn-wait-lifecycle ./scripts/validate-v2-completi
 до `warm churn`; для documentSymbol isolation используется `outline`; для
 truthful pre-dispatch ingress тоже используется `outline`; для overlap
 supersession используется `churn overlap`; для pre-active `turn_wait`
-lifecycle используется `churn preactive_overlap`.
+lifecycle используется `churn preactive_overlap`; для
+`refactor-completion-front-edge-exact-deadline-removal` используются
+representative perf profiles `large churn` и real-module profile `front_edge`,
+чтобы validation path оставался привязан к immediate post-edit/save readiness,
+а не к нерелевантному `small` application-layer matrix.
 В обоих случаях script пишет per-profile summaries рядом с report JSON.
 Default smoke path уже покрывает mandatory `documentSymbol` isolation regressions;
 wrapper `./scripts/validate-document-symbol-interactive-isolation.sh` служит

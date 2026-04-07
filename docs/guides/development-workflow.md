@@ -127,6 +127,7 @@ npm --prefix ./vscode-extension test
 ./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
 CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
+CHANGE_ID=refactor-completion-front-edge-exact-deadline-removal ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=stabilize-completion-front-edge ./scripts/validate-v2-completion-gates.sh
 ```
 

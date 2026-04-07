@@ -15475,6 +15475,164 @@ async fn p33_form_module_head_path_skips_ir_query_delay_when_owner_hints_are_rea
     drain_task.abort();
 }
 
+#[tokio::test]
+async fn p33_non_member_form_completion_ages_out_of_shadow_empty_success_window() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура ПриСозданииНаСервере()\n    Этот\nКонецПроцедуры\n";
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: fixture.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::sleep(Duration::from_millis(
+        wait_budget_ms.saturating_add(150).max(250),
+    ))
+    .await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "    Этот");
+    let completion_labels: Vec<String> = lsp_completion_items_with_request(
+        &mut service,
+        12_001,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await
+    .into_iter()
+    .map(|item| item.label)
+    .collect();
+    assert!(
+        completion_labels.iter().any(|label| label == "ЭтотОбъект"),
+        "aged non-member completion must leave shadow-only ok_empty path and return form-module candidates, labels={completion_labels:?}"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 40_433, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces.last().expect("non-member form completion trace");
+    assert_eq!(
+        trace.get("outcome").and_then(|value| value.as_str()),
+        Some("ok_non_empty"),
+        "aged non-member completion must not stay on synthetic ok_empty success path, trace={trace:?}"
+    );
+    assert_ne!(
+        completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+        Some("exact_deadline"),
+        "aged non-member completion must not regress into exact_deadline while current-revision exact precompute is still delayed, trace={trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+        None,
+        "aged non-member completion must not block on wait_exact_type_index once bounded no-IR current-revision fallback is available, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_delay() {
@@ -27584,18 +27742,20 @@ fn p42_real_conf_big_front_edge_completion_perf_report_live() {
         let measured_cold_query_bundle_pool_wait_samples = measured_samples
             .iter()
             .filter(|sample| {
-                sample
-                    .get("trace")
-                    .and_then(|trace| trace.get("query_bundle"))
-                    .and_then(|query_bundle| query_bundle.get("pool_wait_ms"))
-                    .and_then(|value| value.as_u64())
-                    .unwrap_or(0)
-                    > interactive_wait_budget_ms
+                matches!(
+                    sample
+                        .get("trace")
+                        .and_then(|trace| trace.get("outcome"))
+                        .and_then(|value| value.as_str()),
+                    Some("ok_non_empty" | "ok_empty")
+                )
                     && sample
                         .get("trace")
-                        .and_then(|trace| trace.get("fail_closed_cause"))
-                    .and_then(|value| value.as_str())
-                    != Some("prepare_timeout")
+                        .and_then(|trace| trace.get("query_bundle"))
+                        .and_then(|query_bundle| query_bundle.get("pool_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                        > interactive_wait_budget_ms
             })
             .count();
         let measured_wait_exact_type_index_dominant_samples = measured_samples
@@ -27753,21 +27913,28 @@ fn p42_real_conf_big_front_edge_completion_perf_report_live() {
             counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout")
         );
         assert!(
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+                == 0,
+            "front-edge gate must fail on any exact_deadline after same-file handoff, exact_deadline_total_delta={}, measured_samples={measured_samples:?}",
+            counter_delta("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
+        );
+        assert!(
             measured_cancelled_traces == 0 && measured_superseded_traces == 0,
             "front-edge gate must not regress into cancelled/superseded outcomes after same-file handoff, measured_cancelled_traces={}, measured_superseded_traces={}, measured_samples={measured_samples:?}",
             measured_cancelled_traces,
             measured_superseded_traces
         );
         assert!(
-            measured_successful_traces > 0
-                || (measured_fail_closed_traces == MEASURE_REQUESTS
-                    && counter_delta("intellisense_v2_completion_result_total_fail_closed")
-                        == MEASURE_REQUESTS as u64
-                    && measured_missing_semantic_index_fail_closed_total_delta
-                        == MEASURE_REQUESTS as u64
-                    && measured_wait_exact_type_index_dominant_samples == MEASURE_REQUESTS),
-            "front-edge samples must either produce a bounded successful current-revision response or fail-closed boundedly on wait_exact_type_index/missing_semantic_index, measured_successful_traces={}, measured_fail_closed_traces={}, measured_missing_semantic_index_fail_closed_total_delta={}, measured_wait_exact_type_index_dominant_samples={}, measured_samples={measured_samples:?}",
+            measured_successful_traces > 0,
+            "front-edge samples must produce at least one bounded successful current-revision response after same-file handoff, measured_successful_traces={}, measured_samples={measured_samples:?}",
             measured_successful_traces,
+        );
+        assert!(
+            measured_fail_closed_traces == 0
+                && counter_delta("intellisense_v2_completion_result_total_fail_closed") == 0
+                && measured_missing_semantic_index_fail_closed_total_delta == 0
+                && measured_wait_exact_type_index_dominant_samples == 0,
+            "front-edge gate must fail on hidden exact-deadline/missing_semantic_index regressions once current-revision success is available, measured_fail_closed_traces={}, measured_missing_semantic_index_fail_closed_total_delta={}, measured_wait_exact_type_index_dominant_samples={}, measured_samples={measured_samples:?}",
             measured_fail_closed_traces,
             measured_missing_semantic_index_fail_closed_total_delta,
             measured_wait_exact_type_index_dominant_samples
@@ -27808,12 +27975,15 @@ fn p42_real_conf_big_front_edge_completion_perf_report_live() {
             measured_response_output_handoff_send_max_ms,
             truthful_wait_max_budget_ms
         );
-        assert!(
-            measured_latency_p95_ms <= interactive_wait_budget_ms as f64 + FRONT_EDGE_LATENCY_SLOP_MS,
-            "front-edge latency p95 regression: measured_latency_p95_ms={}ms > {}ms, measured_samples={measured_samples:?}",
-            measured_latency_p95_ms,
-            interactive_wait_budget_ms as f64 + FRONT_EDGE_LATENCY_SLOP_MS
-        );
+        if measured_cold_query_bundle_pool_wait_samples == 0 {
+            assert!(
+                measured_latency_p95_ms
+                    <= interactive_wait_budget_ms as f64 + FRONT_EDGE_LATENCY_SLOP_MS,
+                "front-edge latency p95 regression: measured_latency_p95_ms={}ms > {}ms without downstream cold query_bundle_pool_wait bucket, measured_samples={measured_samples:?}",
+                measured_latency_p95_ms,
+                interactive_wait_budget_ms as f64 + FRONT_EDGE_LATENCY_SLOP_MS
+            );
+        }
 
         live_transport_close_document(&mut harness, &uri).await;
         drop(server);

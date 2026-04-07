@@ -1,5 +1,21 @@
 use super::*;
 
+#[cfg(debug_assertions)]
+async fn maybe_inject_completion_current_revision_snapshot_delay_for_test() {
+    let delay_ms = std::env::var("BSL_TEST_COMPLETION_CURRENT_REVISION_SNAPSHOT_DELAY_MS")
+        .ok()
+        .or_else(|| std::env::var("BSL_TEST_AGED_NON_MEMBER_EXACT_REPROBE_DELAY_MS").ok())
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0);
+    let Some(delay_ms) = delay_ms else {
+        return;
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+}
+
+#[cfg(not(debug_assertions))]
+async fn maybe_inject_completion_current_revision_snapshot_delay_for_test() {}
+
 impl IntellisenseV2Facade {
     pub fn completion_support_bundle(&self) -> CompletionSupportBundle {
         let snapshot = self.inner.completion_deps_index_snapshot.load_full();
@@ -100,6 +116,7 @@ impl IntellisenseV2Facade {
         origin: ObservabilityOrigin,
         operation: SemanticOperation,
     ) -> CompletionCurrentRevisionSnapshot {
+        maybe_inject_completion_current_revision_snapshot_delay_for_test().await;
         let queue_priority = RuntimeQueuePriority::for_operation(operation);
         for _ in 0..4 {
             let deps_index_snapshot = self.inner.completion_deps_index_snapshot.load_full();

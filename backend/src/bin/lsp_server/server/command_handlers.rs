@@ -9,6 +9,7 @@ use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -26,6 +27,7 @@ use crate::types::{
 use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
 
 const ATTACHED_MESSAGE: &str = "already running (attached)";
+const CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS: usize = 256;
 
 #[cfg(test)]
 fn maybe_inject_get_current_context_parse_delay_for_test() {
@@ -41,6 +43,27 @@ fn maybe_inject_get_current_context_parse_delay_for_test() {
 #[cfg(not(test))]
 fn maybe_inject_get_current_context_parse_delay_for_test() {}
 
+#[cfg(test)]
+static GET_CURRENT_CONTEXT_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+fn record_get_current_context_parse_attempt_for_test() {
+    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(not(test))]
+fn record_get_current_context_parse_attempt_for_test() {}
+
+#[cfg(test)]
+pub(crate) fn reset_get_current_context_parse_attempts_for_test() {
+    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn get_current_context_parse_attempts_for_test() -> usize {
+    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum BeginFullIndexOutcome {
     Started {
@@ -50,6 +73,72 @@ pub(crate) enum BeginFullIndexOutcome {
         active_operation: Option<FullIndexOperationKind>,
         operation_id: Option<String>,
     },
+}
+
+#[derive(Debug, Clone)]
+struct CurrentContextSupersessionKey {
+    editor_session_id: String,
+    request_generation: u64,
+}
+
+impl CurrentContextSupersessionKey {
+    fn from_params(params: &GetCurrentContextParams) -> Option<Self> {
+        Some(Self {
+            editor_session_id: params.editor_session_id.clone()?,
+            request_generation: params.request_generation?,
+        })
+    }
+}
+
+fn register_current_context_generation(
+    latest_generations: &std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    supersession_key: &CurrentContextSupersessionKey,
+) -> bool {
+    let mut latest_generations = latest_generations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let accepted = match latest_generations.get_mut(&supersession_key.editor_session_id) {
+        Some(latest_generation) if *latest_generation > supersession_key.request_generation => {
+            false
+        }
+        Some(latest_generation) => {
+            *latest_generation = supersession_key.request_generation;
+            true
+        }
+        None => {
+            latest_generations.insert(
+                supersession_key.editor_session_id.clone(),
+                supersession_key.request_generation,
+            );
+            true
+        }
+    };
+    if !accepted {
+        return false;
+    }
+    while latest_generations.len() > CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS {
+        let Some(oldest_session_id) = latest_generations
+            .iter()
+            .min_by_key(|(_, generation)| *generation)
+            .map(|(session_id, _)| session_id.clone())
+        else {
+            break;
+        };
+        latest_generations.remove(&oldest_session_id);
+    }
+    true
+}
+
+fn is_latest_current_context_generation(
+    latest_generations: &std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    supersession_key: &CurrentContextSupersessionKey,
+) -> bool {
+    latest_generations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&supersession_key.editor_session_id)
+        .copied()
+        == Some(supersession_key.request_generation)
 }
 
 impl BslLanguageServer {
@@ -188,6 +277,15 @@ impl BslLanguageServer {
         let uri = Url::parse(&params.uri).map_err(|e| {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
+        let supersession_key = CurrentContextSupersessionKey::from_params(&params);
+        if let Some(supersession_key) = supersession_key.as_ref() {
+            if !register_current_context_generation(
+                self.current_context_latest_generations.as_ref(),
+                supersession_key,
+            ) {
+                return Ok(CurrentContextResponse::empty());
+            }
+        }
 
         let file_id = self.get_or_create_file_id_v2(&uri).await;
         let path = match uri.to_file_path() {
@@ -215,8 +313,12 @@ impl BslLanguageServer {
         };
 
         let coordinator = self.coordinator.clone();
+        let latest_generations = self.current_context_latest_generations.clone();
         let path_for_parse = PathBuf::from(path.as_str());
         let file_text_for_parse = file_text.clone();
+        let supersession_key_for_parse = supersession_key.clone();
+        let line = params.line;
+        let character = params.character;
         let current_context =
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                 bsl_runtime::application::CpuWorkClass::Background,
@@ -224,6 +326,15 @@ impl BslLanguageServer {
                 Some(self.coordinator.as_ref()),
                 move || -> Result<CurrentContextResponse, &'static str> {
                     maybe_inject_get_current_context_parse_delay_for_test();
+                    if let Some(supersession_key) = supersession_key_for_parse.as_ref() {
+                        if !is_latest_current_context_generation(
+                            latest_generations.as_ref(),
+                            supersession_key,
+                        ) {
+                            return Err("superseded_generation");
+                        }
+                    }
+                    record_get_current_context_parse_attempt_for_test();
                     let parsed = coordinator
                         .parser_coordinator()
                         .and_then(|parser| {
@@ -258,8 +369,8 @@ impl BslLanguageServer {
                             &parse_result,
                             file_text_for_parse.as_ref(),
                             line_index.as_ref(),
-                            params.line,
-                            params.character,
+                            line,
+                            character,
                         ) {
                             Some((name, kind, params_list, return_type)) => {
                                 CurrentContextResponse {
@@ -277,7 +388,18 @@ impl BslLanguageServer {
             .await;
 
         match current_context {
-            Ok(Ok(response)) => Ok(response),
+            Ok(Ok(response)) => {
+                if let Some(supersession_key) = supersession_key.as_ref() {
+                    if !is_latest_current_context_generation(
+                        self.current_context_latest_generations.as_ref(),
+                        supersession_key,
+                    ) {
+                        return Ok(CurrentContextResponse::empty());
+                    }
+                }
+                Ok(response)
+            }
+            Ok(Err("superseded_generation")) => Ok(CurrentContextResponse::empty()),
             Ok(Err("parse_unavailable")) => {
                 warn!(
                     uri = %uri,
@@ -1179,6 +1301,71 @@ mod tests {
                 )
                 .await,
             "matching settings_id must still upgrade pending head observation"
+        );
+    }
+
+    #[test]
+    fn current_context_generation_registry_rejects_stale_generation() {
+        let latest_generations = std::sync::Mutex::new(std::collections::HashMap::new());
+        let latest_key = CurrentContextSupersessionKey {
+            editor_session_id: "file:///session-1.bsl::1".to_string(),
+            request_generation: 5,
+        };
+        assert!(
+            register_current_context_generation(&latest_generations, &latest_key),
+            "first generation for a session must be accepted"
+        );
+
+        let stale_key = CurrentContextSupersessionKey {
+            editor_session_id: latest_key.editor_session_id.clone(),
+            request_generation: 4,
+        };
+        assert!(
+            !register_current_context_generation(&latest_generations, &stale_key),
+            "older generation for the same session must be rejected"
+        );
+        assert!(
+            is_latest_current_context_generation(&latest_generations, &latest_key),
+            "latest generation must remain unchanged after stale registration attempt"
+        );
+    }
+
+    #[test]
+    fn current_context_generation_registry_prunes_oldest_sessions_when_capacity_is_exceeded() {
+        let latest_generations = std::sync::Mutex::new(std::collections::HashMap::new());
+
+        for generation in 1..=(CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS as u64 + 1) {
+            let session_id = format!("file:///session-{generation}.bsl::1");
+            assert!(
+                register_current_context_generation(
+                    &latest_generations,
+                    &CurrentContextSupersessionKey {
+                        editor_session_id: session_id.clone(),
+                        request_generation: generation,
+                    },
+                ),
+                "generation {generation} must register successfully"
+            );
+        }
+
+        let latest_generations = latest_generations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(
+            latest_generations.len(),
+            CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS,
+            "registry must stay bounded after capacity overflow"
+        );
+        assert!(
+            !latest_generations.contains_key("file:///session-1.bsl::1"),
+            "oldest session must be evicted first once registry exceeds capacity"
+        );
+        assert_eq!(
+            latest_generations
+                .get("file:///session-257.bsl::1")
+                .copied(),
+            Some(257),
+            "newest session must remain tracked after opportunistic pruning"
         );
     }
 }

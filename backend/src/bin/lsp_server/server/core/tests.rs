@@ -14818,6 +14818,25 @@ fn completion_timeline_trace_stage_duration_ms(
     })
 }
 
+fn completion_timeline_max_stage_end_ms(trace: &serde_json::Value) -> Option<u64> {
+    let stages = trace.get("stages").and_then(|value| value.as_array())?;
+    stages
+        .iter()
+        .filter_map(|stage| {
+            let stage = stage.as_object()?;
+            let started_offset_ms = stage.get("started_offset_ms")?.as_u64()?;
+            let duration_ms = stage.get("duration_ms")?.as_u64()?;
+            Some(started_offset_ms.saturating_add(duration_ms))
+        })
+        .max()
+}
+
+fn completion_timeline_uncovered_gap_ms(trace: &serde_json::Value) -> Option<u64> {
+    let total_duration_ms = trace.get("total_duration_ms")?.as_u64()?;
+    let max_stage_end_ms = completion_timeline_max_stage_end_ms(trace).unwrap_or(0);
+    Some(total_duration_ms.saturating_sub(max_stage_end_ms))
+}
+
 const COMPLETION_TIMELINE_QUERY_BUNDLE_STAGE_NAMES: &[&str] = &[
     "query_bundle_pool_wait",
     "query_bundle_deps_and_file_snapshot",
@@ -15628,6 +15647,188 @@ async fn p33_non_member_form_completion_ages_out_of_shadow_empty_success_window(
         completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
         None,
         "aged non-member completion must not block on wait_exact_type_index once bounded no-IR current-revision fallback is available, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p33_aged_non_member_completion_skips_blocking_current_revision_snapshot_reprobe() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK);
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let snapshot_delay_ms = precompute_delay_ms.saturating_add(300).max(800);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура ПриСозданииНаСервере()\n    Этот\nКонецПроцедуры\n";
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: fixture.to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::sleep(Duration::from_millis(
+        wait_budget_ms.saturating_add(150).max(250),
+    ))
+    .await;
+
+    let _snapshot_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_AGED_NON_MEMBER_EXACT_REPROBE_DELAY_MS",
+        &snapshot_delay_ms.to_string(),
+    );
+
+    let completion_position = find_utf16_position_after_marker(fixture, "    Этот");
+    let completion_started = Instant::now();
+    let completion_labels: Vec<String> = lsp_completion_items_with_request(
+        &mut service,
+        12_101,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await
+    .into_iter()
+    .map(|item| item.label)
+    .collect();
+    let completion_elapsed_ms = completion_started.elapsed().as_millis() as u64;
+    assert!(
+        completion_labels.iter().any(|label| label == "ЭтотОбъект"),
+        "aged non-member completion must keep returning current-revision no-IR candidates even when current-revision snapshot reacquisition is delayed, labels={completion_labels:?}"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 40_434, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("aged non-member completion trace with snapshot delay");
+    let uncovered_gap_ms = completion_timeline_uncovered_gap_ms(trace).unwrap_or(u64::MAX);
+    let max_stage_end_ms = completion_timeline_max_stage_end_ms(trace).unwrap_or(0);
+    let total_duration_ms = trace
+        .get("total_duration_ms")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    assert_eq!(
+        trace.get("outcome").and_then(|value| value.as_str()),
+        Some("ok_non_empty"),
+        "aged non-member completion must stay successful under injected snapshot delay, trace={trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_trace_stage_duration_ms(trace, "wait_exact_type_index"),
+        None,
+        "aged non-member completion must not re-enter exact wait under injected snapshot delay, trace={trace:?}"
+    );
+    assert!(
+        completion_elapsed_ms < snapshot_delay_ms / 2,
+        "aged non-member completion must not inherit injected current-revision snapshot delay once post-window path is lightweight, elapsed={}ms, snapshot_delay={}ms, trace={trace:?}",
+        completion_elapsed_ms,
+        snapshot_delay_ms,
+    );
+    assert!(
+        uncovered_gap_ms < snapshot_delay_ms / 2,
+        "aged non-member completion must not leave snapshot-delay-sized uncovered handler gap, uncovered_gap={}ms, max_stage_end={}ms, total_duration_ms={}ms, trace={trace:?}",
+        uncovered_gap_ms,
+        max_stage_end_ms,
+        total_duration_ms,
     );
 
     drain_task.abort();
@@ -21882,6 +22083,410 @@ async fn p33_get_current_context_parse_delay_does_not_delay_concurrent_completio
     assert!(
         response_output_handoff_send_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
         "concurrent getCurrentContext parse delay must not strand completion response on output handoff, trace={trace:?}"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    drop(server);
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn p33_get_current_context_superseded_generation_skips_obsolete_parse_and_stale_surface() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const CURRENT_CONTEXT_DELAY_MS: u64 = 900;
+    const FIRST_REQUEST_ID: i64 = 50_541;
+    const SECOND_REQUEST_ID: i64 = 50_542;
+    const SESSION_ID: &str = "file:///current_context_latest_only_fixture.bsl::1";
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _current_context_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
+        &CURRENT_CONTEXT_DELAY_MS.to_string(),
+    );
+
+    let fixture = concat!(
+        "Процедура ПерваяПроцедура(Первый)\n",
+        "    Сообщить(Первый);\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура ВтораяПроцедура(Второй)\n",
+        "    Сообщить(Второй);\n",
+        "КонецПроцедуры\n",
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///current_context_latest_only_fixture.bsl").expect("uri");
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.to_string(),
+            },
+        })
+        .await;
+    server.sync_v2_globals().await;
+
+    let first_position = find_utf16_position_after_marker(fixture, "Сообщить(Первый");
+    let second_position = find_utf16_position_after_marker(fixture, "Сообщить(Второй");
+
+    super::super::command_handlers::reset_get_current_context_parse_attempts_for_test();
+
+    live_transport_write_execute_command_request(
+        &mut harness,
+        FIRST_REQUEST_ID,
+        "bsl.getCurrentContext",
+        vec![serde_json::json!({
+            "uri": uri.to_string(),
+            "line": first_position.line,
+            "character": first_position.character,
+            "editorSessionId": SESSION_ID,
+            "requestGeneration": 1,
+        })],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    live_transport_write_execute_command_request(
+        &mut harness,
+        SECOND_REQUEST_ID,
+        "bsl.getCurrentContext",
+        vec![serde_json::json!({
+            "uri": uri.to_string(),
+            "line": second_position.line,
+            "character": second_position.character,
+            "editorSessionId": SESSION_ID,
+            "requestGeneration": 2,
+        })],
+    )
+    .await;
+
+    let (first_response, second_response) = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut first_response = None;
+        let mut second_response = None;
+        loop {
+            let response = harness.read_message().await;
+            let Some(response_id) = response.get("id").and_then(|value| value.as_i64()) else {
+                continue;
+            };
+            if response_id == FIRST_REQUEST_ID {
+                first_response = Some(response);
+            } else if response_id == SECOND_REQUEST_ID {
+                second_response = Some(response);
+            }
+            if first_response.is_some() && second_response.is_some() {
+                break (
+                    first_response.expect("first response"),
+                    second_response.expect("second response"),
+                );
+            }
+        }
+    })
+    .await
+    .expect("both current-context responses must arrive");
+
+    assert_eq!(
+        first_response
+            .get("result")
+            .and_then(|result| result.get("functionName"))
+            .and_then(|value| value.as_str()),
+        None,
+        "superseded generation must not surface stale current-context routine name"
+    );
+    assert_eq!(
+        first_response
+            .get("result")
+            .and_then(|result| result.get("functionKind"))
+            .and_then(|value| value.as_str()),
+        Some("none"),
+        "superseded generation must degrade to empty current-context surface"
+    );
+    assert_eq!(
+        second_response
+            .get("result")
+            .and_then(|result| result.get("functionName"))
+            .and_then(|value| value.as_str()),
+        Some("ВтораяПроцедура"),
+        "latest generation must preserve the newest current-context surface"
+    );
+    assert_eq!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
+        1,
+        "superseded generation must be cut off before expensive parse/context derivation"
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    drop(server);
+    harness.shutdown().await;
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn p33_get_current_context_superseded_generation_keeps_completion_bounded_under_mixed_load() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const CURRENT_CONTEXT_DELAY_MS: u64 = 1_500;
+    const FIRST_REQUEST_ID: i64 = 50_551;
+    const SECOND_REQUEST_ID: i64 = 50_552;
+    const COMPLETION_REQUEST_ID: i64 = 50_553;
+    const SESSION_ID: &str = "file:///current_context_mixed_load_fixture.bsl::1";
+    const RUNTIME_ISOLATION_BUDGET_MS: u64 = 250;
+
+    static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    let _env_lock = ENV_LOCK
+        .get_or_init(|| std::sync::Mutex::new(()))
+        .lock()
+        .expect("env lock");
+    let _current_context_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_GET_CURRENT_CONTEXT_PARSE_DELAY_MS",
+        &CURRENT_CONTEXT_DELAY_MS.to_string(),
+    );
+
+    let mut fixture = String::new();
+    for index in 0..256 {
+        fixture.push_str(&format!(
+            "Процедура Вспомогательная{}()\n    Сообщить(\"{}\");\nКонецПроцедуры\n\n",
+            index, index
+        ));
+    }
+    fixture
+        .push_str("Процедура ПерваяПроцедура(Первый)\n    Сообщить(Первый);\nКонецПроцедуры\n\n");
+    fixture.push_str(
+        "Процедура ВтораяПроцедура(Второй)\n    ДляCompletion = Объект.\n    Сообщить(Второй);\nКонецПроцедуры\n",
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///current_context_mixed_load_fixture.bsl").expect("uri");
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "bsl".to_string(),
+                version: 1,
+                text: fixture.clone(),
+            },
+        })
+        .await;
+    server.sync_v2_globals().await;
+
+    let first_context_position = find_utf16_position_after_marker(&fixture, "Сообщить(Первый");
+    let second_context_position = find_utf16_position_after_marker(&fixture, "Сообщить(Второй");
+    let completion_position = find_utf16_position_after_marker(&fixture, "ДляCompletion = Объект.");
+
+    super::super::command_handlers::reset_get_current_context_parse_attempts_for_test();
+
+    live_transport_write_execute_command_request(
+        &mut harness,
+        FIRST_REQUEST_ID,
+        "bsl.getCurrentContext",
+        vec![serde_json::json!({
+            "uri": uri.to_string(),
+            "line": first_context_position.line,
+            "character": first_context_position.character,
+            "editorSessionId": SESSION_ID,
+            "requestGeneration": 1,
+        })],
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let completion_request_written_at_ms = live_transport_write_completion_request(
+        &mut harness,
+        COMPLETION_REQUEST_ID,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    live_transport_write_execute_command_request(
+        &mut harness,
+        SECOND_REQUEST_ID,
+        "bsl.getCurrentContext",
+        vec![serde_json::json!({
+            "uri": uri.to_string(),
+            "line": second_context_position.line,
+            "character": second_context_position.character,
+            "editorSessionId": SESSION_ID,
+            "requestGeneration": 2,
+        })],
+    )
+    .await;
+
+    let (completion_response, completion_elapsed_ms, first_response, second_response) =
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let completion_started = Instant::now();
+            let mut completion_response = None;
+            let mut completion_elapsed_ms = None;
+            let mut first_response = None;
+            let mut second_response = None;
+            loop {
+                let response = harness.read_message().await;
+                let Some(response_id) = response.get("id").and_then(|value| value.as_i64()) else {
+                    continue;
+                };
+                if response_id == COMPLETION_REQUEST_ID {
+                    completion_elapsed_ms = Some(
+                        completion_started
+                            .elapsed()
+                            .as_millis()
+                            .min(u64::MAX as u128) as u64,
+                    );
+                    completion_response = Some(response);
+                } else if response_id == FIRST_REQUEST_ID {
+                    first_response = Some(response);
+                } else if response_id == SECOND_REQUEST_ID {
+                    second_response = Some(response);
+                }
+                if completion_response.is_some()
+                    && first_response.is_some()
+                    && second_response.is_some()
+                {
+                    break (
+                        completion_response.expect("completion response"),
+                        completion_elapsed_ms.expect("completion elapsed"),
+                        first_response.expect("first response"),
+                        second_response.expect("second response"),
+                    );
+                }
+            }
+        })
+        .await
+        .expect("completion and current-context responses must arrive");
+
+    assert!(
+        completion_response.get("result").is_some(),
+        "completion must still return a response while superseded current-context parse is delayed"
+    );
+    assert!(
+        completion_elapsed_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "mixed-load path must keep completion bounded while obsolete current-context work is superseded, completion_elapsed_ms={}ms, completion_response={completion_response:?}",
+        completion_elapsed_ms
+    );
+    assert_eq!(
+        first_response
+            .get("result")
+            .and_then(|result| result.get("functionName"))
+            .and_then(|value| value.as_str()),
+        None,
+        "mixed-load stale current-context response must stay empty after supersession"
+    );
+    assert_eq!(
+        second_response
+            .get("result")
+            .and_then(|result| result.get("functionName"))
+            .and_then(|value| value.as_str()),
+        Some("ВтораяПроцедура"),
+        "mixed-load latest current-context response must surface the newest routine"
+    );
+    assert_eq!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
+        1,
+        "mixed-load supersession must keep obsolete current-context parse work bounded"
+    );
+
+    let trace = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let timeline = live_transport_get_completion_timeline(&mut harness, 50_554, 32).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("completion timeline traces array");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("request_id").and_then(|value| value.as_str())
+                    == Some(&COMPLETION_REQUEST_ID.to_string())
+            }) {
+                break trace.clone();
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("mixed-load completion trace must appear in timeline");
+
+    let client_to_transport_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "adapter_read_at_ms")
+            .expect("adapter_read_at_ms")
+            .saturating_sub(completion_request_written_at_ms);
+    let service_future_to_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "service_future_to_first_poll_wait_ms")
+            .expect("service_future_to_first_poll_wait_ms");
+    let response_output_handoff_send_wait_ms =
+        completion_timeline_server_edge_u64(&trace, "response_output_handoff_send_wait_ms")
+            .expect("response_output_handoff_send_wait_ms");
+    assert!(
+        client_to_transport_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "mixed-load supersession must not regress completion ingress before adapter_read, client_to_transport_wait_ms={}ms, trace={trace:?}",
+        client_to_transport_wait_ms
+    );
+    assert!(
+        service_future_to_first_poll_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "mixed-load supersession must not delay completion first poll, trace={trace:?}"
+    );
+    assert!(
+        response_output_handoff_send_wait_ms <= RUNTIME_ISOLATION_BUDGET_MS,
+        "mixed-load supersession must not strand completion response on output handoff, trace={trace:?}"
     );
 
     live_transport_close_document(&mut harness, &uri).await;

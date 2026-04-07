@@ -406,6 +406,7 @@ impl BslLanguageServer {
             full_index_state: Arc::new(Mutex::new(super::FullIndexRuntimeState::default())),
             next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
+            current_context_latest_generations: Arc::new(StdMutex::new(HashMap::new())),
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
             next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),

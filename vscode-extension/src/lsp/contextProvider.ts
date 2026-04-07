@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getLanguageClient } from './client/index';
+import { getLanguageClient } from './client';
 import { State } from 'vscode-languageclient/node';
 import { logger } from './logger';
 
@@ -10,12 +10,67 @@ export interface CurrentContext {
     returnType?: string;        // Возвращаемый тип (опционально)
 }
 
+interface CurrentContextRequestParams {
+    uri: string;
+    line: number;
+    character: number;
+    editorSessionId: string;
+    requestGeneration: number;
+}
+
 let debounceTimer: NodeJS.Timeout | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let activeTargetSessionId: string | undefined;
+let latestRequestGenerationBySession = new Map<string, number>();
+let nextRequestGeneration = 1;
+const MAX_TRACKED_CONTEXT_SESSIONS = 256;
 
 // ✅ ИСПРАВЛЕНИЕ: Уникальные маркеры для секции контекста
 const CONTEXT_MARKER_START = '<!-- BSL_CONTEXT_START -->';
 const CONTEXT_MARKER_END = '<!-- BSL_CONTEXT_END -->';
+
+function clearPendingContextUpdate(): void {
+    if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+    }
+}
+
+function resetCurrentContextTrackingState(): void {
+    clearPendingContextUpdate();
+    activeTargetSessionId = undefined;
+    latestRequestGenerationBySession = new Map<string, number>();
+    nextRequestGeneration = 1;
+}
+
+function buildEditorSessionId(editor: vscode.TextEditor): string {
+    return `${editor.document.uri.toString()}::${editor.viewColumn ?? 0}`;
+}
+
+function reserveNextRequestGeneration(editorSessionId: string): number {
+    const generation = nextRequestGeneration;
+    nextRequestGeneration += 1;
+
+    // Refresh insertion order so opportunistic eviction drops the stalest session key.
+    latestRequestGenerationBySession.delete(editorSessionId);
+    latestRequestGenerationBySession.set(editorSessionId, generation);
+    while (latestRequestGenerationBySession.size > MAX_TRACKED_CONTEXT_SESSIONS) {
+        const oldestSessionId = latestRequestGenerationBySession.keys().next().value;
+        if (!oldestSessionId) {
+            break;
+        }
+        latestRequestGenerationBySession.delete(oldestSessionId);
+    }
+
+    return generation;
+}
+
+function isLatestCurrentContextRequest(
+    editorSessionId: string,
+    requestGeneration: number
+): boolean {
+    return latestRequestGenerationBySession.get(editorSessionId) === requestGeneration;
+}
 
 /**
  * Инициализирует отслеживание текущего контекста в редакторе
@@ -27,6 +82,7 @@ export function initializeContextProvider(
     context: vscode.ExtensionContext,
     statusBar: vscode.StatusBarItem
 ): void {
+    resetCurrentContextTrackingState();
     statusBarItem = statusBar;
 
     // Обработчик изменения позиции курсора
@@ -41,7 +97,11 @@ export function initializeContextProvider(
         vscode.window.onDidChangeActiveTextEditor((editor) => {
             if (editor) {
                 handleCursorMove(editor);
+                return;
             }
+
+            clearPendingContextUpdate();
+            activeTargetSessionId = undefined;
         })
     );
 
@@ -57,25 +117,32 @@ export function initializeContextProvider(
 function handleCursorMove(editor: vscode.TextEditor): void {
     // Обрабатываем только .bsl файлы
     if (editor.document.languageId !== 'bsl') {
+        clearPendingContextUpdate();
+        activeTargetSessionId = undefined;
         return;
     }
 
+    const editorSessionId = buildEditorSessionId(editor);
+    activeTargetSessionId = editorSessionId;
+    const requestGeneration = reserveNextRequestGeneration(editorSessionId);
+
     // Debouncing: обновляем не чаще 1 раза в 200ms
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = undefined;
-    }
+    clearPendingContextUpdate();
 
     debounceTimer = setTimeout(() => {
         debounceTimer = undefined;
-        void updateCurrentContext(editor);
+        void updateCurrentContext(editor, editorSessionId, requestGeneration);
     }, 200);
 }
 
 /**
  * Запрашивает текущий контекст через LSP и обновляет tooltip
  */
-async function updateCurrentContext(editor: vscode.TextEditor): Promise<void> {
+async function updateCurrentContext(
+    editor: vscode.TextEditor,
+    editorSessionId: string,
+    requestGeneration: number
+): Promise<void> {
     const client = getLanguageClient();
 
     // Проверяем что LSP готов
@@ -85,19 +152,26 @@ async function updateCurrentContext(editor: vscode.TextEditor): Promise<void> {
 
     const uri = editor.document.uri.toString();
     const position = editor.selection.active;
+    const requestParams: CurrentContextRequestParams = {
+        uri,
+        line: position.line,
+        character: position.character,
+        editorSessionId,
+        requestGeneration,
+    };
 
     try {
         // Вызываем Custom Command через executeCommand
         const context = await vscode.commands.executeCommand<CurrentContext>(
             'bsl.getCurrentContext',
-            {
-                uri,
-                line: position.line,
-                character: position.character,
-            }
+            requestParams
         );
 
-        if (context) {
+        if (
+            context
+            && activeTargetSessionId === editorSessionId
+            && isLatestCurrentContextRequest(editorSessionId, requestGeneration)
+        ) {
             updateStatusBarTooltip(context);
         }
     } catch (error) {

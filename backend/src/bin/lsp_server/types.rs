@@ -507,8 +507,13 @@ pub struct RenderTypeHtmlResponse {
 
 /// Custom command: bsl.getCurrentContext - determine current function/procedure
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetCurrentContextParams {
     pub uri: String,
     pub line: u32,
     pub character: u32,
+    #[serde(default)]
+    pub editor_session_id: Option<String>,
+    #[serde(default)]
+    pub request_generation: Option<u64>,
 }

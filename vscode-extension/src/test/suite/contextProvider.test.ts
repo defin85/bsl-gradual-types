@@ -30,6 +30,7 @@ suite('Context Provider Test Suite', () => {
     let onDidChangeTextEditorSelectionStub: sinon.SinonStub;
     let onDidChangeActiveTextEditorStub: sinon.SinonStub;
     let selectionHandler: ((event: any) => void) | undefined;
+    let activeEditorHandler: ((editor: any) => void) | undefined;
     let showErrorMessageStub: sinon.SinonStub;
 
     setup(() => {
@@ -55,6 +56,7 @@ suite('Context Provider Test Suite', () => {
 
         // Перехватываем регистрацию событий VSCode, чтобы можно было вручную вызвать обработчики
         selectionHandler = undefined;
+        activeEditorHandler = undefined;
         onDidChangeTextEditorSelectionStub = sinon
             .stub(vscode.window, 'onDidChangeTextEditorSelection')
             .callsFake((handler: any) => {
@@ -64,7 +66,8 @@ suite('Context Provider Test Suite', () => {
 
         onDidChangeActiveTextEditorStub = sinon
             .stub(vscode.window, 'onDidChangeActiveTextEditor')
-            .callsFake((_handler: any) => {
+            .callsFake((handler: any) => {
+                activeEditorHandler = handler;
                 return { dispose: sinon.stub() } as any;
             });
 
@@ -188,12 +191,289 @@ suite('Context Provider Test Suite', () => {
             call => call.args[0] === 'bsl.getCurrentContext'
         );
 
-        if (contextCall) {
-            const params = contextCall.args[1];
-            assert.strictEqual(params.uri, 'file:///test.bsl', 'URI должен совпадать');
-            assert.strictEqual(params.line, 10, 'Line должна совпадать');
-            assert.strictEqual(params.character, 5, 'Character должен совпадать');
+        assert.ok(contextCall, 'bsl.getCurrentContext должен быть вызван после debounce');
+
+        const params = contextCall.args[1];
+        assert.strictEqual(params.uri, 'file:///test.bsl', 'URI должен совпадать');
+        assert.strictEqual(params.line, 10, 'Line должна совпадать');
+        assert.strictEqual(params.character, 5, 'Character должен совпадать');
+        assert.strictEqual(
+            params.editorSessionId,
+            'file:///test.bsl::0',
+            'editorSessionId должен быть стабильно производным от текущего editor session'
+        );
+        assert.strictEqual(
+            params.requestGeneration,
+            1,
+            'Первый requestGeneration в рамках editor session должен быть равен 1'
+        );
+    });
+
+    test('latest request generation wins for the same editor session', async () => {
+        let resolveFirst: ((context: CurrentContext) => void) | undefined;
+        let resolveSecond: ((context: CurrentContext) => void) | undefined;
+
+        commandExecuteStub
+            .onFirstCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveFirst = resolve;
+            }));
+        commandExecuteStub
+            .onSecondCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveSecond = resolve;
+            }));
+
+        initializeContextProvider(context, statusBarStub);
+
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
+        const mockEditor = {
+            document: {
+                languageId: 'bsl',
+                uri: { toString: () => 'file:///latest-only.bsl' },
+            },
+            selection: {
+                active: { line: 4, character: 3 },
+            },
+        } as any;
+
+        selectionHandler!({ textEditor: mockEditor });
+        clock.tick(200);
+        await flushPromises();
+
+        mockEditor.selection.active = { line: 8, character: 11 };
+        selectionHandler!({ textEditor: mockEditor });
+        clock.tick(200);
+        await flushPromises();
+
+        assert.strictEqual(
+            commandExecuteStub.callCount,
+            2,
+            'Должно уйти два current-context request для двух поколений одной editor session'
+        );
+        assert.strictEqual(
+            commandExecuteStub.secondCall.args[1].requestGeneration,
+            2,
+            'Второй request в рамках той же editor session должен получить generation=2'
+        );
+
+        resolveSecond?.({
+            functionName: 'НоваяФункция',
+            functionKind: 'function',
+            params: ['Параметр2'],
+        });
+        await flushPromises();
+
+        assert.ok(
+            (statusBarStub.tooltip as string).includes('НоваяФункция'),
+            'Status bar должен принять latest response'
+        );
+
+        resolveFirst?.({
+            functionName: 'СтараяФункция',
+            functionKind: 'function',
+            params: ['Параметр1'],
+        });
+        await flushPromises();
+
+        const tooltip = statusBarStub.tooltip as string;
+        assert.ok(
+            tooltip.includes('НоваяФункция'),
+            'Поздний stale response не должен затирать latest current-context tooltip'
+        );
+        assert.ok(
+            !tooltip.includes('СтараяФункция'),
+            'Stale response из более старого generation должен быть проигнорирован'
+        );
+    });
+
+    test('newer cursor move reserves generation before debounce so stale response cannot flash old tooltip', async () => {
+        let resolveFirst: ((context: CurrentContext) => void) | undefined;
+        let resolveSecond: ((context: CurrentContext) => void) | undefined;
+
+        commandExecuteStub
+            .onFirstCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveFirst = resolve;
+            }));
+        commandExecuteStub
+            .onSecondCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveSecond = resolve;
+            }));
+
+        initializeContextProvider(context, statusBarStub);
+
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
+        const mockEditor = {
+            document: {
+                languageId: 'bsl',
+                uri: { toString: () => 'file:///debounce-window.bsl' },
+            },
+            selection: {
+                active: { line: 2, character: 4 },
+            },
+        } as any;
+
+        selectionHandler!({ textEditor: mockEditor });
+        clock.tick(200);
+        await flushPromises();
+
+        mockEditor.selection.active = { line: 9, character: 1 };
+        selectionHandler!({ textEditor: mockEditor });
+
+        resolveFirst?.({
+            functionName: 'СтарыйКонтекст',
+            functionKind: 'function',
+            params: [],
+        });
+        await flushPromises();
+
+        assert.ok(
+            !(statusBarStub.tooltip as string).includes('СтарыйКонтекст'),
+            'После нового cursor move stale response не должен вспыхивать в tooltip даже до отправки следующего request'
+        );
+
+        clock.tick(200);
+        await flushPromises();
+
+        assert.strictEqual(
+            commandExecuteStub.secondCall.args[1].requestGeneration,
+            2,
+            'Следующий request после debounce должен использовать уже зарезервированное generation=2'
+        );
+
+        resolveSecond?.({
+            functionName: 'НовыйКонтекст',
+            functionKind: 'function',
+            params: [],
+        });
+        await flushPromises();
+
+        assert.ok(
+            (statusBarStub.tooltip as string).includes('НовыйКонтекст'),
+            'После отправки нового request tooltip должен перейти на newest generation'
+        );
+    });
+
+    test('request generation stays monotonic after tracked session eviction', async () => {
+        commandExecuteStub.resolves({
+            functionKind: 'none',
+        });
+
+        initializeContextProvider(context, statusBarStub);
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+
+        const makeEditor = (index: number) => ({
+            document: {
+                languageId: 'bsl',
+                uri: { toString: () => `file:///session-${index}.bsl` },
+            },
+            selection: {
+                active: { line: index, character: 0 },
+            },
+            viewColumn: 1,
+        }) as any;
+
+        const firstEditor = makeEditor(0);
+        selectionHandler!({ textEditor: firstEditor });
+        clock.tick(200);
+        await flushPromises();
+        assert.strictEqual(
+            commandExecuteStub.firstCall.args[1].requestGeneration,
+            1,
+            'Первая editor session должна получить generation=1'
+        );
+
+        for (let index = 1; index <= 256; index += 1) {
+            selectionHandler!({ textEditor: makeEditor(index) });
+            clock.tick(200);
+            await flushPromises();
         }
+
+        selectionHandler!({ textEditor: firstEditor });
+        clock.tick(200);
+        await flushPromises();
+
+        assert.strictEqual(
+            commandExecuteStub.lastCall.args[1].requestGeneration,
+            258,
+            'После вытеснения старой session generation не должен перезапускаться с 1'
+        );
+    });
+
+    test('stale response from previous target session is ignored after active editor switch', async () => {
+        let resolveFirst: ((context: CurrentContext) => void) | undefined;
+        let resolveSecond: ((context: CurrentContext) => void) | undefined;
+
+        commandExecuteStub
+            .onFirstCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveFirst = resolve;
+            }));
+        commandExecuteStub
+            .onSecondCall()
+            .returns(new Promise<CurrentContext>((resolve) => {
+                resolveSecond = resolve;
+            }));
+
+        initializeContextProvider(context, statusBarStub);
+
+        assert.ok(selectionHandler, 'Selection handler должен быть зарегистрирован');
+        assert.ok(activeEditorHandler, 'Active editor handler должен быть зарегистрирован');
+
+        const firstEditor = {
+            document: {
+                languageId: 'bsl',
+                uri: { toString: () => 'file:///first-target.bsl' },
+            },
+            selection: {
+                active: { line: 1, character: 1 },
+            },
+        } as any;
+        const secondEditor = {
+            document: {
+                languageId: 'bsl',
+                uri: { toString: () => 'file:///second-target.bsl' },
+            },
+            selection: {
+                active: { line: 2, character: 2 },
+            },
+        } as any;
+
+        selectionHandler!({ textEditor: firstEditor });
+        clock.tick(200);
+        await flushPromises();
+
+        activeEditorHandler!(secondEditor);
+        clock.tick(200);
+        await flushPromises();
+
+        resolveSecond?.({
+            functionName: 'ВтораяФункция',
+            functionKind: 'procedure',
+            params: [],
+        });
+        await flushPromises();
+
+        resolveFirst?.({
+            functionName: 'ПерваяФункция',
+            functionKind: 'procedure',
+            params: [],
+        });
+        await flushPromises();
+
+        const tooltip = statusBarStub.tooltip as string;
+        assert.ok(
+            tooltip.includes('ВтораяФункция'),
+            'Ответ для текущей target session должен применяться'
+        );
+        assert.ok(
+            !tooltip.includes('ПерваяФункция'),
+            'Ответ для предыдущей target session не должен возвращать stale tooltip'
+        );
     });
 
     // ========================================================================

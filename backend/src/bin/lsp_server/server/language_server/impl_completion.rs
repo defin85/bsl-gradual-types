@@ -369,6 +369,27 @@ fn allow_shadow_current_revision_empty_success(
         && prepare_apply_age_at_start.is_some_and(|apply_age| apply_age <= exact_wait_budget)
 }
 
+async fn reacquire_current_revision_snapshot_with_timeline_stage(
+    server: &BslLanguageServer,
+    context: &bsl_runtime::application::ExecutionContext,
+    timeline_capture: &mut CompletionTimelineCapture,
+) -> bsl_runtime::application::CompletionCurrentRevisionSnapshot {
+    let reacquire_started = Instant::now();
+    let snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            context.origin,
+            context.operation,
+        )
+        .await;
+    let reacquire_elapsed = reacquire_started.elapsed();
+    if !reacquire_elapsed.is_zero() {
+        timeline_capture
+            .push_completed_stage("current_revision_snapshot_reacquisition", reacquire_elapsed);
+    }
+    snapshot
+}
+
 impl CompletionTimelineCapture {
     fn new(
         request_id: Option<String>,
@@ -2573,12 +2594,12 @@ impl BslLanguageServer {
                                     );
                                 exact_hit_candidate = true;
                                 refreshed_snapshot_after_wait = Some(
-                                    self.analysis_v2
-                                        .completion_current_revision_snapshot_for_origin_and_operation(
-                                            context.origin,
-                                            context.operation,
-                                        )
-                                        .await,
+                                    reacquire_current_revision_snapshot_with_timeline_stage(
+                                        self,
+                                        &context,
+                                        &mut timeline_capture,
+                                    )
+                                    .await,
                                 );
                             }
                             super::super::core::CompletionArtifactWaitOutcomeV2::Deadline
@@ -2718,11 +2739,11 @@ impl BslLanguageServer {
                             break 'completion_flow Some(completion_empty_response(false));
                         }
 
-                        let snapshot_after_wait = self
-                            .analysis_v2
-                            .completion_current_revision_snapshot_for_origin_and_operation(
-                                context.origin,
-                                context.operation,
+                        let snapshot_after_wait =
+                            reacquire_current_revision_snapshot_with_timeline_stage(
+                                self,
+                                &context,
+                                &mut timeline_capture,
                             )
                             .await;
                         let exact_ready_after_wait = snapshot_after_wait
@@ -2791,42 +2812,16 @@ impl BslLanguageServer {
                             prepare_apply_age_at_start,
                             exact_wait_budget,
                         );
-                    let mut use_non_member_shadow_lightweight_fallback = false;
-                    // Non-member front-edge requests already have current-revision shadow text and
-                    // support-bundle state. After the immediate window, probe the latest snapshot
-                    // once: use exact immediately when it is already ready, otherwise keep the
-                    // first response on bounded lightweight/no-IR fallback instead of blocking on
-                    // exact wait and regressing into exact_deadline.
-                    if !member_access_request
+                    // Aged non-member shadow-current-revision requests already have truthful
+                    // current-revision shadow text plus support-bundle state. Once the immediate
+                    // window closes, first response must stay bounded on the lightweight/no-IR
+                    // path instead of synchronously reacquiring a fresh snapshot just to recheck
+                    // exact readiness before terminal decision.
+                    let use_non_member_shadow_lightweight_fallback = !member_access_request
                         && prepared.kind == "shadow_current_revision_fast_path"
                         && !allow_shadow_current_revision_empty_success
                         && !exact_ready_before_wait
-                        && !exact_hit_candidate
-                    {
-                        let snapshot_for_exact = self
-                            .analysis_v2
-                            .completion_current_revision_snapshot_for_origin_and_operation(
-                                context.origin,
-                                context.operation,
-                            )
-                            .await;
-                        let exact_ready_now = snapshot_for_exact
-                            .analysis
-                            .current_type_index_serve_only_ready(file_id)
-                            .ok()
-                            .unwrap_or(false);
-                        let observed_version = snapshot_for_exact
-                            .analysis
-                            .file_version(file_id)
-                            .ok()
-                            .flatten();
-                        if exact_ready_now && observed_version == Some(expected_version) {
-                            exact_hit_candidate = true;
-                            refreshed_snapshot_after_wait = Some(snapshot_for_exact);
-                        } else {
-                            use_non_member_shadow_lightweight_fallback = true;
-                        }
-                    }
+                        && !exact_hit_candidate;
                     let use_lightweight_query_bundle = (head_route_candidate
                         && !exact_hit_candidate)
                         || allow_shadow_current_revision_empty_success
@@ -4025,8 +4020,19 @@ mod tests {
         CompletionDispatcherRegistry, CompletionTurnOutcome,
     };
     use crate::server::request_context;
+    use bsl_backend::system::SystemCoordinator;
+    use futures::StreamExt;
     use std::future::pending;
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tower::Service;
+    use tower::ServiceExt;
+    use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::Url;
+    use tower_lsp::lsp_types::{
+        ClientCapabilities, DidOpenTextDocumentParams, InitializeParams, InitializedParams,
+        TextDocumentItem,
+    };
+    use tower_lsp::{LanguageServer, LspService};
 
     fn sample_capture() -> CompletionTimelineCapture {
         let uri = Url::parse("file:///completion_timeline_capture_test.bsl").expect("test uri");
@@ -4037,6 +4043,67 @@ mod tests {
             1_699_999_995,
             1_700_000_000,
         )
+    }
+
+    async fn create_initialized_test_server() -> BslLanguageServer {
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let holder: Arc<StdMutex<Option<BslLanguageServer>>> = Arc::new(StdMutex::new(None));
+        let (mut service, mut socket) = LspService::build({
+            let coordinator = coordinator.clone();
+            let holder = holder.clone();
+            move |client| {
+                let server = BslLanguageServer::new(client, coordinator.clone());
+                *holder.lock().expect("test server holder lock") = Some(server.clone());
+                server
+            }
+        })
+        .finish();
+        let _drain_task =
+            tokio::spawn(async move { while let Some(_request) = socket.next().await {} });
+
+        let initialize = Request::build("initialize")
+            .id(100)
+            .params(
+                serde_json::to_value(InitializeParams {
+                    capabilities: ClientCapabilities::default(),
+                    ..Default::default()
+                })
+                .expect("InitializeParams"),
+            )
+            .finish();
+        let initialize_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialize)
+            .await
+            .expect("initialize request");
+        assert!(
+            initialize_response.is_some(),
+            "initialize should return a response"
+        );
+
+        let initialized = Request::build("initialized")
+            .params(serde_json::to_value(InitializedParams {}).expect("InitializedParams"))
+            .finish();
+        let initialized_response = service
+            .ready()
+            .await
+            .expect("service ready")
+            .call(initialized)
+            .await
+            .expect("initialized notification");
+        assert!(
+            initialized_response.is_none(),
+            "initialized is a notification"
+        );
+
+        let server = holder
+            .lock()
+            .expect("test server holder lock")
+            .clone()
+            .expect("test server must be captured");
+        server
     }
 
     #[test]
@@ -4219,6 +4286,87 @@ mod tests {
                 false,
             ),
             Some("superseded")
+        );
+    }
+
+    #[tokio::test]
+    async fn current_revision_snapshot_reacquisition_stage_is_recorded_when_snapshot_is_delayed() {
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                Self { key, previous }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        let _env_lock = ENV_LOCK
+            .get_or_init(|| std::sync::Mutex::new(()))
+            .lock()
+            .expect("env lock");
+        let snapshot_delay_ms = 180_u64;
+        let _snapshot_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_COMPLETION_CURRENT_REVISION_SNAPSHOT_DELAY_MS",
+            &snapshot_delay_ms.to_string(),
+        );
+
+        let server = create_initialized_test_server().await;
+        let uri = Url::parse("file:///completion_snapshot_reacquisition_stage_test.bsl")
+            .expect("test uri");
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: "Процедура Тест()\nКонецПроцедуры\n".to_string(),
+                },
+            })
+            .await;
+        server.sync_v2_globals().await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        let context = server
+            .build_execution_context_v2_with_completion_mode(
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                Some(1),
+                false,
+                Some("invoked"),
+            )
+            .await;
+        let mut capture = sample_capture();
+
+        let _snapshot = reacquire_current_revision_snapshot_with_timeline_stage(
+            &server,
+            &context,
+            &mut capture,
+        )
+        .await;
+
+        let stage = capture
+            .stages
+            .iter()
+            .find(|stage| stage.name == "current_revision_snapshot_reacquisition")
+            .expect("snapshot reacquisition stage");
+        assert!(
+            stage.duration_ms >= snapshot_delay_ms / 2,
+            "snapshot reacquisition stage must reflect the injected delay, stage={stage:?}"
         );
     }
 

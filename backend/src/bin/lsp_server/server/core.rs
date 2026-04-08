@@ -532,6 +532,7 @@ impl BslLanguageServer {
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_save_fastlane_syntax_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_diagnostics_publish_state_v2: Arc::new(RwLock::new(HashMap::new())),
             scale_aware_churn_state_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -681,6 +682,7 @@ impl BslLanguageServer {
                 followup_publish: None,
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
                 followup_wait_reason: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
@@ -720,6 +722,7 @@ impl BslLanguageServer {
                     followup_publish: None,
                     save_fastlane_outcome: None,
                     idle_heavy_outcome: None,
+                    followup_syntax_work_mode: None,
                     followup_wait_reason: None,
                     followup_wait_for_file_version_ms: None,
                     followup_snapshot_with_deps_ms: None,
@@ -738,6 +741,12 @@ impl BslLanguageServer {
             }
 
             if let Some(publish) = result.publish {
+                if matches!(
+                    result.profile,
+                    bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+                ) {
+                    trace.followup_syntax_work_mode = publish.syntax_work_mode.clone();
+                }
                 if trace.first_publish.is_none() {
                     trace.first_publish = Some(publish);
                 } else if trace.followup_publish.is_none() {
@@ -789,6 +798,7 @@ impl BslLanguageServer {
         reason: &'static str,
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
+        syntax_work_mode: Option<&'static str>,
     ) {
         let mut store = self
             .diagnostics_save_timeline_store
@@ -814,12 +824,16 @@ impl BslLanguageServer {
                 followup_publish: None,
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
                 followup_wait_reason: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
                 terminal_outcome: None,
             }
         });
+        if let Some(syntax_work_mode) = syntax_work_mode {
+            trace.followup_syntax_work_mode = Some(syntax_work_mode.to_string());
+        }
         trace.followup_wait_reason = Some(reason.to_string());
         trace.followup_wait_for_file_version_ms =
             wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);

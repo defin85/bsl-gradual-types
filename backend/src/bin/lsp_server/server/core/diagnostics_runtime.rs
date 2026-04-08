@@ -20,12 +20,15 @@ enum SaveFastlaneFirstPublishWaitOutcome {
     NotPublished,
 }
 
+const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET: Duration = Duration::from_millis(3_500);
+
 struct SaveFollowupReadyArtifactsReply {
     diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
     observed_deps_id: String,
     observed_settings_id: String,
-    syntax_elapsed: Duration,
-    semantic_elapsed: Duration,
+    syntax_elapsed: Option<Duration>,
+    semantic_elapsed: Option<Duration>,
+    syntax_work_mode: Option<&'static str>,
 }
 
 impl BslLanguageServer {
@@ -57,6 +60,7 @@ impl BslLanguageServer {
         syntax_diagnostics_query_ms: Option<Duration>,
         semantic_diagnostics_query_ms: Option<Duration>,
         publish_wait_ms: Option<Duration>,
+        syntax_work_mode: Option<&'static str>,
         pipeline_started: Instant,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
         if !matches!(
@@ -70,6 +74,7 @@ impl BslLanguageServer {
             disposition,
             bsl_runtime::application::DiagnosticsDisposition::Published
         ) || publish_kind.is_some()
+            || syntax_work_mode.is_some()
             || blocking_queue_wait_ms.is_some()
             || wait_for_file_version_ms.is_some()
             || snapshot_with_deps_ms.is_some()
@@ -81,6 +86,7 @@ impl BslLanguageServer {
             publish_kind: publish_kind.unwrap_or("unknown").to_string(),
             outcome: disposition.as_str().to_string(),
             elapsed_ms: pipeline_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+            syntax_work_mode: syntax_work_mode.map(str::to_string),
             blocking_queue_wait_ms: blocking_queue_wait_ms
                 .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
             wait_for_file_version_ms: wait_for_file_version_ms
@@ -376,6 +382,7 @@ impl BslLanguageServer {
         requested_version: i32,
     ) -> Option<(
         Vec<tower_lsp::lsp_types::Diagnostic>,
+        Vec<bsl_shared::domain::types::ParseError>,
         &'static str,
         Duration,
     )> {
@@ -404,6 +411,7 @@ impl BslLanguageServer {
                     analysis.file_text(file_id).ok().flatten()?.as_ref(),
                     line_index.as_ref(),
                 ),
+                syntax_errors.iter().cloned().collect(),
                 mode,
                 started.elapsed(),
             ))
@@ -434,6 +442,7 @@ impl BslLanguageServer {
         requested_version: i32,
     ) -> Option<(
         Vec<tower_lsp::lsp_types::Diagnostic>,
+        Vec<bsl_shared::domain::types::ParseError>,
         &'static str,
         Duration,
     )> {
@@ -455,6 +464,12 @@ impl BslLanguageServer {
                 ready_state.text.as_ref(),
                 parse_snapshot.line_index.as_ref(),
             ),
+            parse_snapshot
+                .parse_result
+                .syntax_errors
+                .iter()
+                .cloned()
+                .collect(),
             Self::parse_snapshot_observability_mode_v2(&parse_snapshot),
             started.elapsed(),
         ))
@@ -471,6 +486,82 @@ impl BslLanguageServer {
             .get(&file_id)
             .cloned()
             .filter(|state| state.parse_snapshot.file_version == requested_version)
+    }
+
+    async fn save_fastlane_syntax_artifacts_for_version_v2(
+        &self,
+        file_id: V2FileId,
+        requested_version: i32,
+    ) -> Option<Arc<Vec<bsl_shared::domain::types::ParseError>>> {
+        self.latest_save_fastlane_syntax_artifacts_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
+            .filter(|state| state.version == requested_version)
+            .map(|state| state.syntax_errors)
+    }
+
+    async fn record_save_fastlane_syntax_artifacts_v2(
+        &self,
+        file_id: V2FileId,
+        requested_version: i32,
+        syntax_errors: Vec<bsl_shared::domain::types::ParseError>,
+    ) {
+        self.latest_save_fastlane_syntax_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                super::super::SaveFastlaneSyntaxArtifactsV2 {
+                    version: requested_version,
+                    syntax_errors: Arc::new(syntax_errors),
+                },
+            );
+    }
+
+    async fn wait_for_ready_parse_snapshot_state_for_version_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        wait_budget: Duration,
+    ) -> Option<super::super::ReadyParseSnapshotStateV2> {
+        let wait_started = Instant::now();
+        loop {
+            if let Some(state) = self
+                .ready_parse_snapshot_state_for_version_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                )
+                .await
+            {
+                return Some(state);
+            }
+            if wait_started.elapsed() >= wait_budget {
+                return None;
+            }
+            if cancel_token.is_some_and(|token| token.is_cancelled()) {
+                return None;
+            }
+            if self
+                .current_diagnostics_generation_v2(supersession_key.file_id)
+                .await
+                != Some(supersession_key.diagnostics_generation)
+            {
+                return None;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&supersession_key.file_id)
+                .copied()
+                != Some(supersession_key.requested_version)
+            {
+                return None;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
     }
 
     fn diagnostics_save_cycle_key_from_supersession_key_v2(
@@ -495,6 +586,7 @@ impl BslLanguageServer {
         reason: &'static str,
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
+        syntax_work_mode: Option<&'static str>,
     ) {
         let Some(cycle_key) =
             Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
@@ -507,6 +599,7 @@ impl BslLanguageServer {
             reason,
             wait_for_file_version_ms,
             snapshot_with_deps_ms,
+            syntax_work_mode,
         );
     }
 
@@ -605,6 +698,17 @@ impl BslLanguageServer {
             .ok()
             .flatten()
             .unwrap_or_else(|| Arc::new(bsl_line_index::LineIndex::new(file_text.as_ref())));
+        let save_fastlane_syntax_artifacts = self
+            .save_fastlane_syntax_artifacts_for_version_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+            )
+            .await;
+        let syntax_work_mode = if save_fastlane_syntax_artifacts.is_some() {
+            Some("reused")
+        } else {
+            Some("recomputed")
+        };
 
         self.record_diagnostics_save_followup_wait_state_v2(
             uri,
@@ -612,27 +716,38 @@ impl BslLanguageServer {
             "semantic_work",
             None,
             None,
+            syntax_work_mode,
         );
 
-        let syntax_started = Instant::now();
-        let syntax_errors = bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
-            &context,
-            &analysis,
-            Some(self.coordinator.as_ref()),
-            supersession_key.file_id,
-        )
-        .ok()?;
-        let syntax_elapsed = syntax_started.elapsed();
-
         let mut diagnostics = Vec::new();
-        if let Some(syntax_errors) = syntax_errors {
+        let syntax_elapsed = if let Some(syntax_errors) = save_fastlane_syntax_artifacts {
             diagnostics.extend(syntax_errors_to_diagnostics(
                 syntax_errors.as_ref(),
                 uri,
                 file_text.as_ref(),
                 line_index.as_ref(),
             ));
-        }
+            None
+        } else {
+            let syntax_started = Instant::now();
+            let syntax_errors = bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
+                &context,
+                &analysis,
+                Some(self.coordinator.as_ref()),
+                supersession_key.file_id,
+            )
+            .ok()?;
+            let syntax_elapsed = syntax_started.elapsed();
+            if let Some(syntax_errors) = syntax_errors {
+                diagnostics.extend(syntax_errors_to_diagnostics(
+                    syntax_errors.as_ref(),
+                    uri,
+                    file_text.as_ref(),
+                    line_index.as_ref(),
+                ));
+            }
+            Some(syntax_elapsed)
+        };
 
         let semantic_started = Instant::now();
         let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
@@ -699,9 +814,10 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
-                    Some(syntax_elapsed),
+                    syntax_elapsed,
                     Some(semantic_elapsed),
                     None,
+                    syntax_work_mode,
                     pipeline_started,
                 )
                 .await,
@@ -729,9 +845,10 @@ impl BslLanguageServer {
                 None,
                 None,
                 None,
-                Some(syntax_elapsed),
+                syntax_elapsed,
                 Some(semantic_elapsed),
                 Some(publish_started.elapsed()),
+                syntax_work_mode,
                 pipeline_started,
             )
             .await,
@@ -759,9 +876,10 @@ impl BslLanguageServer {
         }
 
         let ready_state = self
-            .ready_parse_snapshot_state_for_version_v2(
-                supersession_key.file_id,
-                supersession_key.requested_version,
+            .wait_for_ready_parse_snapshot_state_for_version_v2(
+                supersession_key,
+                cancel_token,
+                SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
             )
             .await?;
         let context = self
@@ -784,6 +902,8 @@ impl BslLanguageServer {
         let requested_version = supersession_key.requested_version;
         let ready_text = ready_state.text.clone();
         let parse_snapshot = ready_state.parse_snapshot.clone();
+        let ready_line_index = parse_snapshot.line_index.clone();
+        let ready_syntax_errors = parse_snapshot.parse_result.syntax_errors.clone();
         let deps_id = support_bundle.deps_id.clone();
         let deps = support_bundle.deps.clone();
         let settings_id = context.settings.settings_id.clone();
@@ -796,6 +916,7 @@ impl BslLanguageServer {
             "semantic_work",
             None,
             None,
+            Some("reused"),
         );
         let followup_result =
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
@@ -821,36 +942,16 @@ impl BslLanguageServer {
                     });
 
                     let analysis = host.snapshot();
-                    let file_text = analysis
-                        .file_text(file_id)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_else(|| ready_text.clone());
-                    let line_index = analysis
-                        .line_index(file_id)
-                        .ok()
-                        .flatten()
-                        .unwrap_or_else(|| Arc::new(bsl_line_index::LineIndex::new(file_text.as_ref())));
-
-                    let syntax_started = Instant::now();
-                    let syntax_errors = bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
-                        &context_for_blocking,
-                        &analysis,
-                        Some(coordinator_for_blocking.as_ref()),
-                        file_id,
-                    )
-                    .map_err(|_| ())?;
-                    let syntax_elapsed = syntax_started.elapsed();
+                    let file_text = ready_text.clone();
+                    let line_index = ready_line_index.clone();
 
                     let mut diagnostics = Vec::new();
-                    if let Some(syntax_errors) = syntax_errors {
-                        diagnostics.extend(syntax_errors_to_diagnostics(
-                            syntax_errors.as_ref(),
-                            &uri_for_blocking,
-                            file_text.as_ref(),
-                            line_index.as_ref(),
-                        ));
-                    }
+                    diagnostics.extend(syntax_errors_to_diagnostics(
+                        &ready_syntax_errors,
+                        &uri_for_blocking,
+                        file_text.as_ref(),
+                        line_index.as_ref(),
+                    ));
 
                     let semantic_started = Instant::now();
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
@@ -868,9 +969,8 @@ impl BslLanguageServer {
                     )
                     .map_err(|_| ())?;
                     let semantic_elapsed = semantic_started.elapsed();
-                    let duration_from_profile_ms = |value: u128| {
-                        Duration::from_millis(value.min(u64::MAX as u128) as u64)
-                    };
+                    let duration_from_profile_ms =
+                        |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
                     if let Some(profiled) = query {
                         coordinator_for_blocking
                             .record_intellisense_v2_semantic_diagnostics_query_breakdown(
@@ -903,8 +1003,9 @@ impl BslLanguageServer {
                         diagnostics,
                         observed_deps_id: deps_id.as_str().to_string(),
                         observed_settings_id: settings_id.as_str().to_string(),
-                        syntax_elapsed,
-                        semantic_elapsed,
+                        syntax_elapsed: None,
+                        semantic_elapsed: Some(semantic_elapsed),
+                        syntax_work_mode: Some("reused"),
                     })
                 },
             )
@@ -930,6 +1031,7 @@ impl BslLanguageServer {
                                 .copied(),
                             supersession_key.requested_version,
                         ),
+                        None,
                         None,
                         None,
                         None,
@@ -964,9 +1066,10 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
-                    Some(reply.syntax_elapsed),
-                    Some(reply.semantic_elapsed),
+                    reply.syntax_elapsed,
+                    reply.semantic_elapsed,
                     None,
+                    reply.syntax_work_mode,
                     pipeline_started,
                 )
                 .await,
@@ -979,6 +1082,7 @@ impl BslLanguageServer {
             "pending_publish",
             None,
             None,
+            reply.syntax_work_mode,
         );
         let publish_started = Instant::now();
         let disposition = self
@@ -1001,9 +1105,10 @@ impl BslLanguageServer {
                 None,
                 None,
                 None,
-                Some(reply.syntax_elapsed),
-                Some(reply.semantic_elapsed),
+                reply.syntax_elapsed,
+                reply.semantic_elapsed,
                 Some(publish_started.elapsed()),
+                reply.syntax_work_mode,
                 pipeline_started,
             )
             .await,
@@ -1026,7 +1131,7 @@ impl BslLanguageServer {
         let wait_for_file_version_elapsed = None;
         let snapshot_with_deps_elapsed = None;
 
-        let (diagnostics, syntax_mode, syntax_elapsed) = if let Some(result) = self
+        let (diagnostics, syntax_errors, syntax_mode, syntax_elapsed) = if let Some(result) = self
             .try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
                 uri,
                 file_id,
@@ -1077,6 +1182,7 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -1096,6 +1202,7 @@ impl BslLanguageServer {
                         blocking_queue_wait_elapsed,
                         wait_for_file_version_elapsed,
                         snapshot_with_deps_elapsed,
+                        None,
                         None,
                         None,
                         None,
@@ -1121,7 +1228,7 @@ impl BslLanguageServer {
                             shadow_text.as_ref(),
                             &line_index,
                         );
-                        Ok((diagnostics, elapsed))
+                        Ok((syntax_errors, diagnostics, elapsed))
                     }
                     Err(err) => Err((err, elapsed)),
                 }
@@ -1129,7 +1236,9 @@ impl BslLanguageServer {
             .await;
 
             match syntax_result {
-                Ok(Ok((diagnostics, syntax_elapsed))) => (diagnostics, "other", syntax_elapsed),
+                Ok(Ok((syntax_errors, diagnostics, syntax_elapsed))) => {
+                    (diagnostics, syntax_errors, "other", syntax_elapsed)
+                }
                 Ok(Err((err, syntax_elapsed))) => {
                     self.coordinator
                         .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
@@ -1161,6 +1270,7 @@ impl BslLanguageServer {
                             Some(syntax_elapsed),
                             None,
                             None,
+                            Some("recomputed"),
                             pipeline_started,
                         )
                         .await;
@@ -1200,12 +1310,16 @@ impl BslLanguageServer {
                             None,
                             None,
                             None,
+                            None,
                             pipeline_started,
                         )
                         .await;
                 }
             }
         };
+
+        self.record_save_fastlane_syntax_artifacts_v2(file_id, requested_version, syntax_errors)
+            .await;
 
         self.coordinator
             .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
@@ -1231,6 +1345,7 @@ impl BslLanguageServer {
                     Some(syntax_elapsed),
                     None,
                     None,
+                    Some("recomputed"),
                     pipeline_started,
                 )
                 .await;
@@ -1259,6 +1374,7 @@ impl BslLanguageServer {
             Some(syntax_elapsed),
             None,
             Some(publish_started.elapsed()),
+            Some("recomputed"),
             pipeline_started,
         )
         .await
@@ -1551,11 +1667,13 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
+                    None,
                     pipeline_started,
                 )
                 .await;
         }
 
+        let mut followup_syntax_artifact_reuse_allowed = false;
         if save_followup_from_did_save && run_semantic {
             let applied_revision_matches_requested = || {
                 self.analysis_v2
@@ -1568,12 +1686,18 @@ impl BslLanguageServer {
                 "pending_publish",
                 None,
                 None,
+                None,
             );
             if matches!(
                 self.wait_for_save_fastlane_first_publish_v2(&supersession_key, cancel_token)
                     .await,
                 SaveFastlaneFirstPublishWaitOutcome::Published
             ) {
+                followup_syntax_artifact_reuse_allowed = plan.run_syntax
+                    && self
+                        .save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
+                        .await
+                        .is_some();
                 if applied_revision_matches_requested() {
                     if let Some(disposition) = self
                         .try_execute_save_followup_from_applied_state_v2(
@@ -1615,6 +1739,7 @@ impl BslLanguageServer {
                     wait_reason,
                     None,
                     None,
+                    None,
                 );
             } else {
                 let wait_reason = if applied_revision_matches_requested() {
@@ -1626,6 +1751,7 @@ impl BslLanguageServer {
                     uri,
                     &supersession_key,
                     wait_reason,
+                    None,
                     None,
                     None,
                 );
@@ -1692,6 +1818,7 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -1701,6 +1828,26 @@ impl BslLanguageServer {
         let wait_elapsed = prepared.wait_elapsed.unwrap_or(Duration::ZERO);
         let mut syntax_stage_elapsed = None;
         let mut semantic_stage_elapsed = None;
+        let save_fastlane_syntax_artifacts = if save_followup_from_did_save
+            && run_semantic
+            && plan.run_syntax
+            && followup_syntax_artifact_reuse_allowed
+        {
+            self.save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
+                .await
+        } else {
+            None
+        };
+        let followup_syntax_work_mode =
+            if save_followup_from_did_save && run_semantic && plan.run_syntax {
+                Some(if save_fastlane_syntax_artifacts.is_some() {
+                    "reused"
+                } else {
+                    "recomputed"
+                })
+            } else {
+                None
+            };
         if save_followup_from_did_save && run_semantic {
             self.record_diagnostics_save_followup_wait_state_v2(
                 uri,
@@ -1708,6 +1855,7 @@ impl BslLanguageServer {
                 "semantic_work",
                 Some(wait_elapsed),
                 Some(prepared.snapshot_elapsed),
+                followup_syntax_work_mode,
             );
         }
         if wait_elapsed > Duration::ZERO {
@@ -1788,93 +1936,105 @@ impl BslLanguageServer {
         let mut was_cancelled = false;
 
         if plan.run_syntax {
-            self.coordinator
-                .record_intellisense_v2_payload_shape_with_origin(
-                    context.origin.as_str(),
-                    context.operation.as_str(),
-                    bsl_runtime::application::ObservabilityStage::SyntaxDiagnosticsQuery.as_str(),
-                    file_bytes,
-                    file_lines,
-                );
-            let analysis_for_blocking = analysis
-                .take()
-                .expect("analysis snapshot must be available for syntax stage");
-            let context_for_blocking = context.clone();
-            let coordinator_for_blocking = self.coordinator.clone();
-            let uri_for_blocking = uri.clone();
-            let file_text_for_blocking = file_text.clone();
-            let line_index_for_blocking = line_index.clone();
-            let syntax_result = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                plan.cpu_class,
-                context_for_blocking.origin.as_str(),
-                Some(self.coordinator.as_ref()),
-                move || {
-                    let started = Instant::now();
-                    let syntax_query =
-                        bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
-                            &context_for_blocking,
-                            &analysis_for_blocking,
-                            Some(coordinator_for_blocking.as_ref()),
-                            file_id,
-                        );
-                    let elapsed = started.elapsed();
-                    match syntax_query {
-                        Ok(Some(syntax_errors)) => {
-                            let mut diagnostics = Vec::new();
-                            if let (Some(text), Some(index)) =
-                                (file_text_for_blocking.as_deref(), line_index_for_blocking.as_deref())
-                            {
-                                diagnostics.extend(syntax_errors_to_diagnostics(
-                                    &syntax_errors,
-                                    &uri_for_blocking,
-                                    text,
-                                    index,
-                                ));
-                            }
-                            (diagnostics, false, elapsed, analysis_for_blocking)
-                        }
-                        Ok(None) => (Vec::new(), false, elapsed, analysis_for_blocking),
-                        Err(_) => (Vec::new(), true, elapsed, analysis_for_blocking),
-                    }
-                },
-            )
-            .await;
-            match syntax_result {
-                Ok((syntax_diagnostics, syntax_cancelled, syntax_elapsed, next_analysis)) => {
-                    analysis = Some(next_analysis);
-                    diagnostics.extend(syntax_diagnostics);
-                    was_cancelled |= syntax_cancelled;
-                    syntax_stage_elapsed = Some(syntax_elapsed);
-                    if let Some(threshold) =
-                        super::super::intellisense_v2_slow_query_warn_threshold()
-                    {
-                        if syntax_elapsed >= threshold {
-                            warn!(
-                                uri = %uri,
-                                file_id = file_id.0,
-                                expected_version = requested_version,
-                                expected_generation = requested_generation,
-                                profile = profile.as_str(),
-                                syntax_diagnostics_ms = syntax_elapsed.as_millis(),
-                                file_bytes,
-                                file_lines,
-                                threshold_ms = threshold.as_millis(),
-                                "diagnostics_v2: syntax_diagnostics query is slow"
-                            );
-                        }
-                    }
+            if let Some(syntax_errors) = save_fastlane_syntax_artifacts {
+                if let (Some(text), Some(index)) = (file_text.as_deref(), line_index.as_deref()) {
+                    diagnostics.extend(syntax_errors_to_diagnostics(
+                        syntax_errors.as_ref(),
+                        uri,
+                        text,
+                        index,
+                    ));
                 }
-                Err(err) => {
-                    warn!(
-                        uri = %uri,
-                        file_id = file_id.0,
-                        expected_version = requested_version,
-                        expected_generation = requested_generation,
-                        profile = profile.as_str(),
-                        error = ?err,
-                        "diagnostics_v2: syntax spawn_blocking failed"
+            } else {
+                self.coordinator
+                    .record_intellisense_v2_payload_shape_with_origin(
+                        context.origin.as_str(),
+                        context.operation.as_str(),
+                        bsl_runtime::application::ObservabilityStage::SyntaxDiagnosticsQuery
+                            .as_str(),
+                        file_bytes,
+                        file_lines,
                     );
-                    was_cancelled = true;
+                let analysis_for_blocking = analysis
+                    .take()
+                    .expect("analysis snapshot must be available for syntax stage");
+                let context_for_blocking = context.clone();
+                let coordinator_for_blocking = self.coordinator.clone();
+                let uri_for_blocking = uri.clone();
+                let file_text_for_blocking = file_text.clone();
+                let line_index_for_blocking = line_index.clone();
+                let syntax_result = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    plan.cpu_class,
+                    context_for_blocking.origin.as_str(),
+                    Some(self.coordinator.as_ref()),
+                    move || {
+                        let started = Instant::now();
+                        let syntax_query =
+                            bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
+                                &context_for_blocking,
+                                &analysis_for_blocking,
+                                Some(coordinator_for_blocking.as_ref()),
+                                file_id,
+                            );
+                        let elapsed = started.elapsed();
+                        match syntax_query {
+                            Ok(Some(syntax_errors)) => {
+                                let mut diagnostics = Vec::new();
+                                if let (Some(text), Some(index)) =
+                                    (file_text_for_blocking.as_deref(), line_index_for_blocking.as_deref())
+                                {
+                                    diagnostics.extend(syntax_errors_to_diagnostics(
+                                        &syntax_errors,
+                                        &uri_for_blocking,
+                                        text,
+                                        index,
+                                    ));
+                                }
+                                (diagnostics, false, elapsed, analysis_for_blocking)
+                            }
+                            Ok(None) => (Vec::new(), false, elapsed, analysis_for_blocking),
+                            Err(_) => (Vec::new(), true, elapsed, analysis_for_blocking),
+                        }
+                    },
+                )
+                .await;
+                match syntax_result {
+                    Ok((syntax_diagnostics, syntax_cancelled, syntax_elapsed, next_analysis)) => {
+                        analysis = Some(next_analysis);
+                        diagnostics.extend(syntax_diagnostics);
+                        was_cancelled |= syntax_cancelled;
+                        syntax_stage_elapsed = Some(syntax_elapsed);
+                        if let Some(threshold) =
+                            super::super::intellisense_v2_slow_query_warn_threshold()
+                        {
+                            if syntax_elapsed >= threshold {
+                                warn!(
+                                    uri = %uri,
+                                    file_id = file_id.0,
+                                    expected_version = requested_version,
+                                    expected_generation = requested_generation,
+                                    profile = profile.as_str(),
+                                    syntax_diagnostics_ms = syntax_elapsed.as_millis(),
+                                    file_bytes,
+                                    file_lines,
+                                    threshold_ms = threshold.as_millis(),
+                                    "diagnostics_v2: syntax_diagnostics query is slow"
+                                );
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            expected_version = requested_version,
+                            expected_generation = requested_generation,
+                            profile = profile.as_str(),
+                            error = ?err,
+                            "diagnostics_v2: syntax spawn_blocking failed"
+                        );
+                        was_cancelled = true;
+                    }
                 }
             }
         }
@@ -1908,6 +2068,7 @@ impl BslLanguageServer {
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
                     None,
+                    None,
                     pipeline_started,
                 )
                 .await;
@@ -1939,6 +2100,7 @@ impl BslLanguageServer {
                         syntax_stage_elapsed,
                         semantic_stage_elapsed,
                         None,
+                        followup_syntax_work_mode,
                         pipeline_started,
                     )
                     .await;
@@ -2132,6 +2294,7 @@ impl BslLanguageServer {
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
                     None,
+                    followup_syntax_work_mode,
                     pipeline_started,
                 )
                 .await;
@@ -2170,6 +2333,7 @@ impl BslLanguageServer {
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
                     None,
+                    followup_syntax_work_mode,
                     pipeline_started,
                 )
                 .await;
@@ -2196,6 +2360,7 @@ impl BslLanguageServer {
                 "pending_publish",
                 Some(wait_elapsed),
                 Some(snapshot_elapsed),
+                followup_syntax_work_mode,
             );
         }
         let publish_kind = if run_semantic { "full" } else { "syntax_only" };
@@ -2222,6 +2387,7 @@ impl BslLanguageServer {
             syntax_stage_elapsed,
             semantic_stage_elapsed,
             Some(publish_started.elapsed()),
+            followup_syntax_work_mode,
             pipeline_started,
         )
         .await

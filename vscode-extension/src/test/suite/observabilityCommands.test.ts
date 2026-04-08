@@ -58,7 +58,7 @@ suite('Observability Commands Test Suite', () => {
         sinon.stub(customRequestsModule, 'getDiagnosticsSaveTimeline').resolves({
             kind: 'ok',
             response: {
-                version: 4,
+                version: 6,
                 traces: [],
             },
         });

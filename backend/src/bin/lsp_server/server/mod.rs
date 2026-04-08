@@ -111,7 +111,7 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 24;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 4;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 6;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]
@@ -307,6 +307,8 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_ready_parse_snapshots_v2:
         Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
+    pub(crate) latest_save_fastlane_syntax_artifacts_v2:
+        Arc<RwLock<HashMap<V2FileId, SaveFastlaneSyntaxArtifactsV2>>>,
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,
     pub(crate) latest_diagnostics_publish_state_v2:
         Arc<RwLock<HashMap<V2FileId, DiagnosticsPublishedStateV2>>>,
@@ -391,6 +393,12 @@ pub(crate) struct DiagnosticsSaveTimelineProfileResult {
 pub(crate) struct ReadyParseSnapshotStateV2 {
     pub text: Arc<str>,
     pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SaveFastlaneSyntaxArtifactsV2 {
+    pub version: i32,
+    pub syntax_errors: Arc<Vec<bsl_shared::domain::types::ParseError>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

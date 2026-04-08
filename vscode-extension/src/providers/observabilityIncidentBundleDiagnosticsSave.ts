@@ -14,6 +14,7 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_publish?: DiagnosticsSaveTimelinePublishTrace;
     save_fastlane_outcome?: string;
     idle_heavy_outcome?: string;
+    followup_syntax_work_mode?: string;
     followup_wait_reason?: string;
     followup_wait_for_file_version_ms?: number;
     followup_snapshot_with_deps_ms?: number;
@@ -50,6 +51,7 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_publish: trace.followup_publish,
             save_fastlane_outcome: trace.save_fastlane_outcome,
             idle_heavy_outcome: trace.idle_heavy_outcome,
+            followup_syntax_work_mode: trace.followup_syntax_work_mode,
             followup_wait_reason: trace.followup_wait_reason,
             followup_wait_for_file_version_ms: trace.followup_wait_for_file_version_ms,
             followup_snapshot_with_deps_ms: trace.followup_snapshot_with_deps_ms,
@@ -67,6 +69,9 @@ function formatPublish(label: string, publish: DiagnosticsSaveTimelinePublishTra
     const parts = [
         `${label}=${publish.profile}:${publish.publish_kind}:${publish.outcome}@${publish.elapsed_ms}ms`,
     ];
+    if (publish.syntax_work_mode) {
+        parts.push(`syntax_work_mode=${publish.syntax_work_mode}`);
+    }
     if (typeof publish.blocking_queue_wait_ms === 'number') {
         parts.push(`blocking_queue_wait_ms=${publish.blocking_queue_wait_ms}`);
     }
@@ -117,15 +122,22 @@ function formatPublishWithLifecycle(
 }
 
 function formatFollowupWait(
+    syntaxWorkMode: string | undefined,
     reason: string | undefined,
     waitForFileVersionMs: number | undefined,
     snapshotWithDepsMs: number | undefined
 ): string | undefined {
-    if (!reason) {
+    if (!reason && !syntaxWorkMode) {
         return undefined;
     }
 
-    const parts = [`followup_wait=${reason}`];
+    const parts: string[] = [];
+    if (syntaxWorkMode) {
+        parts.push(`followup_syntax_work_mode=${syntaxWorkMode}`);
+    }
+    if (reason) {
+        parts.push(`followup_wait=${reason}`);
+    }
     if (typeof waitForFileVersionMs === 'number') {
         parts.push(`followup_wait_for_file_version_ms=${waitForFileVersionMs}`);
     }
@@ -147,6 +159,7 @@ export function renderDiagnosticsSaveSummaryLines(
         formatPublishWithLifecycle('first_publish', request.first_publish, request.terminal_outcome),
         formatPublishWithLifecycle('followup_publish', request.followup_publish, request.terminal_outcome),
         formatFollowupWait(
+            request.followup_syntax_work_mode,
             request.followup_wait_reason,
             request.followup_wait_for_file_version_ms,
             request.followup_snapshot_with_deps_ms

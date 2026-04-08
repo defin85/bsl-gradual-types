@@ -735,3 +735,152 @@ Human-readable projection MUST:
 - **THEN** summary явно отмечает, что post-response gap split unavailable by design для этой evidence version
 - **AND** derived handoff не переименовывает opaque tail в точный server-side или client-side виновник
 
+### Requirement: Existing completion surfaces переносят truthful `v23` output-egress split без guessed backlog attribution (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить truthful `v23` finer output-egress split в человекочитаемом виде.
+
+Human-readable projection MUST:
+
+- показывать `response_ready_to_output_enqueue_wait_ms`, `response_output_queue_wait_ms`, `response_output_encode_exec_ms` и `response_output_write_and_flush_exec_ms`, если connected server возвращает `v23` payload с truthful output-egress boundaries;
+- MAY сохранять compatibility umbrella вроде `response_ready_to_flush_wait_ms`, но MUST NOT использовать её как единственный evidence bucket, если truthful `v23` split доступен;
+- сохранять existing `client_to_transport_wait_ms`, `transport_to_client_receive_wait_ms`, `client_receive_to_resolve_wait_ms` и `client_post_response_ms` как отдельные non-server buckets;
+- явно деградировать на `v22`, не выдумывая literal encode-start/write-start split;
+- не переименовывать `response_output_queue_wait_ms` в конкретный backlog culprit без отдельного authoritative backlog snapshot.
+
+#### Scenario: Panel и clipboard показывают truthful `v23` output-egress split
+
+- **GIVEN** extension получает completion timeline `v23`
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible trace
+- **THEN** output показывает enqueue wait, queue wait, encode exec и write/flush exec отдельно
+- **AND** оператору не нужно читать raw JSON, чтобы увидеть finer server egress split
+
+#### Scenario: Incident bundle summary явно деградирует на shipped `v22`
+
+- **GIVEN** connected server возвращает `v22` payload без truthful `v23` encode-start/write-start split
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** summary явно отмечает, что truthful `v23` output-egress split unavailable by design для этой evidence version
+- **AND** derived handoff не называет shipped `response_output_write_started_at_ms` literal first write boundary без нового bounded milestone
+
+### Requirement: Existing completion surfaces переносят `v24` post-handler handoff split без guessed culprit (MUST)
+Completion Timeline panel, clipboard export и request-centric incident bundle summary MUST переносить `v24` post-handler handoff split в человекочитаемом виде.
+
+Human-readable projection MUST:
+
+- показывать `response_ready_to_output_handoff_wait_ms`, `response_output_handoff_send_wait_ms` и `response_output_handoff_to_writer_wait_ms`, если connected server возвращает `v24` payload с truthful `response_output_handoff_*` boundaries;
+- сохранять `response_ready_to_output_enqueue_wait_ms` как compatibility umbrella и MAY показывать его рядом с finer `v24` split;
+- явно помечать `response_output_enqueue_completed_at_ms` как legacy compatibility seam и не называть её truthful enqueue completion;
+- явно деградировать на `v23`, не выдумывая finer handoff boundaries;
+- не переименовывать `response_output_handoff_send_wait_ms` или `response_output_handoff_to_writer_wait_ms` в writer backlog, notification culprit, executeCommand blocker или иной более точный виновник без дополнительных authoritative fields.
+
+#### Scenario: Panel и clipboard показывают truthful post-handler handoff split
+
+- **GIVEN** extension получает completion timeline `v24`
+- **WHEN** оператор открывает Completion Timeline panel или копирует visible trace
+- **THEN** output показывает delay до handoff start, send-side handoff wait и wait до writer selection отдельно
+- **AND** оператору не нужно читать raw JSON, чтобы увидеть, где именно теряется post-handler время до legacy writer-selection seam
+
+#### Scenario: Incident bundle summary явно деградирует на `v23`
+
+- **GIVEN** connected server возвращает `v23` payload без truthful handoff boundaries
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** summary явно отмечает, что truthful pre-enqueue handoff split unavailable by design для этой evidence version
+- **AND** derived explanation не переименовывает opaque `response_ready_to_output_enqueue_wait_ms` в точный writer-backlog или иной culprit
+
+### Requirement: VS Code current-context surface keeps `bsl.getCurrentContext` latest-only per editor session (MUST)
+
+VS Code extension MUST вести `bsl.getCurrentContext` в latest-only режиме для каждого visible editor
+session.
+
+Если extension использует `bsl.getCurrentContext` для status-bar или другой cursor-driven current-context
+surface, она MUST вести bounded monotonically increasing request generation для каждого visible editor
+session и MUST применять к UI только ответ, соответствующий latest known generation этого session.
+
+Этот contract MUST включать:
+
+- bounded generation hints, отправляемые вместе с `bsl.getCurrentContext` request;
+- stale-response drop на client apply path;
+- newest-generation-wins semantics для status-bar/current-context surface.
+
+Debounce MAY использоваться как admission optimization, но MUST NOT быть единственным механизмом stale
+control.
+
+#### Scenario: Быстрые перемещения курсора не дают stale current-context tooltip
+
+- **GIVEN** пользователь быстро перемещает курсор несколько раз в одном editor session
+- **AND** extension отправляет несколько `bsl.getCurrentContext` requests для разных cursor positions
+- **WHEN** older response приходит после newer generation
+- **THEN** extension не применяет older response к current-context UI
+- **AND** status-bar/tooltip остаётся согласован с newest known generation
+
+### Requirement: Incident bundle экспортирует diagnostics save timeline как отдельный authoritative source (MUST)
+VS Code extension MUST экспортировать request-centric diagnostics save timeline как отдельный source внутри
+observability incident bundle, если connected server поддерживает этот контракт.
+
+Этот source MUST:
+
+- быть отдельным от completion timeline;
+- содержать raw attachment `raw/diagnostics_save_timeline.json`;
+- отображаться в `incident.json` и `summary.md` как `authoritative_server_trace`;
+- не реконструироваться из cumulative `observability_metrics`;
+- сохранять `save_cycle_sequence` рядом с `requested_version` и `diagnostics_generation`, если сервер его публикует.
+
+#### Scenario: Bundle содержит отдельный diagnostics save timeline source
+- **GIVEN** connected server поддерживает diagnostics save timeline request
+- **WHEN** пользователь экспортирует observability incident bundle
+- **THEN** bundle содержит `raw/diagnostics_save_timeline.json`
+- **AND** `incident.json` и `summary.md` показывают diagnostics save timeline как отдельный authoritative source
+- **AND** completion timeline и diagnostics save timeline не смешиваются в один raw attachment
+
+#### Scenario: Bundle fail-closed деградирует без diagnostics save timeline
+- **GIVEN** connected server не поддерживает diagnostics save timeline request
+- **WHEN** пользователь экспортирует observability incident bundle
+- **THEN** bundle всё равно создаётся
+- **AND** `incident.json` и `summary.md` явно помечают diagnostics save timeline как `unsupported` или `unavailable`
+- **AND** extension не пытается восстановить diagnostics save trace из metrics snapshot
+
+### Requirement: Incident bundle summary показывает didSave refresh как request-centric diagnostics cycle (MUST)
+`summary.md` и `incident.json` MUST переносить diagnostics save timeline в человекочитаемом request-centric виде.
+
+Human-readable projection MUST:
+
+- показывать `uri`, `requested_version` и bounded first-publish outcome;
+- сохранять `save_cycle_sequence` рядом с `requested_version` и `diagnostics_generation`;
+- различать `save_fastlane` first publish и `idle_heavy` follow-up;
+- показывать, был ли first publish `syntax_only` или `full`;
+- не переименовывать aggregate metrics p95/p99 в request-level факты.
+
+Дополнительно projection MUST:
+
+- рендерить operator-facing save ordering через `save_cycle_sequence`, а не через `diagnostics_generation`, если два save-cycle делят один `requested_version`;
+- явно различать active `in_flight` cycles и terminal cycles;
+- не рендерить pending profile facts для active cycle как `unknown`, если lifecycle уже известен;
+- объяснять active heavy follow-up через explicit request-centric wait reason, если сервер его уже знает.
+
+#### Scenario: Summary показывает first publish и follow-up без guesswork
+- **GIVEN** diagnostics save timeline trace содержит `save_fastlane` first publish и `idle_heavy` follow-up
+- **WHEN** extension формирует `summary.md`
+- **THEN** summary показывает оба bounded факта внутри одного save refresh cycle
+- **AND** оператор может отличить first freshness boundary от final richer publish
+
+#### Scenario: Summary не заменяет request trace cumulative histogram-ом
+- **GIVEN** bundle содержит и diagnostics save timeline, и cumulative observability metrics
+- **WHEN** extension формирует `incident.json` и `summary.md`
+- **THEN** request summary использует authoritative diagnostics save trace для request-level фактов
+- **AND** cumulative metrics остаются только snapshot supplement
+
+#### Scenario: Summary помечает active save cycle как in_flight
+- **GIVEN** bundle содержит active diagnostics save cycle без terminal outcome
+- **WHEN** extension рендерит human-readable summary
+- **THEN** cycle помечается как `in_flight`
+- **AND** pending profile outcome рендерится как `pending`, а не `unknown`
+
+#### Scenario: Summary различает два save-cycle одного requested_version
+- **GIVEN** в bundle есть два `didSave` traces для одного `requested_version`
+- **WHEN** summary строит diagnostics save section
+- **THEN** он показывает distinct `save_cycle_sequence`
+- **AND** не требует читать save ordering через `diagnostics_generation`
+
+#### Scenario: Summary показывает причину stalled heavy follow-up
+- **GIVEN** `didSave` cycle уже имеет first publish, но heavy follow-up ещё не завершён
+- **WHEN** summary строит diagnostics save section
+- **THEN** он показывает explicit follow-up wait reason
+- **AND** не оставляет operator workflow на одном только `pending`

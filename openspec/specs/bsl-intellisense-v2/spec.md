@@ -1115,16 +1115,30 @@ Expensive-проверки MUST запускаться:
 
 Эти проверки MUST NOT быть обязательной частью каждого `didChange` запуска.
 
+Если expensive diagnostics запускаются по `didSave`, система MAY делать bounded first-publish
+fastlane до final heavy publish, но такой fastlane:
+- MUST оставаться same-version truthful для сохранённой revision;
+- MUST NOT публиковать older-version diagnostics;
+- MUST NOT ждать unbounded `wait_for_file_version` только ради final heavy completeness.
+
 #### Scenario: Heavy-проверки выполняются после паузы или сохранения
 - **GIVEN** пользователь печатает без сохранения
 - **WHEN** идут последовательные `didChange`
 - **THEN** heavy-проверки не выполняются на каждый символ
 - **AND** heavy-проверки запускаются только после `didSave` или достижения `idle` окна
 
+#### Scenario: didSave first publish bounded, even if writer apply lags
+- **GIVEN** пользователь сохранил документ на версии `V`
+- **AND** analysis writer ещё не догнал `V` в applied revision state
+- **WHEN** запускается diagnostics path для `didSave`
+- **THEN** система делает bounded first publish для версии `V` без seconds-scale ожидания `wait_for_file_version`
+- **AND** первый publish использует только same-version truthful artifacts
+- **AND** final heavy publish для `V` может завершиться вторым проходом позже
+
 ### Requirement: Observability фиксирует diagnostics trigger/profile/supersede причины (MUST)
 Канонический observability контракт MUST фиксировать diagnostics pipeline по low-cardinality измерениям:
 - `trigger` (`did_change|did_open|did_save|idle`);
-- `profile` (`fast|debounced_full|idle_heavy`);
+- `profile` (`fast|debounced_full|save_fastlane|idle_heavy`);
 - `reason` (`published|superseded_version|superseded_generation|cancelled` минимум).
 
 Dual-write MUST оставаться детерминированным из канонического event model: drilldown как primary, legacy как projection.
@@ -1141,6 +1155,11 @@ Dual-write MUST оставаться детерминированным из к�
 - mode-aware latency MUST позволять сравнить syntax diagnostics stage между parse mode без high-cardinality labels;
 - legacy fixed-key метрика `intellisense_v2_syntax_diagnostics_query_ms` MUST сохраняться как aggregate compatibility projection и MUST NOT терять backward compatibility.
 
+Для save-triggered first publish observability MUST отдельно позволять доказать:
+- latency до первого publish после `didSave`;
+- был ли использован `save_fastlane` или только final heavy path;
+- не ушла ли задержка в `wait_for_file_version`/apply lag до first publish.
+
 #### Scenario: Метрики показывают latency syntax diagnostics по parse mode
 - **GIVEN** mixed нагрузка, где syntax diagnostics в одних ревизиях использует `incremental` или `reused`, а в других `full`
 - **WHEN** запрашивается observability snapshot
@@ -1153,6 +1172,13 @@ Dual-write MUST оставаться детерминированным из к�
 - **WHEN** публикуется observability snapshot для `syntax_diagnostics`
 - **THEN** канонический observability contract использует `mode=other`
 - **AND** система MUST NOT синтезировать `incremental`, `reused` или `full` из adapter-local предположений
+
+#### Scenario: Save fastlane distinguishable from heavy follow-up
+- **GIVEN** first diagnostics refresh после `didSave` выполняется через bounded fastlane
+- **WHEN** анализируется observability snapshot или checked-in acceptance report
+- **THEN** first publish помечается отдельным profile `save_fastlane`
+- **AND** heavy follow-up остаётся различимым как `idle_heavy`
+- **AND** evidence позволяет отличить fastlane успех от apply-lag wait regression
 
 ### Requirement: Completion v2 учитывает trigger context LSP и сохраняет parity между trigger modes (MUST)
 Система MUST использовать `CompletionParams.context` (`TriggerCharacter`, `Invoked`, `TriggerForIncompleteCompletions`) как часть completion policy.
@@ -1752,16 +1778,16 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `21`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `24`.
 
 Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
 Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов, incident summary или агрегированных observability-метрик.
 
-Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v18`, синхронизированный с текущим authoritative payload и его bounded field-set.
+Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v21`, синхронизированный с текущим authoritative payload и его bounded field-set.
 
-`v21` MUST сохранять additive `v20` ingress/query-body semantics, включая grouped `query_bundle*` taxonomy и existing bounded server-edge fields.
+`v24` MUST сохранять additive `v23` ingress/query-body/flush-aware/output-egress semantics, включая grouped `query_bundle*` taxonomy, `response_sent_at_ms`, existing `response_output_*` milestones и `response_flush_completed_at_ms`.
 
-Контракт `v21` MUST включать:
+Контракт `v24` MUST включать:
 
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
@@ -1776,44 +1802,66 @@ Per-request timeline payload MUST формироваться на стороне
 - optional `server_edge_details`;
 - `stages`.
 
-Если `server_edge_details` присутствует, additive `v21` post-handler egress split MUST сохранять existing semantics `response_sent_at_ms` и MAY включать:
+Если `server_edge_details` присутствует, additive `v24` post-handler handoff split MAY включать:
 
-- `response_flush_completed_at_ms`;
-- `response_ready_to_flush_wait_ms`.
+- `response_output_handoff_started_at_ms`;
+- `response_output_handoff_enqueued_at_ms`;
+- `response_ready_to_output_handoff_wait_ms`;
+- `response_output_handoff_send_wait_ms`;
+- `response_output_handoff_to_writer_wait_ms`.
 
-`response_sent_at_ms` MUST продолжать обозначать handler-local response-ready boundary. Это поле MUST NOT ретроактивно переосмысляться как transport flush completion.
+Если `response_output_handoff_started_at_ms` присутствует, payload MUST включать и `response_output_handoff_enqueued_at_ms`.
 
-Если `response_flush_completed_at_ms` присутствует, payload MUST включать и `response_ready_to_flush_wait_ms`, чтобы post-handler server egress split не требовал ручного вычитания timestamp'ов.
+Если `response_output_handoff_started_at_ms` присутствует, payload MUST сохранять `response_output_enqueue_completed_at_ms` как legacy compatibility boundary output-writer selection для completion response и MUST включать все три derived fields:
 
-Если `response_ready_to_flush_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_sent_at_ms` и фактическим flush completion для этого response и MUST NOT включать client-side transport или extension-host post-receive wait.
+- `response_ready_to_output_handoff_wait_ms`;
+- `response_output_handoff_send_wait_ms`;
+- `response_output_handoff_to_writer_wait_ms`.
 
-#### Scenario: VS Code клиент получает `v21` payload без reconstruction
+Если `response_ready_to_output_handoff_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_sent_at_ms` и `response_output_handoff_started_at_ms` и MUST NOT включать blocking внутри outbound handoff path.
+
+Если `response_output_handoff_send_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_output_handoff_started_at_ms` и `response_output_handoff_enqueued_at_ms` и MUST NOT включать wait после успешного handoff acceptance.
+
+Если `response_output_handoff_to_writer_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_output_handoff_enqueued_at_ms` и `response_output_enqueue_completed_at_ms` и MUST NOT трактоваться как writer-queue backlog или конкретный blocker class без дополнительных authoritative fields.
+
+Compatibility field `response_ready_to_output_enqueue_wait_ms` MAY сохраняться как umbrella интервал между `response_sent_at_ms` и `response_output_enqueue_completed_at_ms`, но MUST NOT переопределяться как точный синоним одного из новых `v24` buckets.
+
+`response_output_enqueue_completed_at_ms` MUST NOT переосмысляться как truthful send-side enqueue completion для `v24`; это legacy compatibility field с writer-selection semantics, несмотря на историческое имя.
+
+#### Scenario: VS Code клиент получает `v24` payload без reconstruction
 
 - **GIVEN** VS Code extension запрашивает completion timeline
 - **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v21` с server-generated traces
+- **THEN** LSP возвращает response контракта `v24` с server-generated traces
 - **AND** клиент не строит authoritative server trace из raw logs, incident summary или p95/p99 агрегатов
 
-#### Scenario: Flush completion отделён от handler-ready boundary
+#### Scenario: Post-handler handoff gap отделён на три truthful bucket
 
-- **GIVEN** completion handler уже подготовил response, но transport flush завершится позже
+- **GIVEN** completion handler уже подготовил response, outbound handoff начнётся позже, send-side acceptance завершится ещё позже, а output writer выберет completion response позже этого
 - **WHEN** клиент читает `server_edge_details`
-- **THEN** payload сохраняет `response_sent_at_ms` как handler-ready boundary
-- **AND** публикует `response_flush_completed_at_ms` и `response_ready_to_flush_wait_ms` отдельно, если flush boundary наблюдаема
+- **THEN** payload сохраняет `response_sent_at_ms` и legacy `response_output_enqueue_completed_at_ms`
+- **AND** публикует `response_output_handoff_started_at_ms`, `response_output_handoff_enqueued_at_ms`, `response_ready_to_output_handoff_wait_ms`, `response_output_handoff_send_wait_ms` и `response_output_handoff_to_writer_wait_ms` отдельно, если handoff boundaries наблюдаемы
+
+#### Scenario: Legacy `response_output_enqueue_completed_at_ms` не выдаётся за truthful enqueue acceptance
+
+- **GIVEN** authoritative payload содержит новый `v24` handoff split
+- **WHEN** downstream consumer читает `server_edge_details`
+- **THEN** `response_output_enqueue_completed_at_ms` трактуется как legacy writer-selection seam
+- **AND** truthful send-side acceptance публикуется только через `response_output_handoff_enqueued_at_ms`
+
+#### Scenario: Compatibility enqueue wait остаётся umbrella, а не переименованным bucket
+
+- **GIVEN** authoritative payload содержит новый `v24` handoff split
+- **WHEN** downstream consumer читает `server_edge_details`
+- **THEN** `response_ready_to_output_enqueue_wait_ms` сохраняет compatibility semantics для полного интервала `response_sent_at_ms -> response_output_enqueue_completed_at_ms`
+- **AND** consumer не трактует `v23` payload как будто truthful handoff boundaries уже были доступны
 
 #### Scenario: Versioned contract baseline синхронизирован с shipped payload
 
-- **GIVEN** authoritative completion timeline уже публикует contract `v21`
+- **GIVEN** authoritative completion timeline уже публикует contract `v24`
 - **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
-- **THEN** `contracts/lsp-completion-timeline/v18` совпадает по bounded field-set с runtime payload
-- **AND** policy/verification scripts валидируют именно `v21/v18`, а не более старую версию
-
-#### Scenario: Legacy `response_sent_at_ms` semantics не меняется задним числом
-
-- **GIVEN** authoritative payload содержит новый flush-aware split
-- **WHEN** downstream consumer читает `server_edge_details`
-- **THEN** `response_sent_at_ms` сохраняет response-ready semantics
-- **AND** transport flush completion публикуется только через additive `response_flush_completed_at_ms`
+- **THEN** `contracts/lsp-completion-timeline/v21` совпадает по bounded field-set с runtime payload
+- **AND** policy/verification scripts валидируют именно `v24/v21`, а не более старую версию
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -3044,3 +3092,322 @@ Gate MUST fail:
 - **AND** late `$/cancelRequest` всё ещё классифицируется и отменяет самый новый queued completion до dispatch
 - **AND** transport path сохраняет exactly-once terminal semantics без late publish
 
+### Requirement: Auxiliary LSP CPU work stays isolated from interactive transport/runtime loops (MUST)
+CPU-heavy auxiliary LSP work, не являющаяся primary semantic body текущего interactive ответа, MUST выполняться через bounded blocking или эквивалентную isolated CPU boundary и MUST NOT выполняться inline на async runtime threads, которые обслуживают:
+- transport read/write loops;
+- admission и service scheduling;
+- first polling service futures;
+- completion handoff/output progression.
+
+Этот contract MUST покрывать как минимум:
+- documentSymbol ready-cache materialization и same-version outline refresh, инициированные document-sync path;
+- parse/context derivation для auxiliary request path `bsl.getCurrentContext`, когда для ответа нужен полный parse текущего текста файла.
+
+Auxiliary jobs MAY оставаться bounded, cancellable и coalesced, но MUST NOT вызывать seconds-scale `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` или `response_output_handoff_send_wait_ms` regressions для same-file interactive completion, если primary completion path уже hot/ready.
+
+#### Scenario: Background outline materialization не выполняет symbol building inline на async runtime
+- **GIVEN** document-sync worker уже завершил bounded parse для requested revision
+- **WHEN** сервер materializes latest-ready outline cache для того же файла
+- **THEN** CPU-heavy symbol derivation выполняется через bounded auxiliary CPU boundary
+- **AND** newer same-file completion не теряет runtime progress только из-за этого auxiliary work
+
+#### Scenario: `bsl.getCurrentContext` parse не starvation-ит concurrent completion
+- **GIVEN** extension почти одновременно вызывает `bsl.getCurrentContext` и `textDocument/completion` для крупного модуля
+- **AND** current-context request требует parse/context derivation
+- **WHEN** сервер обслуживает оба запроса
+- **THEN** current-context auxiliary CPU work не выполняется inline на async transport/runtime loop
+- **AND** completion trace не получает seconds-scale ingress или output-handoff delay только из-за `bsl.getCurrentContext`
+
+### Requirement: Representative mixed-load guard budgets truthful ingress and handoff seams (MUST)
+Representative mixed-load regression coverage для completion MUST budget-ить truthful latency seams, которые остаются user-visible после probe/egress split, а не только legacy pre-dispatch ingress split.
+
+Guard MUST как минимум:
+- использовать same-file profile `didChange + didSave + documentSymbol burst + completion` на representative large-module fixture;
+- собирать authoritative fields `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms`;
+- fail-ить, если auxiliary runtime work уводит trace в seconds-scale ingress или handoff backlog, даже если `adapter_to_dispatch_wait_ms` остаётся в бюджете;
+- сохранять existing correctness checks для non-empty completion, fail-closed counters и `documentSymbol latest_ready` behavior.
+
+#### Scenario: Truthful mixed-load gate ловит starvation, скрытую от legacy pre-dispatch split
+- **GIVEN** representative same-file mixed-load profile на крупном модуле
+- **AND** completion handler hot path уже ready или fast
+- **WHEN** auxiliary outline/context work regression-ит и stall-ит transport ingress или completion handoff
+- **THEN** representative gate завершается ошибкой по truthful `client_to_transport_wait_ms` или `response_output_handoff_send_wait_ms`
+- **AND** regression не маскируется только потому, что `adapter_to_dispatch_wait_ms` остался в бюджете
+
+### Requirement: Same-file save-triggered auxiliary churn does not regress current-revision readiness fast lane (MUST)
+После того как current-revision handoff для requested revision уже зарегистрирован через `didOpen` или `didChange`, same-file `didSave`-triggered refresh и другой auxiliary same-file churn MAY продолжаться в фоне, но MUST NOT возвращать interactive completion к `prepare_timeout@wait_for_file_version`, если truthful transport seams уже остаются в интерактивном бюджете.
+
+Для этого requirement readiness regression считается отдельным failure mode:
+- bounded wait на `wait_for_file_version` не должен исчерпываться только потому, что newest same-file readiness все еще стоит позади save-triggered auxiliary backlog;
+- healthy `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms` MUST NOT использоваться как оправдание для `prepare_timeout@wait_for_file_version`;
+- cold semantic/query-body latency после успешного readiness рассматривается отдельно и не считается объяснением readiness timeout.
+
+#### Scenario: Same-file save refresh не держит newest completion в `wait_for_file_version`
+- **GIVEN** `didChange` уже зарегистрировал current-revision handoff для requested revision `V`
+- **AND** same-file `didSave` или другой auxiliary refresh запускает дополнительную background работу для того же файла
+- **WHEN** IDE запрашивает completion для revision `V`
+- **THEN** readiness fast lane не деградирует в `prepare_timeout@wait_for_file_version` только из-за этого same-file auxiliary backlog
+- **AND** completion либо получает current-revision first response, либо завершается по другой truthful причине, не связанной с post-handoff `wait_for_file_version` starvation
+
+#### Scenario: Healthy truthful seams не маскируют readiness timeout
+- **GIVEN** representative completion sample показывает `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms` внутри интерактивного бюджета
+- **WHEN** тот же sample все равно завершает prepare как `prepare_timeout@wait_for_file_version`
+- **THEN** outcome считается current-revision readiness regression
+- **AND** не считается допустимым bounded fail-closed поведением
+
+### Requirement: Representative post-edit/save churn gate separates readiness regressions from cold query-body cost (MUST)
+Representative real-module acceptance для current-revision completion MUST иметь отдельный post-edit/save churn profile, который проверяет readiness fast lane независимо от latency дальнейшего semantic/query-body execution.
+
+Этот gate MUST:
+- использовать same-file профиль `didChange + didSave + auxiliary same-file noise + completion` на representative large-module fixture;
+- собирать truthful transport/readiness fields как минимум `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms`, `response_output_handoff_send_wait_ms` и `prepare_timeout` phase/cause;
+- fail-ить, если measured sample получает `prepare_timeout@wait_for_file_version` при truthful transport seams внутри бюджета;
+- report-ить cold `query_bundle_ir_query` / `collect` latency отдельным diagnostic bucket после успешного readiness, а не как оправдание readiness failure.
+
+#### Scenario: Gate отдельно ловит readiness timeout и отдельно cold query-body
+- **GIVEN** representative same-file post-edit/save churn profile на real module
+- **AND** truthful transport seams measured sample остаются в бюджете
+- **WHEN** один sample завершает prepare как `prepare_timeout@wait_for_file_version`, а другой sample успешно проходит readiness и тратит время в `query_bundle_ir_query`
+- **THEN** gate завершается ошибкой из-за readiness timeout sample
+- **AND** cold query-body latency отражается отдельным diagnostic signal, а не как причина acceptance failure по readiness contract
+
+### Requirement: Immediate same-file post-edit/save completion window does not regress into `prepare_timeout` (MUST)
+После того как same-file current-revision handoff уже зарегистрирован через `didChange` или `didSave`, первые interactive completion requests в immediate post-edit/save window MUST NOT завершаться `prepare_timeout` только потому, что fully prepared current-revision path ещё не стала наблюдаемой на request path, если truthful transport seams остаются в интерактивном бюджете.
+
+Для этого requirement front-edge regression surface включает:
+- `prepare_timeout@wait_for_file_version`;
+- `prepare_timeout@snapshot_with_deps`, если timeout происходит в том же immediate post-edit/save window и не объясняется transport ingress/output backlog.
+
+#### Scenario: Same-file front-edge completion не умирает на `wait_for_file_version`
+- **GIVEN** `didChange` или `didSave` уже зарегистрировал same-file handoff для revision `V`
+- **AND** IDE запрашивает completion почти сразу после этого handoff
+- **WHEN** truthful transport seams остаются в интерактивном бюджете
+- **THEN** completion не завершается `prepare_timeout@wait_for_file_version` только из-за front-edge readiness lag
+- **AND** outcome либо остаётся bounded current-revision first response, либо завершается по другой truthful причине, не связанной с front-edge starvation
+
+#### Scenario: Same-file front-edge completion не маскирует timeout на `snapshot_with_deps`
+- **GIVEN** same-file handoff для revision `V` уже зарегистрирован
+- **AND** `wait_for_file_version` уже не объясняет timeout
+- **WHEN** completion всё равно исчерпывает prepare budget на `snapshot_with_deps` в immediate post-edit/save window
+- **THEN** такой outcome считается front-edge readiness regression
+- **AND** не считается допустимым bounded fail-closed поведением
+
+### Requirement: Representative front-edge gate separates immediate `prepare_timeout` regressions from cold `query_bundle_pool_wait` (MUST)
+Representative real-module acceptance для current-revision completion MUST иметь отдельный immediate post-edit/save front-edge profile, который проверяет первые same-file completion samples сразу после handoff независимо от downstream cold query-body latency.
+
+Этот gate MUST:
+- использовать same-file профиль `didChange + didSave + immediate completion burst` на representative large-module fixture;
+- собирать truthful transport/readiness fields как минимум `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms`, `response_output_handoff_send_wait_ms`, `fail_closed_cause` и `timeout_attribution.phase`;
+- fail-ить на любом `prepare_timeout` в front-edge samples при healthy truthful transport seams;
+- report-ить successful samples с cold `query_bundle_pool_wait` отдельным diagnostic bucket после успешного readiness.
+
+#### Scenario: Gate валится на front-edge timeout и отдельно отражает downstream pool wait
+- **GIVEN** representative immediate post-edit/save front-edge profile на real module
+- **AND** truthful transport seams measured samples остаются в бюджете
+- **WHEN** один sample завершается `prepare_timeout`, а другой sample успешно проходит readiness и тратит время в `query_bundle_pool_wait`
+- **THEN** gate завершается ошибкой из-за front-edge `prepare_timeout`
+- **AND** `query_bundle_pool_wait` отражается отдельным diagnostic signal, а не объяснением readiness failure
+
+### Requirement: Immediate same-file front-edge completion does not regress into hidden `exact_deadline` (MUST)
+После того как same-file current-revision handoff уже зарегистрирован через `didChange` или `didSave`, первые interactive completion requests в immediate post-edit/save window MUST NOT исчерпывать bounded `wait_exact_type_index` и затем завершаться generic fail-closed outcome только потому, что exact current-revision artifact ещё не стал наблюдаемым, если truthful transport seams остаются в интерактивном бюджете.
+
+Для этого requirement:
+- `wait_exact_type_index` exhaustion с `type_index_wait_outcome=deadline` в том же front-edge окне считается unresolved readiness regression;
+- такой outcome не должен маскироваться под generic `missing_semantic_index` без explicit regression attribution.
+
+#### Scenario: Front-edge exact wait deadline не маскируется как generic availability miss
+- **GIVEN** `didChange` или `didSave` уже зарегистрировал same-file handoff для revision `V`
+- **AND** completion request входит в immediate post-edit/save window почти сразу после handoff
+- **WHEN** truthful transport seams остаются в интерактивном бюджете
+- **THEN** completion не завершает front-edge path с hidden `wait_exact_type_index=deadline`
+- **AND** operator-facing evidence не схлопывает такой regression в generic `missing_semantic_index` без отдельной attribution
+
+### Requirement: Representative front-edge gate requires successful current-revision sample before separating cold `query_bundle_pool_wait` (MUST)
+Representative real-module acceptance для current-revision completion MUST считать remediation незавершённой, если immediate post-edit/save front-edge profile не даёт ни одного successful current-revision sample, даже когда `prepare_timeout` уже устранён.
+
+Этот gate MUST:
+- использовать same-file профиль `didChange + didSave + immediate completion burst` на representative large-module fixture;
+- fail-ить на любом front-edge `prepare_timeout` или hidden `exact_deadline` при healthy truthful transport seams;
+- требовать как минимум один successful current-revision sample в measured front-edge window;
+- report-ить cold `query_bundle_pool_wait` отдельным diagnostic bucket только для successful samples после readiness.
+
+#### Scenario: Gate не проходит на all-fail-closed front-edge profile
+- **GIVEN** representative immediate post-edit/save front-edge profile на real module
+- **AND** truthful transport seams measured samples остаются в бюджете
+- **WHEN** measured samples не содержат `prepare_timeout`, но все measured traces завершаются fail-closed до successful current-revision response
+- **THEN** gate завершается ошибкой
+- **AND** remediation не считается завершённой только на основании bounded fail-closed outcomes
+
+### Requirement: Aged non-member current-revision completion does not block first response on exact re-probe (MUST)
+
+Система MUST формировать aged non-member current-revision first response без blocking exact re-probe,
+если exact не был уже доказан из prepared current-revision state.
+
+Если non-member completion request уже использует `shadow_current_revision_fast_path`, current-revision
+shadow/support state для requested revision уже подготовлен, а request вышел из immediate apply-age
+window, first response MUST NOT синхронно re-probe-ить свежий current-revision snapshot только ради
+повторной проверки exact readiness перед terminal decision.
+
+В этом режиме request path:
+
+- MAY возвращать exact только если exact readiness уже доказана из подготовленного current-revision state;
+- MUST иначе переходить в bounded lightweight/no-IR current-revision path;
+- MUST NOT возвращаться к effectively exact-only first-response поведению;
+- MUST NOT получать seconds-scale stall или fail-closed `exact_deadline` только потому, что был сделан post-window exact re-probe.
+
+#### Scenario: Aged non-member invoked completion уходит в bounded current-revision fallback без blocking exact re-probe
+
+- **GIVEN** same-file invoked completion идёт через `shadow_current_revision_fast_path`
+- **AND** request не является member-access
+- **AND** current-revision shadow/support state для requested revision уже prepared
+- **AND** request уже вышел из immediate apply-age window
+- **AND** exact readiness не доказана из подготовленного состояния
+- **WHEN** handler формирует first response
+- **THEN** request не делает blocking exact re-probe как prereq terminal decision
+- **AND** возвращает bounded truthful current-revision lightweight/no-IR response
+- **AND** не регрессирует в `exact_deadline` только из-за post-window re-probe
+
+### Requirement: Completion timeline truthfully covers blocking current-revision snapshot reacquisition (MUST)
+
+Система MUST truthfully покрывать blocking current-revision snapshot reacquisition в authoritative
+completion timeline.
+
+Если completion request path всё ещё делает blocking current-revision snapshot reacquisition или
+эквивалентный exact re-probe до terminal first-response decision, authoritative timeline MUST либо:
+
+- явно публиковать эту работу как отдельный low-cardinality stage внутри `stages`, либо
+- удерживать разницу между `total_duration_ms` и последним видимым stage end в пределах bounded capture overhead.
+
+Authoritative trace MUST NOT приписывать доминирующую latency unrelated visible stage, если основная
+часть request-path времени ушла в неатрибутированную blocking snapshot reacquisition.
+
+#### Scenario: Blocking current-revision snapshot reacquisition не скрывается внутри uncovered handler gap
+
+- **GIVEN** representative aged completion trace тратит заметное время на current-revision snapshot reacquisition до terminal decision
+- **WHEN** сервер сериализует authoritative completion timeline
+- **THEN** trace либо показывает dedicated low-cardinality stage для этой blocking work
+- **OR** не оставляет seconds-scale gap между `total_duration_ms` и последним видимым stage end
+- **AND** operator может отличить эту latency от `handler_prelude` и `query_bundle*`
+
+### Requirement: `bsl.getCurrentContext` honors client latest-only generations with bounded supersession (MUST)
+
+Server MUST honor bounded client latest-only generations for `bsl.getCurrentContext`.
+
+Если client current-context surface передаёт bounded generation hints для `bsl.getCurrentContext`,
+server MUST использовать их для bounded supersession/coalescing obsolete auxiliary work.
+
+Для одного editor session backend:
+
+- MUST NOT позволять obsolete older generations неограниченно накапливать independent expensive parse/context derivation;
+- MUST supersede older generation до expensive parse/context derivation или коалесцировать её с эквивалентным newer work;
+- MUST NOT делать obsolete response источником current context для newer generation;
+- MAY по-прежнему возвращать bounded auxiliary response для superseded request, если это не нарушает newest-generation-wins semantics на client side.
+
+#### Scenario: Cursor burst supersede-ит obsolete current-context work до expensive parse
+
+- **GIVEN** extension отправляет несколько `bsl.getCurrentContext` requests одного editor session с монотонно растущими generation hints
+- **AND** более новая generation становится известна серверу до завершения expensive parse для older request
+- **WHEN** backend обслуживает этот burst
+- **THEN** older request не доходит независимо до полного expensive parse/context derivation
+- **AND** auxiliary path остаётся bounded по obsolete work
+- **AND** newer generation остаётся единственным current candidate для client-visible context surface
+
+### Requirement: didSave diagnostics публикует request-centric save refresh timeline (MUST)
+Система MUST публиковать bounded authoritative trace для каждого diagnostics refresh, инициированного `textDocument/didSave`.
+
+Этот trace MUST:
+
+- быть server-authored;
+- быть request-centric, а не derived из cumulative metrics;
+- содержать `uri`, `requested_version`, `save_cycle_sequence`, `diagnostics_generation`, `trigger=did_save`;
+- фиксировать bounded stage/runtime facts, достаточные для разбора first publish и heavy follow-up;
+- не содержать raw document text, snippets или high-cardinality payload.
+
+Дополнительно trace MUST:
+
+- не создавать второй trace identity для уже terminal `(requested_version, save_cycle_sequence)`;
+- не заставлять operator-facing cycle ordering выводиться из `diagnostics_generation`, если у двух save-cycle совпадает `requested_version`;
+- публиковать `blocking_queue_wait_ms` только как factual wait перед shared blocking gate, а не как synthetic surrogate для direct save-fastlane bypass path;
+- различать `save_fastlane` first publish и heavy follow-up stall;
+- не оставлять active heavy follow-up в состоянии просто `pending`, если сервер уже знает, что primary blocker это `apply_lag` / `wait_for_file_version`.
+
+#### Scenario: didSave refresh экспортируется с dedicated save-cycle identity
+- **GIVEN** пользователь сохраняет документ
+- **WHEN** diagnostics runtime запускает refresh для `didSave`
+- **THEN** система создаёт request-centric trace этого refresh
+- **AND** trace содержит monotonic `save_cycle_sequence`
+- **AND** trace можно получить через dedicated diagnostics save timeline surface
+- **AND** trace не требует реконструкции из aggregate metrics
+
+#### Scenario: operator-facing ordering двух save-cycle не зависит от diagnostics_generation
+- **GIVEN** документ получает два `didSave` при одном и том же `requested_version`
+- **WHEN** оператор читает diagnostics save timeline
+- **THEN** система показывает distinct `save_cycle_sequence` для каждого cycle
+- **AND** trace остаётся truthful даже если `diagnostics_generation` не годится как save ordering key
+
+#### Scenario: timeline объясняет stalled heavy follow-up request-centric причиной
+- **GIVEN** `didSave` cycle уже дал `save_fastlane` first publish
+- **AND** richer heavy follow-up ещё не published
+- **WHEN** оператор читает diagnostics save timeline
+- **THEN** trace показывает request-centric follow-up wait reason
+- **AND** оператор может отличить apply-lag от semantic-work pending
+
+#### Scenario: fastlane fallback публикует blocking queue wait отдельно от syntax query
+- **GIVEN** `save_fastlane` first publish идёт через bounded blocking fallback path
+- **WHEN** trace экспортируется в diagnostics save timeline
+- **THEN** queue wait перед parse фиксируется отдельно от `syntax_diagnostics_query_ms`
+- **AND** оператор может отличить queue wait от actual syntax query work
+
+### Requirement: save_fastlane и idle_heavy группируются в один didSave refresh cycle (MUST)
+Если один `didSave` запускает сначала `save_fastlane`, а затем `idle_heavy`, система MUST экспортировать их как
+части одного save refresh cycle, а не как два несвязанных trace.
+
+Trace MUST:
+
+- явно различать `first_publish_profile` и optional `followup_profile`;
+- сохранять порядок publish событий внутри одного cycle;
+- не позволять follow-up другого `didSave` быть ошибочно приписанным предыдущему cycle.
+
+#### Scenario: fastlane и heavy follow-up видны как один refresh cycle
+- **GIVEN** для одного `didSave` сначала публикуется `save_fastlane`, а затем `idle_heavy`
+- **WHEN** оператор читает diagnostics save timeline
+- **THEN** он видит один save refresh cycle
+- **AND** внутри него first publish и follow-up отображаются отдельно, но с общим cycle identity
+
+#### Scenario: Новый didSave не прилипает к предыдущему refresh cycle
+- **GIVEN** для документа идут два последовательных `didSave`
+- **WHEN** follow-up publish второго save завершается позже первого
+- **THEN** diagnostics save timeline не смешивает publish события разных save cycle
+- **AND** каждый cycle остаётся request-centric и truthful для своей `version/save_cycle_sequence`
+
+### Requirement: didSave save_fastlane публикует bounded same-version first refresh (MUST)
+`save_fastlane` MUST давать bounded same-version first publish после `didSave`, даже если applied-analysis snapshot ещё не готов.
+
+Если `save_fastlane` падает в syntax-only shadow fallback, этот path MUST:
+
+- не ждать shared bounded interactive queue как primary gating step;
+- не публиковать diagnostics от older revision;
+- оставаться supersession-aware для newer `didSave`.
+
+#### Scenario: save_fastlane shadow fallback bypass-ит shared queue starvation
+- **GIVEN** shared interactive blocking queue насыщена другой работой
+- **AND** `didSave` first publish вынужден идти через shadow parse fallback
+- **WHEN** diagnostics runtime публикует `save_fastlane` first refresh
+- **THEN** first publish не тратит seconds-scale latency только на shared queue wait
+- **AND** trace не маскирует bypass synthetic `blocking_queue_wait_ms`
+
+### Requirement: didSave heavy follow-up избегает apply-lag как primary gate (MUST)
+После successful same-version `save_fastlane` first publish система MUST стремиться к richer heavy follow-up того же `save_cycle_sequence` без unbounded зависимости от writer/apply lag как primary gate, если same-version ready artifacts уже доступны.
+
+Система MAY использовать writer-owned applied state, когда он уже готов, но MUST:
+
+- предпочитать same-version ready artifacts поверх blind `wait_for_file_version`;
+- не публиковать older-version diagnostics;
+- сохранять supersession semantics для newer save cycles.
+
+#### Scenario: delayed apply не держит heavy follow-up hostage при наличии ready save artifacts
+- **GIVEN** `didSave` already materialized same-version ready artifacts
+- **AND** writer apply path всё ещё отстаёт
+- **WHEN** heavy follow-up пытается построить richer diagnostics
+- **THEN** система не использует unbounded apply-lag как primary gating step
+- **AND** либо публикует richer follow-up, либо truthful trace attribution показывает residual blocker

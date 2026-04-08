@@ -1711,6 +1711,10 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.latest_save_fastlane_syntax_artifacts_v2
+                .write()
+                .await
+                .remove(&file_id);
             self.latest_apply_enqueued_at_v2
                 .write()
                 .await

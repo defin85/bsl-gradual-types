@@ -2822,6 +2822,17 @@ async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_art
         full_publish.get("wait_for_file_version_ms").is_none(),
         "ready-artifact follow-up must not expose wait_for_file_version as primary gate, trace={trace:?}"
     );
+    assert_eq!(
+        full_publish
+            .get("syntax_work_mode")
+            .and_then(|value| value.as_str()),
+        Some("reused"),
+        "ready-artifact follow-up must report syntax reuse explicitly, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("syntax_diagnostics_query_ms").is_none(),
+        "ready-artifact follow-up must not rerun full syntax diagnostics query when same-version syntax artifacts are already available, trace={trace:?}"
+    );
     assert!(
         full_publish.get("semantic_diagnostics_query_ms").is_some(),
         "ready-artifact follow-up must expose semantic query timing, trace={trace:?}"
@@ -3115,6 +3126,17 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         full_publish.get("wait_for_file_version_ms").is_none(),
         "applied-state follow-up must not regress into wait_for_file_version gating, trace={trace:?}"
     );
+    assert_eq!(
+        full_publish
+            .get("syntax_work_mode")
+            .and_then(|value| value.as_str()),
+        Some("reused"),
+        "applied-state follow-up must reuse same-version save_fastlane syntax artifacts when they are already fresh for the save cycle, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("syntax_diagnostics_query_ms").is_none(),
+        "applied-state follow-up must not expose recomputed syntax timing when same-version save_fastlane syntax artifacts are reused, trace={trace:?}"
+    );
 
     drain_task.abort();
 }
@@ -3316,7 +3338,7 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     .await
     .expect("save_fastlane must still publish before stalled follow-up attribution");
 
-    let trace = tokio::time::timeout(Duration::from_secs(3), async {
+    let trace = tokio::time::timeout(Duration::from_secs(6), async {
         loop {
             let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_707, 8).await;
             let traces = timeline
@@ -3367,6 +3389,266 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     assert!(
         trace.get("terminal_outcome").is_none(),
         "timeline must keep stalled heavy follow-up visible as active, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_apply_delay() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 10_000;
+
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
+    let _did_save_parse_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS", "4000");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_followup_clean_syntax_reuse_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_millis(2500), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_710, 8).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("first_publish")
+                        .and_then(|value| value.get("profile"))
+                        .and_then(|value| value.as_str())
+                        == Some("save_fastlane")
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("save_fastlane must publish before generic follow-up syntax reuse");
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("generic heavy follow-up must eventually publish full diagnostics");
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_711, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let full_publish = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .filter(|publish| {
+            publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+        })
+        .expect("idle_heavy full publish trace");
+    assert_eq!(
+        full_publish
+            .get("syntax_work_mode")
+            .and_then(|value| value.as_str()),
+        Some("reused"),
+        "generic follow-up must reuse same-version syntax-clean save artifacts instead of recomputing syntax, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("syntax_diagnostics_query_ms").is_none(),
+        "generic follow-up must not expose recomputed syntax timing when syntax-clean save artifacts are reused, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("semantic_diagnostics_query_ms").is_some(),
+        "generic follow-up must still expose semantic timing, trace={trace:?}"
     );
 
     drain_task.abort();
@@ -3912,6 +4194,7 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 publish_kind: "syntax_only".to_string(),
                 outcome: "published".to_string(),
                 elapsed_ms: 15,
+                syntax_work_mode: Some("recomputed".to_string()),
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -3940,6 +4223,7 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 publish_kind: "syntax_only".to_string(),
                 outcome: "published".to_string(),
                 elapsed_ms: 11,
+                syntax_work_mode: Some("recomputed".to_string()),
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4096,6 +4380,7 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 publish_kind: "syntax_only".to_string(),
                 outcome: "published".to_string(),
                 elapsed_ms: 18,
+                syntax_work_mode: Some("recomputed".to_string()),
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4124,6 +4409,7 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 publish_kind: "syntax_only".to_string(),
                 outcome: "published".to_string(),
                 elapsed_ms: 12,
+                syntax_work_mode: Some("recomputed".to_string()),
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -32968,6 +33254,456 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
                 .expect("serialize p44 real conf_big diagnostics report"),
         )
         .expect("write p44 real conf_big diagnostics report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p45_real_conf_big_did_save_diagnostics_followup_syntax_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p45 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+            reload_runtime_config: bool,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                Self::set_with_reload(key, value, false)
+            }
+
+            fn set_with_reload(
+                key: &'static str,
+                value: &str,
+                reload_runtime_config: bool,
+            ) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                if reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+                Self {
+                    key,
+                    previous,
+                    reload_runtime_config,
+                }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+                if self.reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+            }
+        }
+
+        let _env_lock = lock_test_env().await;
+        const PROFILE_NAME: &str =
+            "p45_real_conf_big_did_save_diagnostics_followup_syntax_report_live";
+        const APPLY_DELAY_MS: u64 = 0;
+        const FIRST_PUBLISH_OBSERVE_BUDGET_MS: u64 = 60_000;
+        const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 60_000;
+        let _apply_delay_guard =
+            EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", &APPLY_DELAY_MS.to_string());
+        let _debounce_guard = EnvVarGuard::set_with_reload(
+            "BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS",
+            "1200",
+            true,
+        );
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-08-diagnostics-save-followup-syntax-cost-reduction".to_string()
+        });
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p45 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p45_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
+                },
+            )
+            .await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must register version 1 for p45");
+
+        let broken_suffix = "\nПроцедура SaveFollowupSyntaxBroken(\n";
+        let next_version = 2;
+        live_transport_append_text_change(
+            &mut harness,
+            &uri,
+            &module_text,
+            next_version,
+            broken_suffix,
+        )
+        .await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(next_version)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didChange must register version 2 for p45");
+
+        live_transport_save_document(&mut harness, &uri).await;
+        let first_publish = live_transport_wait_publish_diagnostics(
+            &mut harness,
+            &uri,
+            next_version,
+            Duration::from_millis(FIRST_PUBLISH_OBSERVE_BUDGET_MS),
+        )
+        .await;
+        let first_publish_syntax_only = first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax"));
+        assert!(
+            !first_publish.diagnostics.is_empty(),
+            "p45 must observe non-empty save_fastlane diagnostics on broken conf_big revision"
+        );
+        assert!(
+            first_publish_syntax_only,
+            "p45 first publish must stay syntax-only, diagnostics={:?}",
+            first_publish.diagnostics
+        );
+        let timeline_deadline = Instant::now() + Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS);
+        let timeline = loop {
+            let timeline = live_transport_get_diagnostics_save_timeline(
+                &mut harness,
+                45_100_901,
+                12,
+            )
+            .await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            let matching_trace = traces
+                .iter()
+                .filter(|trace| {
+                    trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                        && trace
+                            .get("requested_version")
+                            .and_then(|value| value.as_i64())
+                            == Some(next_version as i64)
+                })
+                .max_by_key(|trace| {
+                    trace
+                        .get("save_cycle_sequence")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                })
+                .cloned();
+            let Some(trace) = matching_trace else {
+                if Instant::now() >= timeline_deadline {
+                    panic!("p45 must observe diagnostics save trace on conf_big");
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            let first_publish = trace
+                .get("first_publish")
+                .and_then(|value| value.as_object())
+                .filter(|publish| {
+                    publish.get("profile").and_then(|value| value.as_str())
+                        == Some("save_fastlane")
+                });
+            let followup_publish = trace
+                .get("followup_publish")
+                .and_then(|value| value.as_object())
+                .filter(|publish| {
+                    publish.get("profile").and_then(|value| value.as_str())
+                        == Some("idle_heavy")
+                });
+            let followup_wait_reason = trace
+                .get("followup_wait_reason")
+                .and_then(|value| value.as_str());
+            let followup_syntax_work_mode = trace
+                .get("followup_syntax_work_mode")
+                .and_then(|value| value.as_str());
+            let explicit_reuse_proof_in_flight = followup_wait_reason == Some("semantic_work")
+                && followup_syntax_work_mode == Some("reused");
+            if first_publish.is_some()
+                && (followup_publish.is_some() || explicit_reuse_proof_in_flight)
+            {
+                break trace;
+            }
+            if Instant::now() >= timeline_deadline {
+                panic!(
+                    "p45 must observe idle_heavy syntax reuse proof on conf_big, last_trace={trace:?}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+
+        let timeline_first_publish = timeline
+            .get("first_publish")
+            .and_then(|value| value.as_object())
+            .expect("p45 save_fastlane first publish trace");
+        assert_eq!(
+            timeline_first_publish
+                .get("profile")
+                .and_then(|value| value.as_str()),
+            Some("save_fastlane")
+        );
+        assert_eq!(
+            timeline_first_publish
+                .get("publish_kind")
+                .and_then(|value| value.as_str()),
+            Some("syntax_only")
+        );
+        assert_eq!(
+            timeline_first_publish
+                .get("outcome")
+                .and_then(|value| value.as_str()),
+            Some("published")
+        );
+        let first_publish_elapsed_ms = timeline_first_publish
+            .get("elapsed_ms")
+            .and_then(|value| value.as_u64())
+            .expect("p45 save_fastlane first publish elapsed_ms");
+        let followup_syntax_work_mode = timeline
+            .get("followup_syntax_work_mode")
+            .and_then(|value| value.as_str());
+        assert_eq!(
+            followup_syntax_work_mode,
+            Some("reused"),
+            "p45 must expose actual syntax reuse for idle_heavy follow-up, trace={timeline:?}"
+        );
+        let followup_wait_reason = timeline
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str());
+
+        let followup_publish = timeline
+            .get("followup_publish")
+            .and_then(|value| value.as_object())
+            .filter(|publish| {
+                publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+            });
+        if let Some(followup_publish) = followup_publish {
+            assert_eq!(
+                followup_publish
+                    .get("publish_kind")
+                    .and_then(|value| value.as_str()),
+                Some("full")
+            );
+            assert_eq!(
+                followup_publish
+                    .get("outcome")
+                    .and_then(|value| value.as_str()),
+                Some("published")
+            );
+            assert_eq!(
+                followup_publish
+                    .get("syntax_work_mode")
+                    .and_then(|value| value.as_str()),
+                Some("reused"),
+                "p45 follow-up publish must report syntax reuse, trace={timeline:?}"
+            );
+            assert!(
+                followup_publish.get("syntax_diagnostics_query_ms").is_none(),
+                "p45 follow-up publish must not expose recomputed syntax query timing when syntax artifacts are reused, trace={timeline:?}"
+            );
+        } else {
+            assert_eq!(
+                followup_wait_reason,
+                Some("semantic_work"),
+                "p45 in-flight syntax reuse proof must already be on the semantic follow-up path, trace={timeline:?}"
+            );
+        }
+
+        let observability_metrics =
+            live_transport_get_observability_metrics(&mut harness, 45_100_902).await;
+        let counters = observability_metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("metrics.counters object");
+        let save_fastlane_published_total = read_u64_metric(
+            counters.get(
+                "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_save_profile_save_fastlane_reason_published",
+            ),
+        );
+        assert!(
+            save_fastlane_published_total > 0,
+            "p45 must observe save_fastlane published counter, counters={counters:?}"
+        );
+
+        let report = serde_json::json!({
+            "profile": PROFILE_NAME,
+            "change_id": change_id,
+            "module_path": module_path.display().to_string(),
+            "uri": uri.to_string(),
+            "apply_delay_ms": APPLY_DELAY_MS,
+            "first_publish_observe_budget_ms": FIRST_PUBLISH_OBSERVE_BUDGET_MS,
+            "followup_publish_budget_ms": FOLLOWUP_PUBLISH_BUDGET_MS,
+            "first_publish_elapsed_ms": first_publish_elapsed_ms,
+            "first_publish_version": next_version,
+            "first_publish_diagnostics_count": first_publish.diagnostics.len(),
+            "first_publish_syntax_only": first_publish_syntax_only,
+            "save_fastlane_published_total": save_fastlane_published_total,
+            "save_cycle_sequence": timeline
+                .get("save_cycle_sequence")
+                .and_then(|value| value.as_u64()),
+            "diagnostics_generation": timeline
+                .get("diagnostics_generation")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_profile": followup_publish
+                .and_then(|publish| publish.get("profile"))
+                .and_then(|value| value.as_str()),
+            "followup_publish_kind": followup_publish
+                .and_then(|publish| publish.get("publish_kind"))
+                .and_then(|value| value.as_str()),
+            "followup_publish_elapsed_ms": followup_publish
+                .and_then(|publish| publish.get("elapsed_ms"))
+                .and_then(|value| value.as_u64()),
+            "followup_syntax_work_mode": followup_publish
+                .and_then(|publish| publish.get("syntax_work_mode"))
+                .and_then(|value| value.as_str())
+                .or(followup_syntax_work_mode),
+            "followup_syntax_diagnostics_query_ms": followup_publish
+                .and_then(|publish| publish.get("syntax_diagnostics_query_ms"))
+                .and_then(|value| value.as_u64()),
+            "followup_semantic_diagnostics_query_ms": followup_publish
+                .and_then(|publish| publish.get("semantic_diagnostics_query_ms"))
+                .and_then(|value| value.as_u64()),
+            "followup_wait_for_file_version_ms": followup_publish
+                .and_then(|publish| publish.get("wait_for_file_version_ms"))
+                .and_then(|value| value.as_u64())
+                .or_else(|| {
+                    timeline
+                        .get("followup_wait_for_file_version_ms")
+                        .and_then(|value| value.as_u64())
+                }),
+            "followup_snapshot_with_deps_ms": followup_publish
+                .and_then(|publish| publish.get("snapshot_with_deps_ms"))
+                .and_then(|value| value.as_u64())
+                .or_else(|| {
+                    timeline
+                        .get("followup_snapshot_with_deps_ms")
+                        .and_then(|value| value.as_u64())
+                }),
+            "followup_wait_reason": timeline
+                .get("followup_wait_reason")
+                .and_then(|value| value.as_str()),
+            "idle_heavy_outcome": timeline
+                .get("idle_heavy_outcome")
+                .and_then(|value| value.as_str()),
+            "terminal_outcome": timeline
+                .get("terminal_outcome")
+                .and_then(|value| value.as_str()),
+        });
+        let report_path = std::env::var(
+            "BSL_V2_REAL_CONF_BIG_DID_SAVE_DIAGNOSTICS_FOLLOWUP_SYNTAX_REPORT",
+        )
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join(format!(
+                    "{change_id}-real-conf-big-did-save-diagnostics-followup-syntax-live.json"
+                ))
+        });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p45 real conf_big diagnostics report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("serialize p45 real conf_big diagnostics report"),
+        )
+        .expect("write p45 real conf_big diagnostics report");
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         live_transport_close_document(&mut harness, &uri).await;

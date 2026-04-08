@@ -417,6 +417,8 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     pub outcome: String,
     pub elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub syntax_work_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub blocking_queue_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for_file_version_ms: Option<u64>,
@@ -447,6 +449,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub save_fastlane_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub idle_heavy_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_syntax_work_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_wait_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

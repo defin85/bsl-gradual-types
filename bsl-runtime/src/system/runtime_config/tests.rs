@@ -159,6 +159,12 @@ fn completion_runtime_keys_have_stable_tier_and_defaults() {
             .get("BSL_INTELLISENSE_V2_COMPLETION_QUEUE_CAPACITY"),
         Some(&ConfigTier::Stable)
     );
+    assert_eq!(
+        snapshot
+            .tiers
+            .get("BSL_INTELLISENSE_V2_DID_SAVE_FOLLOWUP_LANE_QUOTA"),
+        Some(&ConfigTier::Stable)
+    );
 
     assert_eq!(
         store.get_string(RuntimeKey::IntellisenseV2CompletionMode),
@@ -191,5 +197,9 @@ fn completion_runtime_keys_have_stable_tier_and_defaults() {
     assert_eq!(
         store.get_usize(RuntimeKey::IntellisenseV2CompletionQueueCapacity),
         Some(256)
+    );
+    assert_eq!(
+        store.get_usize(RuntimeKey::IntellisenseV2DidSaveFollowupLaneQuota),
+        Some(1)
     );
 }

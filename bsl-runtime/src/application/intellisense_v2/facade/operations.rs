@@ -452,14 +452,50 @@ impl IntellisenseV2Facade {
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
-        self.prepare_stateful_operation_with_progress(context, observability, None)
-            .await
+        self.prepare_stateful_operation_with_admission_lane_and_progress(
+            context,
+            observability,
+            None,
+            None,
+        )
+        .await
     }
 
     pub async fn prepare_stateful_operation_with_progress(
         &self,
         context: &ExecutionContext,
         observability: Option<&SystemCoordinator>,
+        progress: Option<&PrepareStatefulProgress>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        self.prepare_stateful_operation_with_admission_lane_and_progress(
+            context,
+            observability,
+            None,
+            progress,
+        )
+        .await
+    }
+
+    pub async fn prepare_stateful_operation_with_admission_lane(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+        admission_lane: Option<AdmissionLane>,
+    ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
+        self.prepare_stateful_operation_with_admission_lane_and_progress(
+            context,
+            observability,
+            admission_lane,
+            None,
+        )
+        .await
+    }
+
+    pub async fn prepare_stateful_operation_with_admission_lane_and_progress(
+        &self,
+        context: &ExecutionContext,
+        observability: Option<&SystemCoordinator>,
+        admission_lane: Option<AdmissionLane>,
         progress: Option<&PrepareStatefulProgress>,
     ) -> Result<PreparedOperationSnapshot, SemanticOutcome> {
         let interactive_knobs = interactive_freshness_knobs(context.operation, observability);
@@ -485,11 +521,12 @@ impl IntellisenseV2Facade {
             let wait_result = if let Some(knobs) = interactive_knobs {
                 match tokio::time::timeout(
                     knobs.wait_budget,
-                    self.wait_for_file_version_with_priority(
+                    self.wait_for_file_version_with_priority_and_lane(
                         context.origin,
                         queue_priority,
                         context.file_id,
                         min_file_version,
+                        admission_lane,
                     ),
                 )
                 .await
@@ -505,11 +542,12 @@ impl IntellisenseV2Facade {
                 }
             } else {
                 Some(
-                    self.wait_for_file_version_with_priority(
+                    self.wait_for_file_version_with_priority_and_lane(
                         context.origin,
                         queue_priority,
                         context.file_id,
                         min_file_version,
+                        admission_lane,
                     )
                     .await,
                 )
@@ -557,7 +595,12 @@ impl IntellisenseV2Facade {
         }
         let snapshot_started = Instant::now();
         let snapshot_with_deps = self
-            .snapshot_with_deps_with_priority(context.origin, queue_priority, progress.cloned())
+            .snapshot_with_deps_with_priority_and_lane(
+                context.origin,
+                queue_priority,
+                admission_lane,
+                progress.cloned(),
+            )
             .await;
         let snapshot_with_deps_runtime = snapshot_with_deps.trace;
         let analysis = snapshot_with_deps.analysis;

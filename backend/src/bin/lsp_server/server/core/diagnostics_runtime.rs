@@ -33,6 +33,71 @@ struct SaveFollowupReadyArtifactsReply {
     syntax_work_mode: Option<&'static str>,
 }
 
+enum DidSaveFollowupAdmissionOutcome {
+    Admitted {
+        guard: DidSaveFollowupSlotGuard,
+        queue_wait_elapsed: Option<Duration>,
+    },
+    Disposition {
+        disposition: bsl_runtime::application::DiagnosticsDisposition,
+        queue_wait_elapsed: Option<Duration>,
+    },
+}
+
+struct DidSaveFollowupSlotGuard {
+    server: BslLanguageServer,
+    admitted_at: Instant,
+    released: std::sync::atomic::AtomicBool,
+}
+
+impl DidSaveFollowupSlotGuard {
+    fn new(server: BslLanguageServer) -> Self {
+        Self {
+            server,
+            admitted_at: Instant::now(),
+            released: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    fn release(&self) {
+        if self.released.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let quota = bsl_runtime::application::did_save_followup_lane_quota();
+        let (active_slots, queue_depth) = {
+            let mut state = self
+                .server
+                .diagnostics_did_save_followup_lane_v2
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state.active_slots = state.active_slots.saturating_sub(1);
+            (state.active_slots, state.queued_set.len())
+        };
+        self.server.record_did_save_followup_lane_saturation_v2(
+            quota,
+            active_slots,
+            queue_depth,
+        );
+        self.server
+            .coordinator
+            .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                bsl_runtime::application::AdmissionLane::DidSaveFollowup.as_str(),
+                self.admitted_at.elapsed(),
+            );
+        self.server
+            .diagnostics_did_save_followup_lane_notify_v2
+            .notify_waiters();
+    }
+}
+
+impl Drop for DidSaveFollowupSlotGuard {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
 impl BslLanguageServer {
     fn sum_nonzero_durations<I>(durations: I) -> Option<Duration>
     where
@@ -58,6 +123,181 @@ impl BslLanguageServer {
                     requested_version: supersession_key.requested_version,
                 },
             )
+    }
+
+    fn record_did_save_followup_lane_saturation_v2(
+        &self,
+        quota: usize,
+        active_slots: usize,
+        queue_depth: usize,
+    ) {
+        let origin = bsl_runtime::application::ObservabilityOrigin::Lsp.as_str();
+        let lane = bsl_runtime::application::AdmissionLane::DidSaveFollowup.as_str();
+        self.coordinator
+            .record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+                origin,
+                lane,
+                "quota",
+                quota as f64,
+            );
+        self.coordinator
+            .record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+                origin,
+                lane,
+                "active_slots",
+                active_slots as f64,
+            );
+        self.coordinator
+            .record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+                origin,
+                lane,
+                "queue_depth",
+                queue_depth as f64,
+            );
+    }
+
+    async fn acquire_did_save_followup_lane_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+    ) -> DidSaveFollowupAdmissionOutcome {
+        let queue_wait_started = Instant::now();
+        let mut queued = false;
+        let origin = bsl_runtime::application::ObservabilityOrigin::Lsp.as_str();
+        let lane = bsl_runtime::application::AdmissionLane::DidSaveFollowup.as_str();
+
+        loop {
+            if let Some(disposition) = self
+                .diagnostics_checkpoint_v2(supersession_key, trigger, cancel_token)
+                .await
+            {
+                let queue_wait_elapsed = queued.then_some(queue_wait_started.elapsed());
+                if let Some(queue_wait_elapsed) = queue_wait_elapsed {
+                    self.coordinator
+                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                            origin,
+                            lane,
+                            queue_wait_elapsed,
+                        );
+                }
+                self.remove_did_save_followup_lane_queue_entry_v2(supersession_key.file_id);
+                return DidSaveFollowupAdmissionOutcome::Disposition {
+                    disposition,
+                    queue_wait_elapsed,
+                };
+            }
+
+            let quota = bsl_runtime::application::did_save_followup_lane_quota();
+            let (should_wait, (active_slots, queue_depth)) = {
+                let mut state = self
+                    .diagnostics_did_save_followup_lane_v2
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+                if quota == 0 {
+                    state.queued_set.remove(&supersession_key.file_id);
+                    state.queued_files.retain(|file_id| *file_id != supersession_key.file_id);
+                    let active_slots = state.active_slots;
+                    let queue_depth = state.queued_set.len();
+                    (false, (active_slots, queue_depth))
+                } else {
+                    let front_file = state.queued_files.front().copied();
+                    let can_admit = state.active_slots < quota
+                        && (front_file.is_none() || front_file == Some(supersession_key.file_id));
+                    if can_admit {
+                        if front_file == Some(supersession_key.file_id) {
+                            let _ = state.queued_files.pop_front();
+                            state.queued_set.remove(&supersession_key.file_id);
+                        }
+                        state.active_slots = state.active_slots.saturating_add(1);
+                        let active_slots = state.active_slots;
+                        let queue_depth = state.queued_set.len();
+                        (false, (active_slots, queue_depth))
+                    } else {
+                        if state.queued_set.insert(supersession_key.file_id) {
+                            state.queued_files.push_back(supersession_key.file_id);
+                        }
+                        let active_slots = state.active_slots;
+                        let queue_depth = state.queued_set.len();
+                        queued = true;
+                        (true, (active_slots, queue_depth))
+                    }
+                }
+            };
+            self.record_did_save_followup_lane_saturation_v2(quota, active_slots, queue_depth);
+
+            if quota == 0 {
+                let queue_wait_elapsed = queued.then_some(queue_wait_started.elapsed());
+                if let Some(queue_wait_elapsed) = queue_wait_elapsed {
+                    self.coordinator
+                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                            origin,
+                            lane,
+                            queue_wait_elapsed,
+                        );
+                }
+                self.diagnostics_did_save_followup_lane_notify_v2.notify_waiters();
+                return DidSaveFollowupAdmissionOutcome::Disposition {
+                    disposition: bsl_runtime::application::DiagnosticsDisposition::DisabledByConfig,
+                    queue_wait_elapsed,
+                };
+            }
+
+            if !should_wait {
+                let queue_wait_elapsed = queued.then_some(queue_wait_started.elapsed());
+                if let Some(queue_wait_elapsed) = queue_wait_elapsed {
+                    self.coordinator
+                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                            origin,
+                            lane,
+                            queue_wait_elapsed,
+                        );
+                }
+                return DidSaveFollowupAdmissionOutcome::Admitted {
+                    guard: DidSaveFollowupSlotGuard::new(self.clone()),
+                    queue_wait_elapsed,
+                };
+            }
+
+            self.record_diagnostics_save_followup_wait_state_v2(
+                uri,
+                supersession_key,
+                "runtime_queue_wait",
+                None,
+                None,
+                None,
+                None,
+                None,
+            );
+
+            tokio::select! {
+                _ = self.diagnostics_did_save_followup_lane_notify_v2.notified() => {}
+                _ = tokio::time::sleep(Duration::from_millis(25)) => {}
+            }
+        }
+    }
+
+    fn remove_did_save_followup_lane_queue_entry_v2(&self, file_id: V2FileId) {
+        let quota = bsl_runtime::application::did_save_followup_lane_quota();
+        let snapshot = {
+            let mut state = self
+                .diagnostics_did_save_followup_lane_v2
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let removed = state.queued_set.remove(&file_id);
+            if removed {
+                state.queued_files.retain(|queued_file_id| *queued_file_id != file_id);
+                Some((state.active_slots, state.queued_set.len()))
+            } else {
+                None
+            }
+        };
+        if let Some((active_slots, queue_depth)) = snapshot {
+            self.record_did_save_followup_lane_saturation_v2(quota, active_slots, queue_depth);
+            self.diagnostics_did_save_followup_lane_notify_v2.notify_waiters();
+        }
     }
 
     async fn finalize_diagnostics_save_profile_result_v2(
@@ -703,220 +943,6 @@ impl BslLanguageServer {
         }
     }
 
-    async fn try_execute_save_followup_from_applied_state_v2(
-        &self,
-        uri: &Url,
-        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
-        trigger: bsl_runtime::application::DiagnosticsTrigger,
-        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
-        pipeline_started: Instant,
-        show_hints: bool,
-        flow_sensitive_semantic: bool,
-    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
-        if !matches!(
-            (trigger, supersession_key.profile),
-            (
-                bsl_runtime::application::DiagnosticsTrigger::DidSave,
-                bsl_runtime::application::DiagnosticsProfile::IdleHeavy
-            )
-        ) {
-            return None;
-        }
-
-        self.analysis_v2
-            .cached_file_revision_state(supersession_key.file_id)
-            .filter(|state| state.version == supersession_key.requested_version)?;
-
-        let context = self
-            .build_execution_context_v2(
-                bsl_runtime::application::SemanticOperation::Diagnostics,
-                supersession_key.file_id,
-                None,
-                flow_sensitive_semantic,
-            )
-            .await;
-        let (analysis, _index_snapshot, deps_id) = self.analysis_v2.snapshot_with_deps().await;
-        if analysis
-            .file_version(supersession_key.file_id)
-            .ok()
-            .flatten()
-            != Some(supersession_key.requested_version)
-        {
-            return None;
-        }
-
-        let file_text = analysis
-            .file_text(supersession_key.file_id)
-            .ok()
-            .flatten()?;
-        let line_index = analysis
-            .line_index(supersession_key.file_id)
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| Arc::new(bsl_line_index::LineIndex::new(file_text.as_ref())));
-        let save_fastlane_syntax_artifacts = self
-            .save_fastlane_syntax_artifacts_for_version_v2(
-                supersession_key.file_id,
-                supersession_key.requested_version,
-            )
-            .await;
-        let syntax_work_mode = if save_fastlane_syntax_artifacts.is_some() {
-            Some("reused")
-        } else {
-            Some("recomputed")
-        };
-
-        self.record_diagnostics_save_followup_wait_state_v2(
-            uri,
-            supersession_key,
-            "semantic_work",
-            None,
-            None,
-            None,
-            None,
-            syntax_work_mode,
-        );
-
-        let mut diagnostics = Vec::new();
-        let syntax_elapsed = if let Some(syntax_errors) = save_fastlane_syntax_artifacts {
-            diagnostics.extend(syntax_errors_to_diagnostics(
-                syntax_errors.as_ref(),
-                uri,
-                file_text.as_ref(),
-                line_index.as_ref(),
-            ));
-            None
-        } else {
-            let syntax_started = Instant::now();
-            let syntax_errors = bsl_runtime::application::IntellisenseV2Facade::run_syntax_diagnostics_query_singleflight(
-                &context,
-                &analysis,
-                Some(self.coordinator.as_ref()),
-                supersession_key.file_id,
-            )
-            .ok()?;
-            let syntax_elapsed = syntax_started.elapsed();
-            if let Some(syntax_errors) = syntax_errors {
-                diagnostics.extend(syntax_errors_to_diagnostics(
-                    syntax_errors.as_ref(),
-                    uri,
-                    file_text.as_ref(),
-                    line_index.as_ref(),
-                ));
-            }
-            Some(syntax_elapsed)
-        };
-
-        let semantic_started = Instant::now();
-        let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
-            &context,
-            bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
-            &analysis,
-            Some(self.coordinator.as_ref()),
-            |analysis| {
-                if flow_sensitive_semantic {
-                    analysis.semantic_diagnostics_flow_sensitive_profiled(supersession_key.file_id)
-                } else {
-                    analysis.semantic_diagnostics_profiled(supersession_key.file_id)
-                }
-            },
-        )
-        .ok()?;
-        let semantic_elapsed = semantic_started.elapsed();
-        let duration_from_profile_ms =
-            |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
-        if let Some(profiled) = query {
-            self.coordinator
-                .record_intellisense_v2_semantic_diagnostics_query_breakdown(
-                    duration_from_profile_ms(profiled.profile.inputs_ms),
-                    duration_from_profile_ms(profiled.profile.parse_result_ms),
-                    duration_from_profile_ms(profiled.profile.ir_ms),
-                    duration_from_profile_ms(profiled.profile.collect_ms),
-                    (profiled.profile.flow_sensitive_ms > 0)
-                        .then(|| duration_from_profile_ms(profiled.profile.flow_sensitive_ms)),
-                );
-            for error in profiled.diagnostics.iter() {
-                if !show_hints
-                    && matches!(
-                        error.severity,
-                        bsl_shared::domain::types::DiagnosticSeverity::Hint
-                    )
-                {
-                    continue;
-                }
-                diagnostics.push(semantic_error_to_diagnostic(
-                    error,
-                    file_text.as_ref(),
-                    line_index.as_ref(),
-                ));
-            }
-        }
-
-        if let Some(disposition) = self
-            .diagnostics_publish_checkpoint_v2(
-                supersession_key,
-                trigger,
-                cancel_token,
-                Some(deps_id.as_str()),
-                Some(context.settings.settings_id.as_str()),
-            )
-            .await
-        {
-            return Some(
-                self.finalize_diagnostics_save_profile_result_v2(
-                    uri,
-                    supersession_key,
-                    trigger,
-                    disposition,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    syntax_elapsed,
-                    Some(semantic_elapsed),
-                    None,
-                    syntax_work_mode,
-                    pipeline_started,
-                )
-                .await,
-            );
-        }
-
-        let publish_started = Instant::now();
-        let disposition = self
-            .publish_diagnostics_v2(
-                supersession_key,
-                uri,
-                diagnostics,
-                trigger,
-                supersession_key.profile,
-                pipeline_started,
-            )
-            .await;
-        Some(
-            self.finalize_diagnostics_save_profile_result_v2(
-                uri,
-                supersession_key,
-                trigger,
-                disposition,
-                Some("full"),
-                None,
-                None,
-                None,
-                None,
-                None,
-                syntax_elapsed,
-                Some(semantic_elapsed),
-                Some(publish_started.elapsed()),
-                syntax_work_mode,
-                pipeline_started,
-            )
-            .await,
-        )
-    }
-
     async fn try_execute_save_followup_from_shadow_state_v2(
         &self,
         uri: &Url,
@@ -926,6 +952,7 @@ impl BslLanguageServer {
         pipeline_started: Instant,
         show_hints: bool,
         flow_sensitive_semantic: bool,
+        followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
     ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
         if !matches!(
             (trigger, supersession_key.profile),
@@ -1003,9 +1030,10 @@ impl BslLanguageServer {
         let exec_started_syntax_work_mode = syntax_work_mode;
 
         let followup_call =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 context.origin.as_str(),
+                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
                 Some(self.coordinator.as_ref()),
                 Some(move || {
                     queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
@@ -1210,6 +1238,9 @@ impl BslLanguageServer {
             None,
             reply.syntax_work_mode,
         );
+        if let Some(guard) = followup_lane_guard {
+            guard.release();
+        }
         let publish_started = Instant::now();
         let disposition = self
             .publish_diagnostics_v2(
@@ -1252,6 +1283,7 @@ impl BslLanguageServer {
         pipeline_started: Instant,
         show_hints: bool,
         flow_sensitive_semantic: bool,
+        followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
     ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
         if !matches!(
             (trigger, supersession_key.profile),
@@ -1320,9 +1352,10 @@ impl BslLanguageServer {
         let exec_started_supersession_key = *supersession_key;
         let exec_started_apply_lag = apply_lag;
         let followup_call =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 context.origin.as_str(),
+                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
                 Some(self.coordinator.as_ref()),
                 Some(move || {
                     queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
@@ -1521,6 +1554,9 @@ impl BslLanguageServer {
             None,
             reply.syntax_work_mode,
         );
+        if let Some(guard) = followup_lane_guard {
+            guard.release();
+        }
         let publish_started = Instant::now();
         let disposition = self
             .publish_diagnostics_v2(
@@ -2127,6 +2163,8 @@ impl BslLanguageServer {
         }
 
         let mut followup_syntax_artifact_reuse_allowed = false;
+        let mut followup_admission_queue_wait_elapsed = None;
+        let mut did_save_followup_lane_guard: Option<DidSaveFollowupSlotGuard> = None;
         if save_followup_from_did_save && run_semantic {
             let applied_revision_matches_requested = || {
                 self.analysis_v2
@@ -2143,32 +2181,61 @@ impl BslLanguageServer {
                 None,
                 None,
             );
-            if matches!(
+            let save_fastlane_first_publish_completed = matches!(
                 self.wait_for_save_fastlane_first_publish_v2(&supersession_key, cancel_token)
                     .await,
                 SaveFastlaneFirstPublishWaitOutcome::Published
-            ) {
-                followup_syntax_artifact_reuse_allowed = plan.run_syntax
-                    && self
-                        .save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
-                        .await
-                        .is_some();
-                if applied_revision_matches_requested() {
-                    if let Some(disposition) = self
-                        .try_execute_save_followup_from_applied_state_v2(
+            );
+            match self
+                .acquire_did_save_followup_lane_v2(uri, &supersession_key, trigger, cancel_token)
+                .await
+            {
+                DidSaveFollowupAdmissionOutcome::Admitted {
+                    guard,
+                    queue_wait_elapsed,
+                } => {
+                    followup_admission_queue_wait_elapsed = queue_wait_elapsed;
+                    did_save_followup_lane_guard = Some(guard);
+                }
+                DidSaveFollowupAdmissionOutcome::Disposition {
+                    disposition,
+                    queue_wait_elapsed,
+                } => {
+                    self.record_diagnostics_pipeline_event_v2(
+                        trigger,
+                        supersession_key.profile,
+                        disposition,
+                    );
+                    return self
+                        .finalize_diagnostics_save_profile_result_v2(
                             uri,
                             &supersession_key,
                             trigger,
-                            cancel_token,
+                            disposition,
+                            None,
+                            queue_wait_elapsed,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
+                            None,
                             pipeline_started,
-                            show_hints,
-                            plan.flow_sensitive_semantic,
                         )
-                        .await
-                    {
-                        return disposition;
-                    }
+                        .await;
                 }
+            }
+
+            followup_syntax_artifact_reuse_allowed = save_fastlane_first_publish_completed
+                && plan.run_syntax
+                && self
+                    .save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
+                    .await
+                    .is_some();
+
+            if save_fastlane_first_publish_completed {
                 if let Some(disposition) = self
                     .try_execute_save_followup_from_shadow_state_v2(
                         uri,
@@ -2178,6 +2245,7 @@ impl BslLanguageServer {
                         pipeline_started,
                         show_hints,
                         plan.flow_sensitive_semantic,
+                        did_save_followup_lane_guard.as_ref(),
                     )
                     .await
                 {
@@ -2192,49 +2260,32 @@ impl BslLanguageServer {
                         pipeline_started,
                         show_hints,
                         plan.flow_sensitive_semantic,
+                        did_save_followup_lane_guard.as_ref(),
                     )
                     .await
                 {
                     return disposition;
                 }
-                let wait_reason = if applied_revision_matches_requested() {
-                    "semantic_work"
-                } else {
-                    "apply_lag"
-                };
-                let apply_lag = self
-                    .diagnostics_followup_apply_lag_v2(&supersession_key)
-                    .await;
-                self.record_diagnostics_save_followup_wait_state_v2(
-                    uri,
-                    &supersession_key,
-                    wait_reason,
-                    None,
-                    apply_lag,
-                    None,
-                    None,
-                    None,
-                );
-            } else {
-                let wait_reason = if applied_revision_matches_requested() {
-                    "semantic_work"
-                } else {
-                    "apply_lag"
-                };
-                let apply_lag = self
-                    .diagnostics_followup_apply_lag_v2(&supersession_key)
-                    .await;
-                self.record_diagnostics_save_followup_wait_state_v2(
-                    uri,
-                    &supersession_key,
-                    wait_reason,
-                    None,
-                    apply_lag,
-                    None,
-                    None,
-                    None,
-                );
             }
+
+            let wait_reason = if applied_revision_matches_requested() {
+                "semantic_work"
+            } else {
+                "apply_lag"
+            };
+            let apply_lag = self
+                .diagnostics_followup_apply_lag_v2(&supersession_key)
+                .await;
+            self.record_diagnostics_save_followup_wait_state_v2(
+                uri,
+                &supersession_key,
+                wait_reason,
+                followup_admission_queue_wait_elapsed,
+                apply_lag,
+                None,
+                None,
+                None,
+            );
         }
 
         let context = self
@@ -2245,11 +2296,19 @@ impl BslLanguageServer {
                 plan.flow_sensitive_semantic,
             )
             .await;
-        let prepared = match self
-            .analysis_v2
-            .prepare_stateful_operation(&context, Some(self.coordinator.as_ref()))
-            .await
-        {
+        let prepared = match if save_followup_from_did_save && run_semantic {
+            self.analysis_v2
+                .prepare_stateful_operation_with_admission_lane(
+                    &context,
+                    Some(self.coordinator.as_ref()),
+                    Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
+                )
+                .await
+        } else {
+            self.analysis_v2
+                .prepare_stateful_operation(&context, Some(self.coordinator.as_ref()))
+                .await
+        } {
             Ok(prepared) => prepared,
             Err(outcome) => {
                 let disposition = if matches!(
@@ -2314,6 +2373,7 @@ impl BslLanguageServer {
         let mut followup_runtime_queue_wait_elapsed = if save_followup_from_did_save && run_semantic
         {
             Self::sum_nonzero_durations([
+                followup_admission_queue_wait_elapsed,
                 wait_for_file_version_runtime.and_then(|trace| trace.queue_wait_elapsed),
                 snapshot_with_deps_runtime.queue_wait_elapsed,
             ])
@@ -2513,9 +2573,11 @@ impl BslLanguageServer {
                 } else {
                     None
                 };
-                let syntax_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+                let syntax_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
                     plan.cpu_class,
                     context_for_blocking.origin.as_str(),
+                    (save_followup_from_did_save && run_semantic)
+                        .then_some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
                     Some(self.coordinator.as_ref()),
                     syntax_queue_wait_started_hook,
                     syntax_exec_started_hook,
@@ -2728,9 +2790,11 @@ impl BslLanguageServer {
             } else {
                 None
             };
-            let semantic_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+            let semantic_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
                 plan.cpu_class,
                 context_for_blocking.origin.as_str(),
+                (save_followup_from_did_save && run_semantic)
+                    .then_some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
                 Some(self.coordinator.as_ref()),
                 semantic_queue_wait_started_hook,
                 semantic_exec_started_hook,
@@ -2947,6 +3011,9 @@ impl BslLanguageServer {
                 disposition = disposition.as_str(),
                 "diagnostics_v2: skip publish (final checkpoint)"
             );
+            if let Some(guard) = did_save_followup_lane_guard.as_ref() {
+                guard.release();
+            }
             return self
                 .finalize_diagnostics_save_profile_result_v2(
                     uri,
@@ -2995,6 +3062,9 @@ impl BslLanguageServer {
             );
         }
         let publish_kind = if run_semantic { "full" } else { "syntax_only" };
+        if let Some(guard) = did_save_followup_lane_guard.as_ref() {
+            guard.release();
+        }
         let publish_started = Instant::now();
         let disposition = self
             .publish_diagnostics_v2(

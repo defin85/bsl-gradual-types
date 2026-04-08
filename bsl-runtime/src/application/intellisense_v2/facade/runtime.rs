@@ -84,6 +84,14 @@ impl IntellisenseV2Facade {
                                             waiter.priority.as_work_class(),
                                             exec_elapsed,
                                         );
+                                        if let Some(lane) = waiter.lane {
+                                            coordinator
+                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                                                    waiter.origin.as_str(),
+                                                    lane.as_str(),
+                                                    exec_elapsed,
+                                                );
+                                        }
                                     }
                                     let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
                                     let exec_started = Instant::now();
@@ -112,6 +120,14 @@ impl IntellisenseV2Facade {
                                             waiter.priority.as_work_class(),
                                             exec_elapsed,
                                         );
+                                        if let Some(lane) = waiter.lane {
+                                            coordinator
+                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                                                    waiter.origin.as_str(),
+                                                    lane.as_str(),
+                                                    exec_elapsed,
+                                                );
+                                        }
                                     }
                                     let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
                                     let exec_started = Instant::now();
@@ -423,6 +439,7 @@ impl IntellisenseV2Facade {
                         }
                         Command::GetSnapshotWithDeps {
                             origin,
+                            lane,
                             enqueued_at,
                             progress,
                             reply,
@@ -438,6 +455,14 @@ impl IntellisenseV2Facade {
                                     queue_priority.as_work_class(),
                                     queue_wait_elapsed,
                                 );
+                                if let Some(lane) = lane {
+                                    coordinator
+                                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                                            origin.as_str(),
+                                            lane.as_str(),
+                                            queue_wait_elapsed,
+                                        );
+                                }
                             }
                             if let Some(progress) = progress.as_ref() {
                                 progress.mark_snapshot_with_deps_exec_started(queue_wait_elapsed);
@@ -471,6 +496,14 @@ impl IntellisenseV2Facade {
                                     queue_priority.as_work_class(),
                                     exec_elapsed,
                                 );
+                                if let Some(lane) = lane {
+                                    coordinator
+                                        .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                                            origin.as_str(),
+                                            lane.as_str(),
+                                            exec_elapsed,
+                                        );
+                                }
                             }
                             if let Some(progress) = progress.as_ref() {
                                 progress.mark_snapshot_with_deps_wake_wait(
@@ -482,6 +515,7 @@ impl IntellisenseV2Facade {
                         }
                         Command::WaitForFileVersion {
                             origin,
+                            lane,
                             enqueued_at,
                             file_id,
                             min_version,
@@ -498,6 +532,14 @@ impl IntellisenseV2Facade {
                                     queue_priority.as_work_class(),
                                     queue_wait_elapsed,
                                 );
+                                if let Some(lane) = lane {
+                                    coordinator
+                                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                                            origin.as_str(),
+                                            lane.as_str(),
+                                            queue_wait_elapsed,
+                                        );
+                                }
                             }
 
                             match applied_file_revisions.get(&file_id).map(|state| state.version) {
@@ -525,6 +567,14 @@ impl IntellisenseV2Facade {
                                             queue_priority.as_work_class(),
                                             exec_elapsed,
                                         );
+                                        if let Some(lane) = lane {
+                                            coordinator
+                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                                                    origin.as_str(),
+                                                    lane.as_str(),
+                                                    exec_elapsed,
+                                                );
+                                        }
                                     }
                                 }
                                 _ => {
@@ -534,6 +584,7 @@ impl IntellisenseV2Facade {
                                         queue_wait_elapsed,
                                         started_waiting_at: Instant::now(),
                                         origin,
+                                        lane,
                                         priority: queue_priority,
                                     });
                                 }
@@ -566,6 +617,14 @@ impl IntellisenseV2Facade {
                                             waiter.priority.as_work_class(),
                                             exec_elapsed,
                                         );
+                                        if let Some(lane) = waiter.lane {
+                                            coordinator
+                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                                                    waiter.origin.as_str(),
+                                                    lane.as_str(),
+                                                    exec_elapsed,
+                                                );
+                                        }
                                     }
                                     let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
                                     let exec_started = Instant::now();
@@ -714,9 +773,10 @@ impl IntellisenseV2Facade {
 
     pub async fn snapshot_with_deps(&self) -> (AnalysisV2, Arc<IndexSnapshot>, DepsSnapshotId) {
         let reply = self
-            .snapshot_with_deps_with_priority(
+            .snapshot_with_deps_with_priority_and_lane(
                 ObservabilityOrigin::Runtime,
                 RuntimeQueuePriority::Background,
+                None,
                 None,
             )
             .await;
@@ -729,12 +789,24 @@ impl IntellisenseV2Facade {
         priority: RuntimeQueuePriority,
         progress: Option<PrepareStatefulProgress>,
     ) -> GetSnapshotWithDepsReply {
+        self.snapshot_with_deps_with_priority_and_lane(origin, priority, None, progress)
+            .await
+    }
+
+    pub(super) async fn snapshot_with_deps_with_priority_and_lane(
+        &self,
+        origin: ObservabilityOrigin,
+        priority: RuntimeQueuePriority,
+        lane: Option<AdmissionLane>,
+        progress: Option<PrepareStatefulProgress>,
+    ) -> GetSnapshotWithDepsReply {
         let (reply, rx) = oneshot::channel::<GetSnapshotWithDepsReply>();
         if self
             .send_command_with_priority(
                 priority,
                 Command::GetSnapshotWithDeps {
                     origin,
+                    lane,
                     enqueued_at: Instant::now(),
                     progress,
                     reply,
@@ -771,11 +843,12 @@ impl IntellisenseV2Facade {
     /// Operation kind is part of the canonical facade contract and is reserved for
     /// shared policy/observability branching in subsequent migration steps.
     pub async fn wait_for_file_version(&self, file_id: FileId, min_version: i32) -> bool {
-        self.wait_for_file_version_with_priority(
+        self.wait_for_file_version_with_priority_and_lane(
             ObservabilityOrigin::Runtime,
             RuntimeQueuePriority::Background,
             file_id,
             min_version,
+            None,
         )
         .await
         .ready
@@ -788,12 +861,31 @@ impl IntellisenseV2Facade {
         file_id: FileId,
         min_version: i32,
     ) -> WaitForFileVersionReply {
+        self.wait_for_file_version_with_priority_and_lane(
+            origin,
+            priority,
+            file_id,
+            min_version,
+            None,
+        )
+        .await
+    }
+
+    pub(super) async fn wait_for_file_version_with_priority_and_lane(
+        &self,
+        origin: ObservabilityOrigin,
+        priority: RuntimeQueuePriority,
+        file_id: FileId,
+        min_version: i32,
+        lane: Option<AdmissionLane>,
+    ) -> WaitForFileVersionReply {
         let (reply, rx) = oneshot::channel::<WaitForFileVersionReply>();
         if self
             .send_command_with_priority(
                 priority,
                 Command::WaitForFileVersion {
                     origin,
+                    lane,
                     enqueued_at: Instant::now(),
                     file_id,
                     min_version,

@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use super::policy::{
     completion_fastpath_preconditions, interactive_freshness_knobs, should_query_parse_result,
+    AdmissionLane,
 };
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -623,12 +624,14 @@ enum Command {
     },
     GetSnapshotWithDeps {
         origin: ObservabilityOrigin,
+        lane: Option<AdmissionLane>,
         enqueued_at: Instant,
         progress: Option<PrepareStatefulProgress>,
         reply: oneshot::Sender<GetSnapshotWithDepsReply>,
     },
     WaitForFileVersion {
         origin: ObservabilityOrigin,
+        lane: Option<AdmissionLane>,
         enqueued_at: Instant,
         file_id: FileId,
         min_version: i32,
@@ -1055,6 +1058,7 @@ struct PendingWaiter {
     queue_wait_elapsed: Duration,
     started_waiting_at: Instant,
     origin: ObservabilityOrigin,
+    lane: Option<AdmissionLane>,
     priority: RuntimeQueuePriority,
 }
 

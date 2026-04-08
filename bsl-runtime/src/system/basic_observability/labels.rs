@@ -464,6 +464,22 @@ pub(super) fn normalize_work_class_label(class: &str) -> &'static str {
     registry_label(class, WORK_CLASS_REGISTRY, "interactive")
 }
 
+pub(super) fn normalize_runtime_lane_label(lane: &str) -> &'static str {
+    match lane {
+        "did_save_followup" => "did_save_followup",
+        _ => "other",
+    }
+}
+
+pub(super) fn normalize_runtime_lane_saturation_metric_label(metric: &str) -> &'static str {
+    match metric {
+        "active_slots" => "active_slots",
+        "queue_depth" => "queue_depth",
+        "quota" => "quota",
+        _ => "other",
+    }
+}
+
 pub(super) fn normalize_observability_origin_label(origin: &str) -> &'static str {
     registry_label(origin, OBSERVABILITY_ORIGIN_REGISTRY, "runtime")
 }
@@ -496,6 +512,7 @@ pub(super) fn normalize_diagnostics_reason_label(reason: &str) -> &'static str {
         "superseded_version" => "superseded_version",
         "superseded_generation" => "superseded_generation",
         "client_cancel" => "client_cancel",
+        "disabled_by_config" => "disabled_by_config",
         "other_cancel" | "cancelled" => "other_cancel",
         _ => "other_cancel",
     }

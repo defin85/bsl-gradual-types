@@ -113,7 +113,7 @@
         },
         "allowed_reasons": {
           "type": "array",
-          "minItems": 5,
+          "minItems": 6,
           "uniqueItems": true,
           "items": {
             "type": "string",
@@ -122,6 +122,7 @@
               "superseded_version",
               "superseded_generation",
               "client_cancel",
+              "disabled_by_config",
               "other_cancel"
             ]
           }

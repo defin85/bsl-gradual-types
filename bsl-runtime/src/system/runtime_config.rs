@@ -281,6 +281,7 @@ pub enum RuntimeKey {
     IntellisenseV2CompletionMode,
     IntellisenseV2CompletionCanaryPercent,
     IntellisenseV2CompletionQueueCapacity,
+    IntellisenseV2DidSaveFollowupLaneQuota,
     AgentHttpAddr,
     AgentHttpStaticDir,
     AgentStateTtlSecs,
@@ -330,6 +331,7 @@ impl RuntimeKey {
         RuntimeKey::IntellisenseV2CompletionMode,
         RuntimeKey::IntellisenseV2CompletionCanaryPercent,
         RuntimeKey::IntellisenseV2CompletionQueueCapacity,
+        RuntimeKey::IntellisenseV2DidSaveFollowupLaneQuota,
         RuntimeKey::AgentHttpAddr,
         RuntimeKey::AgentHttpStaticDir,
         RuntimeKey::AgentStateTtlSecs,
@@ -584,6 +586,15 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Usize(256)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2DidSaveFollowupLaneQuota => KeySpec {
+                env: "BSL_INTELLISENSE_V2_DID_SAVE_FOLLOWUP_LANE_QUOTA",
+                kind: ValueKind::Usize {
+                    positive_only: false,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Usize(1)),
                 mutability: self.mutability(),
             },
             RuntimeKey::AgentHttpAddr => KeySpec {

@@ -1076,6 +1076,125 @@ fn diagnostics_pipeline_event_exports_low_cardinality_key() {
 }
 
 #[test]
+fn diagnostics_pipeline_disabled_by_config_stays_non_cancellation() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_diagnostics_pipeline_event(
+        "lsp",
+        "did_save",
+        "idle_heavy",
+        "disabled_by_config",
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+    let key = "intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_save_profile_idle_heavy_reason_disabled_by_config";
+    let cancel_histogram_key = "intellisense_v2_diagnostics_pipeline_cancel_sample_origin_lsp_trigger_did_save_profile_idle_heavy_reason_disabled_by_config";
+    assert_eq!(
+        counter_value(counters, key),
+        1,
+        "disabled_by_config must be exported as a first-class diagnostics pipeline reason"
+    );
+    assert_eq!(
+        histogram_count(histograms, cancel_histogram_key),
+        0,
+        "disabled_by_config must not be classified as a cancellation outcome"
+    );
+}
+
+#[test]
+fn runtime_lane_metrics_export_dedicated_lane_family() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+        "lsp",
+        "did_save_followup",
+        Duration::from_millis(7),
+    );
+    observability.record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+        "lsp",
+        "did_save_followup",
+        Duration::from_millis(11),
+    );
+    observability.record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+        "lsp",
+        "did_save_followup",
+        "quota",
+        1.0,
+    );
+    observability.record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+        "lsp",
+        "did_save_followup",
+        "active_slots",
+        0.0,
+    );
+    observability.record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+        "lsp",
+        "did_save_followup",
+        "queue_depth",
+        2.0,
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+    let gauges = gauges(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_lane_queue_wait_total_origin_lsp_lane_did_save_followup"
+        ),
+        1,
+        "dedicated lane queue-wait counter must be exported under canonical lane identity"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_runtime_lane_exec_total_origin_lsp_lane_did_save_followup"
+        ),
+        1,
+        "dedicated lane exec counter must be exported under canonical lane identity"
+    );
+    assert_eq!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_lane_queue_wait_ms_origin_lsp_lane_did_save_followup"
+        ),
+        1,
+        "dedicated lane queue-wait histogram must be exported"
+    );
+    assert_eq!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_lane_exec_ms_origin_lsp_lane_did_save_followup"
+        ),
+        1,
+        "dedicated lane exec histogram must be exported"
+    );
+    assert_eq!(
+        gauges
+            .get("intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_quota")
+            .and_then(|value| value.as_f64()),
+        Some(1.0),
+        "quota gauge must be exported for dedicated runtime lane"
+    );
+    assert_eq!(
+        gauges
+            .get("intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_active_slots")
+            .and_then(|value| value.as_f64()),
+        Some(0.0),
+        "active_slots gauge must be exported for dedicated runtime lane"
+    );
+    assert_eq!(
+        gauges
+            .get("intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_queue_depth")
+            .and_then(|value| value.as_f64()),
+        Some(2.0),
+        "queue_depth gauge must be exported for dedicated runtime lane"
+    );
+}
+
+#[test]
 fn diagnostics_pipeline_event_normalizes_unknown_dimensions() {
     let observability = BasicObservability::default();
     observability.record_intellisense_v2_diagnostics_pipeline_event(

@@ -406,6 +406,45 @@ suite('Observability Incident Bundle Test Suite', () => {
         };
     }
 
+    function sampleDisabledByConfigDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 7,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-5',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 14,
+                        save_cycle_sequence: 8,
+                        diagnostics_generation: 10,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_033_000,
+                        first_publish: {
+                            profile: 'save_fastlane',
+                            publish_kind: 'syntax_only',
+                            outcome: 'published',
+                            elapsed_ms: 88,
+                            syntax_diagnostics_query_ms: 9,
+                        },
+                        followup_publish: {
+                            profile: 'idle_heavy',
+                            publish_kind: 'unknown',
+                            outcome: 'disabled_by_config',
+                            elapsed_ms: 102,
+                            runtime_queue_wait_ms: 17,
+                        },
+                        save_fastlane_outcome: 'published',
+                        idle_heavy_outcome: 'disabled_by_config',
+                        followup_wait_reason: 'runtime_queue_wait',
+                        followup_runtime_queue_wait_ms: 17,
+                        terminal_outcome: 'disabled_by_config',
+                    },
+                ],
+            },
+        };
+    }
+
     test('happy path bundle should contain request-centric incident report and all raw attachments', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
@@ -747,6 +786,27 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(!bundle.summaryMarkdown.includes('apply_lag_ms=0'));
         assert.ok(!bundle.summaryMarkdown.includes('followup_runtime_queue_wait_ms=0'));
         assert.ok(!bundle.summaryMarkdown.includes('followup_apply_lag_ms=0'));
+    });
+
+    test('diagnostics save summary should preserve disabled_by_config as canonical terminal outcome', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleDisabledByConfigDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-5'));
+        assert.ok(bundle.summaryMarkdown.includes('save_fastlane_outcome=published'));
+        assert.ok(bundle.summaryMarkdown.includes('idle_heavy_outcome=disabled_by_config'));
+        assert.ok(bundle.summaryMarkdown.includes('terminal=disabled_by_config'));
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_publish=idle_heavy:unknown:disabled_by_config@102ms')
+        );
+        assert.ok(bundle.summaryMarkdown.includes('followup_wait=runtime_queue_wait'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_runtime_queue_wait_ms=17'));
     });
 
     test('unavailable diagnostics save timeline should stay explicit in bundle status', () => {

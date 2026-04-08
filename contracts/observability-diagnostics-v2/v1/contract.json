@@ -35,6 +35,7 @@
       "superseded_version",
       "superseded_generation",
       "client_cancel",
+      "disabled_by_config",
       "other_cancel"
     ],
     "allowed_cancellation_reasons": [

@@ -327,6 +327,56 @@ impl BasicObservability {
         );
     }
 
+    pub fn record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let lane = normalize_runtime_lane_label(lane);
+        let counter_key =
+            format!("intellisense_v2_runtime_lane_queue_wait_total_origin_{origin}_lane_{lane}");
+        let histogram_key =
+            format!("intellisense_v2_runtime_lane_queue_wait_ms_origin_{origin}_lane_{lane}");
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let lane = normalize_runtime_lane_label(lane);
+        let counter_key =
+            format!("intellisense_v2_runtime_lane_exec_total_origin_{origin}_lane_{lane}");
+        let histogram_key =
+            format!("intellisense_v2_runtime_lane_exec_ms_origin_{origin}_lane_{lane}");
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        saturation_metric: &str,
+        value: f64,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let lane = normalize_runtime_lane_label(lane);
+        let saturation_metric = normalize_runtime_lane_saturation_metric_label(saturation_metric);
+        let key = format!(
+            "intellisense_v2_runtime_lane_saturation_gauge_origin_{origin}_lane_{lane}_metric_{saturation_metric}"
+        );
+        self.metrics.observe(&key, value);
+    }
+
     pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
         self.record_intellisense_v2_query_cancelled_with_origin("runtime", kind);
     }

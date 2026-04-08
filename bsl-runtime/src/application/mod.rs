@@ -10,12 +10,13 @@ pub use bsl_shared::domain::CompletionItem;
 
 pub use intellisense_v2::{
     classify_optional_query, completion_missing_ir_policy_decision, cpu_work_class_for_operation,
-    diagnostics_execution_plan, diagnostics_profiles_for_trigger, scale_aware_document_is_large,
-    should_query_parse_result, spawn_bounded_blocking, spawn_bounded_blocking_with_class,
-    spawn_bounded_blocking_with_class_observed,
+    diagnostics_execution_plan, diagnostics_profiles_for_trigger, did_save_followup_lane_quota,
+    scale_aware_document_is_large, should_query_parse_result, spawn_bounded_blocking,
+    spawn_bounded_blocking_with_class, spawn_bounded_blocking_with_class_observed,
     spawn_bounded_blocking_with_class_observed_call_origin,
     spawn_bounded_blocking_with_class_observed_call_origin_hooks,
-    spawn_bounded_blocking_with_class_observed_origin, CancellationPolicy,
+    spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks,
+    spawn_bounded_blocking_with_class_observed_origin, AdmissionLane, CancellationPolicy,
     CompletionCurrentRevisionSnapshot, CompletionFirstResponseReadiness,
     CompletionFirstResponseSupport, CompletionMissingIrPolicyDecision, CompletionMode,
     CompletionPipelineKnobs, CompletionSupportBundle, CpuWorkClass, DeferredHeavyDiagnosticsReason,

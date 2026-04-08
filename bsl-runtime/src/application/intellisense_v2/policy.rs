@@ -339,6 +339,19 @@ pub enum CpuWorkClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AdmissionLane {
+    DidSaveFollowup,
+}
+
+impl AdmissionLane {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AdmissionLane::DidSaveFollowup => "did_save_followup",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DiagnosticsTrigger {
     DidChange,
     DidOpen,
@@ -387,6 +400,7 @@ pub enum DiagnosticsDisposition {
     SupersededGeneration,
     ClientCancel,
     OtherCancel,
+    DisabledByConfig,
 }
 
 impl DiagnosticsDisposition {
@@ -397,8 +411,19 @@ impl DiagnosticsDisposition {
             DiagnosticsDisposition::SupersededGeneration => "superseded_generation",
             DiagnosticsDisposition::ClientCancel => "client_cancel",
             DiagnosticsDisposition::OtherCancel => "other_cancel",
+            DiagnosticsDisposition::DisabledByConfig => "disabled_by_config",
         }
     }
+}
+
+pub fn did_save_followup_lane_quota() -> usize {
+    let (quota, _) = read_clamped_usize(
+        RuntimeKey::IntellisenseV2DidSaveFollowupLaneQuota,
+        1,
+        0,
+        1024,
+    );
+    quota
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -698,9 +723,10 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
-    spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+    spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
         class,
         origin,
+        None,
         observability,
         None::<fn()>,
         None::<fn(Duration)>,
@@ -712,6 +738,33 @@ where
 pub async fn spawn_bounded_blocking_with_class_observed_call_origin_hooks<F, R, Q, S>(
     class: CpuWorkClass,
     origin: &'static str,
+    observability: Option<&SystemCoordinator>,
+    on_queue_wait_started: Option<Q>,
+    on_exec_started: Option<S>,
+    f: F,
+) -> ObservedBlockingCall<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+    Q: FnOnce(),
+    S: FnOnce(Duration),
+{
+    spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
+        class,
+        origin,
+        None,
+        observability,
+        on_queue_wait_started,
+        on_exec_started,
+        f,
+    )
+    .await
+}
+
+pub async fn spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks<F, R, Q, S>(
+    class: CpuWorkClass,
+    origin: &'static str,
+    lane: Option<AdmissionLane>,
     observability: Option<&SystemCoordinator>,
     on_queue_wait_started: Option<Q>,
     on_exec_started: Option<S>,
@@ -752,6 +805,13 @@ where
             cpu_class_label(class),
             queue_wait_elapsed,
         );
+        if let Some(lane) = lane {
+            coordinator.record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                origin,
+                lane.as_str(),
+                queue_wait_elapsed,
+            );
+        }
     }
     emit_runtime_saturation_gauges(origin, observability);
     if let Some(callback) = on_exec_started {
@@ -767,6 +827,13 @@ where
             cpu_class_label(class),
             exec_elapsed,
         );
+        if let Some(lane) = lane {
+            coordinator.record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                origin,
+                lane.as_str(),
+                exec_elapsed,
+            );
+        }
     }
     drop(permit);
     emit_runtime_saturation_gauges(origin, observability);

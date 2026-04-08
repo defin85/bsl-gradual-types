@@ -721,6 +721,44 @@ impl SystemCoordinator {
             .record_intellisense_v2_runtime_exec_class_latency_with_origin(origin, class, duration);
     }
 
+    pub fn record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                origin, lane, duration,
+            );
+    }
+
+    pub fn record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_lane_exec_latency_with_origin(origin, lane, duration);
+    }
+
+    pub fn record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+        &self,
+        origin: &str,
+        lane: &str,
+        saturation_metric: &str,
+        value: f64,
+    ) {
+        self.observability
+            .record_intellisense_v2_runtime_lane_saturation_gauge_with_origin(
+                origin,
+                lane,
+                saturation_metric,
+                value,
+            );
+    }
+
     pub fn record_intellisense_v2_query_cancelled(&self, kind: &str) {
         self.record_intellisense_v2_query_cancelled_with_origin("runtime", kind);
     }

@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::task::JoinHandle;
 use tower_lsp::Client;
 
@@ -333,6 +333,9 @@ pub struct BslLanguageServer {
         Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) diagnostics_save_timeline_store: Arc<StdMutex<DiagnosticsSaveTimelineStore>>,
+    pub(crate) diagnostics_did_save_followup_lane_v2:
+        Arc<StdMutex<DiagnosticsDidSaveFollowupLaneStateV2>>,
+    pub(crate) diagnostics_did_save_followup_lane_notify_v2: Arc<Notify>,
     pub(crate) next_diagnostics_save_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) next_document_symbol_request_epoch_v2: Arc<AtomicU64>,
     pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,
@@ -380,6 +383,13 @@ pub(crate) struct DiagnosticsSaveTimelineStore {
         HashMap<DiagnosticsSaveTimelineCycleKey, crate::types::DiagnosticsSaveTimelineTrace>,
     pub terminal_keys: DiagnosticsSaveTimelineTerminalKeyStore,
     pub traces: VecDeque<crate::types::DiagnosticsSaveTimelineTrace>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DiagnosticsDidSaveFollowupLaneStateV2 {
+    pub active_slots: usize,
+    pub queued_files: VecDeque<V2FileId>,
+    pub queued_set: HashSet<V2FileId>,
 }
 
 #[derive(Debug, Clone)]

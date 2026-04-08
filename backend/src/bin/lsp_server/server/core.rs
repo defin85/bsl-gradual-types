@@ -564,6 +564,10 @@ impl BslLanguageServer {
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
             diagnostics_save_timeline_store: diagnostics_save_timeline_store.clone(),
+            diagnostics_did_save_followup_lane_v2: Arc::new(StdMutex::new(
+                super::DiagnosticsDidSaveFollowupLaneStateV2::default(),
+            )),
+            diagnostics_did_save_followup_lane_notify_v2: Arc::new(tokio::sync::Notify::new()),
             next_diagnostics_save_timeline_trace_id: next_diagnostics_save_timeline_trace_id
                 .clone(),
             next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),

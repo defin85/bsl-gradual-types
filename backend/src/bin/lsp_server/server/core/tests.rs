@@ -3732,6 +3732,60 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
         "queued shadow follow-up must still reuse save_fastlane syntax artifacts after runtime contention, trace={trace:?}"
     );
 
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    let gauges = metrics
+        .get("gauges")
+        .and_then(|value| value.as_object())
+        .expect("metrics.gauges object");
+    assert!(
+        counters
+            .get("intellisense_v2_runtime_lane_queue_wait_total_origin_lsp_lane_did_save_followup")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "queued shadow follow-up must export dedicated lane queue-wait counter, metrics={metrics:?}"
+    );
+    assert!(
+        counters
+            .get("intellisense_v2_runtime_lane_exec_total_origin_lsp_lane_did_save_followup")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "queued shadow follow-up must export dedicated lane exec counter, metrics={metrics:?}"
+    );
+    assert!(
+        histograms
+            .get("intellisense_v2_runtime_lane_queue_wait_ms_origin_lsp_lane_did_save_followup")
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "queued shadow follow-up must export dedicated lane queue-wait histogram, metrics={metrics:?}"
+    );
+    assert!(
+        histograms
+            .get("intellisense_v2_runtime_lane_exec_ms_origin_lsp_lane_did_save_followup")
+            .and_then(|value| value.get("count"))
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "queued shadow follow-up must export dedicated lane exec histogram, metrics={metrics:?}"
+    );
+    for gauge_key in [
+        "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_quota",
+        "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_active_slots",
+        "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_queue_depth",
+    ] {
+        assert!(
+            gauges.get(gauge_key).and_then(|value| value.as_f64()).is_some(),
+            "queued shadow follow-up must export {gauge_key}, metrics={metrics:?}"
+        );
+    }
+
     drain_task.abort();
 }
 
@@ -4007,6 +4061,902 @@ async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
         "top-level follow-up trace must surface apply lag fact for operator-facing summary, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p8_did_save_followup_quota_zero_disables_future_admissions_without_revoking_admitted_work() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE_A: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяА);\nКонецПроцедуры\n";
+    const V2_FIXTURE_B: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяБ);\nКонецПроцедуры\n";
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 10_000;
+
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+    let _quota_guard = EnvVarGuard::set_with_reload(
+        "BSL_INTELLISENSE_V2_DID_SAVE_FOLLOWUP_LANE_QUOTA",
+        "1",
+        true,
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let uri_a = Url::parse("file:///did_save_followup_quota_zero_a_fixture.bsl").expect("uri a");
+    let uri_b = Url::parse("file:///did_save_followup_quota_zero_b_fixture.bsl").expect("uri b");
+    for uri in [&uri_a, &uri_b] {
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didOpen")
+                    .params(
+                        serde_json::to_value(DidOpenTextDocumentParams {
+                            text_document: TextDocumentItem {
+                                uri: uri.clone(),
+                                language_id: "bsl".to_string(),
+                                version: 1,
+                                text: V1_FIXTURE.to_string(),
+                            },
+                        })
+                        .expect("DidOpenTextDocumentParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+    }
+
+    for (uri, text) in [(&uri_a, V2_FIXTURE_A), (&uri_b, V2_FIXTURE_B)] {
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didChange")
+                    .params(
+                        serde_json::to_value(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: uri.clone(),
+                                version: 2,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: None,
+                                range_length: None,
+                                text: text.to_string(),
+                            }],
+                        })
+                        .expect("DidChangeTextDocumentParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+    }
+    while published_rx.try_recv().is_ok() {}
+
+    let background_holder_barrier = Arc::new(std::sync::Barrier::new(2));
+    let (background_holder_ready_tx, background_holder_ready_rx) = tokio::sync::oneshot::channel();
+    let background_holder_barrier_for_task = background_holder_barrier.clone();
+    let background_holder_coordinator = coordinator.clone();
+    let background_holder = tokio::spawn(async move {
+        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(background_holder_coordinator.as_ref()),
+            move || {
+                let _ = background_holder_ready_tx.send(());
+                background_holder_barrier_for_task.wait();
+            },
+        )
+        .await;
+    });
+    tokio::time::timeout(Duration::from_secs(3), background_holder_ready_rx)
+        .await
+        .expect("background holder must start before didSave follow-up")
+        .expect("background holder ready signal");
+
+    let did_save_a_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_a.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification for file A");
+    assert!(did_save_a_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri_a && params.version == Some(2) {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane first publish for file A must arrive");
+
+    let did_save_b_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_b.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification for file B");
+    assert!(did_save_b_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri_b && params.version == Some(2) {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane first publish for file B must arrive");
+
+    tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_714, 16).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_b.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("followup_wait_reason")
+                        .and_then(|value| value.as_str())
+                        == Some("runtime_queue_wait")
+                    && trace.get("followup_publish").is_none()
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("file B follow-up must queue behind the admitted dedicated lane slot");
+
+    let _quota_disable_guard = EnvVarGuard::set_with_reload(
+        "BSL_INTELLISENSE_V2_DID_SAVE_FOLLOWUP_LANE_QUOTA",
+        "0",
+        true,
+    );
+    background_holder_barrier.wait();
+    tokio::time::timeout(Duration::from_secs(3), background_holder)
+        .await
+        .expect("background holder task timeout")
+        .expect("background holder join");
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri_a || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("already admitted file A follow-up must still publish full diagnostics");
+
+    let timeline = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_715, 16).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            let file_a_ready = traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_a.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("idle_heavy_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("published")
+            });
+            let file_b_ready = traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_b.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("idle_heavy_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("disabled_by_config")
+                    && trace
+                        .get("terminal_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("disabled_by_config")
+            });
+            if file_a_ready && file_b_ready {
+                break timeline;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("timeline must reflect admitted-vs-queued quota-zero outcomes");
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace_a = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri_a.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching file A diagnostics save timeline trace");
+    let trace_b = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri_b.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching file B diagnostics save timeline trace");
+    assert_eq!(
+        trace_a
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published"),
+        "already admitted file A follow-up must stay published after later quota disable, trace={trace_a:?}"
+    );
+    assert!(
+        trace_a.get("followup_publish").is_some(),
+        "already admitted file A follow-up must still emit a full publish trace, trace={trace_a:?}"
+    );
+    assert_eq!(
+        trace_b
+            .get("save_fastlane_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published"),
+        "quota=0 must not affect file B save_fastlane first publish, trace={trace_b:?}"
+    );
+    assert_eq!(
+        trace_b
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("disabled_by_config"),
+        "queued file B follow-up must re-check quota at admission and terminate explicitly, trace={trace_b:?}"
+    );
+    assert_eq!(
+        trace_b
+            .get("terminal_outcome")
+            .and_then(|value| value.as_str()),
+        Some("disabled_by_config"),
+        "file B terminal outcome must preserve disabled_by_config canonically, trace={trace_b:?}"
+    );
+    let trace_b_followup_publish = trace_b
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .expect("disabled file B follow-up must still emit canonical terminal trace");
+    assert_eq!(
+        trace_b_followup_publish
+            .get("outcome")
+            .and_then(|value| value.as_str()),
+        Some("disabled_by_config"),
+        "disabled file B follow-up trace must preserve disabled_by_config canonically, trace={trace_b:?}"
+    );
+    assert_eq!(
+        trace_b_followup_publish
+            .get("publish_kind")
+            .and_then(|value| value.as_str()),
+        Some("unknown"),
+        "disabled file B follow-up trace must stay non-publish-shaped even when represented terminally, trace={trace_b:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        counters
+            .get("intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_did_save_profile_idle_heavy_reason_disabled_by_config")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "quota=0 follow-up disable must flow through shared diagnostics pipeline outcome counters, metrics={metrics:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p8_did_save_followup_default_quota_keeps_single_slot_latest_only_cross_file_fairness() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE_A: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяА2);\nКонецПроцедуры\n";
+    const V3_FIXTURE_A: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяА3);\nКонецПроцедуры\n";
+    const V4_FIXTURE_A: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяА4);\nКонецПроцедуры\n";
+    const V2_FIXTURE_B: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяБ2);\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let uri_a =
+        Url::parse("file:///did_save_followup_default_quota_fairness_a_fixture.bsl").expect("uri a");
+    let uri_b =
+        Url::parse("file:///did_save_followup_default_quota_fairness_b_fixture.bsl").expect("uri b");
+    for uri in [&uri_a, &uri_b] {
+        let did_open_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didOpen")
+                    .params(
+                        serde_json::to_value(DidOpenTextDocumentParams {
+                            text_document: TextDocumentItem {
+                                uri: uri.clone(),
+                                language_id: "bsl".to_string(),
+                                version: 1,
+                                text: V1_FIXTURE.to_string(),
+                            },
+                        })
+                        .expect("DidOpenTextDocumentParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("didOpen notification");
+        assert!(did_open_response.is_none(), "didOpen is a notification");
+    }
+
+    let did_change_a_v2 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri_a.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE_A.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange A v2 notification");
+    assert!(did_change_a_v2.is_none(), "didChange is a notification");
+    let did_change_b_v2 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri_b.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE_B.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange B v2 notification");
+    assert!(did_change_b_v2.is_none(), "didChange is a notification");
+    while published_rx.try_recv().is_ok() {}
+
+    let background_holder_barrier = Arc::new(std::sync::Barrier::new(2));
+    let (background_holder_ready_tx, background_holder_ready_rx) = tokio::sync::oneshot::channel();
+    let background_holder_barrier_for_task = background_holder_barrier.clone();
+    let background_holder_coordinator = coordinator.clone();
+    let background_holder = tokio::spawn(async move {
+        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(background_holder_coordinator.as_ref()),
+            move || {
+                let _ = background_holder_ready_tx.send(());
+                background_holder_barrier_for_task.wait();
+            },
+        )
+        .await;
+    });
+    tokio::time::timeout(Duration::from_secs(3), background_holder_ready_rx)
+        .await
+        .expect("background holder must start before didSave follow-up")
+        .expect("background holder ready signal");
+
+    let did_save_a_v2 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_a.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave A v2 notification");
+    assert!(did_save_a_v2.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri_a && params.version == Some(2) {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane first publish for A v2 must arrive");
+
+    let did_save_b_v2 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_b.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave B v2 notification");
+    assert!(did_save_b_v2.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri_b && params.version == Some(2) {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane first publish for B v2 must arrive");
+
+    tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_716, 24).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_b.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("followup_wait_reason")
+                        .and_then(|value| value.as_str())
+                        == Some("runtime_queue_wait")
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("default quota must leave B queued behind the single admitted A follow-up");
+
+    let did_change_a_v3 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri_a.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V3_FIXTURE_A.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange A v3 notification");
+    assert!(did_change_a_v3.is_none(), "didChange is a notification");
+    let did_save_a_v3 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_a.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave A v3 notification");
+    assert!(did_save_a_v3.is_none(), "didSave is a notification");
+
+    let did_change_a_v4 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri_a.clone(),
+                            version: 4,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V4_FIXTURE_A.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange A v4 notification");
+    assert!(did_change_a_v4.is_none(), "didChange is a notification");
+    let did_save_a_v4 = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri_a.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave A v4 notification");
+    assert!(did_save_a_v4.is_none(), "didSave is a notification");
+
+    background_holder_barrier.wait();
+    tokio::time::timeout(Duration::from_secs(3), background_holder)
+        .await
+        .expect("background holder task timeout")
+        .expect("background holder join");
+
+    let publish_order = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut order = Vec::new();
+        let mut saw_b_v2 = false;
+        let mut saw_a_v4 = false;
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if !params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                continue;
+            }
+            let version = params.version.unwrap_or_default();
+            if params.uri == uri_b && version == 2 && !saw_b_v2 {
+                saw_b_v2 = true;
+                order.push(("b", version));
+            } else if params.uri == uri_a && version == 4 && !saw_a_v4 {
+                saw_a_v4 = true;
+                order.push(("a", version));
+            }
+            if saw_b_v2 && saw_a_v4 {
+                break order;
+            }
+        }
+    })
+    .await
+    .expect("queued B v2 and latest A v4 full publishes must both complete");
+    assert_eq!(
+        publish_order,
+        vec![("b", 2), ("a", 4)],
+        "default single-slot dedicated lane must let queued B v2 run before noisy-file A v4 and must shed stale same-file work instead of raw FIFO blocking, order={publish_order:?}"
+    );
+
+    let timeline = tokio::time::timeout(Duration::from_secs(6), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_717, 24).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            let has_b_v2 = traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_b.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace
+                        .get("idle_heavy_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("published")
+            });
+            let has_a_v4 = traces.iter().any(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri_a.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(4)
+                    && trace
+                        .get("idle_heavy_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("published")
+            });
+            if has_b_v2 && has_a_v4 {
+                break timeline;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("timeline must show B v2 published and latest A v4 published");
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    if let Some(trace_a_v3) = traces.iter().find(|trace| {
+        trace.get("uri").and_then(|value| value.as_str()) == Some(uri_a.as_str())
+            && trace
+                .get("requested_version")
+                .and_then(|value| value.as_i64())
+                == Some(3)
+    }) {
+        let followup_outcome = trace_a_v3
+            .get("followup_publish")
+            .and_then(|value| value.get("outcome"))
+            .and_then(|value| value.as_str());
+        assert_ne!(
+            followup_outcome,
+            Some("published"),
+            "older queued A v3 follow-up must not survive as a full publish once A v4 supersedes it, trace={trace_a_v3:?}"
+        );
+    }
+
+    let metrics = coordinator.observability_metrics();
+    let gauges = metrics
+        .get("gauges")
+        .and_then(|value| value.as_object())
+        .expect("metrics.gauges object");
+    assert_eq!(
+        gauges
+            .get("intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_quota")
+            .and_then(|value| value.as_f64()),
+        Some(1.0),
+        "default dedicated lane quota must stay operator-visible as 1 without overrides, metrics={metrics:?}"
     );
 
     drain_task.abort();

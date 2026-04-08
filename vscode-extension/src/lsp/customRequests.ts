@@ -736,6 +736,8 @@ export interface DiagnosticsSaveTimelinePublishTrace {
     outcome: string;
     elapsed_ms: number;
     syntax_work_mode?: 'reused' | 'recomputed';
+    runtime_queue_wait_ms?: number;
+    apply_lag_ms?: number;
     blocking_queue_wait_ms?: number;
     wait_for_file_version_ms?: number;
     snapshot_with_deps_ms?: number;
@@ -757,7 +759,9 @@ export interface DiagnosticsSaveTimelineTrace {
     save_fastlane_outcome?: string;
     idle_heavy_outcome?: string;
     followup_syntax_work_mode?: 'reused' | 'recomputed';
-    followup_wait_reason?: 'apply_lag' | 'semantic_work' | 'pending_publish' | 'superseded';
+    followup_wait_reason?: 'apply_lag' | 'runtime_queue_wait' | 'semantic_work' | 'pending_publish' | 'superseded';
+    followup_runtime_queue_wait_ms?: number;
+    followup_apply_lag_ms?: number;
     followup_wait_for_file_version_ms?: number;
     followup_snapshot_with_deps_ms?: number;
     terminal_outcome?: string;

@@ -322,6 +322,16 @@ fn cpu_bound_semaphore() -> Arc<Semaphore> {
         .clone()
 }
 
+#[cfg(debug_assertions)]
+fn background_reserved_only_for_test() -> bool {
+    std::env::var_os("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY").is_some()
+}
+
+#[cfg(not(debug_assertions))]
+fn background_reserved_only_for_test() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuWorkClass {
     Interactive,
@@ -518,7 +528,19 @@ impl CpuBoundBudget {
         Self::with_total_permits(permits)
     }
 
+    #[allow(dead_code)]
     async fn acquire(&self, class: CpuWorkClass) -> tokio::sync::OwnedSemaphorePermit {
+        self.acquire_with_queue_wait_hook::<fn()>(class, None).await
+    }
+
+    async fn acquire_with_queue_wait_hook<Q>(
+        &self,
+        class: CpuWorkClass,
+        on_queue_wait_started: Option<Q>,
+    ) -> tokio::sync::OwnedSemaphorePermit
+    where
+        Q: FnOnce(),
+    {
         let (own_reserved, other_reserved, own_waiters, other_waiters) = match class {
             CpuWorkClass::Interactive => (
                 self.interactive_reserved.clone(),
@@ -536,9 +558,18 @@ impl CpuBoundBudget {
 
         own_waiters.fetch_add(1, Ordering::AcqRel);
         let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
-        let can_borrow = !other_has_waiters;
+        let background_reserved_only =
+            matches!(class, CpuWorkClass::Background) && background_reserved_only_for_test();
+        let can_borrow = !other_has_waiters && !background_reserved_only;
         // Keep shared permits biased toward interactive work when interactive queue is non-empty.
-        let can_take_shared = matches!(class, CpuWorkClass::Interactive) || !other_has_waiters;
+        let can_take_shared = !background_reserved_only
+            && (matches!(class, CpuWorkClass::Interactive) || !other_has_waiters);
+        let mut on_queue_wait_started = on_queue_wait_started;
+        let mut mark_queue_wait_started = || {
+            if let Some(callback) = on_queue_wait_started.take() {
+                callback();
+            }
+        };
 
         let permit = if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
             permit
@@ -549,6 +580,7 @@ impl CpuBoundBudget {
                 if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
                     permit
                 } else {
+                    mark_queue_wait_started();
                     tokio::select! {
                         permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
                         permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
@@ -556,6 +588,7 @@ impl CpuBoundBudget {
                     }
                 }
             } else {
+                mark_queue_wait_started();
                 tokio::select! {
                     permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
                     permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
@@ -565,12 +598,14 @@ impl CpuBoundBudget {
             if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
                 permit
             } else {
+                mark_queue_wait_started();
                 tokio::select! {
                     permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
                     permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
                 }
             }
         } else {
+            mark_queue_wait_started();
             own_reserved
                 .clone()
                 .acquire_owned()
@@ -663,17 +698,52 @@ where
     F: FnOnce() -> R + Send + 'static,
     R: Send + 'static,
 {
+    spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+        class,
+        origin,
+        observability,
+        None::<fn()>,
+        None::<fn(Duration)>,
+        f,
+    )
+    .await
+}
+
+pub async fn spawn_bounded_blocking_with_class_observed_call_origin_hooks<F, R, Q, S>(
+    class: CpuWorkClass,
+    origin: &'static str,
+    observability: Option<&SystemCoordinator>,
+    on_queue_wait_started: Option<Q>,
+    on_exec_started: Option<S>,
+    f: F,
+) -> ObservedBlockingCall<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+    Q: FnOnce(),
+    S: FnOnce(Duration),
+{
     let queue_wait_started = Instant::now();
     let permit = if std::thread::available_parallelism()
         .map(|parallelism| parallelism.get() >= 2)
         .unwrap_or(true)
     {
-        cpu_bound_budget().acquire(class).await
-    } else {
-        cpu_bound_semaphore()
-            .acquire_owned()
+        cpu_bound_budget()
+            .acquire_with_queue_wait_hook(class, on_queue_wait_started)
             .await
-            .expect("cpu-bound semaphore closed")
+    } else {
+        let semaphore = cpu_bound_semaphore();
+        if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+            permit
+        } else {
+            if let Some(callback) = on_queue_wait_started {
+                callback();
+            }
+            semaphore
+                .acquire_owned()
+                .await
+                .expect("cpu-bound semaphore closed")
+        }
     };
     let queue_wait_elapsed = queue_wait_started.elapsed();
     if let Some(coordinator) = observability {
@@ -684,6 +754,9 @@ where
         );
     }
     emit_runtime_saturation_gauges(origin, observability);
+    if let Some(callback) = on_exec_started {
+        callback(queue_wait_elapsed);
+    }
 
     let exec_started = Instant::now();
     let join_result = tokio::task::spawn_blocking(f).await;

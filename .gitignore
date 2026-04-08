@@ -95,6 +95,7 @@ backend/tests/perf/reports/*
 !backend/tests/perf/reports/stabilize-completion-front-edge-readiness-gate.md
 !backend/tests/perf/reports/stabilize-completion-front-edge-real-conf-big-revision-churn-completion-perf-live.json
 !backend/tests/perf/reports/stabilize-completion-front-edge-real-conf-big-revision-churn-completion-perf-live.md
+!backend/tests/perf/reports/refactor-09-diagnostics-save-followup-runtime-contention-bounding-real-conf-big-did-save-diagnostics-followup-runtime-live.json
 
 # Documentation build
 docs/_build/

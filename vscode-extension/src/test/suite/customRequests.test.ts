@@ -323,7 +323,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 6,
+                        version: 7,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -338,6 +338,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                     publish_kind: 'syntax_only',
                                     outcome: 'published',
                                     elapsed_ms: 32,
+                                    runtime_queue_wait_ms: 5,
                                     blocking_queue_wait_ms: 14,
                                     syntax_diagnostics_query_ms: 9,
                                     publish_wait_ms: 1,
@@ -348,6 +349,8 @@ suite('LSP Custom Requests Test Suite', () => {
                                     outcome: 'published',
                                     elapsed_ms: 87,
                                     syntax_work_mode: 'recomputed',
+                                    runtime_queue_wait_ms: 6,
+                                    apply_lag_ms: 21,
                                     wait_for_file_version_ms: 12,
                                     snapshot_with_deps_ms: 8,
                                     syntax_diagnostics_query_ms: 10,
@@ -358,6 +361,8 @@ suite('LSP Custom Requests Test Suite', () => {
                                 idle_heavy_outcome: 'published',
                                 followup_syntax_work_mode: 'recomputed',
                                 followup_wait_reason: 'pending_publish',
+                                followup_runtime_queue_wait_ms: 6,
+                                followup_apply_lag_ms: 21,
                                 followup_wait_for_file_version_ms: 12,
                                 followup_snapshot_with_deps_ms: 8,
                                 terminal_outcome: 'published',
@@ -705,16 +710,20 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 6);
+        assert.strictEqual(result.response.version, 7);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
         assert.strictEqual(result.response.traces[0].first_publish?.profile, 'save_fastlane');
         assert.strictEqual(result.response.traces[0].first_publish?.blocking_queue_wait_ms, 14);
         assert.strictEqual(result.response.traces[0].followup_publish?.profile, 'idle_heavy');
+        assert.strictEqual(result.response.traces[0].followup_publish?.runtime_queue_wait_ms, 6);
+        assert.strictEqual(result.response.traces[0].followup_publish?.apply_lag_ms, 21);
         assert.strictEqual(result.response.traces[0].followup_publish?.syntax_work_mode, 'recomputed');
         assert.strictEqual(result.response.traces[0].followup_syntax_work_mode, 'recomputed');
         assert.strictEqual(result.response.traces[0].followup_wait_reason, 'pending_publish');
+        assert.strictEqual(result.response.traces[0].followup_runtime_queue_wait_ms, 6);
+        assert.strictEqual(result.response.traces[0].followup_apply_lag_ms, 21);
     });
 
     test('getDiagnosticsSaveTimeline should fail-closed on Method not found', async function() {
@@ -771,7 +780,7 @@ suite('LSP Custom Requests Test Suite', () => {
         sendRequestStub.resetBehavior();
         sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
         sendRequestStub.onSecondCall().resolves({
-            version: 6,
+            version: 7,
             traces: [],
         });
 

@@ -3285,8 +3285,29 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         .expect("didChange notification");
     assert!(did_change_response.is_none(), "didChange is a notification");
 
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect(
+        "didChange must materialize ready parse snapshot before shadow-state fallback is disabled",
+    );
     server
-        .latest_ready_parse_snapshots_v2
+        .latest_document_shadow_state_v2
         .write()
         .await
         .remove(&file_id);
@@ -3311,32 +3332,25 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         .expect("didSave notification");
     assert!(did_save_response.is_none(), "didSave is a notification");
 
-    tokio::time::timeout(Duration::from_millis(800), async {
+    tokio::time::timeout(Duration::from_millis(2500), async {
         loop {
-            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_707, 8).await;
-            let traces = timeline
-                .get("traces")
-                .and_then(|value| value.as_array())
-                .expect("diagnostics save timeline traces");
-            if traces.iter().any(|trace| {
-                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
-                    && trace
-                        .get("requested_version")
-                        .and_then(|value| value.as_i64())
-                        == Some(2)
-                    && trace
-                        .get("first_publish")
-                        .and_then(|value| value.get("profile"))
-                        .and_then(|value| value.as_str())
-                        == Some("save_fastlane")
-            }) {
-                break;
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            break params;
         }
     })
     .await
     .expect("save_fastlane must still publish before stalled follow-up attribution");
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
 
     let trace = tokio::time::timeout(Duration::from_secs(6), async {
         loop {
@@ -3380,7 +3394,14 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     assert_eq!(
         followup_wait_reason,
         Some("apply_lag"),
-        "in-flight heavy follow-up must expose apply_lag until writer-owned requested version is actually applied, trace={trace:?}"
+        "when shadow-state and ready-artifact follow-up paths are unavailable, in-flight heavy follow-up must expose apply_lag until writer-owned requested version is actually applied, trace={trace:?}"
+    );
+    assert!(
+        trace
+            .get("followup_apply_lag_ms")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "apply-lag fallback trace must expose explicit followup_apply_lag_ms, trace={trace:?}"
     );
     assert!(
         trace.get("idle_heavy_outcome").is_none(),
@@ -3389,6 +3410,326 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     assert!(
         trace.get("terminal_outcome").is_none(),
         "timeline must keep stalled heavy follow-up visible as active, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queued_shadow_followup()
+{
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 10_000;
+
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let uri =
+        Url::parse("file:///did_save_followup_runtime_queue_wait_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    while published_rx.try_recv().is_ok() {}
+
+    let background_holder_barrier = Arc::new(std::sync::Barrier::new(2));
+    let (background_holder_ready_tx, background_holder_ready_rx) = tokio::sync::oneshot::channel();
+    let background_holder_barrier_for_task = background_holder_barrier.clone();
+    let background_holder_coordinator = coordinator.clone();
+    let background_holder = tokio::spawn(async move {
+        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(background_holder_coordinator.as_ref()),
+            move || {
+                let _ = background_holder_ready_tx.send(());
+                background_holder_barrier_for_task.wait();
+            },
+        )
+        .await;
+    });
+    tokio::time::timeout(Duration::from_secs(3), background_holder_ready_rx)
+        .await
+        .expect("background holder must start before didSave follow-up")
+        .expect("background holder ready signal");
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let first_publish = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri == uri && params.version == Some(2) {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("save_fastlane first publish must arrive before queued follow-up");
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "save_fastlane first publish must stay syntax-only when diagnostics are present while queued follow-up waits, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    let queued_trace = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_712, 8).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace.get("followup_publish").is_none()
+                    && trace
+                        .get("followup_wait_reason")
+                        .and_then(|value| value.as_str())
+                        == Some("runtime_queue_wait")
+            }) {
+                break trace.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("queued shadow follow-up must expose runtime_queue_wait while permit is blocked");
+    assert_eq!(
+        queued_trace
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        None,
+        "queued shadow follow-up must remain in-flight before background permit is released, trace={queued_trace:?}"
+    );
+    assert_eq!(
+        queued_trace
+            .get("followup_runtime_queue_wait_ms")
+            .and_then(|value| value.as_u64()),
+        None,
+        "in-flight runtime_queue_wait attribution must not fabricate elapsed queue time before permit acquisition, trace={queued_trace:?}"
+    );
+
+    background_holder_barrier.wait();
+    tokio::time::timeout(Duration::from_secs(3), background_holder)
+        .await
+        .expect("background holder task timeout")
+        .expect("background holder join");
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect(
+        "queued shadow follow-up must eventually publish full diagnostics after permit release",
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_713, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let full_publish = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .expect("idle_heavy full publish trace");
+    assert_eq!(
+        full_publish.get("profile").and_then(|value| value.as_str()),
+        Some("idle_heavy")
+    );
+    assert!(
+        full_publish
+            .get("runtime_queue_wait_ms")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "terminal queued shadow follow-up must expose factual runtime_queue_wait_ms on publish trace, trace={trace:?}"
+    );
+    assert!(
+        trace.get("followup_runtime_queue_wait_ms")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "top-level queued shadow follow-up trace must surface runtime_queue_wait fact for operator-facing summary, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("wait_for_file_version_ms").is_none(),
+        "queued shadow follow-up must not regress into wait_for_file_version gating, trace={trace:?}"
+    );
+    assert_eq!(
+        full_publish
+            .get("syntax_work_mode")
+            .and_then(|value| value.as_str()),
+        Some("reused"),
+        "queued shadow follow-up must still reuse save_fastlane syntax artifacts after runtime contention, trace={trace:?}"
     );
 
     drain_task.abort();
@@ -3649,6 +3990,23 @@ async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_
     assert!(
         full_publish.get("semantic_diagnostics_query_ms").is_some(),
         "generic follow-up must still expose semantic timing, trace={trace:?}"
+    );
+    assert!(
+        full_publish.get("wait_for_file_version_ms").is_none(),
+        "shadow-state follow-up must not regress into wait_for_file_version gating when same-version save artifacts are already fresh, trace={trace:?}"
+    );
+    assert!(
+        full_publish
+            .get("apply_lag_ms")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "shadow-state follow-up must still expose factual apply lag separately from the bounded publish path, trace={trace:?}"
+    );
+    assert!(
+        trace.get("followup_apply_lag_ms")
+            .and_then(|value| value.as_u64())
+            .is_some_and(|value| value > 0),
+        "top-level follow-up trace must surface apply lag fact for operator-facing summary, trace={trace:?}"
     );
 
     drain_task.abort();
@@ -4195,6 +4553,8 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 outcome: "published".to_string(),
                 elapsed_ms: 15,
                 syntax_work_mode: Some("recomputed".to_string()),
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4224,6 +4584,8 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 outcome: "published".to_string(),
                 elapsed_ms: 11,
                 syntax_work_mode: Some("recomputed".to_string()),
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4381,6 +4743,8 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 outcome: "published".to_string(),
                 elapsed_ms: 18,
                 syntax_work_mode: Some("recomputed".to_string()),
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4410,6 +4774,8 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 outcome: "published".to_string(),
                 elapsed_ms: 12,
                 syntax_work_mode: Some("recomputed".to_string()),
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
                 blocking_queue_wait_ms: None,
                 wait_for_file_version_ms: None,
                 snapshot_with_deps_ms: None,
@@ -4488,6 +4854,98 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 .and_then(|value| value.as_u64())
                 .unwrap_or_default(),
         "test fixture must prove save ordering no longer depends on diagnostics generation"
+    );
+
+    drain_task.abort();
+}
+
+#[test]
+fn p6_diagnostics_save_timeline_duration_to_nonzero_ms_filters_sub_ms_values() {
+    assert_eq!(duration_to_nonzero_ms(None), None);
+    assert_eq!(
+        duration_to_nonzero_ms(Some(Duration::from_micros(999))),
+        None
+    );
+    assert_eq!(
+        duration_to_nonzero_ms(Some(Duration::from_millis(1))),
+        Some(1)
+    );
+}
+
+#[tokio::test]
+async fn p6_diagnostics_save_timeline_followup_wait_state_ignores_sub_ms_runtime_facts() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let holder = holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+    initialize_lsp_service(&mut service).await;
+
+    let server = holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_timeline_sub_ms_runtime_facts_fixture.bsl").expect("fixture");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(43),
+        diagnostics_generation: 17,
+        save_cycle_sequence: 3,
+        requested_version: 14,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_followup_wait_state(
+        &uri,
+        key,
+        "runtime_queue_wait",
+        Some(Duration::from_micros(500)),
+        Some(Duration::from_micros(750)),
+        Some(Duration::from_micros(900)),
+        Some(Duration::from_micros(950)),
+        Some("reused"),
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_706, 12).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(14)
+        })
+        .expect("sub-ms diagnostics save trace");
+
+    assert_eq!(
+        trace
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str()),
+        Some("runtime_queue_wait")
+    );
+    assert!(
+        trace.get("followup_runtime_queue_wait_ms").is_none(),
+        "sub-ms runtime queue wait must be omitted instead of leaking as 0ms, trace={trace:?}"
+    );
+    assert!(
+        trace.get("followup_apply_lag_ms").is_none(),
+        "sub-ms apply lag must be omitted instead of leaking as 0ms, trace={trace:?}"
     );
 
     drain_task.abort();
@@ -32906,11 +33364,11 @@ fn p43_real_conf_big_did_save_diagnostics_fastlane_report_live() {
 }
 
 #[test]
-fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
+fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .expect("p44 tokio runtime");
+        .expect("p46 tokio runtime");
     runtime.block_on(async {
         init_test_tracing();
         struct EnvVarGuard {
@@ -32956,10 +33414,11 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
         }
 
         let _env_lock = lock_test_env().await;
-        const PROFILE_NAME: &str = "p44_real_conf_big_did_save_diagnostics_followup_report_live";
+        const PROFILE_NAME: &str =
+            "p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live";
         const APPLY_DELAY_MS: u64 = 4_000;
         const FIRST_PUBLISH_BUDGET_MS: u64 = 2_500;
-        const FOLLOWUP_OBSERVE_BUDGET_MS: u64 = 3_000;
+        const FOLLOWUP_OBSERVE_BUDGET_MS: u64 = 60_000;
         let _apply_delay_guard =
             EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", &APPLY_DELAY_MS.to_string());
         let _debounce_guard = EnvVarGuard::set_with_reload(
@@ -32969,8 +33428,9 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
         );
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
-        let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-07-diagnostics-save-followup-apply-lag-bounding".to_string());
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-09-diagnostics-save-followup-runtime-contention-bounding".to_string()
+        });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {
@@ -33000,7 +33460,7 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
         }
 
         let module_text =
-            std::fs::read_to_string(&module_path).expect("read conf_big module text for p44 report");
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p46 report");
         let workspace_setup = ScaleAwareWorkspaceSetup {
             platform_docs_archive: syntax_helper_path_for_tests(),
             configuration_path: conf_big_root.clone(),
@@ -33009,7 +33469,7 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
         let coordinator = Arc::new(SystemCoordinator::new());
         let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
         initialize_live_lsp_transport(&mut harness).await;
-        prime_server_with_workspace_setup(&server, &workspace_setup, "p44_real_conf_big_live_setup")
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p46_real_conf_big_live_setup")
             .await;
 
         let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
@@ -33044,7 +33504,7 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
             }
         })
         .await
-        .expect("didOpen must register version 1 for p44");
+        .expect("didOpen must register version 1 for p46");
 
         let broken_suffix = "\nПроцедура SaveFollowupBroken(\n";
         let next_version = 2;
@@ -33072,7 +33532,7 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
             }
         })
         .await
-        .expect("didChange must register version 2 for p44");
+        .expect("didChange must register version 2 for p46");
 
         let did_save_started = Instant::now();
         live_transport_save_document(&mut harness, &uri).await;
@@ -33147,12 +33607,40 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
                     let has_followup_wait_reason = trace
                         .get("followup_wait_reason")
                         .and_then(|value| value.as_str())
-                        .is_some();
+                        .is_some_and(|reason| reason != "pending_publish");
+                    let has_followup_runtime_breakdown = trace
+                        .get("followup_runtime_queue_wait_ms")
+                        .and_then(|value| value.as_u64())
+                        .is_some()
+                        || trace
+                            .get("followup_apply_lag_ms")
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                        || trace
+                            .get("followup_wait_for_file_version_ms")
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                        || trace
+                            .get("followup_publish")
+                            .and_then(|value| value.get("runtime_queue_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                        || trace
+                            .get("followup_publish")
+                            .and_then(|value| value.get("apply_lag_ms"))
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                        || trace
+                            .get("followup_publish")
+                            .and_then(|value| value.get("wait_for_file_version_ms"))
+                            .and_then(|value| value.as_u64())
+                            .is_some();
                     let idle_heavy_outcome = trace
                         .get("idle_heavy_outcome")
                         .and_then(|value| value.as_str());
                     if has_followup_publish
                         || has_followup_wait_reason
+                        || has_followup_runtime_breakdown
                         || matches!(idle_heavy_outcome, Some("superseded_generation"))
                     {
                         break trace;
@@ -33173,9 +33661,45 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
             .and_then(|value| value.as_str());
         assert!(
             followup_publish.is_some()
-                || followup_wait_reason.is_some()
+                || followup_wait_reason.is_some_and(|reason| reason != "pending_publish")
+                || timeline
+                    .get("followup_runtime_queue_wait_ms")
+                    .and_then(|value| value.as_u64())
+                    .is_some()
+                || timeline
+                    .get("followup_apply_lag_ms")
+                    .and_then(|value| value.as_u64())
+                    .is_some()
                 || matches!(idle_heavy_outcome, Some("superseded_generation")),
-            "follow-up live report must expose publish or explicit wait attribution, trace={timeline:?}"
+            "follow-up runtime live report must expose publish or explicit runtime/apply attribution, trace={timeline:?}"
+        );
+        assert_ne!(
+            timeline
+                .get("followup_runtime_queue_wait_ms")
+                .and_then(|value| value.as_u64()),
+            Some(0),
+            "follow-up runtime live report must omit zero-valued top-level runtime queue wait noise, trace={timeline:?}"
+        );
+        assert_ne!(
+            timeline
+                .get("followup_apply_lag_ms")
+                .and_then(|value| value.as_u64()),
+            Some(0),
+            "follow-up runtime live report must omit zero-valued top-level apply lag noise, trace={timeline:?}"
+        );
+        assert_ne!(
+            followup_publish
+                .and_then(|publish| publish.get("runtime_queue_wait_ms"))
+                .and_then(|value| value.as_u64()),
+            Some(0),
+            "follow-up runtime live report must omit zero-valued publish runtime queue wait noise, trace={timeline:?}"
+        );
+        assert_ne!(
+            followup_publish
+                .and_then(|publish| publish.get("apply_lag_ms"))
+                .and_then(|value| value.as_u64()),
+            Some(0),
+            "follow-up runtime live report must omit zero-valued publish apply lag noise, trace={timeline:?}"
         );
 
         let observability_metrics =
@@ -33221,7 +33745,19 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
             "followup_publish_elapsed_ms": followup_publish
                 .and_then(|publish| publish.get("elapsed_ms"))
                 .and_then(|value| value.as_u64()),
+            "followup_publish_runtime_queue_wait_ms": followup_publish
+                .and_then(|publish| publish.get("runtime_queue_wait_ms"))
+                .and_then(|value| value.as_u64()),
+            "followup_publish_apply_lag_ms": followup_publish
+                .and_then(|publish| publish.get("apply_lag_ms"))
+                .and_then(|value| value.as_u64()),
             "followup_wait_reason": followup_wait_reason,
+            "followup_runtime_queue_wait_ms": timeline
+                .get("followup_runtime_queue_wait_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_apply_lag_ms": timeline
+                .get("followup_apply_lag_ms")
+                .and_then(|value| value.as_u64()),
             "followup_wait_for_file_version_ms": timeline
                 .get("followup_wait_for_file_version_ms")
                 .and_then(|value| value.as_u64()),
@@ -33241,19 +33777,19 @@ fn p44_real_conf_big_did_save_diagnostics_followup_report_live() {
                     .join("perf")
                     .join("reports")
                     .join(format!(
-                        "{change_id}-real-conf-big-did-save-diagnostics-followup-live.json"
+                        "{change_id}-real-conf-big-did-save-diagnostics-followup-runtime-live.json"
                     ))
             });
         if let Some(parent) = report_path.parent() {
             std::fs::create_dir_all(parent)
-                .expect("failed to create directory for p44 real conf_big diagnostics report");
+                .expect("failed to create directory for p46 real conf_big diagnostics report");
         }
         std::fs::write(
             &report_path,
             serde_json::to_string_pretty(&report)
-                .expect("serialize p44 real conf_big diagnostics report"),
+                .expect("serialize p46 real conf_big diagnostics report"),
         )
-        .expect("write p44 real conf_big diagnostics report");
+        .expect("write p46 real conf_big diagnostics report");
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         live_transport_close_document(&mut harness, &uri).await;

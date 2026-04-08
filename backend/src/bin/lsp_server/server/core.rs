@@ -177,6 +177,18 @@ fn clear_diagnostics_save_timeline_followup_wait_inner(
     trace.followup_snapshot_with_deps_ms = None;
 }
 
+fn duration_to_nonzero_ms(duration: Option<Duration>) -> Option<u64> {
+    let millis = duration.map(|value| value.as_millis().min(u64::MAX as u128) as u64)?;
+    (millis > 0).then_some(millis)
+}
+
+fn update_followup_timing_max(slot: &mut Option<u64>, candidate: Option<u64>) {
+    let Some(candidate) = candidate.filter(|value| *value > 0) else {
+        return;
+    };
+    *slot = Some(slot.unwrap_or(0).max(candidate));
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiagnosticsSaveTimelineFastlaneProgress {
     Pending,
@@ -684,6 +696,8 @@ impl BslLanguageServer {
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
                 followup_wait_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
                 terminal_outcome: None,
@@ -724,6 +738,8 @@ impl BslLanguageServer {
                     idle_heavy_outcome: None,
                     followup_syntax_work_mode: None,
                     followup_wait_reason: None,
+                    followup_runtime_queue_wait_ms: None,
+                    followup_apply_lag_ms: None,
                     followup_wait_for_file_version_ms: None,
                     followup_snapshot_with_deps_ms: None,
                     terminal_outcome: None,
@@ -746,6 +762,14 @@ impl BslLanguageServer {
                     bsl_runtime::application::DiagnosticsProfile::IdleHeavy
                 ) {
                     trace.followup_syntax_work_mode = publish.syntax_work_mode.clone();
+                    update_followup_timing_max(
+                        &mut trace.followup_runtime_queue_wait_ms,
+                        publish.runtime_queue_wait_ms,
+                    );
+                    update_followup_timing_max(
+                        &mut trace.followup_apply_lag_ms,
+                        publish.apply_lag_ms,
+                    );
                 }
                 if trace.first_publish.is_none() {
                     trace.first_publish = Some(publish);
@@ -796,6 +820,8 @@ impl BslLanguageServer {
         uri: &Url,
         key: super::DiagnosticsSaveTimelineCycleKey,
         reason: &'static str,
+        runtime_queue_wait_ms: Option<Duration>,
+        apply_lag_ms: Option<Duration>,
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
@@ -826,6 +852,8 @@ impl BslLanguageServer {
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
                 followup_wait_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
                 terminal_outcome: None,
@@ -835,6 +863,14 @@ impl BslLanguageServer {
             trace.followup_syntax_work_mode = Some(syntax_work_mode.to_string());
         }
         trace.followup_wait_reason = Some(reason.to_string());
+        update_followup_timing_max(
+            &mut trace.followup_runtime_queue_wait_ms,
+            duration_to_nonzero_ms(runtime_queue_wait_ms),
+        );
+        update_followup_timing_max(
+            &mut trace.followup_apply_lag_ms,
+            duration_to_nonzero_ms(apply_lag_ms),
+        );
         trace.followup_wait_for_file_version_ms =
             wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
         trace.followup_snapshot_with_deps_ms =

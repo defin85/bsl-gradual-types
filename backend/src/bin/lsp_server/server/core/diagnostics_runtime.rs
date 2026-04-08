@@ -26,12 +26,25 @@ struct SaveFollowupReadyArtifactsReply {
     diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
     observed_deps_id: String,
     observed_settings_id: String,
+    runtime_queue_wait: Option<Duration>,
+    apply_lag: Option<Duration>,
     syntax_elapsed: Option<Duration>,
     semantic_elapsed: Option<Duration>,
     syntax_work_mode: Option<&'static str>,
 }
 
 impl BslLanguageServer {
+    fn sum_nonzero_durations<I>(durations: I) -> Option<Duration>
+    where
+        I: IntoIterator<Item = Option<Duration>>,
+    {
+        let total = durations
+            .into_iter()
+            .flatten()
+            .fold(Duration::ZERO, |acc, duration| acc.saturating_add(duration));
+        (total > Duration::ZERO).then_some(total)
+    }
+
     fn diagnostics_save_timeline_cycle_key_for_supersession_key(
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
     ) -> Option<super::super::DiagnosticsSaveTimelineCycleKey> {
@@ -54,6 +67,8 @@ impl BslLanguageServer {
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         disposition: bsl_runtime::application::DiagnosticsDisposition,
         publish_kind: Option<&'static str>,
+        runtime_queue_wait_ms: Option<Duration>,
+        apply_lag_ms: Option<Duration>,
         blocking_queue_wait_ms: Option<Duration>,
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
@@ -70,10 +85,14 @@ impl BslLanguageServer {
             return disposition;
         }
 
+        let runtime_queue_wait_ms = duration_to_nonzero_ms(runtime_queue_wait_ms);
+        let apply_lag_ms = duration_to_nonzero_ms(apply_lag_ms);
         let publish = (matches!(
             disposition,
             bsl_runtime::application::DiagnosticsDisposition::Published
         ) || publish_kind.is_some()
+            || runtime_queue_wait_ms.is_some()
+            || apply_lag_ms.is_some()
             || syntax_work_mode.is_some()
             || blocking_queue_wait_ms.is_some()
             || wait_for_file_version_ms.is_some()
@@ -87,6 +106,8 @@ impl BslLanguageServer {
             outcome: disposition.as_str().to_string(),
             elapsed_ms: pipeline_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             syntax_work_mode: syntax_work_mode.map(str::to_string),
+            runtime_queue_wait_ms,
+            apply_lag_ms,
             blocking_queue_wait_ms: blocking_queue_wait_ms
                 .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
             wait_for_file_version_ms: wait_for_file_version_ms
@@ -584,6 +605,8 @@ impl BslLanguageServer {
         uri: &Url,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         reason: &'static str,
+        runtime_queue_wait_ms: Option<Duration>,
+        apply_lag_ms: Option<Duration>,
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
@@ -597,10 +620,43 @@ impl BslLanguageServer {
             uri,
             cycle_key,
             reason,
+            runtime_queue_wait_ms,
+            apply_lag_ms,
             wait_for_file_version_ms,
             snapshot_with_deps_ms,
             syntax_work_mode,
         );
+    }
+
+    async fn diagnostics_followup_apply_lag_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+    ) -> Option<Duration> {
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        if self
+            .latest_current_revision_handoff_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            != Some(requested_version)
+        {
+            return None;
+        }
+        if self
+            .analysis_v2
+            .cached_file_revision_state(file_id)
+            .is_some_and(|state| state.version >= requested_version)
+        {
+            return None;
+        }
+        self.latest_apply_enqueued_at_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            .map(|enqueued_at| enqueued_at.elapsed())
     }
 
     async fn wait_for_save_fastlane_first_publish_v2(
@@ -716,6 +772,8 @@ impl BslLanguageServer {
             "semantic_work",
             None,
             None,
+            None,
+            None,
             syntax_work_mode,
         );
 
@@ -814,6 +872,8 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
+                    None,
+                    None,
                     syntax_elapsed,
                     Some(semantic_elapsed),
                     None,
@@ -845,10 +905,338 @@ impl BslLanguageServer {
                 None,
                 None,
                 None,
+                None,
+                None,
                 syntax_elapsed,
                 Some(semantic_elapsed),
                 Some(publish_started.elapsed()),
                 syntax_work_mode,
+                pipeline_started,
+            )
+            .await,
+        )
+    }
+
+    async fn try_execute_save_followup_from_shadow_state_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        pipeline_started: Instant,
+        show_hints: bool,
+        flow_sensitive_semantic: bool,
+    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
+        if !matches!(
+            (trigger, supersession_key.profile),
+            (
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+            )
+        ) {
+            return None;
+        }
+
+        let shadow_state = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&supersession_key.file_id)
+            .cloned()?;
+        if shadow_state.version != supersession_key.requested_version {
+            return None;
+        }
+
+        let save_fastlane_syntax_artifacts = self
+            .save_fastlane_syntax_artifacts_for_version_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+            )
+            .await?;
+        let apply_lag = self
+            .diagnostics_followup_apply_lag_v2(supersession_key)
+            .await;
+        let context = self
+            .build_execution_context_v2(
+                bsl_runtime::application::SemanticOperation::Diagnostics,
+                supersession_key.file_id,
+                None,
+                flow_sensitive_semantic,
+            )
+            .await;
+        let support_bundle = self.analysis_v2.completion_support_bundle();
+        let path = match uri.to_file_path() {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(_) => uri.to_string(),
+        };
+        let uri_for_blocking = uri.clone();
+        let coordinator_for_blocking = self.coordinator.clone();
+        let file_id = supersession_key.file_id;
+        let requested_version = supersession_key.requested_version;
+        let shadow_text = shadow_state.text.clone();
+        let deps_id = support_bundle.deps_id.clone();
+        let deps = support_bundle.deps.clone();
+        let settings_id = context.settings.settings_id.clone();
+        let diagnostics_detail_level = context.settings.diagnostics_detail_level;
+        let context_for_blocking = context.clone();
+        let path_for_blocking: Arc<str> = Arc::from(path);
+        let syntax_work_mode = Some("reused");
+        self.record_diagnostics_save_followup_wait_state_v2(
+            uri,
+            supersession_key,
+            "semantic_work",
+            None,
+            apply_lag,
+            None,
+            None,
+            syntax_work_mode,
+        );
+        let queued_wait_server = self.clone();
+        let queued_wait_uri = uri.clone();
+        let queued_wait_supersession_key = *supersession_key;
+        let queued_wait_apply_lag = apply_lag;
+        let queued_wait_syntax_work_mode = syntax_work_mode;
+        let exec_started_server = self.clone();
+        let exec_started_uri = uri.clone();
+        let exec_started_supersession_key = *supersession_key;
+        let exec_started_apply_lag = apply_lag;
+        let exec_started_syntax_work_mode = syntax_work_mode;
+
+        let followup_call =
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
+                bsl_runtime::application::CpuWorkClass::Background,
+                context.origin.as_str(),
+                Some(self.coordinator.as_ref()),
+                Some(move || {
+                    queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
+                        &queued_wait_uri,
+                        &queued_wait_supersession_key,
+                        "runtime_queue_wait",
+                        None,
+                        queued_wait_apply_lag,
+                        None,
+                        None,
+                        queued_wait_syntax_work_mode,
+                    );
+                }),
+                Some(move |queue_wait_elapsed| {
+                    exec_started_server.record_diagnostics_save_followup_wait_state_v2(
+                        &exec_started_uri,
+                        &exec_started_supersession_key,
+                        "semantic_work",
+                        (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
+                        exec_started_apply_lag,
+                        None,
+                        None,
+                        exec_started_syntax_work_mode,
+                    );
+                }),
+                move || {
+                    let mut host = bsl_analysis_v2::AnalysisHostV2::default();
+                    host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
+                        deps_id: deps_id.clone(),
+                        deps,
+                    });
+                    host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
+                        settings_id: settings_id.clone(),
+                        diagnostics_detail_level,
+                    });
+                    host.apply_change(bsl_analysis_v2::Change::SetFile {
+                        file_id,
+                        text: shadow_text.clone(),
+                        version: requested_version,
+                        path: path_for_blocking,
+                    });
+
+                    let analysis = host.snapshot();
+                    let file_text = shadow_text.clone();
+                    let line_index =
+                        analysis
+                            .line_index(file_id)
+                            .ok()
+                            .flatten()
+                            .unwrap_or_else(|| {
+                                Arc::new(bsl_line_index::LineIndex::new(file_text.as_ref()))
+                            });
+
+                    let mut diagnostics = Vec::new();
+                    diagnostics.extend(syntax_errors_to_diagnostics(
+                        save_fastlane_syntax_artifacts.as_ref(),
+                        &uri_for_blocking,
+                        file_text.as_ref(),
+                        line_index.as_ref(),
+                    ));
+
+                    let semantic_started = Instant::now();
+                    let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                        &context_for_blocking,
+                        bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
+                        &analysis,
+                        Some(coordinator_for_blocking.as_ref()),
+                        |analysis| {
+                            if flow_sensitive_semantic {
+                                analysis.semantic_diagnostics_flow_sensitive_profiled(file_id)
+                            } else {
+                                analysis.semantic_diagnostics_profiled(file_id)
+                            }
+                        },
+                    )
+                    .map_err(|_| ())?;
+                    let semantic_elapsed = semantic_started.elapsed();
+                    let duration_from_profile_ms =
+                        |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
+                    if let Some(profiled) = query {
+                        coordinator_for_blocking
+                            .record_intellisense_v2_semantic_diagnostics_query_breakdown(
+                                duration_from_profile_ms(profiled.profile.inputs_ms),
+                                duration_from_profile_ms(profiled.profile.parse_result_ms),
+                                duration_from_profile_ms(profiled.profile.ir_ms),
+                                duration_from_profile_ms(profiled.profile.collect_ms),
+                                (profiled.profile.flow_sensitive_ms > 0).then(|| {
+                                    duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
+                                }),
+                            );
+                        for error in profiled.diagnostics.iter() {
+                            if !show_hints
+                                && matches!(
+                                    error.severity,
+                                    bsl_shared::domain::types::DiagnosticSeverity::Hint
+                                )
+                            {
+                                continue;
+                            }
+                            diagnostics.push(semantic_error_to_diagnostic(
+                                error,
+                                file_text.as_ref(),
+                                line_index.as_ref(),
+                            ));
+                        }
+                    }
+
+                    Ok::<SaveFollowupReadyArtifactsReply, ()>(SaveFollowupReadyArtifactsReply {
+                        diagnostics,
+                        observed_deps_id: deps_id.as_str().to_string(),
+                        observed_settings_id: settings_id.as_str().to_string(),
+                        runtime_queue_wait: None,
+                        apply_lag: None,
+                        syntax_elapsed: None,
+                        semantic_elapsed: Some(semantic_elapsed),
+                        syntax_work_mode,
+                    })
+                },
+            )
+            .await;
+        let runtime_queue_wait =
+            Self::sum_nonzero_durations([Some(followup_call.queue_wait_elapsed)]);
+
+        let mut reply = match followup_call.join_result {
+            Ok(Ok(reply)) => reply,
+            Ok(Err(())) | Err(_) => {
+                return Some(
+                    self.finalize_diagnostics_save_profile_result_v2(
+                        uri,
+                        supersession_key,
+                        trigger,
+                        self.diagnostics_cancelled_disposition_v2(
+                            cancel_token,
+                            self.current_diagnostics_generation_v2(supersession_key.file_id)
+                                .await,
+                            supersession_key.diagnostics_generation,
+                            self.latest_received_file_versions_v2
+                                .read()
+                                .await
+                                .get(&supersession_key.file_id)
+                                .copied(),
+                            supersession_key.requested_version,
+                        ),
+                        None,
+                        runtime_queue_wait,
+                        apply_lag,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        pipeline_started,
+                    )
+                    .await,
+                );
+            }
+        };
+        reply.runtime_queue_wait = runtime_queue_wait;
+        reply.apply_lag = apply_lag;
+
+        if let Some(disposition) = self
+            .diagnostics_publish_checkpoint_v2(
+                supersession_key,
+                trigger,
+                cancel_token,
+                Some(reply.observed_deps_id.as_str()),
+                Some(reply.observed_settings_id.as_str()),
+            )
+            .await
+        {
+            return Some(
+                self.finalize_diagnostics_save_profile_result_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    disposition,
+                    None,
+                    reply.runtime_queue_wait,
+                    reply.apply_lag,
+                    None,
+                    None,
+                    None,
+                    reply.syntax_elapsed,
+                    reply.semantic_elapsed,
+                    None,
+                    reply.syntax_work_mode,
+                    pipeline_started,
+                )
+                .await,
+            );
+        }
+
+        self.record_diagnostics_save_followup_wait_state_v2(
+            uri,
+            supersession_key,
+            "pending_publish",
+            reply.runtime_queue_wait,
+            reply.apply_lag,
+            None,
+            None,
+            reply.syntax_work_mode,
+        );
+        let publish_started = Instant::now();
+        let disposition = self
+            .publish_diagnostics_v2(
+                supersession_key,
+                uri,
+                reply.diagnostics,
+                trigger,
+                supersession_key.profile,
+                pipeline_started,
+            )
+            .await;
+        Some(
+            self.finalize_diagnostics_save_profile_result_v2(
+                uri,
+                supersession_key,
+                trigger,
+                disposition,
+                Some("full"),
+                reply.runtime_queue_wait,
+                reply.apply_lag,
+                None,
+                None,
+                None,
+                reply.syntax_elapsed,
+                reply.semantic_elapsed,
+                Some(publish_started.elapsed()),
+                reply.syntax_work_mode,
                 pipeline_started,
             )
             .await,
@@ -882,6 +1270,9 @@ impl BslLanguageServer {
                 SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
             )
             .await?;
+        let apply_lag = self
+            .diagnostics_followup_apply_lag_v2(supersession_key)
+            .await;
         let context = self
             .build_execution_context_v2(
                 bsl_runtime::application::SemanticOperation::Diagnostics,
@@ -915,14 +1306,48 @@ impl BslLanguageServer {
             supersession_key,
             "semantic_work",
             None,
+            apply_lag,
+            None,
             None,
             Some("reused"),
         );
-        let followup_result =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+        let queued_wait_server = self.clone();
+        let queued_wait_uri = uri.clone();
+        let queued_wait_supersession_key = *supersession_key;
+        let queued_wait_apply_lag = apply_lag;
+        let exec_started_server = self.clone();
+        let exec_started_uri = uri.clone();
+        let exec_started_supersession_key = *supersession_key;
+        let exec_started_apply_lag = apply_lag;
+        let followup_call =
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 context.origin.as_str(),
                 Some(self.coordinator.as_ref()),
+                Some(move || {
+                    queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
+                        &queued_wait_uri,
+                        &queued_wait_supersession_key,
+                        "runtime_queue_wait",
+                        None,
+                        queued_wait_apply_lag,
+                        None,
+                        None,
+                        Some("reused"),
+                    );
+                }),
+                Some(move |queue_wait_elapsed| {
+                    exec_started_server.record_diagnostics_save_followup_wait_state_v2(
+                        &exec_started_uri,
+                        &exec_started_supersession_key,
+                        "semantic_work",
+                        (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
+                        exec_started_apply_lag,
+                        None,
+                        None,
+                        Some("reused"),
+                    );
+                }),
                 move || {
                     let mut host = bsl_analysis_v2::AnalysisHostV2::default();
                     host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
@@ -1003,6 +1428,8 @@ impl BslLanguageServer {
                         diagnostics,
                         observed_deps_id: deps_id.as_str().to_string(),
                         observed_settings_id: settings_id.as_str().to_string(),
+                        runtime_queue_wait: None,
+                        apply_lag: None,
                         syntax_elapsed: None,
                         semantic_elapsed: Some(semantic_elapsed),
                         syntax_work_mode: Some("reused"),
@@ -1010,8 +1437,10 @@ impl BslLanguageServer {
                 },
             )
             .await;
+        let runtime_queue_wait =
+            Self::sum_nonzero_durations([Some(followup_call.queue_wait_elapsed)]);
 
-        let reply = match followup_result {
+        let mut reply = match followup_call.join_result {
             Ok(Ok(reply)) => reply,
             Ok(Err(())) | Err(_) => {
                 return Some(
@@ -1032,6 +1461,8 @@ impl BslLanguageServer {
                             supersession_key.requested_version,
                         ),
                         None,
+                        runtime_queue_wait,
+                        apply_lag,
                         None,
                         None,
                         None,
@@ -1045,6 +1476,8 @@ impl BslLanguageServer {
                 );
             }
         };
+        reply.runtime_queue_wait = runtime_queue_wait;
+        reply.apply_lag = apply_lag;
 
         if let Some(disposition) = self
             .diagnostics_publish_checkpoint_v2(
@@ -1063,6 +1496,8 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
+                    reply.runtime_queue_wait,
+                    reply.apply_lag,
                     None,
                     None,
                     None,
@@ -1080,6 +1515,8 @@ impl BslLanguageServer {
             uri,
             supersession_key,
             "pending_publish",
+            reply.runtime_queue_wait,
+            reply.apply_lag,
             None,
             None,
             reply.syntax_work_mode,
@@ -1102,6 +1539,8 @@ impl BslLanguageServer {
                 trigger,
                 disposition,
                 Some("full"),
+                reply.runtime_queue_wait,
+                reply.apply_lag,
                 None,
                 None,
                 None,
@@ -1176,6 +1615,8 @@ impl BslLanguageServer {
                         trigger,
                         disposition,
                         None,
+                        None,
+                        None,
                         blocking_queue_wait_elapsed,
                         wait_for_file_version_elapsed,
                         snapshot_with_deps_elapsed,
@@ -1198,6 +1639,8 @@ impl BslLanguageServer {
                         &supersession_key,
                         trigger,
                         disposition,
+                        None,
+                        None,
                         None,
                         blocking_queue_wait_elapsed,
                         wait_for_file_version_elapsed,
@@ -1264,6 +1707,8 @@ impl BslLanguageServer {
                             trigger,
                             disposition,
                             None,
+                            None,
+                            None,
                             blocking_queue_wait_elapsed,
                             wait_for_file_version_elapsed,
                             snapshot_with_deps_elapsed,
@@ -1304,6 +1749,8 @@ impl BslLanguageServer {
                             trigger,
                             disposition,
                             None,
+                            None,
+                            None,
                             blocking_queue_wait_elapsed,
                             wait_for_file_version_elapsed,
                             snapshot_with_deps_elapsed,
@@ -1339,6 +1786,8 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
+                    None,
+                    None,
                     blocking_queue_wait_elapsed,
                     wait_for_file_version_elapsed,
                     snapshot_with_deps_elapsed,
@@ -1368,6 +1817,8 @@ impl BslLanguageServer {
             trigger,
             disposition,
             Some("syntax_only"),
+            None,
+            None,
             blocking_queue_wait_elapsed,
             wait_for_file_version_elapsed,
             snapshot_with_deps_elapsed,
@@ -1668,6 +2119,8 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
+                    None,
+                    None,
                     pipeline_started,
                 )
                 .await;
@@ -1684,6 +2137,8 @@ impl BslLanguageServer {
                 uri,
                 &supersession_key,
                 "pending_publish",
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -1715,6 +2170,20 @@ impl BslLanguageServer {
                     }
                 }
                 if let Some(disposition) = self
+                    .try_execute_save_followup_from_shadow_state_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        cancel_token,
+                        pipeline_started,
+                        show_hints,
+                        plan.flow_sensitive_semantic,
+                    )
+                    .await
+                {
+                    return disposition;
+                }
+                if let Some(disposition) = self
                     .try_execute_save_followup_from_ready_artifacts_v2(
                         uri,
                         &supersession_key,
@@ -1733,10 +2202,15 @@ impl BslLanguageServer {
                 } else {
                     "apply_lag"
                 };
+                let apply_lag = self
+                    .diagnostics_followup_apply_lag_v2(&supersession_key)
+                    .await;
                 self.record_diagnostics_save_followup_wait_state_v2(
                     uri,
                     &supersession_key,
                     wait_reason,
+                    None,
+                    apply_lag,
                     None,
                     None,
                     None,
@@ -1747,10 +2221,15 @@ impl BslLanguageServer {
                 } else {
                     "apply_lag"
                 };
+                let apply_lag = self
+                    .diagnostics_followup_apply_lag_v2(&supersession_key)
+                    .await;
                 self.record_diagnostics_save_followup_wait_state_v2(
                     uri,
                     &supersession_key,
                     wait_reason,
+                    None,
+                    apply_lag,
                     None,
                     None,
                     None,
@@ -1819,6 +2298,8 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -1826,8 +2307,28 @@ impl BslLanguageServer {
         };
 
         let wait_elapsed = prepared.wait_elapsed.unwrap_or(Duration::ZERO);
-        let mut syntax_stage_elapsed = None;
-        let mut semantic_stage_elapsed = None;
+        let wait_for_file_version_runtime = prepared.wait_for_file_version_runtime;
+        let snapshot_with_deps_runtime = prepared.snapshot_with_deps_runtime;
+        let snapshot_elapsed = prepared.snapshot_elapsed;
+        let mut blocking_queue_wait_elapsed = None;
+        let mut followup_runtime_queue_wait_elapsed = if save_followup_from_did_save && run_semantic
+        {
+            Self::sum_nonzero_durations([
+                wait_for_file_version_runtime.and_then(|trace| trace.queue_wait_elapsed),
+                snapshot_with_deps_runtime.queue_wait_elapsed,
+            ])
+        } else {
+            None
+        };
+        let followup_apply_lag_elapsed = if save_followup_from_did_save && run_semantic {
+            Self::sum_nonzero_durations([
+                wait_for_file_version_runtime.and_then(|trace| trace.wake_wait_elapsed)
+            ])
+        } else {
+            None
+        };
+        let mut syntax_stage_elapsed: Option<Duration> = None;
+        let mut semantic_stage_elapsed: Option<Duration> = None;
         let save_fastlane_syntax_artifacts = if save_followup_from_did_save
             && run_semantic
             && plan.run_syntax
@@ -1853,8 +2354,10 @@ impl BslLanguageServer {
                 uri,
                 &supersession_key,
                 "semantic_work",
+                followup_runtime_queue_wait_elapsed,
+                followup_apply_lag_elapsed,
                 Some(wait_elapsed),
-                Some(prepared.snapshot_elapsed),
+                Some(snapshot_elapsed),
                 followup_syntax_work_mode,
             );
         }
@@ -1916,7 +2419,6 @@ impl BslLanguageServer {
             .map(|text| (text.len(), text.lines().count()))
             .unwrap_or((0, 0));
 
-        let snapshot_elapsed = prepared.snapshot_elapsed;
         if let Some(threshold) = super::super::intellisense_v2_slow_snapshot_warn_threshold() {
             if snapshot_elapsed >= threshold {
                 warn!(
@@ -1963,10 +2465,60 @@ impl BslLanguageServer {
                 let uri_for_blocking = uri.clone();
                 let file_text_for_blocking = file_text.clone();
                 let line_index_for_blocking = line_index.clone();
-                let syntax_result = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                let syntax_queue_wait_started_hook = if save_followup_from_did_save && run_semantic
+                {
+                    let queued_wait_server = self.clone();
+                    let queued_wait_uri = uri.clone();
+                    let queued_wait_supersession_key = supersession_key;
+                    let queued_wait_apply_lag = followup_apply_lag_elapsed;
+                    let queued_wait_runtime_queue_wait = followup_runtime_queue_wait_elapsed;
+                    let queued_wait_syntax_work_mode = followup_syntax_work_mode;
+                    Some(move || {
+                        queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
+                            &queued_wait_uri,
+                            &queued_wait_supersession_key,
+                            "runtime_queue_wait",
+                            queued_wait_runtime_queue_wait,
+                            queued_wait_apply_lag,
+                            Some(wait_elapsed),
+                            Some(snapshot_elapsed),
+                            queued_wait_syntax_work_mode,
+                        );
+                    })
+                } else {
+                    None
+                };
+                let syntax_exec_started_hook = if save_followup_from_did_save && run_semantic {
+                    let exec_started_server = self.clone();
+                    let exec_started_uri = uri.clone();
+                    let exec_started_supersession_key = supersession_key;
+                    let exec_started_apply_lag = followup_apply_lag_elapsed;
+                    let exec_started_runtime_queue_wait = followup_runtime_queue_wait_elapsed;
+                    let exec_started_syntax_work_mode = followup_syntax_work_mode;
+                    Some(move |queue_wait_elapsed| {
+                        exec_started_server.record_diagnostics_save_followup_wait_state_v2(
+                            &exec_started_uri,
+                            &exec_started_supersession_key,
+                            "semantic_work",
+                            Self::sum_nonzero_durations([
+                                exec_started_runtime_queue_wait,
+                                (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
+                            ]),
+                            exec_started_apply_lag,
+                            Some(wait_elapsed),
+                            Some(snapshot_elapsed),
+                            exec_started_syntax_work_mode,
+                        );
+                    })
+                } else {
+                    None
+                };
+                let syntax_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
                     plan.cpu_class,
                     context_for_blocking.origin.as_str(),
                     Some(self.coordinator.as_ref()),
+                    syntax_queue_wait_started_hook,
+                    syntax_exec_started_hook,
                     move || {
                         let started = Instant::now();
                         let syntax_query =
@@ -1998,7 +2550,17 @@ impl BslLanguageServer {
                     },
                 )
                 .await;
-                match syntax_result {
+                let syntax_queue_wait =
+                    Self::sum_nonzero_durations([Some(syntax_call.queue_wait_elapsed)]);
+                blocking_queue_wait_elapsed =
+                    Self::sum_nonzero_durations([blocking_queue_wait_elapsed, syntax_queue_wait]);
+                if save_followup_from_did_save && run_semantic {
+                    followup_runtime_queue_wait_elapsed = Self::sum_nonzero_durations([
+                        followup_runtime_queue_wait_elapsed,
+                        syntax_queue_wait,
+                    ]);
+                }
+                match syntax_call.join_result {
                     Ok((syntax_diagnostics, syntax_cancelled, syntax_elapsed, next_analysis)) => {
                         analysis = Some(next_analysis);
                         diagnostics.extend(syntax_diagnostics);
@@ -2062,7 +2624,9 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
-                    None,
+                    followup_runtime_queue_wait_elapsed,
+                    followup_apply_lag_elapsed,
+                    blocking_queue_wait_elapsed,
                     Some(wait_elapsed),
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
@@ -2094,7 +2658,9 @@ impl BslLanguageServer {
                         trigger,
                         disposition,
                         None,
-                        None,
+                        followup_runtime_queue_wait_elapsed,
+                        followup_apply_lag_elapsed,
+                        blocking_queue_wait_elapsed,
                         Some(wait_elapsed),
                         Some(snapshot_elapsed),
                         syntax_stage_elapsed,
@@ -2115,10 +2681,59 @@ impl BslLanguageServer {
             let line_index_for_blocking = line_index.clone();
             let semantic_flow_sensitive = plan.flow_sensitive_semantic;
             let semantic_show_hints = show_hints;
-            let semantic_result = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            let semantic_queue_wait_started_hook = if save_followup_from_did_save && run_semantic {
+                let queued_wait_server = self.clone();
+                let queued_wait_uri = uri.clone();
+                let queued_wait_supersession_key = supersession_key;
+                let queued_wait_apply_lag = followup_apply_lag_elapsed;
+                let queued_wait_runtime_queue_wait = followup_runtime_queue_wait_elapsed;
+                let queued_wait_syntax_work_mode = followup_syntax_work_mode;
+                Some(move || {
+                    queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
+                        &queued_wait_uri,
+                        &queued_wait_supersession_key,
+                        "runtime_queue_wait",
+                        queued_wait_runtime_queue_wait,
+                        queued_wait_apply_lag,
+                        Some(wait_elapsed),
+                        Some(snapshot_elapsed),
+                        queued_wait_syntax_work_mode,
+                    );
+                })
+            } else {
+                None
+            };
+            let semantic_exec_started_hook = if save_followup_from_did_save && run_semantic {
+                let exec_started_server = self.clone();
+                let exec_started_uri = uri.clone();
+                let exec_started_supersession_key = supersession_key;
+                let exec_started_apply_lag = followup_apply_lag_elapsed;
+                let exec_started_runtime_queue_wait = followup_runtime_queue_wait_elapsed;
+                let exec_started_syntax_work_mode = followup_syntax_work_mode;
+                Some(move |queue_wait_elapsed| {
+                    exec_started_server.record_diagnostics_save_followup_wait_state_v2(
+                        &exec_started_uri,
+                        &exec_started_supersession_key,
+                        "semantic_work",
+                        Self::sum_nonzero_durations([
+                            exec_started_runtime_queue_wait,
+                            (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
+                        ]),
+                        exec_started_apply_lag,
+                        Some(wait_elapsed),
+                        Some(snapshot_elapsed),
+                        exec_started_syntax_work_mode,
+                    );
+                })
+            } else {
+                None
+            };
+            let semantic_call = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_hooks(
                 plan.cpu_class,
                 context_for_blocking.origin.as_str(),
                 Some(self.coordinator.as_ref()),
+                semantic_queue_wait_started_hook,
+                semantic_exec_started_hook,
                 move || {
                     let started = Instant::now();
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
@@ -2174,7 +2789,17 @@ impl BslLanguageServer {
                 },
             )
             .await;
-            match semantic_result {
+            let semantic_queue_wait =
+                Self::sum_nonzero_durations([Some(semantic_call.queue_wait_elapsed)]);
+            blocking_queue_wait_elapsed =
+                Self::sum_nonzero_durations([blocking_queue_wait_elapsed, semantic_queue_wait]);
+            if save_followup_from_did_save && run_semantic {
+                followup_runtime_queue_wait_elapsed = Self::sum_nonzero_durations([
+                    followup_runtime_queue_wait_elapsed,
+                    semantic_queue_wait,
+                ]);
+            }
+            match semantic_call.join_result {
                 Ok((semantic_diagnostics, semantic_cancelled, semantic_elapsed)) => {
                     diagnostics.extend(semantic_diagnostics);
                     was_cancelled |= semantic_cancelled;
@@ -2288,7 +2913,9 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
-                    None,
+                    followup_runtime_queue_wait_elapsed,
+                    followup_apply_lag_elapsed,
+                    blocking_queue_wait_elapsed,
                     Some(wait_elapsed),
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
@@ -2327,7 +2954,9 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
-                    None,
+                    followup_runtime_queue_wait_elapsed,
+                    followup_apply_lag_elapsed,
+                    blocking_queue_wait_elapsed,
                     Some(wait_elapsed),
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
@@ -2358,6 +2987,8 @@ impl BslLanguageServer {
                 uri,
                 &supersession_key,
                 "pending_publish",
+                followup_runtime_queue_wait_elapsed,
+                followup_apply_lag_elapsed,
                 Some(wait_elapsed),
                 Some(snapshot_elapsed),
                 followup_syntax_work_mode,
@@ -2381,7 +3012,9 @@ impl BslLanguageServer {
             trigger,
             disposition,
             Some(publish_kind),
-            None,
+            followup_runtime_queue_wait_elapsed,
+            followup_apply_lag_elapsed,
+            blocking_queue_wait_elapsed,
             Some(wait_elapsed),
             Some(snapshot_elapsed),
             syntax_stage_elapsed,

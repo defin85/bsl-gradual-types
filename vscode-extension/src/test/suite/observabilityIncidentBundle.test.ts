@@ -248,7 +248,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 6,
+                version: 7,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -263,6 +263,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                             publish_kind: 'syntax_only',
                             outcome: 'published',
                             elapsed_ms: 84,
+                            runtime_queue_wait_ms: 6,
                             blocking_queue_wait_ms: 17,
                             syntax_diagnostics_query_ms: 12,
                             publish_wait_ms: 1,
@@ -273,6 +274,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                             outcome: 'published',
                             elapsed_ms: 143,
                             syntax_work_mode: 'recomputed',
+                            runtime_queue_wait_ms: 11,
+                            apply_lag_ms: 23,
                             wait_for_file_version_ms: 9,
                             snapshot_with_deps_ms: 7,
                             syntax_diagnostics_query_ms: 11,
@@ -283,6 +286,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                         idle_heavy_outcome: 'published',
                         followup_syntax_work_mode: 'recomputed',
                         followup_wait_reason: 'pending_publish',
+                        followup_runtime_queue_wait_ms: 11,
+                        followup_apply_lag_ms: 23,
                         followup_wait_for_file_version_ms: 9,
                         followup_snapshot_with_deps_ms: 7,
                         terminal_outcome: 'published',
@@ -296,7 +301,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 6,
+                version: 7,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -317,7 +322,85 @@ suite('Observability Incident Bundle Test Suite', () => {
                         save_fastlane_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
                         followup_wait_reason: 'apply_lag',
+                        followup_apply_lag_ms: 1770,
+                    },
+                ],
+            },
+        };
+    }
+
+    function sampleQueuedInFlightDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 7,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-3',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 12,
+                        save_cycle_sequence: 6,
+                        diagnostics_generation: 8,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_031_000,
+                        first_publish: {
+                            profile: 'save_fastlane',
+                            publish_kind: 'syntax_only',
+                            outcome: 'published',
+                            elapsed_ms: 91,
+                            blocking_queue_wait_ms: 19,
+                            syntax_diagnostics_query_ms: 14,
                         },
+                        save_fastlane_outcome: 'published',
+                        followup_syntax_work_mode: 'reused',
+                        followup_wait_reason: 'runtime_queue_wait',
+                    },
+                ],
+            },
+        };
+    }
+
+    function sampleZeroTimingDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 7,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-4',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 13,
+                        save_cycle_sequence: 7,
+                        diagnostics_generation: 9,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_032_000,
+                        first_publish: {
+                            profile: 'save_fastlane',
+                            publish_kind: 'syntax_only',
+                            outcome: 'published',
+                            elapsed_ms: 95,
+                            runtime_queue_wait_ms: 0,
+                            apply_lag_ms: 0,
+                            blocking_queue_wait_ms: 14,
+                            syntax_diagnostics_query_ms: 12,
+                        },
+                        followup_publish: {
+                            profile: 'idle_heavy',
+                            publish_kind: 'full',
+                            outcome: 'published',
+                            elapsed_ms: 131,
+                            runtime_queue_wait_ms: 0,
+                            apply_lag_ms: 0,
+                            semantic_diagnostics_query_ms: 15,
+                        },
+                        save_fastlane_outcome: 'published',
+                        idle_heavy_outcome: 'published',
+                        followup_syntax_work_mode: 'reused',
+                        followup_wait_reason: 'semantic_work',
+                        followup_runtime_queue_wait_ms: 0,
+                        followup_apply_lag_ms: 0,
+                        terminal_outcome: 'published',
+                    },
                 ],
             },
         };
@@ -372,7 +455,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 6);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 7);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -543,11 +626,15 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('save_cycle_sequence=2'));
         assert.ok(bundle.summaryMarkdown.includes('first_publish=save_fastlane:syntax_only:published@84ms'));
+        assert.ok(bundle.summaryMarkdown.includes('runtime_queue_wait_ms=6'));
         assert.ok(bundle.summaryMarkdown.includes('blocking_queue_wait_ms=17'));
         assert.ok(bundle.summaryMarkdown.includes('followup_publish=idle_heavy:full:published@143ms'));
         assert.ok(bundle.summaryMarkdown.includes('syntax_work_mode=recomputed'));
+        assert.ok(bundle.summaryMarkdown.includes('apply_lag_ms=23'));
         assert.ok(bundle.summaryMarkdown.includes('followup_syntax_work_mode=recomputed'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=pending_publish'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_runtime_queue_wait_ms=11'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_apply_lag_ms=23'));
         assert.ok(bundle.summaryMarkdown.includes('trace-1 | request=req-1'));
         assert.ok(bundle.summaryMarkdown.includes('transport_received_at_ms_provenance=jsonrpc_dispatch_received'));
         assert.ok(bundle.summaryMarkdown.includes('jsonrpc_dispatch_received_at_ms=1700000000000'));
@@ -625,6 +712,41 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('terminal=in_flight'));
         assert.ok(bundle.summaryMarkdown.includes('followup_publish=pending'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=apply_lag'));
+    });
+
+    test('diagnostics save summary should render runtime_queue_wait for active queued followup', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleQueuedInFlightDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-3'));
+        assert.ok(bundle.summaryMarkdown.includes('terminal=in_flight'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_publish=pending'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_wait=runtime_queue_wait'));
+    });
+
+    test('diagnostics save summary should omit zero-valued runtime/apply timing noise', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleZeroTimingDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-4'));
+        assert.ok(bundle.summaryMarkdown.includes('blocking_queue_wait_ms=14'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_wait=semantic_work'));
+        assert.ok(!bundle.summaryMarkdown.includes('runtime_queue_wait_ms=0'));
+        assert.ok(!bundle.summaryMarkdown.includes('apply_lag_ms=0'));
+        assert.ok(!bundle.summaryMarkdown.includes('followup_runtime_queue_wait_ms=0'));
+        assert.ok(!bundle.summaryMarkdown.includes('followup_apply_lag_ms=0'));
     });
 
     test('unavailable diagnostics save timeline should stay explicit in bundle status', () => {

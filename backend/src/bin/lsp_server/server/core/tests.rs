@@ -3500,6 +3500,11 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
     });
 
     initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
     let uri =
         Url::parse("file:///did_save_followup_runtime_queue_wait_fixture.bsl").expect("fixture");
     let did_open_response = service
@@ -3653,6 +3658,49 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
             .and_then(|value| value.as_u64()),
         None,
         "in-flight runtime_queue_wait attribution must not fabricate elapsed queue time before permit acquisition, trace={queued_trace:?}"
+    );
+    {
+        let lane_state = server
+            .diagnostics_did_save_followup_lane_v2
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert_eq!(
+            lane_state.active_slots, 1,
+            "single didSave follow-up must own exactly one outer dedicated lane slot while blocked on background CPU, lane_state={lane_state:?}"
+        );
+        assert!(
+            lane_state.queued_files.is_empty() && lane_state.queued_set.is_empty(),
+            "unrelated background CPU saturation must not leave the same follow-up queued behind a second branch-local arbiter once the outer lane admitted it, lane_state={lane_state:?}"
+        );
+    }
+    let interactive_probe = tokio::time::timeout(
+        Duration::from_millis(500),
+        bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin(
+            bsl_runtime::application::CpuWorkClass::Interactive,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(coordinator.as_ref()),
+            || {
+                std::thread::sleep(Duration::from_millis(50));
+                7_u8
+            },
+        ),
+    )
+    .await
+    .expect("interactive probe must not be stranded behind didSave follow-up lane pressure");
+    assert!(
+        interactive_probe.join_result.is_ok(),
+        "interactive probe must complete successfully while didSave follow-up is blocked on background CPU"
+    );
+    assert!(
+        interactive_probe.queue_wait_elapsed < Duration::from_millis(250),
+        "didSave follow-up lane must not borrow interactive reserved capacity under background saturation, observed interactive queue wait={:?}",
+        interactive_probe.queue_wait_elapsed
+    );
+    assert!(
+        wait_any_lsp_publish_diagnostics(&mut published_rx, &uri, Duration::from_millis(250))
+            .await
+            .is_none(),
+        "dedicated follow-up lane must not create net-new background execution capacity while the original background permit is still held"
     );
 
     background_holder_barrier.wait();
@@ -34369,6 +34417,8 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
         const APPLY_DELAY_MS: u64 = 4_000;
         const FIRST_PUBLISH_BUDGET_MS: u64 = 2_500;
         const FOLLOWUP_OBSERVE_BUDGET_MS: u64 = 60_000;
+        const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 6;
+        const FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS: u64 = 5_000;
         let _apply_delay_guard =
             EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", &APPLY_DELAY_MS.to_string());
         let _debounce_guard = EnvVarGuard::set_with_reload(
@@ -34379,7 +34429,7 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-09-diagnostics-save-followup-runtime-contention-bounding".to_string()
+            "refactor-10-diagnostics-save-followup-background-isolation".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -34516,6 +34566,30 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             FIRST_PUBLISH_BUDGET_MS
         );
 
+        let mut document_symbol_present_responses_total = 0_u64;
+        let mut document_symbol_null_responses_total = 0_u64;
+        for request_offset in 0..DOCUMENT_SYMBOL_BURST_REQUESTS {
+            let response = tokio::time::timeout(
+                Duration::from_secs(15),
+                harness.send_request(
+                    44_100_910 + request_offset as i64,
+                    "textDocument/documentSymbol",
+                    DocumentSymbolParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        partial_result_params: PartialResultParams::default(),
+                    },
+                ),
+            )
+            .await
+            .expect("documentSymbol mixed-load request must stay bounded");
+            if document_symbol_response_from_jsonrpc_response(&response).is_some() {
+                document_symbol_present_responses_total += 1;
+            } else {
+                document_symbol_null_responses_total += 1;
+            }
+        }
+
         let timeline = tokio::time::timeout(
             Duration::from_millis(FOLLOWUP_OBSERVE_BUDGET_MS),
             async {
@@ -34609,6 +34683,15 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
         let idle_heavy_outcome = timeline
             .get("idle_heavy_outcome")
             .and_then(|value| value.as_str());
+        let observed_followup_runtime_queue_wait_ms = followup_publish
+            .and_then(|publish| publish.get("runtime_queue_wait_ms"))
+            .and_then(|value| value.as_u64())
+            .or_else(|| {
+                timeline
+                    .get("followup_runtime_queue_wait_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .unwrap_or(0);
         assert!(
             followup_publish.is_some()
                 || followup_wait_reason.is_some_and(|reason| reason != "pending_publish")
@@ -34651,6 +34734,12 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             Some(0),
             "follow-up runtime live report must omit zero-valued publish apply lag noise, trace={timeline:?}"
         );
+        assert!(
+            observed_followup_runtime_queue_wait_ms <= FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS,
+            "follow-up runtime live report must keep runtime_queue_wait bounded under comparable mixed documentSymbol load: observed_followup_runtime_queue_wait_ms={}ms > {}ms, trace={timeline:?}",
+            observed_followup_runtime_queue_wait_ms,
+            FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS
+        );
 
         let observability_metrics =
             live_transport_get_observability_metrics(&mut harness, 44_100_902).await;
@@ -34673,6 +34762,10 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             "change_id": change_id,
             "module_path": module_path.display().to_string(),
             "uri": uri.to_string(),
+            "request_plan": {
+                "mixed_load_profile": "didSave+documentSymbol_burst",
+                "document_symbol_requests_total": DOCUMENT_SYMBOL_BURST_REQUESTS,
+            },
             "apply_delay_ms": APPLY_DELAY_MS,
             "first_publish_budget_ms": FIRST_PUBLISH_BUDGET_MS,
             "first_publish_elapsed_ms": first_publish_elapsed_ms,
@@ -34680,6 +34773,10 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             "first_publish_diagnostics_count": first_publish.diagnostics.len(),
             "first_publish_syntax_only": syntax_only,
             "save_fastlane_published_total": save_fastlane_published_total,
+            "document_symbol_present_responses_total": document_symbol_present_responses_total,
+            "document_symbol_null_responses_total": document_symbol_null_responses_total,
+            "followup_runtime_queue_wait_budget_ms": FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS,
+            "observed_followup_runtime_queue_wait_ms": observed_followup_runtime_queue_wait_ms,
             "save_cycle_sequence": timeline
                 .get("save_cycle_sequence")
                 .and_then(|value| value.as_u64()),

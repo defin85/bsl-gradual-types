@@ -528,6 +528,7 @@ type CurrentRevisionHeadPrecomputeTasksV2 = HashMap<V2FileId, CurrentRevisionHea
 
 pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
     pub requested_version: Arc<AtomicI32>,
+    pub text_hash: [u8; 32],
     pub handle: JoinHandle<()>,
 }
 

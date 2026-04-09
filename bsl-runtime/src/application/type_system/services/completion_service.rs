@@ -82,8 +82,24 @@ pub struct CompletionStats {
     pub has_owner: usize,
     pub stage_snapshot_read: Duration,
     pub stage_collect: Duration,
+    pub collect_breakdown: CompletionCollectBreakdown,
     pub stage_rank: Duration,
     pub stage_format: Duration,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompletionCollectBreakdown {
+    pub member_owner_resolve: Duration,
+    pub member_methods: Duration,
+    pub member_properties: Duration,
+    pub member_metadata: Duration,
+    pub non_member_local_symbols: Duration,
+    pub non_member_contextual_symbols: Duration,
+    pub non_member_module_routines: Duration,
+    pub non_member_global_functions: Duration,
+    pub non_member_metadata_items: Duration,
+    pub non_member_repository_types: Duration,
+    pub non_member_keywords: Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -936,30 +952,21 @@ async fn get_completion_internal(
     let _collect_guard = collect_span.enter();
     let collect_started = Instant::now();
 
-    if context.member_access {
+    let collect_breakdown = if context.member_access {
         // The shared member-access path may only use canonical owner hints materialized
         // from the current-revision exact semantic index. Type-name/text-based rescue
         // and IR fallback reconstruction must fail closed instead of synthesizing truth.
         match evidence {
-            CompletionEvidence::Semantic(analysis) => {
-                for owner_hint in
-                    resolve_member_owner_types_sync(Some(analysis), file_content, line, column, "")
-                {
-                    if let Some(kind) = get_collection_kind(&owner_hint.type_name()) {
-                        add_metadata_items_from_lookup(metadata_lookup, kind, &mut candidates, 0);
-                        continue;
-                    }
-                    add_methods_from_resolution(metadata_lookup, &owner_hint, &mut candidates, 0);
-                    add_properties_from_resolution(
-                        metadata_lookup,
-                        &owner_hint,
-                        &mut candidates,
-                        1,
-                    );
-                }
-            }
+            CompletionEvidence::Semantic(analysis) => collect_member_access_candidates(
+                analysis,
+                file_content,
+                line,
+                column,
+                metadata_lookup,
+                &mut candidates,
+            ),
             #[cfg(test)]
-            CompletionEvidence::SnapshotOnly => {}
+            CompletionEvidence::SnapshotOnly => CompletionCollectBreakdown::default(),
         }
     } else {
         match evidence {
@@ -978,10 +985,11 @@ async fn get_completion_internal(
                     &snapshot,
                     metadata_lookup,
                     &mut candidates,
-                )
+                );
+                CompletionCollectBreakdown::default()
             }
         }
-    }
+    };
     let collect_elapsed = collect_started.elapsed();
     if let Some(request_id) = trace_request_id {
         if tracing::level_filters::STATIC_MAX_LEVEL >= tracing::level_filters::LevelFilter::DEBUG {
@@ -1087,10 +1095,45 @@ async fn get_completion_internal(
             has_owner: ranked.summary.has_owner,
             stage_snapshot_read: snapshot_elapsed,
             stage_collect: collect_elapsed,
+            collect_breakdown,
             stage_rank: rank_elapsed,
             stage_format: format_elapsed,
         },
     })
+}
+
+fn collect_member_access_candidates(
+    analysis: &CompletionAnalysisContext<'_>,
+    file_content: &str,
+    line: u32,
+    column: u32,
+    metadata_lookup: &TypeMetadataLookup,
+    candidates: &mut Vec<Candidate>,
+) -> CompletionCollectBreakdown {
+    let mut breakdown = CompletionCollectBreakdown::default();
+    let owner_resolve_started = Instant::now();
+    let owner_hints =
+        resolve_member_owner_types_sync(Some(analysis), file_content, line, column, "");
+    breakdown.member_owner_resolve = owner_resolve_started.elapsed();
+
+    for owner_hint in owner_hints {
+        if let Some(kind) = get_collection_kind(&owner_hint.type_name()) {
+            let metadata_started = Instant::now();
+            add_metadata_items_from_lookup(metadata_lookup, kind, candidates, 0);
+            breakdown.member_metadata += metadata_started.elapsed();
+            continue;
+        }
+
+        let methods_started = Instant::now();
+        add_methods_from_resolution(metadata_lookup, &owner_hint, candidates, 0);
+        breakdown.member_methods += methods_started.elapsed();
+
+        let properties_started = Instant::now();
+        add_properties_from_resolution(metadata_lookup, &owner_hint, candidates, 1);
+        breakdown.member_properties += properties_started.elapsed();
+    }
+
+    breakdown
 }
 
 fn collect_non_member_candidates(
@@ -1100,14 +1143,38 @@ fn collect_non_member_candidates(
     column: u32,
     metadata_lookup: &TypeMetadataLookup,
     candidates: &mut Vec<Candidate>,
-) {
+) -> CompletionCollectBreakdown {
+    let mut breakdown = CompletionCollectBreakdown::default();
+
+    let local_symbols_started = Instant::now();
     add_local_symbols_from_ir(Some(analysis), file_content, line, column, candidates, 0);
+    breakdown.non_member_local_symbols = local_symbols_started.elapsed();
+
+    let contextual_started = Instant::now();
     add_contextual_non_member_symbols_without_ir(analysis, candidates, 0);
+    breakdown.non_member_contextual_symbols = contextual_started.elapsed();
+
+    let module_routines_started = Instant::now();
     add_module_routines_from_ir(Some(analysis), file_content, line, column, candidates, 1);
+    breakdown.non_member_module_routines = module_routines_started.elapsed();
+
+    let global_functions_started = Instant::now();
     add_global_functions_from_lookup(metadata_lookup, candidates, 1);
+    breakdown.non_member_global_functions = global_functions_started.elapsed();
+
+    let metadata_items_started = Instant::now();
     add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+    breakdown.non_member_metadata_items = metadata_items_started.elapsed();
+
+    let repository_types_started = Instant::now();
     add_repository_types_from_lookup(metadata_lookup, candidates, 3);
+    breakdown.non_member_repository_types = repository_types_started.elapsed();
+
+    let keywords_started = Instant::now();
     add_default_keywords(candidates, 4);
+    breakdown.non_member_keywords = keywords_started.elapsed();
+
+    breakdown
 }
 
 fn add_contextual_non_member_symbols_without_ir(

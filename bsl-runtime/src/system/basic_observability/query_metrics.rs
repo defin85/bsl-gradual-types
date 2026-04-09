@@ -1,5 +1,15 @@
 use super::*;
 
+fn normalize_current_context_parse_source_label(source: &str) -> &'static str {
+    match source {
+        "ready_snapshot" => "ready_snapshot",
+        "parser_coordinator" => "parser_coordinator",
+        "syntax_fallback" => "syntax_fallback",
+        "parse_unavailable" => "parse_unavailable",
+        _ => "other",
+    }
+}
+
 impl BasicObservability {
     pub fn record_intellisense_v2_payload_shape(
         &self,
@@ -257,6 +267,34 @@ impl BasicObservability {
 
     pub fn record_intellisense_v2_ir_query_cancelled(&self, kind: &str) {
         self.record_intellisense_v2_ir_query_cancelled_with_origin("runtime", kind);
+    }
+
+    pub fn record_intellisense_v2_current_context_parse_source(&self, source: &str) {
+        let source = normalize_current_context_parse_source_label(source);
+        let key = format!("intellisense_v2_current_context_parse_source_total_source_{source}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_current_context_parse_latency(
+        &self,
+        source: &str,
+        duration: Duration,
+    ) {
+        let source = normalize_current_context_parse_source_label(source);
+        let key = format!("intellisense_v2_current_context_parse_ms_source_{source}");
+        self.metrics
+            .observe_histogram(&key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_current_context_wall_latency(
+        &self,
+        source: &str,
+        duration: Duration,
+    ) {
+        let source = normalize_current_context_parse_source_label(source);
+        let key = format!("intellisense_v2_current_context_wall_ms_source_{source}");
+        self.metrics
+            .observe_histogram(&key, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_ir_query_cancelled_with_origin(&self, origin: &str, kind: &str) {

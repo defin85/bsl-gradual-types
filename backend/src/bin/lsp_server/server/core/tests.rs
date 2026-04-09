@@ -3417,8 +3417,7 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queued_shadow_followup()
-{
+async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_reserved_blocker() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -3459,7 +3458,6 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
     const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
-    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 10_000;
 
     let _env_lock = lock_test_env().await;
     let _background_reserved_only_guard =
@@ -3500,7 +3498,7 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
     });
 
     initialize_lsp_service(&mut service).await;
-    let server = server_holder
+    let _server = server_holder
         .lock()
         .expect("server holder lock")
         .clone()
@@ -3615,64 +3613,10 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
             .diagnostics
             .iter()
             .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
-        "save_fastlane first publish must stay syntax-only when diagnostics are present while queued follow-up waits, diagnostics={:?}",
+        "save_fastlane first publish must stay syntax-only while heavy follow-up is still pending, diagnostics={:?}",
         first_publish.diagnostics
     );
 
-    let queued_trace = tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_712, 8).await;
-            let traces = timeline
-                .get("traces")
-                .and_then(|value| value.as_array())
-                .expect("diagnostics save timeline traces");
-            if let Some(trace) = traces.iter().find(|trace| {
-                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
-                    && trace
-                        .get("requested_version")
-                        .and_then(|value| value.as_i64())
-                        == Some(2)
-                    && trace.get("followup_publish").is_none()
-                    && trace
-                        .get("followup_wait_reason")
-                        .and_then(|value| value.as_str())
-                        == Some("runtime_queue_wait")
-            }) {
-                break trace.clone();
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("queued shadow follow-up must expose runtime_queue_wait while permit is blocked");
-    assert_eq!(
-        queued_trace
-            .get("idle_heavy_outcome")
-            .and_then(|value| value.as_str()),
-        None,
-        "queued shadow follow-up must remain in-flight before background permit is released, trace={queued_trace:?}"
-    );
-    assert_eq!(
-        queued_trace
-            .get("followup_runtime_queue_wait_ms")
-            .and_then(|value| value.as_u64()),
-        None,
-        "in-flight runtime_queue_wait attribution must not fabricate elapsed queue time before permit acquisition, trace={queued_trace:?}"
-    );
-    {
-        let lane_state = server
-            .diagnostics_did_save_followup_lane_v2
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        assert_eq!(
-            lane_state.active_slots, 1,
-            "single didSave follow-up must own exactly one outer dedicated lane slot while blocked on background CPU, lane_state={lane_state:?}"
-        );
-        assert!(
-            lane_state.queued_files.is_empty() && lane_state.queued_set.is_empty(),
-            "unrelated background CPU saturation must not leave the same follow-up queued behind a second branch-local arbiter once the outer lane admitted it, lane_state={lane_state:?}"
-        );
-    }
     let interactive_probe = tokio::time::timeout(
         Duration::from_millis(500),
         bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin(
@@ -3689,27 +3633,15 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
     .expect("interactive probe must not be stranded behind didSave follow-up lane pressure");
     assert!(
         interactive_probe.join_result.is_ok(),
-        "interactive probe must complete successfully while didSave follow-up is blocked on background CPU"
+        "interactive probe must complete successfully while didSave follow-up is active"
     );
     assert!(
         interactive_probe.queue_wait_elapsed < Duration::from_millis(250),
         "didSave follow-up lane must not borrow interactive reserved capacity under background saturation, observed interactive queue wait={:?}",
         interactive_probe.queue_wait_elapsed
     );
-    assert!(
-        wait_any_lsp_publish_diagnostics(&mut published_rx, &uri, Duration::from_millis(250))
-            .await
-            .is_none(),
-        "dedicated follow-up lane must not create net-new background execution capacity while the original background permit is still held"
-    );
 
-    background_holder_barrier.wait();
-    tokio::time::timeout(Duration::from_secs(3), background_holder)
-        .await
-        .expect("background holder task timeout")
-        .expect("background holder join");
-
-    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+    let followup_publish = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let params = published_rx
                 .recv()
@@ -3729,24 +3661,43 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
     })
     .await
     .expect(
-        "queued shadow follow-up must eventually publish full diagnostics after permit release",
+        "didSave heavy follow-up must publish richer diagnostics before the generic background reserved permit is released",
+    );
+    assert!(
+        followup_publish
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2")),
+        "heavy follow-up publish must include semantic diagnostics while the generic background reserved permit is still blocked, diagnostics={:?}",
+        followup_publish.diagnostics
+    );
+    assert!(
+        !background_holder.is_finished(),
+        "generic background blocker should still be holding its reserved permit when the didSave follow-up publishes"
     );
 
-    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_713, 8).await;
-    let traces = timeline
-        .get("traces")
-        .and_then(|value| value.as_array())
-        .expect("diagnostics save timeline traces");
-    let trace = traces
-        .iter()
-        .find(|trace| {
-            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
-                && trace
-                    .get("requested_version")
-                    .and_then(|value| value.as_i64())
-                    == Some(2)
-        })
-        .expect("matching diagnostics save timeline trace");
+    let trace = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_712, 8).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+                    && trace.get("followup_publish").is_some()
+            }) {
+                break trace.clone();
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("didSave follow-up publish trace must be observable");
     let full_publish = trace
         .get("followup_publish")
         .and_then(|value| value.as_object())
@@ -3755,30 +3706,42 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
         full_publish.get("profile").and_then(|value| value.as_str()),
         Some("idle_heavy")
     );
+    assert_ne!(
+        trace.get("followup_wait_reason")
+            .and_then(|value| value.as_str()),
+        Some("runtime_queue_wait"),
+        "isolated didSave follow-up must not report generic runtime_queue_wait as the default blocker when generic background reserved capacity is already occupied, trace={trace:?}"
+    );
     assert!(
         full_publish
             .get("runtime_queue_wait_ms")
             .and_then(|value| value.as_u64())
-            .is_some_and(|value| value > 0),
-        "terminal queued shadow follow-up must expose factual runtime_queue_wait_ms on publish trace, trace={trace:?}"
+            .map_or(true, |value| value < 250),
+        "isolated didSave follow-up must keep any residual runtime queue wait bounded while publishing under generic background pressure, trace={trace:?}"
     );
     assert!(
         trace.get("followup_runtime_queue_wait_ms")
             .and_then(|value| value.as_u64())
-            .is_some_and(|value| value > 0),
-        "top-level queued shadow follow-up trace must surface runtime_queue_wait fact for operator-facing summary, trace={trace:?}"
+            .map_or(true, |value| value < 250),
+        "top-level didSave follow-up trace must not surface large generic runtime queue wait after isolation, trace={trace:?}"
     );
     assert!(
         full_publish.get("wait_for_file_version_ms").is_none(),
-        "queued shadow follow-up must not regress into wait_for_file_version gating, trace={trace:?}"
+        "isolated didSave follow-up must not regress into wait_for_file_version gating, trace={trace:?}"
     );
     assert_eq!(
         full_publish
             .get("syntax_work_mode")
             .and_then(|value| value.as_str()),
         Some("reused"),
-        "queued shadow follow-up must still reuse save_fastlane syntax artifacts after runtime contention, trace={trace:?}"
+        "isolated didSave follow-up must still reuse save_fastlane syntax artifacts, trace={trace:?}"
     );
+
+    background_holder_barrier.wait();
+    tokio::time::timeout(Duration::from_secs(3), background_holder)
+        .await
+        .expect("background holder task timeout")
+        .expect("background holder join");
 
     let metrics = coordinator.observability_metrics();
     let counters = metrics
@@ -3798,14 +3761,14 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
             .get("intellisense_v2_runtime_lane_queue_wait_total_origin_lsp_lane_did_save_followup")
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
-        "queued shadow follow-up must export dedicated lane queue-wait counter, metrics={metrics:?}"
+        "isolated didSave follow-up must export dedicated lane queue-wait counter, metrics={metrics:?}"
     );
     assert!(
         counters
             .get("intellisense_v2_runtime_lane_exec_total_origin_lsp_lane_did_save_followup")
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
-        "queued shadow follow-up must export dedicated lane exec counter, metrics={metrics:?}"
+        "isolated didSave follow-up must export dedicated lane exec counter, metrics={metrics:?}"
     );
     assert!(
         histograms
@@ -3813,7 +3776,7 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
             .and_then(|value| value.get("count"))
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
-        "queued shadow follow-up must export dedicated lane queue-wait histogram, metrics={metrics:?}"
+        "isolated didSave follow-up must export dedicated lane queue-wait histogram, metrics={metrics:?}"
     );
     assert!(
         histograms
@@ -3821,7 +3784,7 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
             .and_then(|value| value.get("count"))
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
-        "queued shadow follow-up must export dedicated lane exec histogram, metrics={metrics:?}"
+        "isolated didSave follow-up must export dedicated lane exec histogram, metrics={metrics:?}"
     );
     for gauge_key in [
         "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_quota",
@@ -3830,7 +3793,7 @@ async fn p7_diagnostics_save_timeline_marks_runtime_queue_wait_for_inflight_queu
     ] {
         assert!(
             gauges.get(gauge_key).and_then(|value| value.as_f64()).is_some(),
-            "queued shadow follow-up must export {gauge_key}, metrics={metrics:?}"
+            "isolated didSave follow-up must export {gauge_key}, metrics={metrics:?}"
         );
     }
 
@@ -4115,7 +4078,8 @@ async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_
 }
 
 #[tokio::test]
-async fn p8_did_save_followup_quota_zero_disables_future_admissions_without_revoking_admitted_work() {
+async fn p8_did_save_followup_quota_zero_disables_future_admissions_without_revoking_admitted_work()
+{
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -4155,10 +4119,8 @@ async fn p8_did_save_followup_quota_zero_disables_future_admissions_without_revo
     }
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
-    const V2_FIXTURE_A: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяА);\nКонецПроцедуры\n";
-    const V2_FIXTURE_B: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяБ);\nКонецПроцедуры\n";
+    const V2_FIXTURE_A: &str = "Процедура Тест()\n    Сообщить(необъявленнаяА);\nКонецПроцедуры\n";
+    const V2_FIXTURE_B: &str = "Процедура Тест()\n    Сообщить(необъявленнаяБ);\nКонецПроцедуры\n";
     const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 10_000;
 
     let _env_lock = lock_test_env().await;
@@ -4571,14 +4533,10 @@ async fn p8_did_save_followup_default_quota_keeps_single_slot_latest_only_cross_
     }
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
-    const V2_FIXTURE_A: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяА2);\nКонецПроцедуры\n";
-    const V3_FIXTURE_A: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяА3);\nКонецПроцедуры\n";
-    const V4_FIXTURE_A: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяА4);\nКонецПроцедуры\n";
-    const V2_FIXTURE_B: &str =
-        "Процедура Тест()\n    Сообщить(необъявленнаяБ2);\nКонецПроцедуры\n";
+    const V2_FIXTURE_A: &str = "Процедура Тест()\n    Сообщить(необъявленнаяА2);\nКонецПроцедуры\n";
+    const V3_FIXTURE_A: &str = "Процедура Тест()\n    Сообщить(необъявленнаяА3);\nКонецПроцедуры\n";
+    const V4_FIXTURE_A: &str = "Процедура Тест()\n    Сообщить(необъявленнаяА4);\nКонецПроцедуры\n";
+    const V2_FIXTURE_B: &str = "Процедура Тест()\n    Сообщить(необъявленнаяБ2);\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env().await;
     let _background_reserved_only_guard =
@@ -4610,10 +4568,10 @@ async fn p8_did_save_followup_default_quota_keeps_single_slot_latest_only_cross_
     });
 
     initialize_lsp_service(&mut service).await;
-    let uri_a =
-        Url::parse("file:///did_save_followup_default_quota_fairness_a_fixture.bsl").expect("uri a");
-    let uri_b =
-        Url::parse("file:///did_save_followup_default_quota_fairness_b_fixture.bsl").expect("uri b");
+    let uri_a = Url::parse("file:///did_save_followup_default_quota_fairness_a_fixture.bsl")
+        .expect("uri a");
+    let uri_b = Url::parse("file:///did_save_followup_default_quota_fairness_b_fixture.bsl")
+        .expect("uri b");
     for uri in [&uri_a, &uri_b] {
         let did_open_response = service
             .ready()
@@ -20401,6 +20359,7 @@ async fn p33_completion_service_first_poll_ignores_blocking_did_change_parse_del
     let _env_lock = lock_test_env().await;
     let _blocking_parse_delay_guard =
         EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
+    let _did_save_parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_SAVE_PARSE_DELAY_MS", "1500");
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -23138,7 +23097,7 @@ async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_defini
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
+async fn p33_did_save_coalesces_same_version_outline_refresh_on_default_path() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -23263,16 +23222,15 @@ async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
     .expect("didChange parse-snapshot gap must become observable before didSave");
 
     live_transport_save_document(&mut harness, &uri).await;
-    tokio::time::timeout(Duration::from_millis(800), async {
-        loop {
-            if super::super::language_server::did_save_inline_parse_delay_active_for_test() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("didSave must re-arm same-version outline refresh on the default path");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        super::super::language_server::did_change_inline_parse_delay_active_for_test(),
+        "didChange same-version parse gap must still be active when didSave arrives"
+    );
+    assert!(
+        !super::super::language_server::did_save_inline_parse_delay_active_for_test(),
+        "didSave must coalesce behind the in-flight same-version refresh instead of spawning a second delayed parse worker"
+    );
 
     let response = tokio::time::timeout(
         Duration::from_millis(250),
@@ -23293,11 +23251,11 @@ async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
     let names = document_symbol_names(&parsed);
     assert!(
         names.iter().any(|name| name == "OldProc"),
-        "didSave-triggered outline refresh must keep serving the previous ready cache while rebuilding, names={names:?}"
+        "coalesced same-version outline refresh must keep serving the previous ready cache while rebuilding, names={names:?}"
     );
     assert!(
         names.iter().all(|name| name != "NewProc"),
-        "didSave-triggered outline refresh must not masquerade as the new revision before refresh completes, names={names:?}"
+        "coalesced same-version outline refresh must not masquerade as the new revision before refresh completes, names={names:?}"
     );
 
     drop(did_change_guard);
@@ -23326,10 +23284,10 @@ async fn p33_did_save_rearms_same_version_outline_refresh_on_default_path() {
         }
     })
     .await
-    .expect("didSave-triggered outline refresh must eventually materialize");
+    .expect("coalesced same-version outline refresh must eventually materialize");
     assert!(
         refreshed.iter().any(|name| name == "NewProc"),
-        "didSave-triggered refresh must eventually expose the new outline, names={refreshed:?}"
+        "coalesced same-version refresh must eventually expose the new outline, names={refreshed:?}"
     );
 
     live_transport_close_document(&mut harness, &uri).await;
@@ -23461,6 +23419,30 @@ async fn p33_changed_text_current_revision_head_stays_available_while_parse_snap
     .await
     .expect(
         "didChange must publish changed current revision before blocking parse snapshot completes",
+    );
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        !super::super::language_server::did_save_inline_parse_delay_active_for_test(),
+        "same-version didSave must not start a second delayed parse worker on the current-revision completion path"
     );
 
     let completion_position = find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = S.");
@@ -26088,6 +26070,7 @@ async fn p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_
     let (mut service, drain_task, server, uri, file_id) =
         open_lsp_fixture_with_snapshot(fixture, "file:///current_context_fixture.bsl").await;
     force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+    super::super::command_handlers::reset_get_current_context_parse_attempts_for_test();
 
     let execute = Request::build("workspace/executeCommand")
         .id(13301)
@@ -26137,6 +26120,11 @@ async fn p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_
         params,
         vec!["ПервыйПараметр", "ВторойПараметр"],
         "current context must surface routine parameters without exact type index"
+    );
+    assert_eq!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
+        0,
+        "getCurrentContext must reuse latest ready parse snapshot instead of launching a same-version auxiliary parse"
     );
 
     let exact_ready = server
@@ -30754,6 +30742,7 @@ fn p40_real_conf_big_same_file_overlap_completion_perf_report_live() {
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("metrics_before_measured.counters object");
+        super::super::command_handlers::reset_get_current_context_parse_attempts_for_test();
 
         let parse_completion_response = |response: &serde_json::Value| {
             let result = response
@@ -32856,13 +32845,16 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         const PROFILE_NAME: &str = "p39_real_conf_big_document_symbol_mixed_load_gate_live";
         let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-completion-current-revision-readiness-fast-lane".to_string());
+            .unwrap_or_else(|_| "refactor-conf-big-parse-apply-contention-bounding".to_string());
         const WARMUP_REQUESTS: usize = 1;
         const MEASURE_REQUESTS: usize = 10;
         const DOCUMENT_SYMBOL_BURST_REQUESTS: usize = 4;
+        const CURRENT_CONTEXT_REQUESTS_PER_MEASURED_COMPLETION: usize = 1;
         const ADAPTER_TO_DISPATCH_MAX_FACTOR: u64 = 4;
         const TRUTHFUL_WAIT_P95_FACTOR: f64 = 1.0;
         const TRUTHFUL_WAIT_MAX_FACTOR: u64 = 4;
+        const APPLY_BACKLOG_P95_BUDGET_MS: f64 = 3_500.0;
+        const APPLY_BACKLOG_MAX_BUDGET_MS: u64 = 5_000;
         const SERVICE_FUTURE_FIRST_POLL_P95_BUDGET_MS: f64 = 250.0;
         const SERVICE_FUTURE_FIRST_POLL_MAX_BUDGET_MS: u64 = 1_000;
         let interactive_wait_budget_ms = bsl_runtime::system::global_runtime_config()
@@ -32962,7 +32954,22 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "analysis runtime must catch up to opened real conf_big file version"
         );
 
-        let seeded = tokio::time::timeout(Duration::from_secs(60), async {
+        let seeded_ready = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                server
+                    .schedule_document_symbol_bootstrap_from_request_v2(file_id, opened_version)
+                    .await;
+                if let Some(ready) = server.latest_document_symbol_ready_v2(file_id).await {
+                    if ready.file_version >= opened_version {
+                        break ready.response;
+                    }
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("default didOpen outline bootstrap must eventually populate ready cache");
+        let seeded = tokio::time::timeout(Duration::from_secs(2), async {
             loop {
                 let response = harness
                     .send_request(
@@ -32982,10 +32989,14 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             }
         })
         .await
-        .expect("default didOpen outline bootstrap must eventually materialize");
+        .expect("default didOpen outline request must observe populated ready cache");
         assert!(
             !document_symbol_names(&seeded).is_empty(),
             "seed documentSymbol response must expose non-empty real-module outline"
+        );
+        assert!(
+            !document_symbol_names(&seeded_ready).is_empty(),
+            "seed documentSymbol ready cache must expose non-empty real-module outline"
         );
 
         let completion_position = find_utf16_position_after_marker(&module_text, "Объект.");
@@ -32993,6 +33004,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             trigger_kind: CompletionTriggerKind::INVOKED,
             trigger_character: None,
         });
+        let current_context_session_id = format!("{}::p39-conf-big-current-context", uri);
         let mut current_text = module_text.clone();
         let mut current_version = opened_version;
 
@@ -33028,7 +33040,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         for index in 0..MEASURE_REQUESTS {
             let outline_probe_name = format!("DocumentSymbolIsolationProbe{}", index + 1);
             let appended_outline = format!(
-                "\n#Область {outline_probe_name}\nПроцедура {outline_probe_name}() Экспорт\nКонецПроцедуры\n#КонецОбласти\n"
+                "\n#Область {outline_probe_name}\nПроцедура {outline_probe_name}() Экспорт\n    Сообщить(\"{outline_probe_name}\");\nКонецПроцедуры\n#КонецОбласти\n"
             );
             let next_version = current_version
                 .checked_add(1)
@@ -33043,6 +33055,9 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             .await;
             current_text.push_str(&appended_outline);
             current_version = next_version;
+            let current_context_marker = format!("Сообщить(\"{outline_probe_name}\")");
+            let current_context_position =
+                find_utf16_position_after_marker(&current_text, &current_context_marker);
             live_transport_save_document(&mut harness, &uri).await;
 
             let parse_gap_source = tokio::time::timeout(Duration::from_millis(800), async {
@@ -33076,6 +33091,20 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             for request_id in &document_symbol_request_ids {
                 live_transport_write_document_symbol_request(&mut harness, *request_id, &uri).await;
             }
+            let current_context_request_id = 39_250_000_i64 + index as i64;
+            live_transport_write_execute_command_request(
+                &mut harness,
+                current_context_request_id,
+                "bsl.getCurrentContext",
+                vec![serde_json::json!({
+                    "uri": uri.to_string(),
+                    "line": current_context_position.line,
+                    "character": current_context_position.character,
+                    "editorSessionId": current_context_session_id.as_str(),
+                    "requestGeneration": (index + 1) as u64,
+                })],
+            )
+            .await;
 
             let completion_request_id = 39_300_000_i64 + index as i64;
             let completion_started = Instant::now();
@@ -33088,11 +33117,17 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             )
             .await;
 
-            let (completion_response, completion_elapsed_ms, document_symbol_responses) =
+            let (
+                completion_response,
+                completion_elapsed_ms,
+                document_symbol_responses,
+                current_context_response,
+            ) =
                 tokio::time::timeout(Duration::from_secs(10), async {
                     let mut completion_response = None;
                     let mut completion_elapsed_ms = None;
                     let mut document_symbol_responses = Vec::new();
+                    let mut current_context_response = None;
                     loop {
                         let response = harness.read_message().await;
                         let Some(response_id) = response.get("id").and_then(|value| value.as_i64())
@@ -33105,15 +33140,18 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                                     as u64,
                             );
                             completion_response = Some(response);
+                        } else if response_id == current_context_request_id {
+                            current_context_response = Some(response);
                         } else if document_symbol_request_ids.contains(&response_id) {
                             document_symbol_responses.push(response);
                         }
                         if document_symbol_responses.len() == document_symbol_request_ids.len() {
-                            if let Some(completion_response) = completion_response {
+                            if let Some(completion_response) = completion_response.take() {
                                 break (
                                     completion_response,
                                     completion_elapsed_ms.expect("completion elapsed"),
                                     document_symbol_responses,
+                                    current_context_response,
                                 );
                             }
                         }
@@ -33121,7 +33159,6 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 })
                 .await
                 .expect("mixed-load completion and outline responses must arrive");
-
             let labels = completion_labels_from_jsonrpc_response(&completion_response);
             let document_symbol_response_summaries = document_symbol_request_ids
                 .iter()
@@ -33173,6 +33210,12 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 !document_symbol_fresh_outline_present,
                 "outline mixed-load sample must not masquerade as current revision while parse gap is active, fresh_outline_name={outline_probe_name}, summaries={document_symbol_response_summaries:?}"
             );
+            let current_context_function_name = current_context_response
+                .as_ref()
+                .and_then(|response| response.get("result"))
+                .and_then(|value| value.get("functionName"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
 
             measured_samples.push(serde_json::json!({
                 "step": format!("measured_document_symbol_mixed_load_completion_{}", index + 1),
@@ -33186,6 +33229,9 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "document_symbol_request_ids": document_symbol_request_ids,
                 "document_symbol_response_summaries": document_symbol_response_summaries,
                 "document_symbol_present_responses": document_symbol_present_responses,
+                "current_context_request_id": current_context_request_id,
+                "current_context_function_name": current_context_function_name,
+                "current_context_response_seen": current_context_response.is_some(),
                 "did_change_notifications_per_measured_completion": 1,
                 "did_save_after_did_change": true,
                 "parse_gap_source": parse_gap_source,
@@ -33569,6 +33615,29 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 + measured_document_symbol_current_ready_total_delta
                 + measured_document_symbol_unavailable_total_delta
                 + measured_document_symbol_superseded_total_delta;
+        let measured_current_context_response_seen_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("current_context_response_seen")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+            })
+            .count();
+        let measured_parse_snapshot_full_total_delta =
+            counter_delta("intellisense_v2_parse_snapshot_total_origin_lsp_mode_full");
+        let measured_parse_snapshot_incremental_total_delta =
+            counter_delta("intellisense_v2_parse_snapshot_total_origin_lsp_mode_incremental");
+        let measured_parse_snapshot_reused_total_delta =
+            counter_delta("intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused");
+        let measured_parse_snapshot_no_previous_tree_total_delta = counter_delta(
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_previous_tree",
+        );
+        let measured_parse_snapshot_no_edits_total_delta = counter_delta(
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_edits_provided",
+        );
+        let measured_current_context_parse_attempts_total =
+            super::super::command_handlers::get_current_context_parse_attempts_for_test();
         let warmup_latency_histogram = sample_elapsed_histogram(&warmup_samples);
         let measured_latency_histogram = sample_elapsed_histogram(&measured_samples);
         let measured_latency_p95_ms = read_numeric_metric(measured_latency_histogram.get("p95"));
@@ -33576,6 +33645,64 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             (interactive_wait_budget_ms as f64) * TRUTHFUL_WAIT_P95_FACTOR;
         let truthful_wait_max_budget_ms =
             interactive_wait_budget_ms.saturating_mul(TRUTHFUL_WAIT_MAX_FACTOR);
+        let measured_wait_for_file_version_runtime_queue_wait_histogram = sample_trace_histogram(
+            &measured_samples,
+            "wait_for_file_version_runtime_queue_wait_ms",
+        );
+        let measured_wait_for_file_version_runtime_queue_wait_p95_ms = read_numeric_metric(
+            measured_wait_for_file_version_runtime_queue_wait_histogram.get("p95"),
+        );
+        let measured_wait_for_file_version_runtime_queue_wait_present_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("wait_for_file_version_runtime_queue_wait_ms"))
+                    .and_then(|value| value.as_u64())
+                    .is_some()
+            })
+            .count();
+        let measured_wait_for_file_version_runtime_queue_wait_max_ms = measured_samples
+            .iter()
+            .filter_map(|sample| {
+                sample
+                    .get("trace")
+                    .and_then(|trace| trace.get("wait_for_file_version_runtime_queue_wait_ms"))
+                    .and_then(|value| value.as_u64())
+            })
+            .max()
+            .unwrap_or(0);
+        let measured_runtime_apply_changes_queue_wait_ms = histogram_metric_value_or_zero(
+            histograms,
+            "intellisense_v2_runtime_apply_changes_queue_wait_ms",
+            None,
+        );
+        let measured_runtime_apply_changes_queue_wait_present_samples =
+            read_u64_metric(measured_runtime_apply_changes_queue_wait_ms.get("count"));
+        let measured_runtime_apply_changes_queue_wait_p95_ms =
+            read_numeric_metric(measured_runtime_apply_changes_queue_wait_ms.get("p95"));
+        let measured_runtime_apply_changes_queue_wait_max_ms =
+            read_numeric_metric(measured_runtime_apply_changes_queue_wait_ms.get("max"));
+        let measured_prepare_apply_age_at_start_ms = histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_prepare_apply_age_at_start_ms",
+            None,
+        );
+        let measured_prepare_apply_age_at_terminal_ms = histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_prepare_apply_age_at_terminal_ms",
+            None,
+        );
+        let measured_exact_wait_apply_age_at_start_ms = histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_exact_wait_apply_age_at_start_ms",
+            None,
+        );
+        let measured_exact_wait_apply_age_at_terminal_ms = histogram_metric_value_or_zero(
+            histograms,
+            "completion_stage_exact_wait_apply_age_at_terminal_ms",
+            None,
+        );
         let measured_adapter_to_dispatch_histogram = sample_trace_server_edge_histogram(
             &measured_samples,
             "adapter_to_dispatch_wait_ms",
@@ -33752,6 +33879,131 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     && fail_closed_cause != Some("prepare_timeout")
             })
             .count();
+        let parse_cold_start_evidence = serde_json::json!({
+            "measured_cold_query_bundle_samples": measured_cold_query_bundle_samples,
+            "measured_parse_snapshot_full_total_delta": measured_parse_snapshot_full_total_delta,
+            "measured_parse_snapshot_incremental_total_delta": measured_parse_snapshot_incremental_total_delta,
+            "measured_parse_snapshot_reused_total_delta": measured_parse_snapshot_reused_total_delta,
+            "measured_parse_snapshot_no_previous_tree_total_delta": measured_parse_snapshot_no_previous_tree_total_delta,
+            "measured_parse_snapshot_no_edits_total_delta": measured_parse_snapshot_no_edits_total_delta,
+            "intellisense_v2_parse_snapshot_build_full_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
+                None
+            ),
+            "intellisense_v2_parse_snapshot_build_reused_ms": histogram_metric_value_or_zero(
+                histograms,
+                "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
+                None
+            ),
+        });
+        let apply_backlog_evidence = serde_json::json!({
+            "measured_prepare_timeout_wait_for_file_version_samples": measured_prepare_timeout_wait_for_file_version_samples,
+            "measured_wait_for_file_version_runtime_queue_wait_ms": measured_wait_for_file_version_runtime_queue_wait_histogram,
+            "measured_wait_for_file_version_runtime_queue_wait_present_samples": measured_wait_for_file_version_runtime_queue_wait_present_samples,
+            "measured_wait_for_file_version_runtime_queue_wait_max_ms": measured_wait_for_file_version_runtime_queue_wait_max_ms,
+            "intellisense_v2_runtime_apply_changes_queue_wait_ms": measured_runtime_apply_changes_queue_wait_ms,
+            "completion_stage_prepare_apply_age_at_start_ms": measured_prepare_apply_age_at_start_ms,
+            "completion_stage_prepare_apply_age_at_terminal_ms": measured_prepare_apply_age_at_terminal_ms,
+            "completion_stage_exact_wait_apply_age_at_start_ms": measured_exact_wait_apply_age_at_start_ms,
+            "completion_stage_exact_wait_apply_age_at_terminal_ms": measured_exact_wait_apply_age_at_terminal_ms,
+        });
+        let parse_cold_start_validation_pass = measured_cold_query_bundle_samples == 0
+            && measured_parse_snapshot_no_previous_tree_total_delta == 0
+            && measured_parse_snapshot_full_total_delta <= MEASURE_REQUESTS as u64;
+        let apply_backlog_wait_for_file_version_p95_pass =
+            measured_wait_for_file_version_runtime_queue_wait_present_samples == 0
+                || measured_wait_for_file_version_runtime_queue_wait_p95_ms
+                    <= APPLY_BACKLOG_P95_BUDGET_MS;
+        let apply_backlog_wait_for_file_version_max_pass =
+            measured_wait_for_file_version_runtime_queue_wait_present_samples == 0
+                || measured_wait_for_file_version_runtime_queue_wait_max_ms as f64
+                    <= APPLY_BACKLOG_MAX_BUDGET_MS as f64;
+        let apply_backlog_runtime_apply_queue_p95_pass =
+            measured_runtime_apply_changes_queue_wait_present_samples == 0
+                || measured_runtime_apply_changes_queue_wait_p95_ms
+                    <= APPLY_BACKLOG_P95_BUDGET_MS;
+        let apply_backlog_runtime_apply_queue_max_pass =
+            measured_runtime_apply_changes_queue_wait_present_samples == 0
+                || measured_runtime_apply_changes_queue_wait_max_ms
+                    <= APPLY_BACKLOG_MAX_BUDGET_MS as f64;
+        let apply_backlog_validation_pass = measured_prepare_timeout_wait_for_file_version_samples
+            == 0
+            && apply_backlog_wait_for_file_version_p95_pass
+            && apply_backlog_wait_for_file_version_max_pass
+            && apply_backlog_runtime_apply_queue_p95_pass
+            && apply_backlog_runtime_apply_queue_max_pass;
+        let parse_cold_start_validation = serde_json::json!({
+            "failure_class": "parse_cold_start",
+            "status": if parse_cold_start_validation_pass { "pass" } else { "fail" },
+            "checks": {
+                "cold_query_bundle_samples": {
+                    "status": if measured_cold_query_bundle_samples == 0 { "pass" } else { "fail" },
+                    "observed": measured_cold_query_bundle_samples,
+                    "expected_max": 0,
+                },
+                "same_version_no_previous_tree_total_delta": {
+                    "status": if measured_parse_snapshot_no_previous_tree_total_delta == 0 { "pass" } else { "fail" },
+                    "observed": measured_parse_snapshot_no_previous_tree_total_delta,
+                    "expected_max": 0,
+                },
+                "same_version_full_parse_total_delta": {
+                    "status": if measured_parse_snapshot_full_total_delta <= MEASURE_REQUESTS as u64 { "pass" } else { "fail" },
+                    "observed": measured_parse_snapshot_full_total_delta,
+                    "expected_max": MEASURE_REQUESTS,
+                },
+            },
+        });
+        let apply_backlog_validation = serde_json::json!({
+            "failure_class": "apply_backlog",
+            "status": if apply_backlog_validation_pass { "pass" } else { "fail" },
+            "checks": {
+                "prepare_timeout_wait_for_file_version_samples": {
+                    "status": if measured_prepare_timeout_wait_for_file_version_samples == 0 { "pass" } else { "fail" },
+                    "observed": measured_prepare_timeout_wait_for_file_version_samples,
+                    "expected_max": 0,
+                },
+                "wait_for_file_version_runtime_queue_wait_p95_ms": {
+                    "status": if apply_backlog_wait_for_file_version_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_wait_for_file_version_runtime_queue_wait_p95_ms,
+                    "budget_ms": APPLY_BACKLOG_P95_BUDGET_MS,
+                    "present_samples": measured_wait_for_file_version_runtime_queue_wait_present_samples,
+                },
+                "wait_for_file_version_runtime_queue_wait_max_ms": {
+                    "status": if apply_backlog_wait_for_file_version_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_wait_for_file_version_runtime_queue_wait_max_ms,
+                    "budget_ms": APPLY_BACKLOG_MAX_BUDGET_MS,
+                    "present_samples": measured_wait_for_file_version_runtime_queue_wait_present_samples,
+                },
+                "runtime_apply_changes_queue_wait_p95_ms": {
+                    "status": if apply_backlog_runtime_apply_queue_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_runtime_apply_changes_queue_wait_p95_ms,
+                    "budget_ms": APPLY_BACKLOG_P95_BUDGET_MS,
+                    "present_samples": measured_runtime_apply_changes_queue_wait_present_samples,
+                },
+                "runtime_apply_changes_queue_wait_max_ms": {
+                    "status": if apply_backlog_runtime_apply_queue_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_runtime_apply_changes_queue_wait_max_ms,
+                    "budget_ms": APPLY_BACKLOG_MAX_BUDGET_MS,
+                    "present_samples": measured_runtime_apply_changes_queue_wait_present_samples,
+                },
+            },
+        });
+        let overall_validation_failing_classes = [
+            (!parse_cold_start_validation_pass).then_some("parse_cold_start"),
+            (!apply_backlog_validation_pass).then_some("apply_backlog"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        let overall_validation = serde_json::json!({
+            "status": if parse_cold_start_validation_pass && apply_backlog_validation_pass {
+                "pass"
+            } else {
+                "fail"
+            },
+            "failing_classes": overall_validation_failing_classes,
+        });
 
         let report = serde_json::json!({
             "change_id": change_id,
@@ -33767,8 +34019,9 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_requests": MEASURE_REQUESTS,
                 "completion_trigger_mode": "invoked",
                 "transport_path": "tower_lsp_server_serve_duplex",
-                "mixed_load_profile": "didChange+didSave+documentSymbol_burst+completion",
+                "mixed_load_profile": "didChange+didSave+documentSymbol_burst+currentContext+completion",
                 "document_symbol_requests_per_measured_completion": DOCUMENT_SYMBOL_BURST_REQUESTS,
+                "current_context_requests_per_measured_completion": CURRENT_CONTEXT_REQUESTS_PER_MEASURED_COMPLETION,
                 "did_change_notifications_per_measured_completion": 1,
                 "did_save_after_did_change": true,
                 "did_change_blocking_parse_delay_ms": 1500,
@@ -33803,6 +34056,13 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_document_symbol_present_responses_total": measured_document_symbol_present_responses_total,
                 "measured_document_symbol_null_responses_total": measured_document_symbol_null_responses_total,
                 "measured_document_symbol_fresh_outline_leak_samples": measured_document_symbol_fresh_outline_leak_samples,
+                "measured_current_context_response_seen_samples": measured_current_context_response_seen_samples,
+                "measured_current_context_parse_attempts_total": measured_current_context_parse_attempts_total,
+                "measured_parse_snapshot_full_total_delta": measured_parse_snapshot_full_total_delta,
+                "measured_parse_snapshot_incremental_total_delta": measured_parse_snapshot_incremental_total_delta,
+                "measured_parse_snapshot_reused_total_delta": measured_parse_snapshot_reused_total_delta,
+                "measured_parse_snapshot_no_previous_tree_total_delta": measured_parse_snapshot_no_previous_tree_total_delta,
+                "measured_parse_snapshot_no_edits_total_delta": measured_parse_snapshot_no_edits_total_delta,
                 "measured_document_symbol_latest_ready_total_delta": measured_document_symbol_latest_ready_total_delta,
                 "measured_document_symbol_current_ready_total_delta": measured_document_symbol_current_ready_total_delta,
                 "measured_document_symbol_unavailable_total_delta": measured_document_symbol_unavailable_total_delta,
@@ -33811,6 +34071,14 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_ingress_regression_samples": measured_ingress_regression_samples,
                 "measured_prepare_timeout_wait_for_file_version_samples": measured_prepare_timeout_wait_for_file_version_samples,
                 "measured_cold_query_bundle_samples": measured_cold_query_bundle_samples,
+                "measured_wait_for_file_version_runtime_queue_wait_ms": measured_wait_for_file_version_runtime_queue_wait_histogram,
+                "measured_wait_for_file_version_runtime_queue_wait_present_samples": measured_wait_for_file_version_runtime_queue_wait_present_samples,
+                "measured_wait_for_file_version_runtime_queue_wait_max_ms": measured_wait_for_file_version_runtime_queue_wait_max_ms,
+                "intellisense_v2_runtime_apply_changes_queue_wait_ms": measured_runtime_apply_changes_queue_wait_ms,
+                "completion_stage_prepare_apply_age_at_start_ms": measured_prepare_apply_age_at_start_ms,
+                "completion_stage_prepare_apply_age_at_terminal_ms": measured_prepare_apply_age_at_terminal_ms,
+                "completion_stage_exact_wait_apply_age_at_start_ms": measured_exact_wait_apply_age_at_start_ms,
+                "completion_stage_exact_wait_apply_age_at_terminal_ms": measured_exact_wait_apply_age_at_terminal_ms,
                 "measured_pre_dispatch_wait_over_budget_samples": measured_pre_dispatch_wait_over_budget_samples,
                 "measured_pre_dispatch_wait_over_hard_cap_samples": measured_pre_dispatch_wait_over_hard_cap_samples,
                 "interactive_wait_budget_ms": interactive_wait_budget_ms,
@@ -33842,6 +34110,8 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     "query_bundle_total_ms",
                 ),
                 "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
+                "parse_cold_start_evidence": parse_cold_start_evidence,
+                "apply_backlog_evidence": apply_backlog_evidence,
             },
             "extension_like_key_latencies": {
                 "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
@@ -33874,12 +34144,27 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     "intellisense_v2_ir_query_completion_ms",
                     None
                 ),
+                "intellisense_v2_parse_snapshot_build_full_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_full",
+                    None
+                ),
+                "intellisense_v2_parse_snapshot_build_reused_ms": histogram_metric_value_or_zero(
+                    histograms,
+                    "intellisense_v2_parse_snapshot_build_ms_origin_lsp_mode_reused",
+                    None
+                ),
             },
             "latest_trace_summaries": latest_trace_summaries,
             "completion_timeline": {
                 "trace_count": filtered_traces.len(),
                 "selected_traces": filtered_traces,
                 "raw": completion_timeline,
+            },
+            "validation": {
+                "parse_cold_start": parse_cold_start_validation,
+                "apply_backlog": apply_backlog_validation,
+                "overall": overall_validation,
             },
             "observability": {
                 "raw": observability_metrics,
@@ -33971,6 +34256,38 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "mixed-load gate must fail on post-edit/save readiness timeout separately from cold query-body cost, prepare_timeout_wait_for_file_version_samples={}, measured_samples={measured_samples:?}",
             measured_prepare_timeout_wait_for_file_version_samples
         );
+        if measured_wait_for_file_version_runtime_queue_wait_present_samples > 0 {
+            assert!(
+                measured_wait_for_file_version_runtime_queue_wait_p95_ms
+                    <= APPLY_BACKLOG_P95_BUDGET_MS,
+                "mixed-load apply-backlog p95 regression: measured_wait_for_file_version_runtime_queue_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_wait_for_file_version_runtime_queue_wait_p95_ms,
+                APPLY_BACKLOG_P95_BUDGET_MS
+            );
+            assert!(
+                measured_wait_for_file_version_runtime_queue_wait_max_ms as f64
+                    <= APPLY_BACKLOG_MAX_BUDGET_MS as f64,
+                "mixed-load apply-backlog max regression: measured_wait_for_file_version_runtime_queue_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_wait_for_file_version_runtime_queue_wait_max_ms,
+                APPLY_BACKLOG_MAX_BUDGET_MS
+            );
+        }
+        if measured_runtime_apply_changes_queue_wait_present_samples > 0 {
+            assert!(
+                measured_runtime_apply_changes_queue_wait_p95_ms
+                    <= APPLY_BACKLOG_P95_BUDGET_MS,
+                "mixed-load runtime apply queue p95 regression: intellisense_v2_runtime_apply_changes_queue_wait_ms p95={}ms > {}ms, metrics={histograms:?}",
+                measured_runtime_apply_changes_queue_wait_p95_ms,
+                APPLY_BACKLOG_P95_BUDGET_MS
+            );
+            assert!(
+                measured_runtime_apply_changes_queue_wait_max_ms
+                    <= APPLY_BACKLOG_MAX_BUDGET_MS as f64,
+                "mixed-load runtime apply queue max regression: intellisense_v2_runtime_apply_changes_queue_wait_ms max={}ms > {}ms, metrics={histograms:?}",
+                measured_runtime_apply_changes_queue_wait_max_ms,
+                APPLY_BACKLOG_MAX_BUDGET_MS
+            );
+        }
         assert!(
             measured_head_hit_traces + measured_exact_hit_traces == MEASURE_REQUESTS,
             "expected every measured mixed-load trace to expose head/exact route attribution, measured_head_hit_traces={}, measured_exact_hit_traces={}, measured_samples={measured_samples:?}",
@@ -34076,6 +34393,22 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         assert!(
             measured_document_symbol_present_responses_total > 0,
             "mixed-load gate must keep at least one non-null outline response across measured samples, measured_samples={measured_samples:?}"
+        );
+        assert!(
+            measured_parse_snapshot_no_previous_tree_total_delta == 0,
+            "mixed-load gate must distinguish same-version churn from cold-start tree misses on a warmed conf_big file, measured_parse_snapshot_no_previous_tree_total_delta={}, counters={counters:?}",
+            measured_parse_snapshot_no_previous_tree_total_delta
+        );
+        assert!(
+            measured_current_context_parse_attempts_total > 0,
+            "mixed-load gate must exercise current-context as a real auxiliary parse-only load instead of a no-op request stream, measured_current_context_parse_attempts_total={}, measured_samples={measured_samples:?}",
+            measured_current_context_parse_attempts_total
+        );
+        assert!(
+            measured_parse_snapshot_full_total_delta <= MEASURE_REQUESTS as u64,
+            "mixed-load gate must fail on repeated identical same-version full parse beyond the single didChange fallback per measured cycle, measured_parse_snapshot_full_total_delta={}, measured_requests={}, counters={counters:?}",
+            measured_parse_snapshot_full_total_delta,
+            MEASURE_REQUESTS
         );
 
         live_transport_close_document(&mut harness, &uri).await;
@@ -34624,48 +34957,10 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                         continue;
                     };
-                    let has_followup_publish = trace
+                    if trace
                         .get("followup_publish")
                         .and_then(|value| value.as_object())
-                        .is_some();
-                    let has_followup_wait_reason = trace
-                        .get("followup_wait_reason")
-                        .and_then(|value| value.as_str())
-                        .is_some_and(|reason| reason != "pending_publish");
-                    let has_followup_runtime_breakdown = trace
-                        .get("followup_runtime_queue_wait_ms")
-                        .and_then(|value| value.as_u64())
                         .is_some()
-                        || trace
-                            .get("followup_apply_lag_ms")
-                            .and_then(|value| value.as_u64())
-                            .is_some()
-                        || trace
-                            .get("followup_wait_for_file_version_ms")
-                            .and_then(|value| value.as_u64())
-                            .is_some()
-                        || trace
-                            .get("followup_publish")
-                            .and_then(|value| value.get("runtime_queue_wait_ms"))
-                            .and_then(|value| value.as_u64())
-                            .is_some()
-                        || trace
-                            .get("followup_publish")
-                            .and_then(|value| value.get("apply_lag_ms"))
-                            .and_then(|value| value.as_u64())
-                            .is_some()
-                        || trace
-                            .get("followup_publish")
-                            .and_then(|value| value.get("wait_for_file_version_ms"))
-                            .and_then(|value| value.as_u64())
-                            .is_some();
-                    let idle_heavy_outcome = trace
-                        .get("idle_heavy_outcome")
-                        .and_then(|value| value.as_str());
-                    if has_followup_publish
-                        || has_followup_wait_reason
-                        || has_followup_runtime_breakdown
-                        || matches!(idle_heavy_outcome, Some("superseded_generation"))
                     {
                         break trace;
                     }
@@ -34674,7 +34969,7 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             },
         )
         .await
-        .expect("follow-up live report must expose richer publish or truthful wait attribution");
+        .expect("follow-up live report must expose a real richer follow-up publish");
 
         let followup_publish = timeline.get("followup_publish").and_then(|value| value.as_object());
         let followup_wait_reason = timeline
@@ -34690,8 +34985,11 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
                 timeline
                     .get("followup_runtime_queue_wait_ms")
                     .and_then(|value| value.as_u64())
-            })
-            .unwrap_or(0);
+            });
+        assert!(
+            followup_publish.is_some(),
+            "follow-up runtime live report must include a concrete richer follow-up publish for the observed didSave cycle, trace={timeline:?}"
+        );
         assert!(
             followup_publish.is_some()
                 || followup_wait_reason.is_some_and(|reason| reason != "pending_publish")
@@ -34735,9 +35033,9 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             "follow-up runtime live report must omit zero-valued publish apply lag noise, trace={timeline:?}"
         );
         assert!(
-            observed_followup_runtime_queue_wait_ms <= FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS,
-            "follow-up runtime live report must keep runtime_queue_wait bounded under comparable mixed documentSymbol load: observed_followup_runtime_queue_wait_ms={}ms > {}ms, trace={timeline:?}",
-            observed_followup_runtime_queue_wait_ms,
+            observed_followup_runtime_queue_wait_ms
+                .map_or(true, |value| value <= FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS),
+            "follow-up runtime live report must keep runtime_queue_wait bounded under comparable mixed documentSymbol load: observed_followup_runtime_queue_wait_ms={observed_followup_runtime_queue_wait_ms:?} > {}ms, trace={timeline:?}",
             FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS
         );
 

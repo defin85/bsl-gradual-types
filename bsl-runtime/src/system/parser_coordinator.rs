@@ -5,9 +5,14 @@
 #![allow(clippy::explicit_counter_loop)]
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+#[cfg(test)]
+use std::time::Duration;
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
 use url::Url;
@@ -38,6 +43,41 @@ fn is_cache_disabled_env() -> bool {
     global_runtime_config()
         .get_bool(RuntimeKey::CacheDisable)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+static PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+fn maybe_inject_parse_snapshot_full_parse_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_PARSE_SNAPSHOT_FULL_PARSE_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
+#[cfg(not(test))]
+fn maybe_inject_parse_snapshot_full_parse_delay_for_test() {}
+
+#[cfg(test)]
+fn record_parse_snapshot_full_parse_attempt_for_test() {
+    PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(not(test))]
+fn record_parse_snapshot_full_parse_attempt_for_test() {}
+
+#[cfg(test)]
+pub(crate) fn reset_parse_snapshot_full_parse_attempts_for_test() {
+    PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[cfg(test)]
+pub(crate) fn get_parse_snapshot_full_parse_attempts_for_test() -> usize {
+    PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Текстовое изменение для инкрементального парсинга (из LSP)
@@ -71,10 +111,24 @@ pub struct ParseSnapshotReport {
     pub fallback_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ParseSnapshotSingleflightKey {
+    file_path: PathBuf,
+    content_hash: [u8; 32],
+}
+
+#[derive(Debug)]
+struct ParseSnapshotSingleflightEntry {
+    result: Mutex<Option<Result<ParseSnapshotReport, String>>>,
+    ready: Condvar,
+}
+
 /// Координатор Tree-sitter парсера (Milestone 2.8: без regex fallback)
 pub struct ParserCoordinator {
     tree_sitter: TreeSitterParser,
     tree_cache: TreeCache,
+    parse_snapshot_singleflight:
+        Mutex<HashMap<ParseSnapshotSingleflightKey, Arc<ParseSnapshotSingleflightEntry>>>,
     ast_cache: AstCache,
     disk_cache: Arc<DiskCache>,
     cache_scope: Arc<RwLock<AstCacheScope>>,
@@ -102,6 +156,7 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            parse_snapshot_singleflight: Mutex::new(HashMap::new()),
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
@@ -121,6 +176,7 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            parse_snapshot_singleflight: Mutex::new(HashMap::new()),
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
@@ -149,6 +205,7 @@ impl ParserCoordinator {
         Self {
             tree_sitter: TreeSitterParser::new(),
             tree_cache: TreeCache::new(),
+            parse_snapshot_singleflight: Mutex::new(HashMap::new()),
             ast_cache: AstCache::new_from_env(),
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
@@ -235,11 +292,120 @@ impl ParserCoordinator {
     ) -> Result<ParseSnapshotReport, String> {
         let new_hash = ast_cache_key(&new_content);
         let new_tree_hash = hash_content(&new_content);
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
+            }
+        }
+
+        let key = ParseSnapshotSingleflightKey {
+            file_path: file_path.clone(),
+            content_hash: new_hash,
+        };
+        let (entry, is_leader) = self.begin_parse_snapshot_singleflight(key.clone());
+        if !is_leader {
+            return Self::wait_parse_snapshot_singleflight(entry.as_ref());
+        }
+
+        let result = self.parse_incremental_with_report_singleflight_leader(
+            file_path,
+            new_content,
+            edits,
+            new_hash,
+            new_tree_hash,
+        );
+        self.complete_parse_snapshot_singleflight(&key, &entry, &result);
+        result
+    }
+
+    fn begin_parse_snapshot_singleflight(
+        &self,
+        key: ParseSnapshotSingleflightKey,
+    ) -> (Arc<ParseSnapshotSingleflightEntry>, bool) {
+        let mut singleflight = self
+            .parse_snapshot_singleflight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(existing) = singleflight.get(&key) {
+            return (Arc::clone(existing), false);
+        }
+        let entry = Arc::new(ParseSnapshotSingleflightEntry {
+            result: Mutex::new(None),
+            ready: Condvar::new(),
+        });
+        singleflight.insert(key, Arc::clone(&entry));
+        (entry, true)
+    }
+
+    fn wait_parse_snapshot_singleflight(
+        entry: &ParseSnapshotSingleflightEntry,
+    ) -> Result<ParseSnapshotReport, String> {
+        let mut result = entry
+            .result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(ready) = result.as_ref() {
+                return ready.clone();
+            }
+            result = entry
+                .ready
+                .wait(result)
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn complete_parse_snapshot_singleflight(
+        &self,
+        key: &ParseSnapshotSingleflightKey,
+        entry: &Arc<ParseSnapshotSingleflightEntry>,
+        result: &Result<ParseSnapshotReport, String>,
+    ) {
+        {
+            let mut slot = entry
+                .result
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            *slot = Some(result.clone());
+        }
+        entry.ready.notify_all();
+        let mut singleflight = self
+            .parse_snapshot_singleflight
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if singleflight
+            .get(key)
+            .is_some_and(|current| Arc::ptr_eq(current, entry))
+        {
+            singleflight.remove(key);
+        }
+    }
+
+    fn parse_incremental_with_report_singleflight_leader(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+        new_hash: [u8; 32],
+        new_tree_hash: u64,
+    ) -> Result<ParseSnapshotReport, String> {
         let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
 
-        // Попытка получить старое дерево из кеша
         if let Some((old_tree, old_source, old_hash)) = self.tree_cache.get(&file_path) {
-            // Проверяем, нужно ли обновление
             if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
@@ -256,7 +422,6 @@ impl ParserCoordinator {
                 });
             }
 
-            // Применяем инкрементальное обновление
             debug!("Applying {} edits incrementally", edits.len());
 
             match self.tree_sitter.parse_incremental(
@@ -267,7 +432,6 @@ impl ParserCoordinator {
             ) {
                 Ok((new_tree, program, changed_ranges)) => {
                     let backend_tree = Arc::new(new_tree.clone());
-                    // Кешируем новое дерево
                     self.tree_cache.update(
                         &file_path,
                         new_tree,
@@ -300,8 +464,9 @@ impl ParserCoordinator {
                     } else {
                         Some(format!("incremental_failed:{e}"))
                     };
-                    // Fallback: полный парсинг (Milestone 2.8: только Tree-sitter)
                     debug!("Full parse for file (fallback): {:?}", file_path);
+                    maybe_inject_parse_snapshot_full_parse_delay_for_test();
+                    record_parse_snapshot_full_parse_attempt_for_test();
                     return match self.tree_sitter.parse_with_tree(&new_content) {
                         Ok((tree, program)) => {
                             let backend_tree = Arc::new(tree.clone());
@@ -336,8 +501,9 @@ impl ParserCoordinator {
             }
         }
 
-        // Fallback: полный парсинг (Milestone 2.8: только Tree-sitter)
         debug!("Full parse for file: {:?}", file_path);
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        record_parse_snapshot_full_parse_attempt_for_test();
         match self.tree_sitter.parse_with_tree(&new_content) {
             Ok((tree, program)) => {
                 let backend_tree = Arc::new(tree.clone());

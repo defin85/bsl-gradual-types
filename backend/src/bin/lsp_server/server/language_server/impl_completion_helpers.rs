@@ -47,6 +47,58 @@ pub(super) async fn observe_completion_result_metrics(
             server
                 .coordinator
                 .record_completion_stage_latency("collect", stats.stage_collect);
+            for (stage, duration) in [
+                (
+                    "collect_member_owner_resolve",
+                    stats.collect_breakdown.member_owner_resolve,
+                ),
+                (
+                    "collect_member_methods",
+                    stats.collect_breakdown.member_methods,
+                ),
+                (
+                    "collect_member_properties",
+                    stats.collect_breakdown.member_properties,
+                ),
+                (
+                    "collect_member_metadata",
+                    stats.collect_breakdown.member_metadata,
+                ),
+                (
+                    "collect_non_member_local_symbols",
+                    stats.collect_breakdown.non_member_local_symbols,
+                ),
+                (
+                    "collect_non_member_contextual_symbols",
+                    stats.collect_breakdown.non_member_contextual_symbols,
+                ),
+                (
+                    "collect_non_member_module_routines",
+                    stats.collect_breakdown.non_member_module_routines,
+                ),
+                (
+                    "collect_non_member_global_functions",
+                    stats.collect_breakdown.non_member_global_functions,
+                ),
+                (
+                    "collect_non_member_metadata_items",
+                    stats.collect_breakdown.non_member_metadata_items,
+                ),
+                (
+                    "collect_non_member_repository_types",
+                    stats.collect_breakdown.non_member_repository_types,
+                ),
+                (
+                    "collect_non_member_keywords",
+                    stats.collect_breakdown.non_member_keywords,
+                ),
+            ] {
+                if !duration.is_zero() {
+                    server
+                        .coordinator
+                        .record_completion_stage_latency(stage, duration);
+                }
+            }
             server
                 .coordinator
                 .record_completion_stage_latency("rank", stats.stage_rank);

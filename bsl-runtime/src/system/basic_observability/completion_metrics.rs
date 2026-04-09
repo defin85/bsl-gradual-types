@@ -11,6 +11,35 @@ impl BasicObservability {
         let metric = match stage {
             "snapshot_read" => "completion_stage_snapshot_read_ms",
             "collect" => "completion_stage_collect_ms",
+            "collect_member_owner_resolve" => {
+                "completion_stage_collect_member_owner_resolve_ms"
+            }
+            "collect_member_methods" => "completion_stage_collect_member_methods_ms",
+            "collect_member_properties" => {
+                "completion_stage_collect_member_properties_ms"
+            }
+            "collect_member_metadata" => "completion_stage_collect_member_metadata_ms",
+            "collect_non_member_local_symbols" => {
+                "completion_stage_collect_non_member_local_symbols_ms"
+            }
+            "collect_non_member_contextual_symbols" => {
+                "completion_stage_collect_non_member_contextual_symbols_ms"
+            }
+            "collect_non_member_module_routines" => {
+                "completion_stage_collect_non_member_module_routines_ms"
+            }
+            "collect_non_member_global_functions" => {
+                "completion_stage_collect_non_member_global_functions_ms"
+            }
+            "collect_non_member_metadata_items" => {
+                "completion_stage_collect_non_member_metadata_items_ms"
+            }
+            "collect_non_member_repository_types" => {
+                "completion_stage_collect_non_member_repository_types_ms"
+            }
+            "collect_non_member_keywords" => {
+                "completion_stage_collect_non_member_keywords_ms"
+            }
             "rank" => "completion_stage_rank_ms",
             "format" => "completion_stage_format_ms",
             "turn_wait" => "completion_stage_turn_wait_ms",

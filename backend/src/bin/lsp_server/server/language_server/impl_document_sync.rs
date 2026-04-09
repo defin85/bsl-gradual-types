@@ -140,6 +140,10 @@ fn parse_snapshot_apply_debounce_duration() -> Duration {
     Duration::from_millis(25)
 }
 
+fn parse_snapshot_text_hash(text: &str) -> [u8; 32] {
+    *blake3::hash(text.as_bytes()).as_bytes()
+}
+
 struct BackgroundParseSnapshotApplyArgs {
     file_id: bsl_analysis_v2::FileId,
     requested_version: i32,
@@ -284,10 +288,14 @@ impl BslLanguageServer {
     ) {
         let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
         let file_id = args.file_id;
+        let text_hash = parse_snapshot_text_hash(args.text.as_ref());
         if let Some(task) = tasks.get(&file_id) {
-            if !args.force_reschedule_same_version
-                && task.requested_version.load(Ordering::Relaxed) == args.requested_version
-            {
+            let same_version =
+                task.requested_version.load(Ordering::Relaxed) == args.requested_version;
+            if same_version && task.text_hash == text_hash {
+                return;
+            }
+            if !args.force_reschedule_same_version && same_version {
                 return;
             }
         }
@@ -309,6 +317,7 @@ impl BslLanguageServer {
             file_id,
             super::super::BackgroundParseSnapshotApplyTaskV2 {
                 requested_version: requested_version_state,
+                text_hash,
                 handle,
             },
         );
@@ -1600,8 +1609,8 @@ impl BslLanguageServer {
                 Err(_) => uri.to_string(),
             };
             // Save can be followed by an immediate outline refresh without a new version bump.
-            // Re-arm the snapshot-backed outline path for the current shadow revision so
-            // same-file didChange/didSave churn stays truthful on the default runtime path.
+            // Coalesce identical same-version refresh behind the existing worker so save does
+            // not restart the same cold/full parse for unchanged shadow text.
             self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
                 file_id,
                 requested_version: version,

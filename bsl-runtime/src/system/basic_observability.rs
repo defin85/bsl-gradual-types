@@ -134,6 +134,11 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_observability_contract_violation_total",
     "intellisense_v2_projection_missing_total",
     "intellisense_v2_runtime_saturation_sample_total",
+    "intellisense_v2_current_context_parse_source_total_source_ready_snapshot",
+    "intellisense_v2_current_context_parse_source_total_source_parser_coordinator",
+    "intellisense_v2_current_context_parse_source_total_source_syntax_fallback",
+    "intellisense_v2_current_context_parse_source_total_source_parse_unavailable",
+    "intellisense_v2_current_context_parse_source_total_source_other",
 ];
 
 const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
@@ -199,6 +204,27 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_semantic_diagnostics_query_collect_ms",
     "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
     "intellisense_v2_revision_lag_versions",
+    "completion_stage_collect_member_owner_resolve_ms",
+    "completion_stage_collect_member_methods_ms",
+    "completion_stage_collect_member_properties_ms",
+    "completion_stage_collect_member_metadata_ms",
+    "completion_stage_collect_non_member_local_symbols_ms",
+    "completion_stage_collect_non_member_contextual_symbols_ms",
+    "completion_stage_collect_non_member_module_routines_ms",
+    "completion_stage_collect_non_member_global_functions_ms",
+    "completion_stage_collect_non_member_metadata_items_ms",
+    "completion_stage_collect_non_member_repository_types_ms",
+    "completion_stage_collect_non_member_keywords_ms",
+    "intellisense_v2_current_context_parse_ms_source_ready_snapshot",
+    "intellisense_v2_current_context_parse_ms_source_parser_coordinator",
+    "intellisense_v2_current_context_parse_ms_source_syntax_fallback",
+    "intellisense_v2_current_context_parse_ms_source_parse_unavailable",
+    "intellisense_v2_current_context_parse_ms_source_other",
+    "intellisense_v2_current_context_wall_ms_source_ready_snapshot",
+    "intellisense_v2_current_context_wall_ms_source_parser_coordinator",
+    "intellisense_v2_current_context_wall_ms_source_syntax_fallback",
+    "intellisense_v2_current_context_wall_ms_source_parse_unavailable",
+    "intellisense_v2_current_context_wall_ms_source_other",
 ];
 
 const UNIFIED_INTELLISENSE_V2_GAUGE_KEYS: &[&str] = &[

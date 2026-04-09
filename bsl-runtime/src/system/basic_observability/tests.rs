@@ -3212,3 +3212,93 @@ fn payload_shape_metrics_export_bucket_and_histograms() {
         "payload-shape lines histogram should be exported"
     );
 }
+
+#[test]
+fn completion_collect_detail_stage_histograms_are_exported() {
+    let observability = BasicObservability::default();
+
+    for stage in [
+        "collect_member_owner_resolve",
+        "collect_member_methods",
+        "collect_member_properties",
+        "collect_member_metadata",
+        "collect_non_member_local_symbols",
+        "collect_non_member_contextual_symbols",
+        "collect_non_member_module_routines",
+        "collect_non_member_global_functions",
+        "collect_non_member_metadata_items",
+        "collect_non_member_repository_types",
+        "collect_non_member_keywords",
+    ] {
+        observability.record_completion_stage_latency(stage, Duration::from_millis(3));
+    }
+
+    let exported = observability.get_metrics().export_metrics();
+    let histograms = histograms(&exported);
+
+    for key in [
+        "completion_stage_collect_member_owner_resolve_ms",
+        "completion_stage_collect_member_methods_ms",
+        "completion_stage_collect_member_properties_ms",
+        "completion_stage_collect_member_metadata_ms",
+        "completion_stage_collect_non_member_local_symbols_ms",
+        "completion_stage_collect_non_member_contextual_symbols_ms",
+        "completion_stage_collect_non_member_module_routines_ms",
+        "completion_stage_collect_non_member_global_functions_ms",
+        "completion_stage_collect_non_member_metadata_items_ms",
+        "completion_stage_collect_non_member_repository_types_ms",
+        "completion_stage_collect_non_member_keywords_ms",
+    ] {
+        assert!(
+            histogram_count(histograms, key) > 0,
+            "collect detail histogram must be exported for {key}"
+        );
+    }
+}
+
+#[test]
+fn current_context_parse_source_metrics_are_exported() {
+    let observability = BasicObservability::default();
+
+    for source in [
+        "ready_snapshot",
+        "parser_coordinator",
+        "syntax_fallback",
+        "parse_unavailable",
+    ] {
+        observability.record_intellisense_v2_current_context_parse_source(source);
+        observability
+            .record_intellisense_v2_current_context_parse_latency(source, Duration::from_millis(7));
+        observability
+            .record_intellisense_v2_current_context_wall_latency(source, Duration::from_millis(11));
+    }
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+
+    for source in [
+        "ready_snapshot",
+        "parser_coordinator",
+        "syntax_fallback",
+        "parse_unavailable",
+    ] {
+        let counter_key =
+            format!("intellisense_v2_current_context_parse_source_total_source_{source}");
+        let parse_histogram_key =
+            format!("intellisense_v2_current_context_parse_ms_source_{source}");
+        let wall_histogram_key = format!("intellisense_v2_current_context_wall_ms_source_{source}");
+        assert!(
+            counter_value(counters, &counter_key) > 0,
+            "current-context parse source counter must be exported for {source}"
+        );
+        assert!(
+            histogram_count(histograms, &parse_histogram_key) > 0,
+            "current-context parse histogram must be exported for {source}"
+        );
+        assert!(
+            histogram_count(histograms, &wall_histogram_key) > 0,
+            "current-context wall histogram must be exported for {source}"
+        );
+    }
+}

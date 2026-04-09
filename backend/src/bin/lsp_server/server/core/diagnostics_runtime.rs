@@ -74,11 +74,8 @@ impl DidSaveFollowupSlotGuard {
             state.active_slots = state.active_slots.saturating_sub(1);
             (state.active_slots, state.queued_set.len())
         };
-        self.server.record_did_save_followup_lane_saturation_v2(
-            quota,
-            active_slots,
-            queue_depth,
-        );
+        self.server
+            .record_did_save_followup_lane_saturation_v2(quota, active_slots, queue_depth);
         self.server
             .coordinator
             .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
@@ -198,7 +195,9 @@ impl BslLanguageServer {
 
                 if quota == 0 {
                     state.queued_set.remove(&supersession_key.file_id);
-                    state.queued_files.retain(|file_id| *file_id != supersession_key.file_id);
+                    state
+                        .queued_files
+                        .retain(|file_id| *file_id != supersession_key.file_id);
                     let active_slots = state.active_slots;
                     let queue_depth = state.queued_set.len();
                     (false, (active_slots, queue_depth))
@@ -238,7 +237,8 @@ impl BslLanguageServer {
                             queue_wait_elapsed,
                         );
                 }
-                self.diagnostics_did_save_followup_lane_notify_v2.notify_waiters();
+                self.diagnostics_did_save_followup_lane_notify_v2
+                    .notify_waiters();
                 return DidSaveFollowupAdmissionOutcome::Disposition {
                     disposition: bsl_runtime::application::DiagnosticsDisposition::DisabledByConfig,
                     queue_wait_elapsed,
@@ -288,7 +288,9 @@ impl BslLanguageServer {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let removed = state.queued_set.remove(&file_id);
             if removed {
-                state.queued_files.retain(|queued_file_id| *queued_file_id != file_id);
+                state
+                    .queued_files
+                    .retain(|queued_file_id| *queued_file_id != file_id);
                 Some((state.active_slots, state.queued_set.len()))
             } else {
                 None
@@ -296,7 +298,8 @@ impl BslLanguageServer {
         };
         if let Some((active_slots, queue_depth)) = snapshot {
             self.record_did_save_followup_lane_saturation_v2(quota, active_slots, queue_depth);
-            self.diagnostics_did_save_followup_lane_notify_v2.notify_waiters();
+            self.diagnostics_did_save_followup_lane_notify_v2
+                .notify_waiters();
         }
     }
 

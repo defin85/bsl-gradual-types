@@ -247,6 +247,136 @@ async fn interactive_snapshot_for_completion_preempts_background_backlog() {
 }
 
 #[tokio::test]
+async fn did_save_followup_wait_for_file_version_preempts_generic_background_backlog() {
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_id = FileId(22);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 7,
+            path: Arc::from("did_save_followup_wait_lane.bsl"),
+        }],
+    );
+    let applied = timeout(
+        Duration::from_millis(120),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            7,
+        ),
+    )
+    .await
+    .expect("interactive apply must publish the latest version before lane wait probe")
+    .ready;
+    assert!(applied, "interactive apply must publish the latest version");
+
+    let mut sleepers = Vec::new();
+    for _ in 0..6 {
+        sleepers.push(
+            runtime.enqueue_test_sleep(RuntimeQueuePriority::Background, Duration::from_millis(40)),
+        );
+    }
+
+    let wait_reply = timeout(
+        Duration::from_millis(120),
+        runtime.wait_for_file_version_with_priority_and_lane(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Background,
+            file_id,
+            7,
+            Some(AdmissionLane::DidSaveFollowup),
+        ),
+    )
+    .await
+    .expect("didSave follow-up wait_for_file_version must not wait for the full generic background backlog");
+    assert!(
+        wait_reply.ready,
+        "didSave follow-up wait_for_file_version should observe the already applied revision"
+    );
+
+    for sleeper_ack in sleepers {
+        timeout(Duration::from_secs(1), sleeper_ack)
+            .await
+            .expect("background sleeper ack timeout")
+            .expect("background sleeper ack");
+    }
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
+async fn did_save_followup_snapshot_with_deps_preempts_generic_background_backlog() {
+    let index_snapshot = Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7")));
+    let runtime =
+        IntellisenseV2Facade::new(AnalysisHostV2::default(), index_snapshot.clone(), None);
+    let file_id = FileId(23);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 7,
+            path: Arc::from("did_save_followup_snapshot_lane.bsl"),
+        }],
+    );
+    let applied = timeout(
+        Duration::from_millis(120),
+        runtime.wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            7,
+        ),
+    )
+    .await
+    .expect("interactive apply must publish the latest version before lane snapshot probe")
+    .ready;
+    assert!(applied, "interactive apply must publish the latest version");
+
+    let mut sleepers = Vec::new();
+    for _ in 0..6 {
+        sleepers.push(
+            runtime.enqueue_test_sleep(RuntimeQueuePriority::Background, Duration::from_millis(40)),
+        );
+    }
+
+    let snapshot = timeout(
+        Duration::from_millis(120),
+        runtime.snapshot_with_deps_with_priority_and_lane(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Background,
+            Some(AdmissionLane::DidSaveFollowup),
+            None,
+        ),
+    )
+    .await
+    .expect("didSave follow-up snapshot_with_deps must not wait for the full generic background backlog");
+    assert_eq!(snapshot.analysis.file_version(file_id).unwrap(), Some(7));
+    assert_eq!(
+        snapshot.index_snapshot.id.as_str(),
+        index_snapshot.id.as_str()
+    );
+
+    for sleeper_ack in sleepers {
+        timeout(Duration::from_secs(1), sleeper_ack)
+            .await
+            .expect("background sleeper ack timeout")
+            .expect("background sleeper ack");
+    }
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
 async fn interactive_set_file_burst_coalesces_latest_version_for_wait_for_file_version() {
     let _env_lock = lock_test_env().await;
     let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "80");

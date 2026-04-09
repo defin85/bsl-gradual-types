@@ -59,6 +59,8 @@ impl IntellisenseV2Facade {
                 let mut interactive_closed = false;
                 let mut background_closed = false;
                 let mut pending_interactive_commands = VecDeque::new();
+                let mut pending_did_save_followup_commands = VecDeque::new();
+                let mut pending_background_commands = VecDeque::new();
 
                 let wake_waiters_for_file =
                     |file_id: FileId,
@@ -169,6 +171,8 @@ impl IntellisenseV2Facade {
                     } else if let Some(command) = try_recv_next_writer_command_nonblocking(
                         &interactive_rx,
                         &background_rx,
+                        &mut pending_did_save_followup_commands,
+                        &mut pending_background_commands,
                         &mut interactive_streak,
                         &mut interactive_closed,
                         &mut background_closed,
@@ -181,6 +185,8 @@ impl IntellisenseV2Facade {
                         recv_next_writer_command(
                             &interactive_rx,
                             &background_rx,
+                            &mut pending_did_save_followup_commands,
+                            &mut pending_background_commands,
                             &mut interactive_streak,
                             &mut interactive_closed,
                             &mut background_closed,
@@ -190,6 +196,8 @@ impl IntellisenseV2Facade {
                     recv_next_writer_command(
                         &interactive_rx,
                         &background_rx,
+                        &mut pending_did_save_followup_commands,
+                        &mut pending_background_commands,
                         &mut interactive_streak,
                         &mut interactive_closed,
                         &mut background_closed,

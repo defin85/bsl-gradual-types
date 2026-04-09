@@ -111,6 +111,14 @@ struct EnvVarGuard {
 }
 
 static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static ASYNC_ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+
+async fn lock_test_env() -> tokio::sync::MutexGuard<'static, ()> {
+    ASYNC_ENV_LOCK
+        .get_or_init(|| tokio::sync::Mutex::new(()))
+        .lock()
+        .await
+}
 
 impl EnvVarGuard {
     fn set(key: &'static str, value: &str) -> Self {
@@ -355,6 +363,94 @@ async fn cpu_budget_bidirectional_waiters_eventually_make_progress() {
         }
         _ => unreachable!("unexpected waiter class"),
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cpu_budget_did_save_followup_progresses_while_generic_background_holds_reserved_permit() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+
+    let budget = Arc::new(CpuBoundBudget::with_total_permits(4));
+    let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+
+    let budget_for_followup = budget.clone();
+    let did_save_followup = timeout(Duration::from_millis(150), async move {
+        let permit = budget_for_followup
+            .acquire_with_lane_queue_wait_hook(
+                CpuWorkClass::Background,
+                Some(AdmissionLane::DidSaveFollowup),
+                None::<fn()>,
+            )
+            .await;
+        drop(permit);
+    })
+    .await;
+    assert!(
+        did_save_followup.is_ok(),
+        "didSave follow-up lane should not wait for the generic background reserved permit when shared non-interactive capacity exists"
+    );
+
+    drop(background_reserved);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_save_followup() {
+    let budget = Arc::new(CpuBoundBudget::with_total_permits(4));
+    let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
+    let interactive_borrowed = budget.acquire(CpuWorkClass::Interactive).await;
+    let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+    let shared_taken_by_background = budget.acquire(CpuWorkClass::Background).await;
+
+    let budget_for_followup = budget.clone();
+    let did_save_followup_waiter = tokio::spawn(async move {
+        budget_for_followup
+            .acquire_with_lane_queue_wait_hook(
+                CpuWorkClass::Background,
+                Some(AdmissionLane::DidSaveFollowup),
+                None::<fn()>,
+            )
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !did_save_followup_waiter.is_finished(),
+        "didSave follow-up waiter should queue while both generic background and shared permits are occupied"
+    );
+
+    let budget_for_background = budget.clone();
+    let background_waiter = tokio::spawn(async move {
+        budget_for_background
+            .acquire(CpuWorkClass::Background)
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !background_waiter.is_finished(),
+        "generic background waiter should also queue before shared release"
+    );
+
+    drop(shared_taken_by_background);
+    let did_save_followup_permit = timeout(Duration::from_millis(300), did_save_followup_waiter)
+        .await
+        .expect("didSave follow-up waiter should win the released shared permit")
+        .expect("didSave follow-up waiter join should succeed");
+
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !background_waiter.is_finished(),
+        "generic background waiter must not steal shared while didSave follow-up lane is waiting"
+    );
+
+    drop(did_save_followup_permit);
+    drop(interactive_reserved);
+    drop(interactive_borrowed);
+    drop(background_reserved);
+    let background_permit = timeout(Duration::from_millis(300), background_waiter)
+        .await
+        .expect("generic background waiter should eventually make progress")
+        .expect("generic background waiter join should succeed");
+    drop(background_permit);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

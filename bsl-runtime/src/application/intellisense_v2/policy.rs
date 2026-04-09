@@ -526,6 +526,7 @@ struct CpuBoundBudget {
     shared: Arc<Semaphore>,
     interactive_waiters: AtomicUsize,
     background_waiters: AtomicUsize,
+    did_save_followup_waiters: AtomicUsize,
 }
 
 impl CpuBoundBudget {
@@ -543,6 +544,7 @@ impl CpuBoundBudget {
             shared: Arc::new(Semaphore::new(shared_permits)),
             interactive_waiters: AtomicUsize::new(0),
             background_waiters: AtomicUsize::new(0),
+            did_save_followup_waiters: AtomicUsize::new(0),
         }
     }
 
@@ -566,6 +568,43 @@ impl CpuBoundBudget {
     where
         Q: FnOnce(),
     {
+        self.acquire_with_lane_queue_wait_hook(class, None, on_queue_wait_started)
+            .await
+    }
+
+    async fn acquire_with_lane_queue_wait_hook<Q>(
+        &self,
+        class: CpuWorkClass,
+        lane: Option<AdmissionLane>,
+        on_queue_wait_started: Option<Q>,
+    ) -> tokio::sync::OwnedSemaphorePermit
+    where
+        Q: FnOnce(),
+    {
+        struct WaiterCountGuard<'a> {
+            counter: &'a AtomicUsize,
+        }
+
+        impl<'a> WaiterCountGuard<'a> {
+            fn new(counter: &'a AtomicUsize) -> Self {
+                counter.fetch_add(1, Ordering::AcqRel);
+                Self { counter }
+            }
+        }
+
+        impl Drop for WaiterCountGuard<'_> {
+            fn drop(&mut self) {
+                self.counter.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+
+        let is_did_save_followup = matches!(
+            (class, lane),
+            (
+                CpuWorkClass::Background,
+                Some(AdmissionLane::DidSaveFollowup)
+            )
+        );
         let (own_reserved, other_reserved, own_waiters, other_waiters) = match class {
             CpuWorkClass::Interactive => (
                 self.interactive_reserved.clone(),
@@ -581,14 +620,24 @@ impl CpuBoundBudget {
             ),
         };
 
-        own_waiters.fetch_add(1, Ordering::AcqRel);
+        let own_waiter_guard = WaiterCountGuard::new(own_waiters);
+        let lane_waiter_guard =
+            is_did_save_followup.then(|| WaiterCountGuard::new(&self.did_save_followup_waiters));
         let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
-        let background_reserved_only =
-            matches!(class, CpuWorkClass::Background) && background_reserved_only_for_test();
-        let can_borrow = !other_has_waiters && !background_reserved_only;
+        let competing_did_save_waiters = self.did_save_followup_waiters.load(Ordering::Acquire)
+            > usize::from(is_did_save_followup);
+        let background_reserved_only = matches!(class, CpuWorkClass::Background)
+            && !is_did_save_followup
+            && background_reserved_only_for_test();
+        let can_borrow = !other_has_waiters && !background_reserved_only && !is_did_save_followup;
         // Keep shared permits biased toward interactive work when interactive queue is non-empty.
-        let can_take_shared = !background_reserved_only
-            && (matches!(class, CpuWorkClass::Interactive) || !other_has_waiters);
+        let can_take_shared = match class {
+            CpuWorkClass::Interactive => !background_reserved_only,
+            CpuWorkClass::Background if is_did_save_followup => !other_has_waiters,
+            CpuWorkClass::Background => {
+                !background_reserved_only && !other_has_waiters && !competing_did_save_waiters
+            }
+        };
         let mut on_queue_wait_started = on_queue_wait_started;
         let mut mark_queue_wait_started = || {
             if let Some(callback) = on_queue_wait_started.take() {
@@ -596,11 +645,55 @@ impl CpuBoundBudget {
             }
         };
 
-        let permit = if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
-            permit
-        } else if can_take_shared {
-            if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+        let permit = if is_did_save_followup {
+            if can_take_shared {
+                if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                    permit
+                } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+                    permit
+                } else {
+                    mark_queue_wait_started();
+                    tokio::select! {
+                        permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
+                        permit = own_reserved.clone().acquire_owned() => permit.expect("background reserved semaphore closed"),
+                    }
+                }
+            } else {
+                if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+                    permit
+                } else {
+                    mark_queue_wait_started();
+                    own_reserved
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("background reserved semaphore closed")
+                }
+            }
+        } else {
+            if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
                 permit
+            } else if can_take_shared {
+                if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                    permit
+                } else if can_borrow {
+                    if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
+                        permit
+                    } else {
+                        mark_queue_wait_started();
+                        tokio::select! {
+                            permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
+                            permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
+                            permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
+                        }
+                    }
+                } else {
+                    mark_queue_wait_started();
+                    tokio::select! {
+                        permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
+                        permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
+                    }
+                }
             } else if can_borrow {
                 if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
                     permit
@@ -608,36 +701,20 @@ impl CpuBoundBudget {
                     mark_queue_wait_started();
                     tokio::select! {
                         permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
-                        permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
                         permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
                     }
                 }
             } else {
                 mark_queue_wait_started();
-                tokio::select! {
-                    permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
-                    permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
-                }
+                own_reserved
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("interactive/background reserved semaphore closed")
             }
-        } else if can_borrow {
-            if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
-                permit
-            } else {
-                mark_queue_wait_started();
-                tokio::select! {
-                    permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
-                    permit = other_reserved.clone().acquire_owned() => permit.expect("borrowed semaphore closed"),
-                }
-            }
-        } else {
-            mark_queue_wait_started();
-            own_reserved
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("interactive/background reserved semaphore closed")
         };
-        own_waiters.fetch_sub(1, Ordering::AcqRel);
+        drop(lane_waiter_guard);
+        drop(own_waiter_guard);
         permit
     }
 
@@ -782,7 +859,7 @@ where
         .unwrap_or(true)
     {
         cpu_bound_budget()
-            .acquire_with_queue_wait_hook(class, on_queue_wait_started)
+            .acquire_with_lane_queue_wait_hook(class, lane, on_queue_wait_started)
             .await
     } else {
         let semaphore = cpu_bound_semaphore();

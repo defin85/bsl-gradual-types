@@ -771,23 +771,89 @@ impl CurrentRevisionApplyCommand {
 const INTERACTIVE_BURST_QUOTA: usize = 8;
 const CURRENT_REVISION_COALESCE_WINDOW: Duration = Duration::from_millis(4);
 
+fn command_lane(command: &Command) -> Option<AdmissionLane> {
+    match command {
+        Command::GetSnapshotWithDeps { lane, .. } | Command::WaitForFileVersion { lane, .. } => {
+            *lane
+        }
+        _ => None,
+    }
+}
+
+fn push_background_command(
+    command: Command,
+    pending_did_save_followup_commands: &mut VecDeque<Command>,
+    pending_background_commands: &mut VecDeque<Command>,
+) {
+    if matches!(command_lane(&command), Some(AdmissionLane::DidSaveFollowup)) {
+        pending_did_save_followup_commands.push_back(command);
+    } else {
+        pending_background_commands.push_back(command);
+    }
+}
+
+fn pop_next_background_command(
+    pending_did_save_followup_commands: &mut VecDeque<Command>,
+    pending_background_commands: &mut VecDeque<Command>,
+) -> Option<Command> {
+    pending_did_save_followup_commands
+        .pop_front()
+        .or_else(|| pending_background_commands.pop_front())
+}
+
+fn drain_background_commands_nonblocking(
+    background_rx: &std::sync::mpsc::Receiver<Command>,
+    pending_did_save_followup_commands: &mut VecDeque<Command>,
+    pending_background_commands: &mut VecDeque<Command>,
+    background_closed: &mut bool,
+) {
+    use std::sync::mpsc::TryRecvError;
+
+    if *background_closed {
+        return;
+    }
+
+    loop {
+        match background_rx.try_recv() {
+            Ok(command) => push_background_command(
+                command,
+                pending_did_save_followup_commands,
+                pending_background_commands,
+            ),
+            Err(TryRecvError::Disconnected) => {
+                *background_closed = true;
+                break;
+            }
+            Err(TryRecvError::Empty) => break,
+        }
+    }
+}
+
 fn try_recv_next_writer_command_nonblocking(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
     background_rx: &std::sync::mpsc::Receiver<Command>,
+    pending_did_save_followup_commands: &mut VecDeque<Command>,
+    pending_background_commands: &mut VecDeque<Command>,
     interactive_streak: &mut usize,
     interactive_closed: &mut bool,
     background_closed: &mut bool,
 ) -> Option<(RuntimeQueuePriority, Command)> {
     use std::sync::mpsc::TryRecvError;
 
+    drain_background_commands_nonblocking(
+        background_rx,
+        pending_did_save_followup_commands,
+        pending_background_commands,
+        background_closed,
+    );
+
     if *interactive_streak >= INTERACTIVE_BURST_QUOTA {
         *interactive_streak = 0;
-        if !*background_closed {
-            match background_rx.try_recv() {
-                Ok(command) => return Some((RuntimeQueuePriority::Background, command)),
-                Err(TryRecvError::Disconnected) => *background_closed = true,
-                Err(TryRecvError::Empty) => {}
-            }
+        if let Some(command) = pop_next_background_command(
+            pending_did_save_followup_commands,
+            pending_background_commands,
+        ) {
+            return Some((RuntimeQueuePriority::Background, command));
         }
     }
 
@@ -802,15 +868,19 @@ fn try_recv_next_writer_command_nonblocking(
         }
     }
 
-    if !*background_closed {
-        match background_rx.try_recv() {
-            Ok(command) => {
-                *interactive_streak = 0;
-                return Some((RuntimeQueuePriority::Background, command));
-            }
-            Err(TryRecvError::Disconnected) => *background_closed = true,
-            Err(TryRecvError::Empty) => {}
-        }
+    drain_background_commands_nonblocking(
+        background_rx,
+        pending_did_save_followup_commands,
+        pending_background_commands,
+        background_closed,
+    );
+
+    if let Some(command) = pop_next_background_command(
+        pending_did_save_followup_commands,
+        pending_background_commands,
+    ) {
+        *interactive_streak = 0;
+        return Some((RuntimeQueuePriority::Background, command));
     }
 
     None
@@ -819,6 +889,8 @@ fn try_recv_next_writer_command_nonblocking(
 fn recv_next_writer_command(
     interactive_rx: &std::sync::mpsc::Receiver<Command>,
     background_rx: &std::sync::mpsc::Receiver<Command>,
+    pending_did_save_followup_commands: &mut VecDeque<Command>,
+    pending_background_commands: &mut VecDeque<Command>,
     interactive_streak: &mut usize,
     interactive_closed: &mut bool,
     background_closed: &mut bool,
@@ -826,14 +898,20 @@ fn recv_next_writer_command(
     use std::sync::mpsc::{RecvTimeoutError, TryRecvError};
 
     loop {
+        drain_background_commands_nonblocking(
+            background_rx,
+            pending_did_save_followup_commands,
+            pending_background_commands,
+            background_closed,
+        );
+
         if *interactive_streak >= INTERACTIVE_BURST_QUOTA {
             *interactive_streak = 0;
-            if !*background_closed {
-                match background_rx.try_recv() {
-                    Ok(command) => return Some((RuntimeQueuePriority::Background, command)),
-                    Err(TryRecvError::Disconnected) => *background_closed = true,
-                    Err(TryRecvError::Empty) => {}
-                }
+            if let Some(command) = pop_next_background_command(
+                pending_did_save_followup_commands,
+                pending_background_commands,
+            ) {
+                return Some((RuntimeQueuePriority::Background, command));
             }
         }
 
@@ -848,15 +926,19 @@ fn recv_next_writer_command(
             }
         }
 
-        if !*background_closed {
-            match background_rx.try_recv() {
-                Ok(command) => {
-                    *interactive_streak = 0;
-                    return Some((RuntimeQueuePriority::Background, command));
-                }
-                Err(TryRecvError::Disconnected) => *background_closed = true,
-                Err(TryRecvError::Empty) => {}
-            }
+        drain_background_commands_nonblocking(
+            background_rx,
+            pending_did_save_followup_commands,
+            pending_background_commands,
+            background_closed,
+        );
+
+        if let Some(command) = pop_next_background_command(
+            pending_did_save_followup_commands,
+            pending_background_commands,
+        ) {
+            *interactive_streak = 0;
+            return Some((RuntimeQueuePriority::Background, command));
         }
 
         if *interactive_closed && *background_closed {
@@ -876,10 +958,11 @@ fn recv_next_writer_command(
 
         if !*background_closed {
             match background_rx.recv_timeout(Duration::from_millis(2)) {
-                Ok(command) => {
-                    *interactive_streak = 0;
-                    return Some((RuntimeQueuePriority::Background, command));
-                }
+                Ok(command) => push_background_command(
+                    command,
+                    pending_did_save_followup_commands,
+                    pending_background_commands,
+                ),
                 Err(RecvTimeoutError::Disconnected) => *background_closed = true,
                 Err(RecvTimeoutError::Timeout) => {}
             }

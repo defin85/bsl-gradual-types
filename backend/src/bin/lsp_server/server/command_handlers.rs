@@ -10,7 +10,7 @@ use tracing::{info, warn};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -82,6 +82,16 @@ pub(crate) enum BeginFullIndexOutcome {
 struct CurrentContextSupersessionKey {
     editor_session_id: String,
     request_generation: u64,
+}
+
+struct CurrentContextParseObservability {
+    parse_source: &'static str,
+    parse_elapsed: Duration,
+}
+
+enum CurrentContextExecution {
+    Resolved(CurrentContextResponse),
+    ParseUnavailable,
 }
 
 impl CurrentContextSupersessionKey {
@@ -295,11 +305,14 @@ impl BslLanguageServer {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
         };
-        let file_text = self
+        let shadow_state = self
             .latest_document_shadow_state_v2
             .read()
             .await
             .get(&file_id)
+            .cloned();
+        let file_text = shadow_state
+            .as_ref()
             .map(|state| state.text.clone())
             .or_else(|| {
                 uri.to_file_path()
@@ -314,21 +327,43 @@ impl BslLanguageServer {
             );
             return Ok(CurrentContextResponse::empty());
         };
+        let ready_parse_snapshot = if let Some(shadow_state) = shadow_state.as_ref() {
+            self.latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .filter(|state| {
+                    state.parse_snapshot.file_version == shadow_state.version
+                        && state.text.as_ref() == shadow_state.text.as_ref()
+                })
+                .map(|state| {
+                    (
+                        Arc::clone(&state.parse_snapshot.parse_result),
+                        Arc::clone(&state.parse_snapshot.line_index),
+                    )
+                })
+        } else {
+            None
+        };
 
         let coordinator = self.coordinator.clone();
         let latest_generations = self.current_context_latest_generations.clone();
         let path_for_parse = PathBuf::from(path.as_str());
         let file_text_for_parse = file_text.clone();
+        let ready_parse_snapshot_for_parse = ready_parse_snapshot.clone();
         let supersession_key_for_parse = supersession_key.clone();
         let line = params.line;
         let character = params.character;
+        let current_context_started = Instant::now();
         let current_context =
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                 bsl_runtime::application::CpuWorkClass::Background,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 Some(self.coordinator.as_ref()),
-                move || -> Result<CurrentContextResponse, &'static str> {
-                    maybe_inject_get_current_context_parse_delay_for_test();
+                move || -> Result<
+                    (CurrentContextExecution, CurrentContextParseObservability),
+                    &'static str,
+                > {
                     if let Some(supersession_key) = supersession_key_for_parse.as_ref() {
                         if !is_latest_current_context_generation(
                             latest_generations.as_ref(),
@@ -337,10 +372,18 @@ impl BslLanguageServer {
                             return Err("superseded_generation");
                         }
                     }
-                    record_get_current_context_parse_attempt_for_test();
-                    let parsed = coordinator
-                        .parser_coordinator()
-                        .and_then(|parser| {
+                    let parse_started = Instant::now();
+                    let (parsed, parse_source) = if let Some((parse_result, line_index)) =
+                        ready_parse_snapshot_for_parse.as_ref()
+                    {
+                        (
+                            Some((Arc::clone(parse_result), Arc::clone(line_index))),
+                            "ready_snapshot",
+                        )
+                    } else {
+                        maybe_inject_get_current_context_parse_delay_for_test();
+                        record_get_current_context_parse_attempt_for_test();
+                        let parser_result = coordinator.parser_coordinator().and_then(|parser| {
                             parser
                                 .parse_incremental_with_report(
                                     path_for_parse.clone(),
@@ -348,28 +391,49 @@ impl BslLanguageServer {
                                     Vec::new(),
                                 )
                                 .ok()
-                        })
-                        .map(|report| (report.parse_result, report.line_index))
-                        .or_else(|| {
-                            bsl_syntax::parse(
-                                file_text_for_parse.as_ref(),
-                                &bsl_syntax::ParseOptions::default(),
-                            )
-                            .ok()
-                            .map(|parse_result| {
-                                (
-                                    parse_result,
-                                    Arc::new(LineIndex::new(file_text_for_parse.as_ref())),
-                                )
-                            })
                         });
+                        if let Some(report) = parser_result {
+                            (
+                                Some((Arc::new(report.parse_result), report.line_index)),
+                                "parser_coordinator",
+                            )
+                        } else {
+                            (
+                                bsl_syntax::parse(
+                                    file_text_for_parse.as_ref(),
+                                    &bsl_syntax::ParseOptions::default(),
+                                )
+                                .ok()
+                                .map(|parse_result| {
+                                    (
+                                        Arc::new(parse_result),
+                                        Arc::new(LineIndex::new(file_text_for_parse.as_ref())),
+                                    )
+                                }),
+                                "syntax_fallback",
+                            )
+                        }
+                    };
+                    let parse_elapsed = parse_started.elapsed();
+                    let parse_observability = CurrentContextParseObservability {
+                        parse_source: if parsed.is_some() {
+                            parse_source
+                        } else {
+                            "parse_unavailable"
+                        },
+                        parse_elapsed,
+                    };
                     let Some((parse_result, line_index)) = parsed else {
-                        return Err("parse_unavailable");
+                        return Ok((
+                            CurrentContextExecution::ParseUnavailable,
+                            parse_observability,
+                        ));
                     };
 
-                    Ok(
-                        match find_containing_function_in_parse_result(
-                            &parse_result,
+                    Ok((
+                        CurrentContextExecution::Resolved(
+                            match find_containing_function_in_parse_result(
+                            parse_result.as_ref(),
                             file_text_for_parse.as_ref(),
                             line_index.as_ref(),
                             line,
@@ -385,13 +449,30 @@ impl BslLanguageServer {
                             }
                             None => CurrentContextResponse::empty(),
                         },
-                    )
+                        ),
+                        parse_observability,
+                    ))
                 },
             )
             .await;
+        let current_context_elapsed = current_context_started.elapsed();
 
         match current_context {
-            Ok(Ok(response)) => {
+            Ok(Ok((CurrentContextExecution::Resolved(response), parse_observability))) => {
+                self.coordinator
+                    .record_intellisense_v2_current_context_parse_source(
+                        parse_observability.parse_source,
+                    );
+                self.coordinator
+                    .record_intellisense_v2_current_context_parse_latency(
+                        parse_observability.parse_source,
+                        parse_observability.parse_elapsed,
+                    );
+                self.coordinator
+                    .record_intellisense_v2_current_context_wall_latency(
+                        parse_observability.parse_source,
+                        current_context_elapsed,
+                    );
                 if let Some(supersession_key) = supersession_key.as_ref() {
                     if !is_latest_current_context_generation(
                         self.current_context_latest_generations.as_ref(),
@@ -403,7 +484,21 @@ impl BslLanguageServer {
                 Ok(response)
             }
             Ok(Err("superseded_generation")) => Ok(CurrentContextResponse::empty()),
-            Ok(Err("parse_unavailable")) => {
+            Ok(Ok((CurrentContextExecution::ParseUnavailable, parse_observability))) => {
+                self.coordinator
+                    .record_intellisense_v2_current_context_parse_source(
+                        parse_observability.parse_source,
+                    );
+                self.coordinator
+                    .record_intellisense_v2_current_context_parse_latency(
+                        parse_observability.parse_source,
+                        parse_observability.parse_elapsed,
+                    );
+                self.coordinator
+                    .record_intellisense_v2_current_context_wall_latency(
+                        parse_observability.parse_source,
+                        current_context_elapsed,
+                    );
                 warn!(
                     uri = %uri,
                     file_id = file_id.0,

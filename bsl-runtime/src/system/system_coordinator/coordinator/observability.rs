@@ -96,6 +96,29 @@ impl SystemCoordinator {
             .record_intellisense_v2_completion_fail_closed_cause(cause);
     }
 
+    pub fn record_intellisense_v2_current_context_parse_source(&self, source: &str) {
+        self.observability
+            .record_intellisense_v2_current_context_parse_source(source);
+    }
+
+    pub fn record_intellisense_v2_current_context_parse_latency(
+        &self,
+        source: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_current_context_parse_latency(source, duration);
+    }
+
+    pub fn record_intellisense_v2_current_context_wall_latency(
+        &self,
+        source: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_current_context_wall_latency(source, duration);
+    }
+
     pub fn record_intellisense_v2_completion_head_to_exact_upgrade(
         &self,
         duration: std::time::Duration,

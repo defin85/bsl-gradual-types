@@ -270,6 +270,38 @@ mod symbol_index_tests {
 #[cfg(test)]
 mod parse_snapshot_tests {
     use super::*;
+    use std::sync::{Arc, Barrier, Mutex, OnceLock};
+
+    fn lock_parse_snapshot_test_env() -> std::sync::MutexGuard<'static, ()> {
+        static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        TEST_ENV_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn incremental_snapshot_matches_full_parse_result() {
@@ -369,5 +401,60 @@ mod parse_snapshot_tests {
             );
             assert_eq!(report.changed_ranges.len(), 1);
         }
+    }
+
+    #[test]
+    fn same_text_concurrent_parse_reports_share_single_full_parse() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _delay_guard = EnvVarGuard::set("BSL_TEST_PARSE_SNAPSHOT_FULL_PARSE_DELAY_MS", "150");
+        reset_parse_snapshot_full_parse_attempts_for_test();
+
+        let parser = Arc::new(ParserCoordinator::with_fallback());
+        let barrier = Arc::new(Barrier::new(3));
+        let file_path = PathBuf::from("snapshot-singleflight.bsl");
+        let text = "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string();
+
+        let spawn_parse = |parser: Arc<ParserCoordinator>, barrier: Arc<Barrier>| {
+            let file_path = file_path.clone();
+            let text = text.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                parser.parse_incremental_with_report(file_path, text, Vec::new())
+            })
+        };
+
+        let first = spawn_parse(Arc::clone(&parser), Arc::clone(&barrier));
+        let second = spawn_parse(parser, Arc::clone(&barrier));
+        barrier.wait();
+
+        let first = first
+            .join()
+            .expect("first concurrent parse thread")
+            .expect("first parse report");
+        let second = second
+            .join()
+            .expect("second concurrent parse thread")
+            .expect("second parse report");
+
+        assert!(!first.incremental, "first concurrent parse must stay full");
+        assert!(
+            !second.incremental,
+            "second concurrent parse must reuse the full parse"
+        );
+        assert_eq!(
+            first.fallback_reason.as_deref(),
+            Some("no_previous_tree"),
+            "first parse must record initial cold-parse reason"
+        );
+        assert_eq!(
+            second.fallback_reason.as_deref(),
+            Some("no_previous_tree"),
+            "coalesced follower must preserve canonical cold-parse attribution"
+        );
+        assert_eq!(
+            get_parse_snapshot_full_parse_attempts_for_test(),
+            1,
+            "concurrent identical parse reports must pay a single full parse"
+        );
     }
 }

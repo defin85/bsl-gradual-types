@@ -24,6 +24,134 @@ fn maybe_inject_apply_change_delay_for_test(change: &Change) {
 #[cfg(not(debug_assertions))]
 fn maybe_inject_apply_change_delay_for_test(_change: &Change) {}
 
+fn lock_readiness_state(
+    readiness_state: &Arc<std::sync::Mutex<ReadinessState>>,
+) -> std::sync::MutexGuard<'_, ReadinessState> {
+    readiness_state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn observe_wait_for_file_version_registration(
+    observability: Option<&Arc<SystemCoordinator>>,
+    origin: ObservabilityOrigin,
+    priority: RuntimeQueuePriority,
+    lane: Option<AdmissionLane>,
+    registration_elapsed: Duration,
+) {
+    let Some(coordinator) = observability else {
+        return;
+    };
+    coordinator.record_intellisense_v2_runtime_queue_wait_latency(
+        "wait_for_file_version",
+        registration_elapsed,
+    );
+    coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+        origin.as_str(),
+        priority.as_work_class(),
+        registration_elapsed,
+    );
+    if let Some(lane) = lane {
+        coordinator.record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+            origin.as_str(),
+            lane.as_str(),
+            registration_elapsed,
+        );
+    }
+}
+
+fn observe_wait_for_file_version_passive_wait(
+    observability: Option<&Arc<SystemCoordinator>>,
+    origin: ObservabilityOrigin,
+    priority: RuntimeQueuePriority,
+    lane: Option<AdmissionLane>,
+    passive_wait_elapsed: Duration,
+) {
+    let Some(coordinator) = observability else {
+        return;
+    };
+    coordinator
+        .record_intellisense_v2_runtime_exec_latency("wait_for_file_version", passive_wait_elapsed);
+    coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+        origin.as_str(),
+        priority.as_work_class(),
+        passive_wait_elapsed,
+    );
+    if let Some(lane) = lane {
+        coordinator.record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+            origin.as_str(),
+            lane.as_str(),
+            passive_wait_elapsed,
+        );
+    }
+}
+
+fn immediate_wait_for_file_version_reply(
+    registration_elapsed: Duration,
+) -> WaitForFileVersionReply {
+    let exec_started = Instant::now();
+    let exec_elapsed = exec_started.elapsed();
+    WaitForFileVersionReply {
+        ready: true,
+        trace: WaitForFileVersionRuntimeTrace {
+            queue_wait_elapsed: Some(registration_elapsed),
+            exec_elapsed: Some(exec_elapsed),
+            wake_wait_elapsed: None,
+            resolution: Some(WaitForFileVersionResolutionKind::Immediate),
+        },
+    }
+}
+
+fn complete_pending_waiter(
+    waiter: PendingWaiter,
+    ready: bool,
+    observability: Option<&Arc<SystemCoordinator>>,
+) {
+    let passive_wait_elapsed = waiter.registered_at.elapsed();
+    observe_wait_for_file_version_passive_wait(
+        observability,
+        waiter.origin,
+        waiter.priority,
+        waiter.lane,
+        passive_wait_elapsed,
+    );
+    let _ = waiter.reply.send(WaitForFileVersionReply {
+        ready,
+        trace: WaitForFileVersionRuntimeTrace {
+            queue_wait_elapsed: Some(waiter.registration_elapsed),
+            exec_elapsed: Some(passive_wait_elapsed),
+            wake_wait_elapsed: Some(passive_wait_elapsed),
+            resolution: Some(WaitForFileVersionResolutionKind::Waiter),
+        },
+    });
+}
+
+fn collect_resolved_waiters_for_file(
+    readiness_state: &mut ReadinessState,
+    file_id: FileId,
+    current_version: Option<i32>,
+) -> Vec<(PendingWaiter, bool)> {
+    let Some(pending) = readiness_state.waiters.remove(&file_id) else {
+        return Vec::new();
+    };
+
+    let mut resolved = Vec::new();
+    let mut still_waiting = Vec::new();
+    for waiter in pending {
+        match current_version {
+            None => resolved.push((waiter, false)),
+            Some(version) if version >= waiter.min_version => resolved.push((waiter, true)),
+            Some(_) => still_waiting.push(waiter),
+        }
+    }
+
+    if !still_waiting.is_empty() {
+        readiness_state.waiters.insert(file_id, still_waiting);
+    }
+
+    resolved
+}
+
 impl IntellisenseV2Facade {
     pub fn new(
         initial_host: AnalysisHostV2,
@@ -43,117 +171,23 @@ impl IntellisenseV2Facade {
                 index_snapshot: initial_index_snapshot.clone(),
             }));
         let completion_deps_index_snapshot_for_writer = completion_deps_index_snapshot.clone();
-        let applied_file_revisions = Arc::new(std::sync::RwLock::new(HashMap::new()));
-        let applied_file_revisions_for_writer = applied_file_revisions.clone();
+        let readiness_state = Arc::new(std::sync::Mutex::new(ReadinessState::default()));
+        let readiness_state_for_writer = readiness_state.clone();
+        let observability_for_writer = observability.clone();
 
         let join_handle = std::thread::Builder::new()
             .name("analysis-v2-writer".to_string())
             .spawn(move || {
+                let observability = observability_for_writer;
                 let mut host = initial_host;
                 let mut current_deps_id = host.deps_id();
                 let mut index_snapshot = initial_index_snapshot;
-                let mut applied_file_revisions: HashMap<FileId, FileRevisionState> =
-                    HashMap::new();
-                let mut waiters: HashMap<FileId, Vec<PendingWaiter>> = HashMap::new();
                 let mut interactive_streak = 0usize;
                 let mut interactive_closed = false;
                 let mut background_closed = false;
                 let mut pending_interactive_commands = VecDeque::new();
                 let mut pending_did_save_followup_commands = VecDeque::new();
                 let mut pending_background_commands = VecDeque::new();
-
-                let wake_waiters_for_file =
-                    |file_id: FileId,
-                     current_version: Option<i32>,
-                     waiters: &mut HashMap<FileId, Vec<PendingWaiter>>,
-                     observability: &Option<Arc<SystemCoordinator>>| {
-                        let Some(pending) = waiters.remove(&file_id) else {
-                            return;
-                        };
-
-                        let mut still_waiting = Vec::new();
-                        for waiter in pending {
-                            match current_version {
-                                None => {
-                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
-                                    if let Some(coordinator) = observability {
-                                        coordinator.record_intellisense_v2_runtime_exec_latency(
-                                            "wait_for_file_version",
-                                            exec_elapsed,
-                                        );
-                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
-                                            waiter.origin.as_str(),
-                                            waiter.priority.as_work_class(),
-                                            exec_elapsed,
-                                        );
-                                        if let Some(lane) = waiter.lane {
-                                            coordinator
-                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
-                                                    waiter.origin.as_str(),
-                                                    lane.as_str(),
-                                                    exec_elapsed,
-                                                );
-                                        }
-                                    }
-                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
-                                    let exec_started = Instant::now();
-                                    let exec_elapsed = exec_started.elapsed();
-                                    let _ = waiter.reply.send(WaitForFileVersionReply {
-                                        ready: false,
-                                        trace: WaitForFileVersionRuntimeTrace {
-                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
-                                            exec_elapsed: Some(exec_elapsed),
-                                            wake_wait_elapsed: Some(wake_wait_elapsed),
-                                            resolution: Some(
-                                                WaitForFileVersionResolutionKind::Waiter,
-                                            ),
-                                        },
-                                    });
-                                }
-                                Some(version) if version >= waiter.min_version => {
-                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
-                                    if let Some(coordinator) = observability {
-                                        coordinator.record_intellisense_v2_runtime_exec_latency(
-                                            "wait_for_file_version",
-                                            exec_elapsed,
-                                        );
-                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
-                                            waiter.origin.as_str(),
-                                            waiter.priority.as_work_class(),
-                                            exec_elapsed,
-                                        );
-                                        if let Some(lane) = waiter.lane {
-                                            coordinator
-                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
-                                                    waiter.origin.as_str(),
-                                                    lane.as_str(),
-                                                    exec_elapsed,
-                                                );
-                                        }
-                                    }
-                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
-                                    let exec_started = Instant::now();
-                                    let exec_elapsed = exec_started.elapsed();
-                                    let _ = waiter.reply.send(WaitForFileVersionReply {
-                                        ready: true,
-                                        trace: WaitForFileVersionRuntimeTrace {
-                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
-                                            exec_elapsed: Some(exec_elapsed),
-                                            wake_wait_elapsed: Some(wake_wait_elapsed),
-                                            resolution: Some(
-                                                WaitForFileVersionResolutionKind::Waiter,
-                                            ),
-                                        },
-                                    });
-                                }
-                                Some(_) => still_waiting.push(waiter),
-                            }
-                        }
-
-                        if !still_waiting.is_empty() {
-                            waiters.insert(file_id, still_waiting);
-                        }
-                    };
 
                 while let Some((queue_priority, cmd)) = if !pending_interactive_commands.is_empty()
                 {
@@ -291,19 +325,22 @@ impl IntellisenseV2Facade {
                                 let skip_stale_change = match &change {
                                     Change::SetFile {
                                         file_id, version, ..
-                                    } => applied_file_revisions
+                                    } => lock_readiness_state(&readiness_state_for_writer)
+                                        .applied_file_revisions
                                         .get(file_id)
                                         .is_some_and(|state| state.version > *version),
                                     Change::SetFileWithSnapshot {
                                         file_id, version, ..
-                                    } => applied_file_revisions
+                                    } => lock_readiness_state(&readiness_state_for_writer)
+                                        .applied_file_revisions
                                         .get(file_id)
                                         .is_some_and(|state| state.version > *version),
                                     Change::ReuseCompletionHeadFromPreviousVersion {
                                         file_id,
                                         expected_version,
                                         ..
-                                    } => applied_file_revisions
+                                    } => lock_readiness_state(&readiness_state_for_writer)
+                                        .applied_file_revisions
                                         .get(file_id)
                                         .is_some_and(|state| state.version > *expected_version),
                                     _ => false,
@@ -328,27 +365,23 @@ impl IntellisenseV2Facade {
 
                                 let cache_effects = host.apply_change(change);
                                 if let Some((file_id, version)) = applied_revision_update {
+                                    changed_files.push(file_id);
+                                    let mut readiness_state =
+                                        lock_readiness_state(&readiness_state_for_writer);
                                     match version {
                                         Some(version) => {
-                                            let revision_state = FileRevisionState {
-                                                version,
-                                                updated_at: Instant::now(),
-                                            };
-                                            applied_file_revisions.insert(file_id, revision_state);
-                                            applied_file_revisions_for_writer
-                                                .write()
-                                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                                .insert(file_id, revision_state);
+                                            readiness_state.applied_file_revisions.insert(
+                                                file_id,
+                                                FileRevisionState {
+                                                    version,
+                                                    updated_at: Instant::now(),
+                                                },
+                                            );
                                         }
                                         None => {
-                                            applied_file_revisions.remove(&file_id);
-                                            applied_file_revisions_for_writer
-                                                .write()
-                                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                                .remove(&file_id);
+                                            readiness_state.applied_file_revisions.remove(&file_id);
                                         }
                                     }
-                                    changed_files.push(file_id);
                                 }
                                 if let Some(coordinator) = &observability {
                                     if cache_effects.invalidated_deps_total > 0 {
@@ -383,15 +416,22 @@ impl IntellisenseV2Facade {
                             }
                             let changed_files_count = changed_files.len();
                             for file_id in changed_files {
-                                let version = applied_file_revisions
-                                    .get(&file_id)
-                                    .map(|state| state.version);
-                                wake_waiters_for_file(
-                                    file_id,
-                                    version,
-                                    &mut waiters,
-                                    &observability,
-                                );
+                                let resolved_waiters = {
+                                    let mut readiness_state =
+                                        lock_readiness_state(&readiness_state_for_writer);
+                                    let version = readiness_state
+                                        .applied_file_revisions
+                                        .get(&file_id)
+                                        .map(|state| state.version);
+                                    collect_resolved_waiters_for_file(
+                                        &mut readiness_state,
+                                        file_id,
+                                        version,
+                                    )
+                                };
+                                for (waiter, ready) in resolved_waiters {
+                                    complete_pending_waiter(waiter, ready, observability.as_ref());
+                                }
                             }
 
                             let exec_elapsed = exec_started.elapsed();
@@ -521,85 +561,12 @@ impl IntellisenseV2Facade {
                             }
                             let _ = reply.send(response);
                         }
-                        Command::WaitForFileVersion {
-                            origin,
-                            lane,
-                            enqueued_at,
-                            file_id,
-                            min_version,
-                            reply,
-                        } => {
-                            let queue_wait_elapsed = enqueued_at.elapsed();
-                            if let Some(coordinator) = &observability {
-                                coordinator.record_intellisense_v2_runtime_queue_wait_latency(
-                                    "wait_for_file_version",
-                                    queue_wait_elapsed,
-                                );
-                                coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
-                                    origin.as_str(),
-                                    queue_priority.as_work_class(),
-                                    queue_wait_elapsed,
-                                );
-                                if let Some(lane) = lane {
-                                    coordinator
-                                        .record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
-                                            origin.as_str(),
-                                            lane.as_str(),
-                                            queue_wait_elapsed,
-                                        );
-                                }
-                            }
-
-                            match applied_file_revisions.get(&file_id).map(|state| state.version) {
-                                Some(version) if version >= min_version => {
-                                    let exec_started = Instant::now();
-                                    let exec_elapsed = exec_started.elapsed();
-                                    let _ = reply.send(WaitForFileVersionReply {
-                                        ready: true,
-                                        trace: WaitForFileVersionRuntimeTrace {
-                                            queue_wait_elapsed: Some(queue_wait_elapsed),
-                                            exec_elapsed: Some(exec_elapsed),
-                                            wake_wait_elapsed: None,
-                                            resolution: Some(
-                                                WaitForFileVersionResolutionKind::Immediate,
-                                            ),
-                                        },
-                                    });
-                                    if let Some(coordinator) = &observability {
-                                        coordinator.record_intellisense_v2_runtime_exec_latency(
-                                            "wait_for_file_version",
-                                            exec_elapsed,
-                                        );
-                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
-                                            origin.as_str(),
-                                            queue_priority.as_work_class(),
-                                            exec_elapsed,
-                                        );
-                                        if let Some(lane) = lane {
-                                            coordinator
-                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
-                                                    origin.as_str(),
-                                                    lane.as_str(),
-                                                    exec_elapsed,
-                                                );
-                                        }
-                                    }
-                                }
-                                _ => {
-                                    waiters.entry(file_id).or_default().push(PendingWaiter {
-                                        min_version,
-                                        reply,
-                                        queue_wait_elapsed,
-                                        started_waiting_at: Instant::now(),
-                                        origin,
-                                        lane,
-                                        priority: queue_priority,
-                                    });
-                                }
-                            }
-                        }
                         Command::GetFileRevisionState { file_id, reply } => {
-                            let _ = reply.send(applied_file_revisions.get(&file_id).copied());
+                            let state = lock_readiness_state(&readiness_state_for_writer)
+                                .applied_file_revisions
+                                .get(&file_id)
+                                .copied();
+                            let _ = reply.send(state);
                         }
                         #[cfg(test)]
                         Command::TestSleep { duration, ack } => {
@@ -612,43 +579,17 @@ impl IntellisenseV2Facade {
                         }
                         #[cfg(test)]
                         Command::Shutdown { ack } => {
-                            for (_file_id, pending) in waiters.drain() {
-                                for waiter in pending {
-                                    let exec_elapsed = waiter.started_waiting_at.elapsed();
-                                    if let Some(coordinator) = &observability {
-                                        coordinator.record_intellisense_v2_runtime_exec_latency(
-                                            "wait_for_file_version",
-                                            exec_elapsed,
-                                        );
-                                        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
-                                            waiter.origin.as_str(),
-                                            waiter.priority.as_work_class(),
-                                            exec_elapsed,
-                                        );
-                                        if let Some(lane) = waiter.lane {
-                                            coordinator
-                                                .record_intellisense_v2_runtime_lane_exec_latency_with_origin(
-                                                    waiter.origin.as_str(),
-                                                    lane.as_str(),
-                                                    exec_elapsed,
-                                                );
-                                        }
-                                    }
-                                    let wake_wait_elapsed = waiter.started_waiting_at.elapsed();
-                                    let exec_started = Instant::now();
-                                    let exec_elapsed = exec_started.elapsed();
-                                    let _ = waiter.reply.send(WaitForFileVersionReply {
-                                        ready: false,
-                                        trace: WaitForFileVersionRuntimeTrace {
-                                            queue_wait_elapsed: Some(waiter.queue_wait_elapsed),
-                                            exec_elapsed: Some(exec_elapsed),
-                                            wake_wait_elapsed: Some(wake_wait_elapsed),
-                                            resolution: Some(
-                                                WaitForFileVersionResolutionKind::Waiter,
-                                            ),
-                                        },
-                                    });
-                                }
+                            let pending_waiters = {
+                                let mut readiness_state =
+                                    lock_readiness_state(&readiness_state_for_writer);
+                                readiness_state
+                                    .waiters
+                                    .drain()
+                                    .flat_map(|(_file_id, pending)| pending)
+                                    .collect::<Vec<_>>()
+                            };
+                            for waiter in pending_waiters {
+                                complete_pending_waiter(waiter, false, observability.as_ref());
                             }
                             let _ = ack.send(());
                             break;
@@ -665,8 +606,9 @@ impl IntellisenseV2Facade {
             inner: Arc::new(Inner {
                 interactive_tx,
                 background_tx,
+                observability,
                 completion_deps_index_snapshot,
-                applied_file_revisions,
+                readiness_state,
                 #[cfg(test)]
                 join_handle: std::sync::Mutex::new(Some(join_handle)),
             }),
@@ -888,25 +830,49 @@ impl IntellisenseV2Facade {
         lane: Option<AdmissionLane>,
     ) -> WaitForFileVersionReply {
         let (reply, rx) = oneshot::channel::<WaitForFileVersionReply>();
-        if self
-            .send_command_with_priority(
-                priority,
-                Command::WaitForFileVersion {
-                    origin,
-                    lane,
-                    enqueued_at: Instant::now(),
-                    file_id,
-                    min_version,
-                    reply,
-                },
-            )
-            .is_err()
+        let request_started = Instant::now();
         {
-            warn!("analysis_v2_runtime: failed to send WaitForFileVersion (writer thread is gone)");
-            return WaitForFileVersionReply {
-                ready: false,
-                trace: WaitForFileVersionRuntimeTrace::default(),
-            };
+            let mut readiness_state = lock_readiness_state(&self.inner.readiness_state);
+            match readiness_state
+                .applied_file_revisions
+                .get(&file_id)
+                .map(|state| state.version)
+            {
+                Some(version) if version >= min_version => {
+                    let registration_elapsed = request_started.elapsed();
+                    observe_wait_for_file_version_registration(
+                        self.inner.observability.as_ref(),
+                        origin,
+                        priority,
+                        lane,
+                        registration_elapsed,
+                    );
+                    return immediate_wait_for_file_version_reply(registration_elapsed);
+                }
+                _ => {
+                    let registration_elapsed = request_started.elapsed();
+                    observe_wait_for_file_version_registration(
+                        self.inner.observability.as_ref(),
+                        origin,
+                        priority,
+                        lane,
+                        registration_elapsed,
+                    );
+                    readiness_state
+                        .waiters
+                        .entry(file_id)
+                        .or_default()
+                        .push(PendingWaiter {
+                            min_version,
+                            reply,
+                            registration_elapsed,
+                            registered_at: Instant::now(),
+                            origin,
+                            lane,
+                            priority,
+                        });
+                }
+            }
         }
         match rx.await {
             Ok(reply) => reply,
@@ -942,9 +908,10 @@ impl IntellisenseV2Facade {
 
     pub fn cached_file_revision_state(&self, file_id: FileId) -> Option<FileRevisionState> {
         self.inner
-            .applied_file_revisions
-            .read()
+            .readiness_state
+            .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .applied_file_revisions
             .get(&file_id)
             .copied()
     }

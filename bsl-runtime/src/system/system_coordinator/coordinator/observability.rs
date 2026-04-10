@@ -119,6 +119,34 @@ impl SystemCoordinator {
             .record_intellisense_v2_current_context_wall_latency(source, duration);
     }
 
+    pub fn record_intellisense_v2_current_context_role(&self, role: &str) {
+        self.observability
+            .record_intellisense_v2_current_context_role(role);
+    }
+
+    pub fn record_intellisense_v2_current_context_terminal_outcome(&self, outcome: &str) {
+        self.observability
+            .record_intellisense_v2_current_context_terminal_outcome(outcome);
+    }
+
+    pub fn record_intellisense_v2_current_context_parse_latency_by_role(
+        &self,
+        role: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_current_context_parse_latency_by_role(role, duration);
+    }
+
+    pub fn record_intellisense_v2_current_context_wall_latency_by_role(
+        &self,
+        role: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_current_context_wall_latency_by_role(role, duration);
+    }
+
     pub fn record_intellisense_v2_completion_head_to_exact_upgrade(
         &self,
         duration: std::time::Duration,

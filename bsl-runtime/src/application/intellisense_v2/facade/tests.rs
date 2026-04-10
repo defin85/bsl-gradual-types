@@ -185,6 +185,100 @@ async fn interactive_apply_changes_preempts_background_backlog_for_wait_for_file
 }
 
 #[tokio::test]
+async fn wait_for_file_version_registration_bypasses_background_backlog_before_passive_wait() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        Some(coordinator.clone()),
+    );
+    let file_id = FileId(119);
+
+    let mut sleepers = Vec::new();
+    for _ in 0..6 {
+        sleepers.push(
+            runtime.enqueue_test_sleep(RuntimeQueuePriority::Background, Duration::from_millis(40)),
+        );
+    }
+
+    let waiter_task = tokio::spawn({
+        let runtime = runtime.clone();
+        async move {
+            runtime
+                .wait_for_file_version_with_priority(
+                    ObservabilityOrigin::Lsp,
+                    RuntimeQueuePriority::Background,
+                    file_id,
+                    7,
+                )
+                .await
+        }
+    });
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id,
+            text: Arc::from("x = 1;"),
+            version: 7,
+            path: Arc::from("wait_registration_bypass_backlog.bsl"),
+        }],
+    );
+
+    let waiter = timeout(Duration::from_millis(120), waiter_task)
+        .await
+        .expect("waiter registration must not sit behind generic background backlog")
+        .expect("waiter task join");
+    assert!(
+        waiter.ready,
+        "wait_for_file_version should still observe the interactively published revision"
+    );
+    assert_eq!(
+        waiter.trace.resolution,
+        Some(WaitForFileVersionResolutionKind::Waiter)
+    );
+    assert!(
+        waiter
+            .trace
+            .queue_wait_elapsed
+            .is_some_and(|elapsed| elapsed < Duration::from_millis(30)),
+        "waiter registration latency must stay bounded even while background backlog is busy, trace={:?}",
+        waiter.trace
+    );
+    assert!(
+        waiter.trace.wake_wait_elapsed.is_some(),
+        "passive waiter path must surface actual apply lag separately from registration"
+    );
+
+    for sleeper_ack in sleepers {
+        timeout(Duration::from_secs(1), sleeper_ack)
+            .await
+            .expect("background sleeper ack timeout")
+            .expect("background sleeper ack");
+    }
+
+    let metrics = coordinator.observability_metrics();
+    let histograms = histograms(&metrics);
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_wait_for_file_version_queue_wait_ms",
+        ) > 0,
+        "low-latency waiter registration must still export runtime queue-wait metrics"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_runtime_wait_for_file_version_exec_ms"
+        ) > 0,
+        "passive waiter wake path must still export runtime exec metrics"
+    );
+
+    runtime.shutdown_for_test().await;
+}
+
+#[tokio::test]
 async fn interactive_snapshot_for_completion_preempts_background_backlog() {
     let index_snapshot = Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7")));
     let runtime =
@@ -792,6 +886,16 @@ async fn wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_
         }],
     );
 
+    let first_ready = runtime
+        .wait_for_file_version_with_priority(
+            ObservabilityOrigin::Lsp,
+            RuntimeQueuePriority::Interactive,
+            file_id,
+            7,
+        )
+        .await;
+    assert!(first_ready.ready, "first readiness wait must succeed");
+
     let immediate = runtime
         .wait_for_file_version_with_priority(
             ObservabilityOrigin::Lsp,
@@ -800,7 +904,10 @@ async fn wait_for_file_version_runtime_trace_distinguishes_immediate_and_waiter_
             7,
         )
         .await;
-    assert!(immediate.ready, "immediate wait must succeed");
+    assert!(
+        immediate.ready,
+        "immediate wait must succeed once the revision is applied"
+    );
     assert_eq!(
         immediate.trace.resolution,
         Some(WaitForFileVersionResolutionKind::Immediate)

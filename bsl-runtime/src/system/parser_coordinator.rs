@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
-#[cfg(test)]
 use std::time::Duration;
 use tracing::{debug, error, warn};
 use tree_sitter::{InputEdit, Parser, Point};
@@ -45,6 +44,8 @@ fn is_cache_disabled_env() -> bool {
         .unwrap_or(false)
 }
 
+const PARSE_COORDINATOR_CANCELLED_ERROR: &str = "Tree-sitter parsing cancelled";
+
 #[cfg(test)]
 static PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
@@ -69,6 +70,16 @@ fn record_parse_snapshot_full_parse_attempt_for_test() {
 
 #[cfg(not(test))]
 fn record_parse_snapshot_full_parse_attempt_for_test() {}
+
+fn maybe_inject_current_context_parse_progress_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_CURRENT_CONTEXT_PARSE_PROGRESS_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
 
 #[cfg(test)]
 pub(crate) fn reset_parse_snapshot_full_parse_attempts_for_test() {
@@ -109,6 +120,12 @@ pub struct ParseSnapshotReport {
     pub backend_tree_hash: u64,
     pub incremental: bool,
     pub fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CurrentContextParseReport {
+    pub parse_result: ParseResult,
+    pub line_index: Arc<bsl_line_index::LineIndex>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -330,6 +347,54 @@ impl ParserCoordinator {
         );
         self.complete_parse_snapshot_singleflight(&key, &entry, &result);
         result
+    }
+
+    pub fn parse_current_context_with_cancellation(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<CurrentContextParseReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(CurrentContextParseReport {
+                    parse_result: result,
+                    line_index,
+                });
+            }
+        }
+
+        debug!("Current-context full parse for file: {:?}", file_path);
+        record_parse_snapshot_full_parse_attempt_for_test();
+        let (tree, result) =
+            self.tree_sitter
+                .parse_with_tree_cancellation(&new_content, None, cancellation_flag)?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        self.store_ast_cache(new_hash, &result, Some(file_path.as_path()), &new_content);
+        self.tree_cache
+            .set(file_path, tree, new_content.clone(), new_tree_hash);
+
+        Ok(CurrentContextParseReport {
+            parse_result: result,
+            line_index,
+        })
     }
 
     fn begin_parse_snapshot_singleflight(
@@ -736,6 +801,10 @@ impl ParserCoordinator {
     }
 }
 
+pub fn is_parse_cancelled_error(error: &str) -> bool {
+    error == PARSE_COORDINATOR_CANCELLED_ERROR
+}
+
 impl TreeSitterParser {
     fn new() -> Self {
         let mut parser = Parser::new();
@@ -777,6 +846,47 @@ impl TreeSitterParser {
 
         // Конвертация tree-sitter AST → ParseResult через TreeSitterAdapter
         let result = TreeSitterAdapter::convert_tree(&tree, content)?;
+        Ok((tree, result))
+    }
+
+    fn parse_with_tree_cancellation(
+        &self,
+        content: &str,
+        old_tree: Option<&tree_sitter::Tree>,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<(tree_sitter::Tree, ParseResult), String> {
+        let mut parser = self
+            .parser
+            .lock()
+            .map_err(|e| format!("Failed to lock parser: {}", e))?;
+
+        let bytes = content.as_bytes();
+        let len = bytes.len();
+        let mut progress = |_state: &tree_sitter::ParseState| {
+            maybe_inject_current_context_parse_progress_delay_for_test();
+            cancellation_flag.load(Ordering::SeqCst)
+        };
+        let tree = parser
+            .parse_with_options(
+                &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                old_tree,
+                Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
+            )
+            .ok_or_else(|| {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
+                } else {
+                    "Tree-sitter parsing failed".to_string()
+                }
+            })?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let result = TreeSitterAdapter::convert_tree(&tree, content)?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
         Ok((tree, result))
     }
 

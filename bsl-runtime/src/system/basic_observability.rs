@@ -139,6 +139,15 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_current_context_parse_source_total_source_syntax_fallback",
     "intellisense_v2_current_context_parse_source_total_source_parse_unavailable",
     "intellisense_v2_current_context_parse_source_total_source_other",
+    "intellisense_v2_current_context_role_total_role_ready_snapshot",
+    "intellisense_v2_current_context_role_total_role_broker_leader",
+    "intellisense_v2_current_context_role_total_role_broker_follower",
+    "intellisense_v2_current_context_role_total_role_other",
+    "intellisense_v2_current_context_terminal_total_outcome_resolved",
+    "intellisense_v2_current_context_terminal_total_outcome_parse_unavailable",
+    "intellisense_v2_current_context_terminal_total_outcome_superseded",
+    "intellisense_v2_current_context_terminal_total_outcome_budget_exhausted",
+    "intellisense_v2_current_context_terminal_total_outcome_other",
 ];
 
 const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
@@ -225,6 +234,14 @@ const UNIFIED_INTELLISENSE_V2_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_current_context_wall_ms_source_syntax_fallback",
     "intellisense_v2_current_context_wall_ms_source_parse_unavailable",
     "intellisense_v2_current_context_wall_ms_source_other",
+    "intellisense_v2_current_context_parse_ms_role_ready_snapshot",
+    "intellisense_v2_current_context_parse_ms_role_broker_leader",
+    "intellisense_v2_current_context_parse_ms_role_broker_follower",
+    "intellisense_v2_current_context_parse_ms_role_other",
+    "intellisense_v2_current_context_wall_ms_role_ready_snapshot",
+    "intellisense_v2_current_context_wall_ms_role_broker_leader",
+    "intellisense_v2_current_context_wall_ms_role_broker_follower",
+    "intellisense_v2_current_context_wall_ms_role_other",
 ];
 
 const UNIFIED_INTELLISENSE_V2_GAUGE_KEYS: &[&str] = &[

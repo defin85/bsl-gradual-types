@@ -1,0 +1,17 @@
+# Traceability
+
+## Requirement -> Code -> Test
+
+| Requirement | Code | Test / Evidence |
+|---|---|---|
+| Same-file same-revision/text `bsl.getCurrentContext` requests coalesce behind one broker leader before `spawn_bounded_blocking`, and followers do not hold independent blocking CPU permits just to wait. | `backend/src/bin/lsp_server/server/command_handlers.rs` `backend/src/bin/lsp_server/server/mod.rs` `backend/src/bin/lsp_server/server/core.rs` | `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_same_revision_burst_shares_one_broker_leader_before_blocking -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_broker_follower_budget_exhaustion_returns_bounded_empty -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_same_key_current_context_burst_keeps_completion_bounded_under_mixed_load -- --nocapture` `backend/tests/perf/reports/refactor-11-current-context-parse-broker-bounding-burst-smoke.json` |
+| Latest-only generations stay bounded: obsolete older generations are either coalesced with equivalent newer work, prevented from launching an independent expensive parse, or cancelled before stale in-flight parse/context derivation completes for non-equivalent newer revisions/text. | `backend/src/bin/lsp_server/server/command_handlers.rs` `bsl-runtime/src/system/parser_coordinator.rs` | `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_superseded_non_equivalent_generation_skips_obsolete_parse_before_start -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_inflight_non_equivalent_generation_cancels_obsolete_parse -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_superseded_generation_skips_obsolete_parse_and_stale_surface -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_superseded_generation_keeps_completion_bounded_under_mixed_load -- --nocapture` |
+| Dedicated observability distinguishes parse source, source-scoped wall latency, broker role, terminal outcome, and role wall/parse latency for incident bundles. | `backend/src/bin/lsp_server/server/command_handlers.rs` `bsl-runtime/src/system/basic_observability/query_metrics.rs` `bsl-runtime/src/system/basic_observability.rs` `bsl-runtime/src/system/system_coordinator/coordinator/observability.rs` | `cargo test -p bsl-runtime current_context_parse_source_metrics_are_exported -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_index -- --nocapture` `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_same_revision_burst_shares_one_broker_leader_before_blocking -- --nocapture` `backend/tests/perf/reports/refactor-11-current-context-parse-broker-bounding-ready-snapshot-smoke.json` `backend/tests/perf/reports/refactor-11-current-context-parse-broker-bounding-burst-smoke.json` `validation/observability-evidence.md` |
+
+## OpenSpec / Beads sync
+
+- `tasks.md` now matches the delivered code and validation reality for `1.1` through `2.5`.
+- Strict validation passes:
+  `openspec validate refactor-11-current-context-parse-broker-bounding --strict --no-interactive`
+- Change-scoped Beads graph created and closed during this pass:
+  `bsl-gradual-types-aw1s` `bsl-gradual-types-aw1s.1` `bsl-gradual-types-aw1s.2`

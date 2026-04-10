@@ -1,0 +1,33 @@
+{
+  "change_id": "refactor-11-current-context-parse-broker-bounding",
+  "command": "cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_index -- --nocapture",
+  "profile": "current_context_ready_snapshot_smoke",
+  "selected_histograms": {
+    "current_context_parse_ms_role_ready_snapshot": {
+      "count": 1,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "current_context_wall_ms_role_ready_snapshot": {
+      "count": 1,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "current_context_wall_ms_source_ready_snapshot": {
+      "count": 1,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    }
+  },
+  "summary": {
+    "broker_follower_total": 0,
+    "broker_leader_total": 0,
+    "parse_attempts": 0,
+    "ready_snapshot_role_total": 1,
+    "ready_snapshot_source_total": 1,
+    "resolved_total": 1
+  }
+}

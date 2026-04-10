@@ -4,6 +4,7 @@
 
 use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_line_index::LineIndex;
+use bsl_syntax::ast::ParseResult;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::{MessageType, Url};
 use tracing::{info, warn};
@@ -13,7 +14,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 #[cfg(test)]
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+use bsl_analysis_v2::FileId as V2FileId;
+use tokio::sync::Notify;
 
 use crate::commands::{
     handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
@@ -31,6 +35,8 @@ use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
 
 const ATTACHED_MESSAGE: &str = "already running (attached)";
 const CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS: usize = 256;
+const CURRENT_CONTEXT_PARSE_BROKER_WAIT_BUDGET_MS: u64 = 2_000;
+const CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS: u64 = 25;
 
 #[cfg(test)]
 fn maybe_inject_get_current_context_parse_delay_for_test() {
@@ -50,6 +56,9 @@ fn maybe_inject_get_current_context_parse_delay_for_test() {}
 static GET_CURRENT_CONTEXT_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
+static GET_CURRENT_CONTEXT_PARSE_CANCELLATIONS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
 fn record_get_current_context_parse_attempt_for_test() {
     GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 }
@@ -58,13 +67,41 @@ fn record_get_current_context_parse_attempt_for_test() {
 fn record_get_current_context_parse_attempt_for_test() {}
 
 #[cfg(test)]
+fn record_get_current_context_parse_cancellation_for_test() {
+    GET_CURRENT_CONTEXT_PARSE_CANCELLATIONS.fetch_add(1, AtomicOrdering::SeqCst);
+}
+
+#[cfg(not(test))]
+fn record_get_current_context_parse_cancellation_for_test() {}
+
+#[cfg(test)]
+fn current_context_parse_broker_wait_budget() -> Duration {
+    std::env::var("BSL_TEST_GET_CURRENT_CONTEXT_BROKER_WAIT_BUDGET_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_millis(CURRENT_CONTEXT_PARSE_BROKER_WAIT_BUDGET_MS))
+}
+
+#[cfg(not(test))]
+fn current_context_parse_broker_wait_budget() -> Duration {
+    Duration::from_millis(CURRENT_CONTEXT_PARSE_BROKER_WAIT_BUDGET_MS)
+}
+
+#[cfg(test)]
 pub(crate) fn reset_get_current_context_parse_attempts_for_test() {
-    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
+    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.store(0, AtomicOrdering::SeqCst);
+    GET_CURRENT_CONTEXT_PARSE_CANCELLATIONS.store(0, AtomicOrdering::SeqCst);
 }
 
 #[cfg(test)]
 pub(crate) fn get_current_context_parse_attempts_for_test() -> usize {
-    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.load(std::sync::atomic::Ordering::SeqCst)
+    GET_CURRENT_CONTEXT_PARSE_ATTEMPTS.load(AtomicOrdering::SeqCst)
+}
+
+#[cfg(test)]
+pub(crate) fn get_current_context_parse_cancellations_for_test() -> usize {
+    GET_CURRENT_CONTEXT_PARSE_CANCELLATIONS.load(AtomicOrdering::SeqCst)
 }
 
 #[derive(Debug, Clone)]
@@ -84,14 +121,76 @@ struct CurrentContextSupersessionKey {
     request_generation: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CurrentContextParseBrokerKey {
+    file_id: V2FileId,
+    file_version: Option<i32>,
+    text_hash: [u8; 32],
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CurrentContextLatestGenerationState {
+    request_generation: u64,
+    broker_key: CurrentContextParseBrokerKey,
+    active_parse_cancellation_flag: Option<std::sync::Weak<std::sync::atomic::AtomicBool>>,
+}
+
+pub(crate) type CurrentContextLatestGenerationRegistry =
+    std::sync::Mutex<std::collections::HashMap<String, CurrentContextLatestGenerationState>>;
+
+#[derive(Debug, Clone, Copy)]
 struct CurrentContextParseObservability {
     parse_source: &'static str,
     parse_elapsed: Duration,
 }
 
-enum CurrentContextExecution {
-    Resolved(CurrentContextResponse),
+#[derive(Debug, Clone)]
+enum CurrentContextParseSharedResult {
+    Parsed {
+        parse_result: Arc<ParseResult>,
+        line_index: Arc<LineIndex>,
+        parse_observability: CurrentContextParseObservability,
+    },
+    ParseUnavailable {
+        parse_observability: CurrentContextParseObservability,
+    },
+    Superseded,
+}
+
+#[derive(Debug)]
+pub(crate) struct CurrentContextParseBrokerEntry {
+    result: std::sync::Mutex<Option<CurrentContextParseSharedResult>>,
+    notify: Notify,
+}
+
+pub(crate) type CurrentContextParseBroker = std::sync::Mutex<
+    std::collections::HashMap<CurrentContextParseBrokerKey, Arc<CurrentContextParseBrokerEntry>>,
+>;
+
+#[derive(Debug, Clone, Copy)]
+enum CurrentContextRoute {
+    ReadySnapshot,
+    BrokerLeader,
+    BrokerFollower,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum CurrentContextTerminalOutcome {
+    Resolved,
     ParseUnavailable,
+    Superseded,
+    BudgetExhausted,
+}
+
+enum CurrentContextParseBrokerAcquireOutcome {
+    Leader(Arc<CurrentContextParseBrokerEntry>),
+    Follower(Arc<CurrentContextParseBrokerEntry>),
+}
+
+enum CurrentContextParseBrokerWaitOutcome {
+    Resolved(CurrentContextParseSharedResult),
+    Superseded,
+    BudgetExhausted,
 }
 
 impl CurrentContextSupersessionKey {
@@ -103,25 +202,233 @@ impl CurrentContextSupersessionKey {
     }
 }
 
+impl CurrentContextParseBrokerKey {
+    fn new(file_id: V2FileId, file_version: Option<i32>, text: &str) -> Self {
+        Self {
+            file_id,
+            file_version,
+            text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+        }
+    }
+}
+
+impl CurrentContextParseBrokerEntry {
+    fn new() -> Self {
+        Self {
+            result: std::sync::Mutex::new(None),
+            notify: Notify::new(),
+        }
+    }
+
+    fn take_shared_result(&self) -> Option<CurrentContextParseSharedResult> {
+        self.result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn publish_shared_result(&self, result: CurrentContextParseSharedResult) {
+        *self
+            .result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(result);
+        self.notify.notify_waiters();
+    }
+}
+
+impl CurrentContextRoute {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadySnapshot => "ready_snapshot",
+            Self::BrokerLeader => "broker_leader",
+            Self::BrokerFollower => "broker_follower",
+        }
+    }
+}
+
+impl CurrentContextTerminalOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Resolved => "resolved",
+            Self::ParseUnavailable => "parse_unavailable",
+            Self::Superseded => "superseded",
+            Self::BudgetExhausted => "budget_exhausted",
+        }
+    }
+}
+
+fn acquire_current_context_parse_broker_entry(
+    broker: &CurrentContextParseBroker,
+    key: CurrentContextParseBrokerKey,
+) -> CurrentContextParseBrokerAcquireOutcome {
+    let mut broker = broker
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = broker.get(&key) {
+        return CurrentContextParseBrokerAcquireOutcome::Follower(Arc::clone(entry));
+    }
+    let entry = Arc::new(CurrentContextParseBrokerEntry::new());
+    broker.insert(key, Arc::clone(&entry));
+    CurrentContextParseBrokerAcquireOutcome::Leader(entry)
+}
+
+fn release_current_context_parse_broker_entry(
+    broker: &CurrentContextParseBroker,
+    key: &CurrentContextParseBrokerKey,
+    expected_entry: &Arc<CurrentContextParseBrokerEntry>,
+) {
+    let mut broker = broker
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if broker
+        .get(key)
+        .is_some_and(|registered| Arc::ptr_eq(registered, expected_entry))
+    {
+        broker.remove(key);
+    }
+}
+
+async fn wait_for_current_context_parse_broker_result(
+    entry: &Arc<CurrentContextParseBrokerEntry>,
+    latest_generations: &CurrentContextLatestGenerationRegistry,
+    supersession_key: Option<&CurrentContextSupersessionKey>,
+    wait_budget: Duration,
+) -> CurrentContextParseBrokerWaitOutcome {
+    let deadline = tokio::time::Instant::now() + wait_budget;
+    loop {
+        if let Some(result) = entry.take_shared_result() {
+            return CurrentContextParseBrokerWaitOutcome::Resolved(result);
+        }
+        if let Some(supersession_key) = supersession_key {
+            if !is_latest_current_context_generation(latest_generations, supersession_key) {
+                return CurrentContextParseBrokerWaitOutcome::Superseded;
+            }
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return CurrentContextParseBrokerWaitOutcome::BudgetExhausted;
+        }
+
+        let notified = entry.notify.notified();
+        if let Some(result) = entry.take_shared_result() {
+            return CurrentContextParseBrokerWaitOutcome::Resolved(result);
+        }
+
+        tokio::select! {
+            _ = notified => {}
+            _ = tokio::time::sleep(
+                (deadline - now).min(Duration::from_millis(CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS))
+            ) => {}
+        }
+    }
+}
+
+fn resolve_current_context_from_parse(
+    parse_result: &ParseResult,
+    file_text: &str,
+    line_index: &LineIndex,
+    line: u32,
+    character: u32,
+) -> CurrentContextResponse {
+    match find_containing_function_in_parse_result(
+        parse_result,
+        file_text,
+        line_index,
+        line,
+        character,
+    ) {
+        Some((name, kind, params_list, return_type)) => CurrentContextResponse {
+            function_name: Some(name),
+            function_kind: kind,
+            params: Some(params_list),
+            return_type,
+        },
+        None => CurrentContextResponse::empty(),
+    }
+}
+
+fn record_current_context_request_observability(
+    coordinator: &bsl_backend::system::SystemCoordinator,
+    route: Option<CurrentContextRoute>,
+    terminal_outcome: CurrentContextTerminalOutcome,
+    parse_observability: Option<CurrentContextParseObservability>,
+    wall_elapsed: Duration,
+) {
+    if let Some(parse_observability) = parse_observability {
+        coordinator
+            .record_intellisense_v2_current_context_parse_source(parse_observability.parse_source);
+        coordinator.record_intellisense_v2_current_context_parse_latency(
+            parse_observability.parse_source,
+            parse_observability.parse_elapsed,
+        );
+        coordinator.record_intellisense_v2_current_context_wall_latency(
+            parse_observability.parse_source,
+            wall_elapsed,
+        );
+    }
+    if let Some(route) = route {
+        coordinator.record_intellisense_v2_current_context_role(route.as_str());
+        coordinator.record_intellisense_v2_current_context_wall_latency_by_role(
+            route.as_str(),
+            wall_elapsed,
+        );
+        if let Some(parse_observability) = parse_observability {
+            coordinator.record_intellisense_v2_current_context_parse_latency_by_role(
+                route.as_str(),
+                parse_observability.parse_elapsed,
+            );
+        }
+    }
+    coordinator.record_intellisense_v2_current_context_terminal_outcome(terminal_outcome.as_str());
+}
+
 fn register_current_context_generation(
-    latest_generations: &std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    latest_generations: &CurrentContextLatestGenerationRegistry,
     supersession_key: &CurrentContextSupersessionKey,
+    broker_key: &CurrentContextParseBrokerKey,
 ) -> bool {
     let mut latest_generations = latest_generations
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let accepted = match latest_generations.get_mut(&supersession_key.editor_session_id) {
-        Some(latest_generation) if *latest_generation > supersession_key.request_generation => {
+        Some(latest_generation)
+            if latest_generation.request_generation > supersession_key.request_generation =>
+        {
             false
         }
         Some(latest_generation) => {
-            *latest_generation = supersession_key.request_generation;
+            let carry_cancellation_flag = if latest_generation.broker_key == *broker_key {
+                latest_generation.active_parse_cancellation_flag.clone()
+            } else {
+                None
+            };
+            if latest_generation.request_generation < supersession_key.request_generation
+                && latest_generation.broker_key != *broker_key
+            {
+                if let Some(cancellation_flag) = latest_generation
+                    .active_parse_cancellation_flag
+                    .as_ref()
+                    .and_then(std::sync::Weak::upgrade)
+                {
+                    cancellation_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            }
+            *latest_generation = CurrentContextLatestGenerationState {
+                request_generation: supersession_key.request_generation,
+                broker_key: broker_key.clone(),
+                active_parse_cancellation_flag: carry_cancellation_flag,
+            };
             true
         }
         None => {
             latest_generations.insert(
                 supersession_key.editor_session_id.clone(),
-                supersession_key.request_generation,
+                CurrentContextLatestGenerationState {
+                    request_generation: supersession_key.request_generation,
+                    broker_key: broker_key.clone(),
+                    active_parse_cancellation_flag: None,
+                },
             );
             true
         }
@@ -132,7 +439,7 @@ fn register_current_context_generation(
     while latest_generations.len() > CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS {
         let Some(oldest_session_id) = latest_generations
             .iter()
-            .min_by_key(|(_, generation)| *generation)
+            .min_by_key(|(_, generation)| generation.request_generation)
             .map(|(session_id, _)| session_id.clone())
         else {
             break;
@@ -143,15 +450,51 @@ fn register_current_context_generation(
 }
 
 fn is_latest_current_context_generation(
-    latest_generations: &std::sync::Mutex<std::collections::HashMap<String, u64>>,
+    latest_generations: &CurrentContextLatestGenerationRegistry,
     supersession_key: &CurrentContextSupersessionKey,
 ) -> bool {
     latest_generations
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .get(&supersession_key.editor_session_id)
-        .copied()
-        == Some(supersession_key.request_generation)
+        .is_some_and(|state| state.request_generation == supersession_key.request_generation)
+}
+
+fn current_context_generation_allows_equivalent_parse_reuse(
+    latest_generations: &CurrentContextLatestGenerationRegistry,
+    supersession_key: &CurrentContextSupersessionKey,
+    broker_key: &CurrentContextParseBrokerKey,
+) -> bool {
+    let latest_generations = latest_generations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(state) = latest_generations.get(&supersession_key.editor_session_id) else {
+        return true;
+    };
+    if state.request_generation <= supersession_key.request_generation {
+        return true;
+    }
+    state.broker_key == *broker_key
+}
+
+fn attach_current_context_generation_parse_cancellation_flag(
+    latest_generations: &CurrentContextLatestGenerationRegistry,
+    supersession_key: &CurrentContextSupersessionKey,
+    broker_key: &CurrentContextParseBrokerKey,
+    cancellation_flag: &Arc<std::sync::atomic::AtomicBool>,
+) {
+    let mut latest_generations = latest_generations
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let Some(state) = latest_generations.get_mut(&supersession_key.editor_session_id) else {
+        return;
+    };
+    if state.broker_key != *broker_key
+        || state.request_generation < supersession_key.request_generation
+    {
+        return;
+    }
+    state.active_parse_cancellation_flag = Some(Arc::downgrade(cancellation_flag));
 }
 
 impl BslLanguageServer {
@@ -291,14 +634,6 @@ impl BslLanguageServer {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
         let supersession_key = CurrentContextSupersessionKey::from_params(&params);
-        if let Some(supersession_key) = supersession_key.as_ref() {
-            if !register_current_context_generation(
-                self.current_context_latest_generations.as_ref(),
-                supersession_key,
-            ) {
-                return Ok(CurrentContextResponse::empty());
-            }
-        }
 
         let file_id = self.get_or_create_file_id_v2(&uri).await;
         let path = match uri.to_file_path() {
@@ -325,6 +660,13 @@ impl BslLanguageServer {
                 file_id = file_id.0,
                 "getCurrentContext: document text is unavailable"
             );
+            record_current_context_request_observability(
+                self.coordinator.as_ref(),
+                None,
+                CurrentContextTerminalOutcome::ParseUnavailable,
+                None,
+                Duration::ZERO,
+            );
             return Ok(CurrentContextResponse::empty());
         };
         let ready_parse_snapshot = if let Some(shadow_state) = shadow_state.as_ref() {
@@ -345,182 +687,325 @@ impl BslLanguageServer {
         } else {
             None
         };
-
-        let coordinator = self.coordinator.clone();
-        let latest_generations = self.current_context_latest_generations.clone();
-        let path_for_parse = PathBuf::from(path.as_str());
-        let file_text_for_parse = file_text.clone();
-        let ready_parse_snapshot_for_parse = ready_parse_snapshot.clone();
-        let supersession_key_for_parse = supersession_key.clone();
         let line = params.line;
         let character = params.character;
         let current_context_started = Instant::now();
-        let current_context =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-                bsl_runtime::application::CpuWorkClass::Background,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                Some(self.coordinator.as_ref()),
-                move || -> Result<
-                    (CurrentContextExecution, CurrentContextParseObservability),
-                    &'static str,
-                > {
-                    if let Some(supersession_key) = supersession_key_for_parse.as_ref() {
-                        if !is_latest_current_context_generation(
-                            latest_generations.as_ref(),
-                            supersession_key,
-                        ) {
-                            return Err("superseded_generation");
-                        }
-                    }
-                    let parse_started = Instant::now();
-                    let (parsed, parse_source) = if let Some((parse_result, line_index)) =
-                        ready_parse_snapshot_for_parse.as_ref()
-                    {
-                        (
-                            Some((Arc::clone(parse_result), Arc::clone(line_index))),
-                            "ready_snapshot",
-                        )
-                    } else {
-                        maybe_inject_get_current_context_parse_delay_for_test();
-                        record_get_current_context_parse_attempt_for_test();
-                        let parser_result = coordinator.parser_coordinator().and_then(|parser| {
-                            parser
-                                .parse_incremental_with_report(
-                                    path_for_parse.clone(),
-                                    file_text_for_parse.to_string(),
-                                    Vec::new(),
-                                )
-                                .ok()
-                        });
-                        if let Some(report) = parser_result {
-                            (
-                                Some((Arc::new(report.parse_result), report.line_index)),
-                                "parser_coordinator",
-                            )
-                        } else {
-                            (
-                                bsl_syntax::parse(
-                                    file_text_for_parse.as_ref(),
-                                    &bsl_syntax::ParseOptions::default(),
-                                )
-                                .ok()
-                                .map(|parse_result| {
-                                    (
-                                        Arc::new(parse_result),
-                                        Arc::new(LineIndex::new(file_text_for_parse.as_ref())),
-                                    )
-                                }),
-                                "syntax_fallback",
-                            )
-                        }
-                    };
-                    let parse_elapsed = parse_started.elapsed();
-                    let parse_observability = CurrentContextParseObservability {
-                        parse_source: if parsed.is_some() {
-                            parse_source
-                        } else {
-                            "parse_unavailable"
-                        },
-                        parse_elapsed,
-                    };
-                    let Some((parse_result, line_index)) = parsed else {
-                        return Ok((
-                            CurrentContextExecution::ParseUnavailable,
-                            parse_observability,
-                        ));
-                    };
+        let broker_key = CurrentContextParseBrokerKey::new(
+            file_id,
+            shadow_state.as_ref().map(|state| state.version),
+            file_text.as_ref(),
+        );
 
-                    Ok((
-                        CurrentContextExecution::Resolved(
-                            match find_containing_function_in_parse_result(
-                            parse_result.as_ref(),
-                            file_text_for_parse.as_ref(),
-                            line_index.as_ref(),
-                            line,
-                            character,
-                        ) {
-                            Some((name, kind, params_list, return_type)) => {
-                                CurrentContextResponse {
-                                    function_name: Some(name),
-                                    function_kind: kind,
-                                    params: Some(params_list),
-                                    return_type,
-                                }
-                            }
-                            None => CurrentContextResponse::empty(),
-                        },
-                        ),
-                        parse_observability,
-                    ))
-                },
-            )
-            .await;
-        let current_context_elapsed = current_context_started.elapsed();
+        if let Some(supersession_key) = supersession_key.as_ref() {
+            if !register_current_context_generation(
+                self.current_context_latest_generations.as_ref(),
+                supersession_key,
+                &broker_key,
+            ) {
+                record_current_context_request_observability(
+                    self.coordinator.as_ref(),
+                    None,
+                    CurrentContextTerminalOutcome::Superseded,
+                    None,
+                    Duration::ZERO,
+                );
+                return Ok(CurrentContextResponse::empty());
+            }
+        }
 
-        match current_context {
-            Ok(Ok((CurrentContextExecution::Resolved(response), parse_observability))) => {
-                self.coordinator
-                    .record_intellisense_v2_current_context_parse_source(
-                        parse_observability.parse_source,
-                    );
-                self.coordinator
-                    .record_intellisense_v2_current_context_parse_latency(
-                        parse_observability.parse_source,
-                        parse_observability.parse_elapsed,
-                    );
-                self.coordinator
-                    .record_intellisense_v2_current_context_wall_latency(
-                        parse_observability.parse_source,
-                        current_context_elapsed,
-                    );
-                if let Some(supersession_key) = supersession_key.as_ref() {
-                    if !is_latest_current_context_generation(
+        if let Some((parse_result, line_index)) = ready_parse_snapshot.as_ref() {
+            let response = resolve_current_context_from_parse(
+                parse_result.as_ref(),
+                file_text.as_ref(),
+                line_index.as_ref(),
+                line,
+                character,
+            );
+            let wall_elapsed = current_context_started.elapsed();
+            let parse_observability = CurrentContextParseObservability {
+                parse_source: "ready_snapshot",
+                parse_elapsed: Duration::ZERO,
+            };
+            let terminal_outcome = if supersession_key.as_ref().is_some_and(|supersession_key| {
+                !is_latest_current_context_generation(
+                    self.current_context_latest_generations.as_ref(),
+                    supersession_key,
+                )
+            }) {
+                CurrentContextTerminalOutcome::Superseded
+            } else {
+                CurrentContextTerminalOutcome::Resolved
+            };
+            record_current_context_request_observability(
+                self.coordinator.as_ref(),
+                Some(CurrentContextRoute::ReadySnapshot),
+                terminal_outcome,
+                Some(parse_observability),
+                wall_elapsed,
+            );
+            return if matches!(terminal_outcome, CurrentContextTerminalOutcome::Resolved) {
+                Ok(response)
+            } else {
+                Ok(CurrentContextResponse::empty())
+            };
+        }
+
+        let route_and_shared_result = match acquire_current_context_parse_broker_entry(
+            self.current_context_parse_broker.as_ref(),
+            broker_key.clone(),
+        ) {
+            CurrentContextParseBrokerAcquireOutcome::Leader(entry) => {
+                if supersession_key.as_ref().is_some_and(|supersession_key| {
+                    !current_context_generation_allows_equivalent_parse_reuse(
                         self.current_context_latest_generations.as_ref(),
                         supersession_key,
-                    ) {
+                        &broker_key,
+                    )
+                }) {
+                    let shared_result = CurrentContextParseSharedResult::Superseded;
+                    entry.publish_shared_result(shared_result.clone());
+                    release_current_context_parse_broker_entry(
+                        self.current_context_parse_broker.as_ref(),
+                        &broker_key,
+                        &entry,
+                    );
+                    (CurrentContextRoute::BrokerLeader, shared_result)
+                } else {
+                    let coordinator = self.coordinator.clone();
+                    let latest_generations = self.current_context_latest_generations.clone();
+                    let path_for_parse = PathBuf::from(path.as_str());
+                    let file_text_for_parse = file_text.clone();
+                    let broker_key_for_parse = broker_key.clone();
+                    let supersession_key_for_parse = supersession_key.clone();
+                    let cancellation_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    if let Some(supersession_key) = supersession_key.as_ref() {
+                        attach_current_context_generation_parse_cancellation_flag(
+                            self.current_context_latest_generations.as_ref(),
+                            supersession_key,
+                            &broker_key,
+                            &cancellation_flag,
+                        );
+                    }
+                    let cancellation_flag_for_parse = Arc::clone(&cancellation_flag);
+                    let shared_result = match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                        bsl_runtime::application::CpuWorkClass::Background,
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        Some(self.coordinator.as_ref()),
+                        move || {
+                            let parse_started = Instant::now();
+                            maybe_inject_get_current_context_parse_delay_for_test();
+                            if supersession_key_for_parse.as_ref().is_some_and(|supersession_key| {
+                                !current_context_generation_allows_equivalent_parse_reuse(
+                                    latest_generations.as_ref(),
+                                    supersession_key,
+                                    &broker_key_for_parse,
+                                )
+                            }) {
+                                cancellation_flag_for_parse
+                                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                                return CurrentContextParseSharedResult::Superseded;
+                            }
+                            record_get_current_context_parse_attempt_for_test();
+                            let parser_result = coordinator.parser_coordinator().and_then(|parser| {
+                                parser
+                                    .parse_current_context_with_cancellation(
+                                        path_for_parse.clone(),
+                                        file_text_for_parse.to_string(),
+                                        cancellation_flag_for_parse.as_ref(),
+                                    )
+                                    .ok()
+                            });
+                            let parse_elapsed = parse_started.elapsed();
+                            if let Some(report) = parser_result {
+                                CurrentContextParseSharedResult::Parsed {
+                                    parse_result: Arc::new(report.parse_result),
+                                    line_index: report.line_index,
+                                    parse_observability: CurrentContextParseObservability {
+                                        parse_source: "parser_coordinator",
+                                        parse_elapsed,
+                                    },
+                                }
+                            } else if cancellation_flag_for_parse
+                                .load(std::sync::atomic::Ordering::SeqCst)
+                            {
+                                record_get_current_context_parse_cancellation_for_test();
+                                CurrentContextParseSharedResult::Superseded
+                            } else if supersession_key_for_parse.as_ref().is_some_and(|supersession_key| {
+                                !current_context_generation_allows_equivalent_parse_reuse(
+                                    latest_generations.as_ref(),
+                                    supersession_key,
+                                    &broker_key_for_parse,
+                                )
+                            }) {
+                                CurrentContextParseSharedResult::Superseded
+                            } else if let Ok(parse_result) = bsl_syntax::parse(
+                                file_text_for_parse.as_ref(),
+                                &bsl_syntax::ParseOptions::default(),
+                            ) {
+                                CurrentContextParseSharedResult::Parsed {
+                                    parse_result: Arc::new(parse_result),
+                                    line_index: Arc::new(LineIndex::new(file_text_for_parse.as_ref())),
+                                    parse_observability: CurrentContextParseObservability {
+                                        parse_source: "syntax_fallback",
+                                        parse_elapsed,
+                                    },
+                                }
+                            } else {
+                                CurrentContextParseSharedResult::ParseUnavailable {
+                                    parse_observability: CurrentContextParseObservability {
+                                        parse_source: "parse_unavailable",
+                                        parse_elapsed,
+                                    },
+                                }
+                            }
+                        },
+                    )
+                    .await {
+                        Ok(shared_result) => shared_result,
+                        Err(err) => {
+                            release_current_context_parse_broker_entry(
+                                self.current_context_parse_broker.as_ref(),
+                                &broker_key,
+                                &entry,
+                            );
+                            warn!(
+                                uri = %uri,
+                                file_id = file_id.0,
+                                error = %err,
+                                "getCurrentContext: auxiliary parse task failed"
+                            );
+                            record_current_context_request_observability(
+                                self.coordinator.as_ref(),
+                                Some(CurrentContextRoute::BrokerLeader),
+                                CurrentContextTerminalOutcome::ParseUnavailable,
+                                None,
+                                current_context_started.elapsed(),
+                            );
+                            return Ok(CurrentContextResponse::empty());
+                        }
+                    };
+                    entry.publish_shared_result(shared_result.clone());
+                    release_current_context_parse_broker_entry(
+                        self.current_context_parse_broker.as_ref(),
+                        &broker_key,
+                        &entry,
+                    );
+                    (CurrentContextRoute::BrokerLeader, shared_result)
+                }
+            }
+            CurrentContextParseBrokerAcquireOutcome::Follower(entry) => {
+                match wait_for_current_context_parse_broker_result(
+                    &entry,
+                    self.current_context_latest_generations.as_ref(),
+                    supersession_key.as_ref(),
+                    current_context_parse_broker_wait_budget(),
+                )
+                .await
+                {
+                    CurrentContextParseBrokerWaitOutcome::Resolved(shared_result) => {
+                        (CurrentContextRoute::BrokerFollower, shared_result)
+                    }
+                    CurrentContextParseBrokerWaitOutcome::Superseded => {
+                        record_current_context_request_observability(
+                            self.coordinator.as_ref(),
+                            Some(CurrentContextRoute::BrokerFollower),
+                            CurrentContextTerminalOutcome::Superseded,
+                            None,
+                            current_context_started.elapsed(),
+                        );
+                        return Ok(CurrentContextResponse::empty());
+                    }
+                    CurrentContextParseBrokerWaitOutcome::BudgetExhausted => {
+                        record_current_context_request_observability(
+                            self.coordinator.as_ref(),
+                            Some(CurrentContextRoute::BrokerFollower),
+                            CurrentContextTerminalOutcome::BudgetExhausted,
+                            None,
+                            current_context_started.elapsed(),
+                        );
                         return Ok(CurrentContextResponse::empty());
                     }
                 }
-                Ok(response)
             }
-            Ok(Err("superseded_generation")) => Ok(CurrentContextResponse::empty()),
-            Ok(Ok((CurrentContextExecution::ParseUnavailable, parse_observability))) => {
-                self.coordinator
-                    .record_intellisense_v2_current_context_parse_source(
-                        parse_observability.parse_source,
-                    );
-                self.coordinator
-                    .record_intellisense_v2_current_context_parse_latency(
-                        parse_observability.parse_source,
-                        parse_observability.parse_elapsed,
-                    );
-                self.coordinator
-                    .record_intellisense_v2_current_context_wall_latency(
-                        parse_observability.parse_source,
-                        current_context_elapsed,
-                    );
-                warn!(
-                    uri = %uri,
-                    file_id = file_id.0,
-                    "getCurrentContext: parse snapshot is unavailable"
+        };
+
+        let (route, shared_result) = route_and_shared_result;
+        let wall_elapsed = current_context_started.elapsed();
+        match shared_result {
+            CurrentContextParseSharedResult::Parsed {
+                parse_result,
+                line_index,
+                parse_observability,
+            } => {
+                let terminal_outcome =
+                    if supersession_key.as_ref().is_some_and(|supersession_key| {
+                        !is_latest_current_context_generation(
+                            self.current_context_latest_generations.as_ref(),
+                            supersession_key,
+                        )
+                    }) {
+                        CurrentContextTerminalOutcome::Superseded
+                    } else {
+                        CurrentContextTerminalOutcome::Resolved
+                    };
+                record_current_context_request_observability(
+                    self.coordinator.as_ref(),
+                    Some(route),
+                    terminal_outcome,
+                    Some(parse_observability),
+                    wall_elapsed,
                 );
+                if !matches!(terminal_outcome, CurrentContextTerminalOutcome::Resolved) {
+                    return Ok(CurrentContextResponse::empty());
+                }
+                Ok(resolve_current_context_from_parse(
+                    parse_result.as_ref(),
+                    file_text.as_ref(),
+                    line_index.as_ref(),
+                    line,
+                    character,
+                ))
+            }
+            CurrentContextParseSharedResult::ParseUnavailable {
+                parse_observability,
+            } => {
+                let terminal_outcome =
+                    if supersession_key.as_ref().is_some_and(|supersession_key| {
+                        !is_latest_current_context_generation(
+                            self.current_context_latest_generations.as_ref(),
+                            supersession_key,
+                        )
+                    }) {
+                        CurrentContextTerminalOutcome::Superseded
+                    } else {
+                        CurrentContextTerminalOutcome::ParseUnavailable
+                    };
+                record_current_context_request_observability(
+                    self.coordinator.as_ref(),
+                    Some(route),
+                    terminal_outcome,
+                    Some(parse_observability),
+                    wall_elapsed,
+                );
+                if matches!(
+                    terminal_outcome,
+                    CurrentContextTerminalOutcome::ParseUnavailable
+                ) {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        "getCurrentContext: parse snapshot is unavailable"
+                    );
+                }
                 Ok(CurrentContextResponse::empty())
             }
-            Ok(Err(reason)) => {
-                warn!(
-                    uri = %uri,
-                    file_id = file_id.0,
-                    reason,
-                    "getCurrentContext: auxiliary parse returned an unexpected failure"
-                );
-                Ok(CurrentContextResponse::empty())
-            }
-            Err(err) => {
-                warn!(
-                    uri = %uri,
-                    file_id = file_id.0,
-                    error = %err,
-                    "getCurrentContext: auxiliary parse task failed"
+            CurrentContextParseSharedResult::Superseded => {
+                record_current_context_request_observability(
+                    self.coordinator.as_ref(),
+                    Some(route),
+                    CurrentContextTerminalOutcome::Superseded,
+                    None,
+                    wall_elapsed,
                 );
                 Ok(CurrentContextResponse::empty())
             }
@@ -1627,13 +2112,22 @@ mod tests {
 
     #[test]
     fn current_context_generation_registry_rejects_stale_generation() {
-        let latest_generations = std::sync::Mutex::new(std::collections::HashMap::new());
+        let latest_generations = CurrentContextLatestGenerationRegistry::default();
         let latest_key = CurrentContextSupersessionKey {
             editor_session_id: "file:///session-1.bsl::1".to_string(),
             request_generation: 5,
         };
+        let latest_broker_key = CurrentContextParseBrokerKey {
+            file_id: V2FileId(1),
+            file_version: Some(5),
+            text_hash: [5; 32],
+        };
         assert!(
-            register_current_context_generation(&latest_generations, &latest_key),
+            register_current_context_generation(
+                &latest_generations,
+                &latest_key,
+                &latest_broker_key
+            ),
             "first generation for a session must be accepted"
         );
 
@@ -1641,8 +2135,17 @@ mod tests {
             editor_session_id: latest_key.editor_session_id.clone(),
             request_generation: 4,
         };
+        let stale_broker_key = CurrentContextParseBrokerKey {
+            file_id: V2FileId(1),
+            file_version: Some(4),
+            text_hash: [4; 32],
+        };
         assert!(
-            !register_current_context_generation(&latest_generations, &stale_key),
+            !register_current_context_generation(
+                &latest_generations,
+                &stale_key,
+                &stale_broker_key
+            ),
             "older generation for the same session must be rejected"
         );
         assert!(
@@ -1653,7 +2156,7 @@ mod tests {
 
     #[test]
     fn current_context_generation_registry_prunes_oldest_sessions_when_capacity_is_exceeded() {
-        let latest_generations = std::sync::Mutex::new(std::collections::HashMap::new());
+        let latest_generations = CurrentContextLatestGenerationRegistry::default();
 
         for generation in 1..=(CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS as u64 + 1) {
             let session_id = format!("file:///session-{generation}.bsl::1");
@@ -1663,6 +2166,11 @@ mod tests {
                     &CurrentContextSupersessionKey {
                         editor_session_id: session_id.clone(),
                         request_generation: generation,
+                    },
+                    &CurrentContextParseBrokerKey {
+                        file_id: V2FileId(generation as u32),
+                        file_version: Some(generation as i32),
+                        text_hash: [generation as u8; 32],
                     },
                 ),
                 "generation {generation} must register successfully"
@@ -1684,9 +2192,66 @@ mod tests {
         assert_eq!(
             latest_generations
                 .get("file:///session-257.bsl::1")
-                .copied(),
+                .map(|state| state.request_generation),
             Some(257),
             "newest session must remain tracked after opportunistic pruning"
+        );
+    }
+
+    #[test]
+    fn current_context_generation_registry_allows_equivalent_newer_work_to_reuse_inflight_parse() {
+        let latest_generations = CurrentContextLatestGenerationRegistry::default();
+        let session_id = "file:///session-1.bsl::1".to_string();
+        let older_key = CurrentContextSupersessionKey {
+            editor_session_id: session_id.clone(),
+            request_generation: 1,
+        };
+        let equivalent_broker_key = CurrentContextParseBrokerKey {
+            file_id: V2FileId(1),
+            file_version: Some(2),
+            text_hash: [7; 32],
+        };
+        assert!(register_current_context_generation(
+            &latest_generations,
+            &older_key,
+            &equivalent_broker_key,
+        ));
+        assert!(register_current_context_generation(
+            &latest_generations,
+            &CurrentContextSupersessionKey {
+                editor_session_id: session_id.clone(),
+                request_generation: 2,
+            },
+            &equivalent_broker_key,
+        ));
+        assert!(
+            current_context_generation_allows_equivalent_parse_reuse(
+                &latest_generations,
+                &older_key,
+                &equivalent_broker_key,
+            ),
+            "same-key newer generation must keep the older leader parse reusable"
+        );
+        let non_equivalent_broker_key = CurrentContextParseBrokerKey {
+            file_id: V2FileId(1),
+            file_version: Some(3),
+            text_hash: [9; 32],
+        };
+        assert!(register_current_context_generation(
+            &latest_generations,
+            &CurrentContextSupersessionKey {
+                editor_session_id: session_id,
+                request_generation: 3,
+            },
+            &non_equivalent_broker_key,
+        ));
+        assert!(
+            !current_context_generation_allows_equivalent_parse_reuse(
+                &latest_generations,
+                &older_key,
+                &equivalent_broker_key,
+            ),
+            "non-equivalent newer generation must supersede obsolete in-flight parse work"
         );
     }
 }

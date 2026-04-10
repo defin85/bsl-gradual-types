@@ -594,10 +594,17 @@ pub struct IntellisenseV2Facade {
 struct Inner {
     interactive_tx: std::sync::mpsc::Sender<Command>,
     background_tx: std::sync::mpsc::Sender<Command>,
+    observability: Option<Arc<SystemCoordinator>>,
     completion_deps_index_snapshot: Arc<ArcSwap<CompletionDepsIndexSnapshot>>,
-    applied_file_revisions: Arc<std::sync::RwLock<HashMap<FileId, FileRevisionState>>>,
+    readiness_state: Arc<std::sync::Mutex<ReadinessState>>,
     #[cfg(test)]
     join_handle: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+#[derive(Default)]
+struct ReadinessState {
+    applied_file_revisions: HashMap<FileId, FileRevisionState>,
+    waiters: HashMap<FileId, Vec<PendingWaiter>>,
 }
 
 #[derive(Clone)]
@@ -628,14 +635,6 @@ enum Command {
         enqueued_at: Instant,
         progress: Option<PrepareStatefulProgress>,
         reply: oneshot::Sender<GetSnapshotWithDepsReply>,
-    },
-    WaitForFileVersion {
-        origin: ObservabilityOrigin,
-        lane: Option<AdmissionLane>,
-        enqueued_at: Instant,
-        file_id: FileId,
-        min_version: i32,
-        reply: oneshot::Sender<WaitForFileVersionReply>,
     },
     GetFileRevisionState {
         file_id: FileId,
@@ -773,9 +772,7 @@ const CURRENT_REVISION_COALESCE_WINDOW: Duration = Duration::from_millis(4);
 
 fn command_lane(command: &Command) -> Option<AdmissionLane> {
     match command {
-        Command::GetSnapshotWithDeps { lane, .. } | Command::WaitForFileVersion { lane, .. } => {
-            *lane
-        }
+        Command::GetSnapshotWithDeps { lane, .. } => *lane,
         _ => None,
     }
 }
@@ -1138,8 +1135,8 @@ mod runtime;
 struct PendingWaiter {
     min_version: i32,
     reply: oneshot::Sender<WaitForFileVersionReply>,
-    queue_wait_elapsed: Duration,
-    started_waiting_at: Instant,
+    registration_elapsed: Duration,
+    registered_at: Instant,
     origin: ObservabilityOrigin,
     lane: Option<AdmissionLane>,
     priority: RuntimeQueuePriority,

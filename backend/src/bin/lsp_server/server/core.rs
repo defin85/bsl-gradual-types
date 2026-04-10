@@ -561,6 +561,7 @@ impl BslLanguageServer {
             next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
             current_context_latest_generations: Arc::new(StdMutex::new(HashMap::new())),
+            current_context_parse_broker: Arc::new(StdMutex::new(HashMap::new())),
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
             diagnostics_save_timeline_store: diagnostics_save_timeline_store.clone(),

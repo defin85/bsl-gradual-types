@@ -3272,6 +3272,25 @@ fn current_context_parse_source_metrics_are_exported() {
         observability
             .record_intellisense_v2_current_context_wall_latency(source, Duration::from_millis(11));
     }
+    for role in ["ready_snapshot", "broker_leader", "broker_follower"] {
+        observability.record_intellisense_v2_current_context_role(role);
+        observability.record_intellisense_v2_current_context_parse_latency_by_role(
+            role,
+            Duration::from_millis(13),
+        );
+        observability.record_intellisense_v2_current_context_wall_latency_by_role(
+            role,
+            Duration::from_millis(17),
+        );
+    }
+    for outcome in [
+        "resolved",
+        "parse_unavailable",
+        "superseded",
+        "budget_exhausted",
+    ] {
+        observability.record_intellisense_v2_current_context_terminal_outcome(outcome);
+    }
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -3299,6 +3318,38 @@ fn current_context_parse_source_metrics_are_exported() {
         assert!(
             histogram_count(histograms, &wall_histogram_key) > 0,
             "current-context wall histogram must be exported for {source}"
+        );
+    }
+
+    for role in ["ready_snapshot", "broker_leader", "broker_follower"] {
+        let counter_key = format!("intellisense_v2_current_context_role_total_role_{role}");
+        let parse_histogram_key = format!("intellisense_v2_current_context_parse_ms_role_{role}");
+        let wall_histogram_key = format!("intellisense_v2_current_context_wall_ms_role_{role}");
+        assert!(
+            counter_value(counters, &counter_key) > 0,
+            "current-context role counter must be exported for {role}"
+        );
+        assert!(
+            histogram_count(histograms, &parse_histogram_key) > 0,
+            "current-context parse-by-role histogram must be exported for {role}"
+        );
+        assert!(
+            histogram_count(histograms, &wall_histogram_key) > 0,
+            "current-context wall-by-role histogram must be exported for {role}"
+        );
+    }
+
+    for outcome in [
+        "resolved",
+        "parse_unavailable",
+        "superseded",
+        "budget_exhausted",
+    ] {
+        let counter_key =
+            format!("intellisense_v2_current_context_terminal_total_outcome_{outcome}");
+        assert!(
+            counter_value(counters, &counter_key) > 0,
+            "current-context terminal outcome counter must be exported for {outcome}"
         );
     }
 }

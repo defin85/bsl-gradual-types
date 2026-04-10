@@ -10,6 +10,25 @@ fn normalize_current_context_parse_source_label(source: &str) -> &'static str {
     }
 }
 
+fn normalize_current_context_role_label(role: &str) -> &'static str {
+    match role {
+        "ready_snapshot" => "ready_snapshot",
+        "broker_leader" => "broker_leader",
+        "broker_follower" => "broker_follower",
+        _ => "other",
+    }
+}
+
+fn normalize_current_context_terminal_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "resolved" => "resolved",
+        "parse_unavailable" => "parse_unavailable",
+        "superseded" => "superseded",
+        "budget_exhausted" => "budget_exhausted",
+        _ => "other",
+    }
+}
+
 impl BasicObservability {
     pub fn record_intellisense_v2_payload_shape(
         &self,
@@ -293,6 +312,40 @@ impl BasicObservability {
     ) {
         let source = normalize_current_context_parse_source_label(source);
         let key = format!("intellisense_v2_current_context_wall_ms_source_{source}");
+        self.metrics
+            .observe_histogram(&key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_current_context_role(&self, role: &str) {
+        let role = normalize_current_context_role_label(role);
+        let key = format!("intellisense_v2_current_context_role_total_role_{role}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_current_context_terminal_outcome(&self, outcome: &str) {
+        let outcome = normalize_current_context_terminal_outcome_label(outcome);
+        let key = format!("intellisense_v2_current_context_terminal_total_outcome_{outcome}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_current_context_parse_latency_by_role(
+        &self,
+        role: &str,
+        duration: Duration,
+    ) {
+        let role = normalize_current_context_role_label(role);
+        let key = format!("intellisense_v2_current_context_parse_ms_role_{role}");
+        self.metrics
+            .observe_histogram(&key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_current_context_wall_latency_by_role(
+        &self,
+        role: &str,
+        duration: Duration,
+    ) {
+        let role = normalize_current_context_role_label(role);
+        let key = format!("intellisense_v2_current_context_wall_ms_role_{role}");
         self.metrics
             .observe_histogram(&key, duration.as_millis() as f64);
     }

@@ -1,0 +1,46 @@
+{
+  "change_id": "refactor-11-current-context-parse-broker-bounding",
+  "command": "cargo test -p bsl-backend --bin bsl-lsp-server same_revision_burst_shares_one_broker_leader_before_blocking",
+  "profile": "current_context_broker_same_revision_burst_smoke",
+  "selected_histograms": {
+    "current_context_parse_ms_role_broker_follower": {
+      "count": 1,
+      "p50": 900.0,
+      "p95": 900.0,
+      "p99": 900.0
+    },
+    "current_context_parse_ms_role_broker_leader": {
+      "count": 1,
+      "p50": 900.0,
+      "p95": 900.0,
+      "p99": 900.0
+    },
+    "current_context_wall_ms_role_broker_follower": {
+      "count": 1,
+      "p50": 849.0,
+      "p95": 849.0,
+      "p99": 849.0
+    },
+    "current_context_wall_ms_role_broker_leader": {
+      "count": 1,
+      "p50": 901.0,
+      "p95": 901.0,
+      "p99": 901.0
+    },
+    "current_context_wall_ms_source_parser_coordinator": {
+      "count": 2,
+      "p50": 901.0,
+      "p95": 901.0,
+      "p99": 901.0
+    }
+  },
+  "summary": {
+    "broker_follower_total": 1,
+    "broker_leader_total": 1,
+    "budget_exhausted_total": 0,
+    "parse_attempts": 1,
+    "parser_coordinator_source_total": 2,
+    "resolved_total": 2,
+    "superseded_total": 0
+  }
+}

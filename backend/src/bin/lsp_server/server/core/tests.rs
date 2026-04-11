@@ -3294,7 +3294,8 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         trace
             .get("followup_ready_snapshot_zero_probe")
             .and_then(|value| value.as_str()),
-        Some("not_ready")
+        Some("not_ready"),
+        "stale latest-version path must retain zero-budget probe attribution before the bounded wait observes version mismatch, trace={trace:?}"
     );
     assert!(
         trace.get("followup_ready_snapshot_wait_probe").is_none(),
@@ -3582,7 +3583,8 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         trace
             .get("followup_ready_snapshot_zero_probe")
             .and_then(|value| value.as_str()),
-        Some("not_ready")
+        Some("not_ready"),
+        "superseded path must retain zero-budget probe attribution before the bounded wait observes supersession, trace={trace:?}"
     );
     assert_eq!(
         trace
@@ -3616,6 +3618,307 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     assert!(
         trace.get("terminal_outcome").is_none(),
         "timeline must keep stalled heavy follow-up visible as active, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_records_wait_probe_version_mismatch_on_stale_latest_version()
+{
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let holder = holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+    initialize_lsp_service(&mut service).await;
+
+    let server = holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///did_save_wait_probe_version_mismatch_trace_fixture.bsl")
+            .expect("fixture");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(93),
+        diagnostics_generation: 17,
+        save_cycle_sequence: 5,
+        requested_version: 14,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id: key.file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+
+    let zero_probe = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &supersession_key,
+        Duration::ZERO,
+        Duration::ZERO,
+        None,
+        Some(key.diagnostics_generation),
+        Some(key.requested_version),
+    )
+    .expect("zero-budget probe outcome");
+    let wait_probe = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &supersession_key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        None,
+        Some(key.diagnostics_generation),
+        Some(key.requested_version + 1),
+    )
+    .expect("version-mismatch probe outcome");
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 15,
+                syntax_work_mode: Some("recomputed".to_string()),
+                semantic_path: None,
+                semantic_parse_source: None,
+                semantic_ir_source: None,
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(7),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some(zero_probe.as_str()),
+        Some(wait_probe.as_str()),
+        Some("in_flight_same_version"),
+        Some(false),
+    );
+    server.record_diagnostics_save_timeline_profile_disposition(
+        &uri,
+        key,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        bsl_runtime::application::DiagnosticsDisposition::SupersededVersion,
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_718, 12).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(key.requested_version as i64)
+        })
+        .expect("version-mismatch diagnostics save trace");
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("version_mismatch")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_records_wait_probe_superseded_when_newer_change_arrives() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let holder = holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+    initialize_lsp_service(&mut service).await;
+    let server = holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_wait_probe_superseded_trace_fixture.bsl")
+        .expect("fixture");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(94),
+        diagnostics_generation: 19,
+        save_cycle_sequence: 6,
+        requested_version: 18,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id: key.file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+
+    let zero_probe = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &supersession_key,
+        Duration::ZERO,
+        Duration::ZERO,
+        None,
+        Some(key.diagnostics_generation),
+        Some(key.requested_version),
+    )
+    .expect("zero-budget probe outcome");
+    let wait_probe = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &supersession_key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        Some(crate::server::DiagnosticsCancellationReasonV2::SupersededVersion),
+        Some(key.diagnostics_generation),
+        Some(key.requested_version),
+    )
+    .expect("superseded probe outcome");
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 11,
+                syntax_work_mode: Some("recomputed".to_string()),
+                semantic_path: None,
+                semantic_parse_source: None,
+                semantic_ir_source: None,
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: None,
+                blocking_queue_wait_ms: None,
+                wait_for_file_version_ms: None,
+                snapshot_with_deps_ms: None,
+                syntax_diagnostics_query_ms: Some(5),
+                semantic_diagnostics_query_ms: None,
+                publish_wait_ms: Some(1),
+            }),
+        },
+    );
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some(zero_probe.as_str()),
+        Some(wait_probe.as_str()),
+        Some("absent"),
+        Some(false),
+    );
+    server.record_diagnostics_save_timeline_profile_disposition(
+        &uri,
+        key,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration,
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_719, 12).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(key.requested_version as i64)
+        })
+        .expect("superseded diagnostics save trace");
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("superseded")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("absent")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        trace
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation")
+    );
+    assert_eq!(
+        trace
+            .get("terminal_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation")
     );
 
     drain_task.abort();

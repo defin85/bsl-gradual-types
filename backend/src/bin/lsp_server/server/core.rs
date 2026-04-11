@@ -704,6 +704,10 @@ impl BslLanguageServer {
                 followup_semantic_path: None,
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
@@ -749,6 +753,10 @@ impl BslLanguageServer {
                     followup_semantic_path: None,
                     followup_semantic_parse_source: None,
                     followup_semantic_ir_source: None,
+                    followup_ready_snapshot_zero_probe: None,
+                    followup_ready_snapshot_wait_probe: None,
+                    followup_ready_snapshot_task_state: None,
+                    followup_shadow_state_available: None,
                     followup_wait_reason: None,
                     followup_runtime_queue_wait_ms: None,
                     followup_apply_lag_ms: None,
@@ -837,6 +845,71 @@ impl BslLanguageServer {
         );
     }
 
+    pub(crate) fn record_diagnostics_save_timeline_followup_probe_state(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        ready_snapshot_zero_probe: Option<&'static str>,
+        ready_snapshot_wait_probe: Option<&'static str>,
+        ready_snapshot_task_state: Option<&'static str>,
+        shadow_state_available: Option<bool>,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_shadow_state_available: None,
+                followup_wait_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+        if let Some(outcome) = ready_snapshot_zero_probe {
+            trace.followup_ready_snapshot_zero_probe = Some(outcome.to_string());
+        }
+        if let Some(outcome) = ready_snapshot_wait_probe {
+            trace.followup_ready_snapshot_wait_probe = Some(outcome.to_string());
+        }
+        if trace.followup_ready_snapshot_task_state.is_none() {
+            if let Some(task_state) = ready_snapshot_task_state {
+                trace.followup_ready_snapshot_task_state = Some(task_state.to_string());
+            }
+        }
+        if trace.followup_shadow_state_available.is_none() {
+            trace.followup_shadow_state_available = shadow_state_available;
+        }
+    }
+
     pub(crate) fn record_diagnostics_save_timeline_followup_wait_state(
         &self,
         uri: &Url,
@@ -879,6 +952,10 @@ impl BslLanguageServer {
                 followup_semantic_path: None,
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,

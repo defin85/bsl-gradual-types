@@ -1411,7 +1411,10 @@ fn completion_item_labels(response: &CompletionResponse) -> Vec<String> {
         CompletionResponse::Array(items) => items.as_slice(),
         CompletionResponse::List(list) => list.items.as_slice(),
     };
-    let mut out = items.iter().map(|item| item.label.clone()).collect::<Vec<_>>();
+    let mut out = items
+        .iter()
+        .map(|item| item.label.clone())
+        .collect::<Vec<_>>();
     out.sort();
     out.dedup();
     out
@@ -2917,7 +2920,9 @@ async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_art
         Some("published")
     );
     assert_eq!(
-        trace.get("followup_semantic_path").and_then(|value| value.as_str()),
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
         Some("ready_artifacts")
     );
     assert_eq!(
@@ -2931,6 +2936,28 @@ async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_art
             .get("followup_semantic_ir_source")
             .and_then(|value| value.as_str()),
         Some("snapshot_build")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("ready")
+    );
+    assert!(
+        trace.get("followup_ready_snapshot_wait_probe").is_none(),
+        "successful zero-budget ready-snapshot probe must not fabricate bounded-wait attribution, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("ready_same_version")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
 
     drain_task.abort();
@@ -3246,7 +3273,9 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         "applied-state follow-up must not expose recomputed syntax timing when same-version save_fastlane syntax artifacts are reused, trace={trace:?}"
     );
     assert_eq!(
-        trace.get("followup_semantic_path").and_then(|value| value.as_str()),
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
         Some("shadow_state")
     );
     assert_eq!(
@@ -3260,6 +3289,28 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
             .get("followup_semantic_ir_source")
             .and_then(|value| value.as_str()),
         Some("salsa")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert!(
+        trace.get("followup_ready_snapshot_wait_probe").is_none(),
+        "shadow-state fallback must not report bounded-wait probe when fallback succeeds first, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("absent")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(true)
     );
 
     drain_task.abort();
@@ -3521,9 +3572,35 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         "when shadow-state and ready-artifact follow-up paths are unavailable, in-flight heavy follow-up must expose apply_lag until writer-owned requested version is actually applied, trace={trace:?}"
     );
     assert_eq!(
-        trace.get("followup_semantic_path").and_then(|value| value.as_str()),
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
         Some("generic_pipeline"),
         "apply-lag fallback must identify generic pipeline path before publish, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(false)
     );
     assert!(
         trace
@@ -3542,6 +3619,80 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     );
 
     drain_task.abort();
+}
+
+#[test]
+fn p7_ready_parse_snapshot_probe_wait_decision_classifies_freshness_mismatches() {
+    let key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id: bsl_analysis_v2::FileId(91),
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: 7,
+        save_cycle_sequence: Some(3),
+        requested_version: 11,
+    };
+
+    let generation_mismatch = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        None,
+        Some(8),
+        Some(11),
+    );
+    assert_eq!(
+        generation_mismatch,
+        Some(diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::GenerationMismatch)
+    );
+
+    let version_mismatch = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        None,
+        Some(7),
+        Some(12),
+    );
+    assert_eq!(
+        version_mismatch,
+        Some(diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::VersionMismatch)
+    );
+}
+
+#[test]
+fn p7_ready_parse_snapshot_probe_wait_decision_classifies_cancellation_and_supersession() {
+    let key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id: bsl_analysis_v2::FileId(92),
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: 9,
+        save_cycle_sequence: Some(4),
+        requested_version: 14,
+    };
+
+    let cancelled = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        Some(crate::server::DiagnosticsCancellationReasonV2::ClientCancel),
+        Some(9),
+        Some(14),
+    );
+    assert_eq!(
+        cancelled,
+        Some(diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Cancelled)
+    );
+
+    let superseded = BslLanguageServer::ready_parse_snapshot_probe_wait_decision_v2(
+        &key,
+        diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+        Duration::from_millis(5),
+        Some(crate::server::DiagnosticsCancellationReasonV2::SupersededVersion),
+        Some(9),
+        Some(14),
+    );
+    assert_eq!(
+        superseded,
+        Some(diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Superseded)
+    );
 }
 
 #[allow(clippy::await_holding_lock)]

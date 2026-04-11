@@ -20,7 +20,70 @@ enum SaveFastlaneFirstPublishWaitOutcome {
     NotPublished,
 }
 
-const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET: Duration = Duration::from_millis(3_500);
+pub(crate) const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET: Duration =
+    Duration::from_millis(3_500);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadyParseSnapshotProbeSlotV2 {
+    ZeroBudget,
+    BoundedWait,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadyParseSnapshotProbeOutcomeV2 {
+    Ready,
+    NotReady,
+    GenerationMismatch,
+    VersionMismatch,
+    Timeout,
+    Cancelled,
+    Superseded,
+}
+
+impl ReadyParseSnapshotProbeOutcomeV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NotReady => "not_ready",
+            Self::GenerationMismatch => "generation_mismatch",
+            Self::VersionMismatch => "version_mismatch",
+            Self::Timeout => "timeout",
+            Self::Cancelled => "cancelled",
+            Self::Superseded => "superseded",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ReadyParseSnapshotProbeResultV2 {
+    outcome: ReadyParseSnapshotProbeOutcomeV2,
+    state: Option<super::super::ReadyParseSnapshotStateV2>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadySnapshotTaskStateV2 {
+    Absent,
+    InFlightSameVersion,
+    InFlightOtherVersion,
+    ReadySameVersion,
+}
+
+impl ReadySnapshotTaskStateV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::InFlightSameVersion => "in_flight_same_version",
+            Self::InFlightOtherVersion => "in_flight_other_version",
+            Self::ReadySameVersion => "ready_same_version",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DiagnosticsSaveFollowupBranchContextV2 {
+    ready_snapshot_task_state: ReadySnapshotTaskStateV2,
+    shadow_state_available: bool,
+}
 
 struct SaveFollowupReadyArtifactsReply {
     diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
@@ -799,12 +862,53 @@ impl BslLanguageServer {
             );
     }
 
-    async fn wait_for_ready_parse_snapshot_state_for_version_v2(
+    fn ready_parse_snapshot_probe_outcome_for_cancel_reason_v2(
+        reason: super::super::DiagnosticsCancellationReasonV2,
+    ) -> ReadyParseSnapshotProbeOutcomeV2 {
+        match reason {
+            super::super::DiagnosticsCancellationReasonV2::SupersededGeneration
+            | super::super::DiagnosticsCancellationReasonV2::SupersededVersion => {
+                ReadyParseSnapshotProbeOutcomeV2::Superseded
+            }
+            super::super::DiagnosticsCancellationReasonV2::ClientCancel
+            | super::super::DiagnosticsCancellationReasonV2::OtherCancel => {
+                ReadyParseSnapshotProbeOutcomeV2::Cancelled
+            }
+        }
+    }
+
+    pub(crate) fn ready_parse_snapshot_probe_wait_decision_v2(
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        wait_budget: Duration,
+        wait_elapsed: Duration,
+        cancel_reason: Option<super::super::DiagnosticsCancellationReasonV2>,
+        current_generation: Option<u64>,
+        latest_received_version: Option<i32>,
+    ) -> Option<ReadyParseSnapshotProbeOutcomeV2> {
+        if wait_budget.is_zero() {
+            return Some(ReadyParseSnapshotProbeOutcomeV2::NotReady);
+        }
+        if wait_elapsed >= wait_budget {
+            return Some(ReadyParseSnapshotProbeOutcomeV2::Timeout);
+        }
+        if let Some(reason) = cancel_reason {
+            return Some(Self::ready_parse_snapshot_probe_outcome_for_cancel_reason_v2(reason));
+        }
+        if current_generation != Some(supersession_key.diagnostics_generation) {
+            return Some(ReadyParseSnapshotProbeOutcomeV2::GenerationMismatch);
+        }
+        if latest_received_version != Some(supersession_key.requested_version) {
+            return Some(ReadyParseSnapshotProbeOutcomeV2::VersionMismatch);
+        }
+        None
+    }
+
+    async fn wait_for_ready_parse_snapshot_probe_v2(
         &self,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
         wait_budget: Duration,
-    ) -> Option<super::super::ReadyParseSnapshotStateV2> {
+    ) -> ReadyParseSnapshotProbeResultV2 {
         let wait_started = Instant::now();
         loop {
             if let Some(state) = self
@@ -814,32 +918,76 @@ impl BslLanguageServer {
                 )
                 .await
             {
-                return Some(state);
+                return ReadyParseSnapshotProbeResultV2 {
+                    outcome: ReadyParseSnapshotProbeOutcomeV2::Ready,
+                    state: Some(state),
+                };
             }
-            if wait_started.elapsed() >= wait_budget {
-                return None;
-            }
-            if cancel_token.is_some_and(|token| token.is_cancelled()) {
-                return None;
-            }
-            if self
+            let cancel_reason = cancel_token
+                .filter(|token| token.is_cancelled())
+                .map(|token| token.reason());
+            let current_generation = self
                 .current_diagnostics_generation_v2(supersession_key.file_id)
-                .await
-                != Some(supersession_key.diagnostics_generation)
-            {
-                return None;
-            }
-            if self
+                .await;
+            let latest_received_version = self
                 .latest_received_file_versions_v2
                 .read()
                 .await
                 .get(&supersession_key.file_id)
-                .copied()
-                != Some(supersession_key.requested_version)
-            {
-                return None;
+                .copied();
+            if let Some(outcome) = Self::ready_parse_snapshot_probe_wait_decision_v2(
+                supersession_key,
+                wait_budget,
+                wait_started.elapsed(),
+                cancel_reason,
+                current_generation,
+                latest_received_version,
+            ) {
+                return ReadyParseSnapshotProbeResultV2 {
+                    outcome,
+                    state: None,
+                };
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    async fn diagnostics_save_followup_branch_context_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+    ) -> DiagnosticsSaveFollowupBranchContextV2 {
+        let ready_snapshot_task_state = if self
+            .ready_parse_snapshot_state_for_version_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+            )
+            .await
+            .is_some()
+        {
+            ReadySnapshotTaskStateV2::ReadySameVersion
+        } else {
+            let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
+            match tasks.get(&supersession_key.file_id) {
+                Some(task)
+                    if task.requested_version.load(Ordering::Relaxed)
+                        == supersession_key.requested_version =>
+                {
+                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                }
+                Some(_) => ReadySnapshotTaskStateV2::InFlightOtherVersion,
+                None => ReadySnapshotTaskStateV2::Absent,
+            }
+        };
+        let shadow_state_available = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&supersession_key.file_id)
+            .is_some_and(|state| state.version == supersession_key.requested_version);
+
+        DiagnosticsSaveFollowupBranchContextV2 {
+            ready_snapshot_task_state,
+            shadow_state_available,
         }
     }
 
@@ -889,6 +1037,30 @@ impl BslLanguageServer {
             semantic_path,
             semantic_parse_source,
             semantic_ir_source,
+        );
+    }
+
+    fn record_diagnostics_save_followup_probe_state_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        ready_snapshot_zero_probe: Option<ReadyParseSnapshotProbeOutcomeV2>,
+        ready_snapshot_wait_probe: Option<ReadyParseSnapshotProbeOutcomeV2>,
+        ready_snapshot_task_state: Option<ReadySnapshotTaskStateV2>,
+        shadow_state_available: Option<bool>,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_probe_state(
+            uri,
+            cycle_key,
+            ready_snapshot_zero_probe.map(ReadyParseSnapshotProbeOutcomeV2::as_str),
+            ready_snapshot_wait_probe.map(ReadyParseSnapshotProbeOutcomeV2::as_str),
+            ready_snapshot_task_state.map(ReadySnapshotTaskStateV2::as_str),
+            shadow_state_available,
         );
     }
 
@@ -1335,6 +1507,7 @@ impl BslLanguageServer {
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        probe_slot: ReadyParseSnapshotProbeSlotV2,
         wait_budget: Duration,
         pipeline_started: Instant,
         show_hints: bool,
@@ -1351,13 +1524,24 @@ impl BslLanguageServer {
             return None;
         }
 
-        let ready_state = self
-            .wait_for_ready_parse_snapshot_state_for_version_v2(
-                supersession_key,
-                cancel_token,
-                wait_budget,
-            )
-            .await?;
+        let probe = self
+            .wait_for_ready_parse_snapshot_probe_v2(supersession_key, cancel_token, wait_budget)
+            .await;
+        self.record_diagnostics_save_followup_probe_state_v2(
+            uri,
+            supersession_key,
+            match probe_slot {
+                ReadyParseSnapshotProbeSlotV2::ZeroBudget => Some(probe.outcome),
+                ReadyParseSnapshotProbeSlotV2::BoundedWait => None,
+            },
+            match probe_slot {
+                ReadyParseSnapshotProbeSlotV2::ZeroBudget => None,
+                ReadyParseSnapshotProbeSlotV2::BoundedWait => Some(probe.outcome),
+            },
+            None,
+            None,
+        );
+        let ready_state = probe.state?;
         let apply_lag = self
             .diagnostics_followup_apply_lag_v2(supersession_key)
             .await;
@@ -2350,12 +2534,24 @@ impl BslLanguageServer {
                     .is_some();
 
             if save_fastlane_first_publish_completed {
+                let branch_context = self
+                    .diagnostics_save_followup_branch_context_v2(&supersession_key)
+                    .await;
+                self.record_diagnostics_save_followup_probe_state_v2(
+                    uri,
+                    &supersession_key,
+                    None,
+                    None,
+                    Some(branch_context.ready_snapshot_task_state),
+                    Some(branch_context.shadow_state_available),
+                );
                 if let Some(disposition) = self
                     .try_execute_save_followup_from_ready_artifacts_v2(
                         uri,
                         &supersession_key,
                         trigger,
                         cancel_token,
+                        ReadyParseSnapshotProbeSlotV2::ZeroBudget,
                         Duration::ZERO,
                         pipeline_started,
                         show_hints,
@@ -2387,6 +2583,7 @@ impl BslLanguageServer {
                         &supersession_key,
                         trigger,
                         cancel_token,
+                        ReadyParseSnapshotProbeSlotV2::BoundedWait,
                         SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
                         pipeline_started,
                         show_hints,

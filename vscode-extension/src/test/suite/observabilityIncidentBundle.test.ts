@@ -248,7 +248,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -291,6 +291,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_semantic_path: 'ready_artifacts',
                         followup_semantic_parse_source: 'snapshot',
                         followup_semantic_ir_source: 'snapshot_build',
+                        followup_ready_snapshot_zero_probe: 'ready',
+                        followup_ready_snapshot_task_state: 'ready_same_version',
+                        followup_shadow_state_available: true,
                         followup_wait_reason: 'pending_publish',
                         followup_runtime_queue_wait_ms: 11,
                         followup_apply_lag_ms: 23,
@@ -307,7 +310,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -328,6 +331,10 @@ suite('Observability Incident Bundle Test Suite', () => {
                         save_fastlane_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
                         followup_semantic_path: 'generic_pipeline',
+                        followup_ready_snapshot_zero_probe: 'not_ready',
+                        followup_ready_snapshot_wait_probe: 'timeout',
+                        followup_ready_snapshot_task_state: 'in_flight_same_version',
+                        followup_shadow_state_available: false,
                         followup_wait_reason: 'apply_lag',
                         followup_apply_lag_ms: 1770,
                     },
@@ -340,7 +347,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -361,6 +368,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         save_fastlane_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
                         followup_semantic_path: 'generic_pipeline',
+                        followup_ready_snapshot_zero_probe: 'not_ready',
+                        followup_ready_snapshot_task_state: 'in_flight_other_version',
+                        followup_shadow_state_available: false,
                         followup_wait_reason: 'runtime_queue_wait',
                     },
                 ],
@@ -372,7 +382,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -410,6 +420,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_semantic_path: 'shadow_state',
                         followup_semantic_parse_source: 'salsa',
                         followup_semantic_ir_source: 'salsa',
+                        followup_ready_snapshot_zero_probe: 'not_ready',
+                        followup_ready_snapshot_task_state: 'absent',
+                        followup_shadow_state_available: true,
                         followup_wait_reason: 'semantic_work',
                         followup_runtime_queue_wait_ms: 0,
                         followup_apply_lag_ms: 0,
@@ -424,7 +437,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 8,
+                version: 9,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -450,6 +463,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         save_fastlane_outcome: 'published',
                         idle_heavy_outcome: 'disabled_by_config',
+                        followup_ready_snapshot_zero_probe: 'not_ready',
+                        followup_ready_snapshot_task_state: 'absent',
+                        followup_shadow_state_available: false,
                         followup_wait_reason: 'runtime_queue_wait',
                         followup_runtime_queue_wait_ms: 17,
                         terminal_outcome: 'disabled_by_config',
@@ -490,6 +506,19 @@ suite('Observability Incident Bundle Test Suite', () => {
                 ],
             },
         };
+    }
+
+    function sampleV8DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 8;
+        timeline.response.traces[0].followup_ready_snapshot_zero_probe = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_wait_probe = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_task_state = undefined;
+        timeline.response.traces[0].followup_shadow_state_available = undefined;
+        return timeline;
     }
 
     test('happy path bundle should contain request-centric incident report and all raw attachments', () => {
@@ -541,7 +570,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 8);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 9);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -719,6 +748,9 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('followup_semantic_path=ready_artifacts'));
         assert.ok(bundle.summaryMarkdown.includes('followup_semantic_parse_source=snapshot'));
         assert.ok(bundle.summaryMarkdown.includes('followup_semantic_ir_source=snapshot_build'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_zero_probe=ready'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_task_state=ready_same_version'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_shadow_state_available=true'));
         assert.ok(bundle.summaryMarkdown.includes('apply_lag_ms=23'));
         assert.ok(bundle.summaryMarkdown.includes('followup_syntax_work_mode=recomputed'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=pending_publish'));
@@ -889,6 +921,27 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(
             bundle.summaryMarkdown.includes('followup_semantic_attribution=unavailable_by_design(version=7)')
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_ready_snapshot_miss_attribution=unavailable_by_design(version=7)')
+        );
+    });
+
+    test('v8 diagnostics save timeline should mark ready-snapshot miss attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV8DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) => gap.includes('does not expose ready-snapshot miss attribution by design'))
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_ready_snapshot_miss_attribution=unavailable_by_design(version=8)')
         );
     });
 

@@ -19,6 +19,11 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_semantic_parse_source?: string;
     followup_semantic_ir_source?: string;
     followup_semantic_attribution_note?: string;
+    followup_ready_snapshot_zero_probe?: string;
+    followup_ready_snapshot_wait_probe?: string;
+    followup_ready_snapshot_task_state?: string;
+    followup_shadow_state_available?: boolean;
+    followup_ready_snapshot_attribution_note?: string;
     followup_wait_reason?: string;
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;
@@ -48,12 +53,21 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline.response.version < 8
             ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
             : undefined;
-    const gaps =
-        diagnosticsSaveTimeline.response.version < 8
-            ? [
-                `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose semantic path/source attribution by design.`,
-            ]
-            : [];
+    const readySnapshotAttributionNote =
+        diagnosticsSaveTimeline.response.version < 9
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
+    const gaps: string[] = [];
+    if (diagnosticsSaveTimeline.response.version < 8) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose semantic path/source attribution by design.`
+        );
+    }
+    if (diagnosticsSaveTimeline.response.version < 9) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot miss attribution by design.`
+        );
+    }
 
     return {
         requestCount: diagnosticsSaveTimeline.response.traces.length,
@@ -73,6 +87,11 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_semantic_parse_source: trace.followup_semantic_parse_source,
             followup_semantic_ir_source: trace.followup_semantic_ir_source,
             followup_semantic_attribution_note: semanticAttributionNote,
+            followup_ready_snapshot_zero_probe: trace.followup_ready_snapshot_zero_probe,
+            followup_ready_snapshot_wait_probe: trace.followup_ready_snapshot_wait_probe,
+            followup_ready_snapshot_task_state: trace.followup_ready_snapshot_task_state,
+            followup_shadow_state_available: trace.followup_shadow_state_available,
+            followup_ready_snapshot_attribution_note: readySnapshotAttributionNote,
             followup_wait_reason: trace.followup_wait_reason,
             followup_runtime_queue_wait_ms: trace.followup_runtime_queue_wait_ms,
             followup_apply_lag_ms: trace.followup_apply_lag_ms,
@@ -221,6 +240,41 @@ function formatFollowupSemanticAttribution(
     return parts.join(' | ');
 }
 
+function formatFollowupReadySnapshotAttribution(
+    attributionNote: string | undefined,
+    zeroProbe: string | undefined,
+    waitProbe: string | undefined,
+    taskState: string | undefined,
+    shadowStateAvailable: boolean | undefined
+): string | undefined {
+    if (attributionNote) {
+        return `followup_ready_snapshot_miss_attribution=${attributionNote}`;
+    }
+    if (
+        !zeroProbe
+        && !waitProbe
+        && !taskState
+        && typeof shadowStateAvailable !== 'boolean'
+    ) {
+        return undefined;
+    }
+
+    const parts: string[] = [];
+    if (zeroProbe) {
+        parts.push(`followup_ready_snapshot_zero_probe=${zeroProbe}`);
+    }
+    if (waitProbe) {
+        parts.push(`followup_ready_snapshot_wait_probe=${waitProbe}`);
+    }
+    if (taskState) {
+        parts.push(`followup_ready_snapshot_task_state=${taskState}`);
+    }
+    if (typeof shadowStateAvailable === 'boolean') {
+        parts.push(`followup_shadow_state_available=${shadowStateAvailable}`);
+    }
+    return parts.join(' | ');
+}
+
 export function renderDiagnosticsSaveSummaryLines(
     section: ObservabilityIncidentDiagnosticsSaveSection
 ): string[] {
@@ -237,6 +291,13 @@ export function renderDiagnosticsSaveSummaryLines(
             request.followup_semantic_path,
             request.followup_semantic_parse_source,
             request.followup_semantic_ir_source
+        ),
+        formatFollowupReadySnapshotAttribution(
+            request.followup_ready_snapshot_attribution_note,
+            request.followup_ready_snapshot_zero_probe,
+            request.followup_ready_snapshot_wait_probe,
+            request.followup_ready_snapshot_task_state,
+            request.followup_shadow_state_available
         ),
         formatFollowupWait(
             request.followup_syntax_work_mode,

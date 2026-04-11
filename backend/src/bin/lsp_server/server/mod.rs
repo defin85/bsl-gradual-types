@@ -111,7 +111,7 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 8;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 9;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]

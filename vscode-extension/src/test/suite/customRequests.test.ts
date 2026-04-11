@@ -323,7 +323,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 8,
+                        version: 9,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -366,6 +366,10 @@ suite('LSP Custom Requests Test Suite', () => {
                                 followup_semantic_path: 'generic_pipeline',
                                 followup_semantic_parse_source: 'salsa',
                                 followup_semantic_ir_source: 'salsa',
+                                followup_ready_snapshot_zero_probe: 'not_ready',
+                                followup_ready_snapshot_wait_probe: 'timeout',
+                                followup_ready_snapshot_task_state: 'in_flight_same_version',
+                                followup_shadow_state_available: false,
                                 followup_wait_reason: 'pending_publish',
                                 followup_runtime_queue_wait_ms: 6,
                                 followup_apply_lag_ms: 21,
@@ -716,7 +720,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 8);
+        assert.strictEqual(result.response.version, 9);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
@@ -733,6 +737,10 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.response.traces[0].followup_semantic_path, 'generic_pipeline');
         assert.strictEqual(result.response.traces[0].followup_semantic_parse_source, 'salsa');
         assert.strictEqual(result.response.traces[0].followup_semantic_ir_source, 'salsa');
+        assert.strictEqual(result.response.traces[0].followup_ready_snapshot_zero_probe, 'not_ready');
+        assert.strictEqual(result.response.traces[0].followup_ready_snapshot_wait_probe, 'timeout');
+        assert.strictEqual(result.response.traces[0].followup_ready_snapshot_task_state, 'in_flight_same_version');
+        assert.strictEqual(result.response.traces[0].followup_shadow_state_available, false);
         assert.strictEqual(result.response.traces[0].followup_wait_reason, 'pending_publish');
         assert.strictEqual(result.response.traces[0].followup_runtime_queue_wait_ms, 6);
         assert.strictEqual(result.response.traces[0].followup_apply_lag_ms, 21);
@@ -767,7 +775,7 @@ suite('LSP Custom Requests Test Suite', () => {
         sendRequestStub.resetBehavior();
         sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
         sendRequestStub.onSecondCall().resolves({
-            version: 8,
+            version: 9,
             traces: [],
         });
 
@@ -792,7 +800,7 @@ suite('LSP Custom Requests Test Suite', () => {
         sendRequestStub.resetBehavior();
         sendRequestStub.onFirstCall().rejects({ code: -32601, message: 'Method not found' });
         sendRequestStub.onSecondCall().resolves({
-            version: 8,
+            version: 9,
             traces: [],
         });
 

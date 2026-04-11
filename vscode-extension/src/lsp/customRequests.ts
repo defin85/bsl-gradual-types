@@ -765,6 +765,28 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_semantic_path?: 'ready_artifacts' | 'shadow_state' | 'generic_pipeline';
     followup_semantic_parse_source?: 'snapshot' | 'salsa';
     followup_semantic_ir_source?: 'exact_cache' | 'snapshot_build' | 'salsa';
+    followup_ready_snapshot_zero_probe?:
+        | 'ready'
+        | 'not_ready'
+        | 'generation_mismatch'
+        | 'version_mismatch'
+        | 'timeout'
+        | 'cancelled'
+        | 'superseded';
+    followup_ready_snapshot_wait_probe?:
+        | 'ready'
+        | 'not_ready'
+        | 'generation_mismatch'
+        | 'version_mismatch'
+        | 'timeout'
+        | 'cancelled'
+        | 'superseded';
+    followup_ready_snapshot_task_state?:
+        | 'absent'
+        | 'in_flight_same_version'
+        | 'in_flight_other_version'
+        | 'ready_same_version';
+    followup_shadow_state_available?: boolean;
     followup_wait_reason?: 'apply_lag' | 'runtime_queue_wait' | 'semantic_work' | 'pending_publish' | 'superseded';
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 use tracing::error;
 
-use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints;
+use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
 };
@@ -174,6 +174,40 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
 ) -> Option<CompletionResponseWithStats> {
+    handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot_ids(
+        file_content,
+        file_path,
+        ir_program,
+        member_access_owner_type_hints,
+        deps,
+        position,
+        file_uri,
+        index_snapshot,
+        snippet_support,
+        include_flow_sensitive,
+        None,
+        None,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot_ids(
+    file_content: Arc<str>,
+    file_path: Arc<str>,
+    ir_program: Option<Arc<SemanticProgram>>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    deps: Arc<bsl_analysis_v2::SemanticDeps>,
+    position: Position,
+    file_uri: &Url,
+    index_snapshot: &IndexSnapshot,
+    snippet_support: bool,
+    include_flow_sensitive: bool,
+    deps_id: Option<&bsl_analysis_v2::DepsSnapshotId>,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    trigger_char_hint: Option<char>,
+) -> Option<CompletionResponseWithStats> {
     let resolver = deps
         .resolver
         .clone()
@@ -215,7 +249,7 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
 
     let runtime_started = Instant::now();
     let completion = if member_access_request {
-        bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir(
+        bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
             file_content.as_ref(),
             position.line,
             position.character,
@@ -226,13 +260,15 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
             resolver.as_ref(),
             member_access_owner_type_hints,
             include_flow_sensitive,
+            deps_id,
+            settings_id,
             trigger_char_hint,
         )
         .await
     } else {
         match ir_program {
             Some(ir_program) => {
-                get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+                get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
                     file_content.as_ref(),
                     position.line,
                     position.character,
@@ -244,12 +280,14 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
                     ir_program,
                     member_access_owner_type_hints,
                     include_flow_sensitive,
+                    deps_id,
+                    settings_id,
                     trigger_char_hint,
                 )
                 .await
             }
             None => {
-                bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir(
+                bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
                     file_content.as_ref(),
                     position.line,
                     position.character,
@@ -260,6 +298,8 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints(
                     resolver.as_ref(),
                     member_access_owner_type_hints,
                     include_flow_sensitive,
+                    deps_id,
+                    settings_id,
                     trigger_char_hint,
                 )
                 .await

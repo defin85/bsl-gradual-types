@@ -1290,6 +1290,58 @@ fn semantic_diagnostics_use_current_file_text_even_with_stale_parse_snapshot_pro
 }
 
 #[test]
+fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(312);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             x = 1;\n\
+             x.UnknownMethod();\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-profiled-snapshot"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-profiled-snapshot.bsl"),
+        parse_snapshot: parse_snapshot_for_test(
+            file_id,
+            1,
+            text.as_ref(),
+            Vec::new(),
+            true,
+            None,
+        ),
+    });
+
+    let analysis = host.analysis();
+    let first = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("profiled semantic diagnostics");
+    assert_eq!(
+        first.profile.parse_source,
+        Some(SemanticDiagnosticsParseSource::Snapshot)
+    );
+    assert_eq!(first.profile.ir_source, Some(IrArtifactSource::SnapshotBuild));
+
+    let second = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("cached profiled semantic diagnostics");
+    assert_eq!(
+        second.profile.parse_source,
+        Some(SemanticDiagnosticsParseSource::Snapshot)
+    );
+    assert_eq!(second.profile.ir_source, Some(IrArtifactSource::ExactCache));
+}
+
+#[test]
 fn flow_sensitive_diagnostics_use_current_file_text_even_with_stale_parse_snapshot_program() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(311);

@@ -248,7 +248,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -274,6 +274,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                             outcome: 'published',
                             elapsed_ms: 143,
                             syntax_work_mode: 'recomputed',
+                            semantic_path: 'ready_artifacts',
+                            semantic_parse_source: 'snapshot',
+                            semantic_ir_source: 'snapshot_build',
                             runtime_queue_wait_ms: 11,
                             apply_lag_ms: 23,
                             wait_for_file_version_ms: 9,
@@ -285,6 +288,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         save_fastlane_outcome: 'published',
                         idle_heavy_outcome: 'published',
                         followup_syntax_work_mode: 'recomputed',
+                        followup_semantic_path: 'ready_artifacts',
+                        followup_semantic_parse_source: 'snapshot',
+                        followup_semantic_ir_source: 'snapshot_build',
                         followup_wait_reason: 'pending_publish',
                         followup_runtime_queue_wait_ms: 11,
                         followup_apply_lag_ms: 23,
@@ -301,7 +307,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -321,6 +327,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         save_fastlane_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
+                        followup_semantic_path: 'generic_pipeline',
                         followup_wait_reason: 'apply_lag',
                         followup_apply_lag_ms: 1770,
                     },
@@ -333,7 +340,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -353,6 +360,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                         save_fastlane_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
+                        followup_semantic_path: 'generic_pipeline',
                         followup_wait_reason: 'runtime_queue_wait',
                     },
                 ],
@@ -364,7 +372,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -389,6 +397,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                             publish_kind: 'full',
                             outcome: 'published',
                             elapsed_ms: 131,
+                            semantic_path: 'shadow_state',
+                            semantic_parse_source: 'salsa',
+                            semantic_ir_source: 'salsa',
                             runtime_queue_wait_ms: 0,
                             apply_lag_ms: 0,
                             semantic_diagnostics_query_ms: 15,
@@ -396,6 +407,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         save_fastlane_outcome: 'published',
                         idle_heavy_outcome: 'published',
                         followup_syntax_work_mode: 'reused',
+                        followup_semantic_path: 'shadow_state',
+                        followup_semantic_parse_source: 'salsa',
+                        followup_semantic_ir_source: 'salsa',
                         followup_wait_reason: 'semantic_work',
                         followup_runtime_queue_wait_ms: 0,
                         followup_apply_lag_ms: 0,
@@ -410,7 +424,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 7,
+                version: 8,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -439,6 +453,39 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_wait_reason: 'runtime_queue_wait',
                         followup_runtime_queue_wait_ms: 17,
                         terminal_outcome: 'disabled_by_config',
+                    },
+                ],
+            },
+        };
+    }
+
+    function sampleLegacyDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 7,
+                traces: [
+                    {
+                        trace_id: 'diagnostics-save-trace-legacy',
+                        uri: 'file:///tmp/test.bsl',
+                        requested_version: 15,
+                        save_cycle_sequence: 9,
+                        diagnostics_generation: 11,
+                        trigger: 'did_save',
+                        started_at_ms: 1_700_000_034_000,
+                        followup_publish: {
+                            profile: 'idle_heavy',
+                            publish_kind: 'full',
+                            outcome: 'published',
+                            elapsed_ms: 119,
+                            syntax_work_mode: 'reused',
+                            semantic_diagnostics_query_ms: 31,
+                        },
+                        save_fastlane_outcome: 'published',
+                        idle_heavy_outcome: 'published',
+                        followup_syntax_work_mode: 'reused',
+                        followup_wait_reason: 'pending_publish',
+                        terminal_outcome: 'published',
                     },
                 ],
             },
@@ -494,7 +541,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 7);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 8);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -669,6 +716,9 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('blocking_queue_wait_ms=17'));
         assert.ok(bundle.summaryMarkdown.includes('followup_publish=idle_heavy:full:published@143ms'));
         assert.ok(bundle.summaryMarkdown.includes('syntax_work_mode=recomputed'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_semantic_path=ready_artifacts'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_semantic_parse_source=snapshot'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_semantic_ir_source=snapshot_build'));
         assert.ok(bundle.summaryMarkdown.includes('apply_lag_ms=23'));
         assert.ok(bundle.summaryMarkdown.includes('followup_syntax_work_mode=recomputed'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=pending_publish'));
@@ -822,6 +872,24 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'unavailable');
         assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('Diagnostics save timeline is unavailable')));
         assert.ok(bundle.summaryMarkdown.includes('Diagnostics save timeline: status=unavailable'));
+    });
+
+    test('v7 diagnostics save timeline should mark semantic attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleLegacyDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) => gap.includes('does not expose semantic path/source attribution by design'))
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_semantic_attribution=unavailable_by_design(version=7)')
+        );
     });
 
     test('v7 completion timeline should stay valid and mark v8 provenance details as unavailable', () => {

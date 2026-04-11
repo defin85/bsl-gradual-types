@@ -764,7 +764,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
     let (context, prepared) = match prepare_ephemeral_mcp_operation(
         SemanticOperation::Members,
         flow_sensitive_enabled,
-        deps_id,
+        deps_id.clone(),
         deps.clone(),
         index_snapshot,
         Arc::from(text.clone()),
@@ -856,7 +856,7 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
 
     let result = completion_runtime
         .block_on(
-            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_with_owner_hints(
+            bsl_runtime::application::type_system::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
                 text.as_str(),
                 position.line,
                 position.character,
@@ -868,6 +868,9 @@ fn collect_members(request: MembersRequest) -> Result<BslMembersResponse, rmcp::
                 program,
                 member_access_owner_type_hints,
                 flow_sensitive_enabled,
+                Some(&deps_id),
+                Some(&context.settings.settings_id),
+                None,
             ),
         )
         .map_err(|err| rmcp::ErrorData::internal_error(err.to_string(), None))?;

@@ -758,6 +758,7 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                     semantic_facts_index_entry_count: profile.index_entry_count,
                     total_ms,
                 },
+                source: None,
             }
         }
         Err(_err) => {
@@ -772,6 +773,7 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                     total_ms: started.elapsed().as_millis(),
                     ..IrBuildProfile::default()
                 },
+                source: None,
             }
         }
     }

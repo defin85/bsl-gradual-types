@@ -259,7 +259,7 @@ pub fn rank_candidates_with_trace(
     }
 }
 
-fn match_prefix(label: &str, prefix: &str) -> PrefixMatch {
+pub(crate) fn match_prefix(label: &str, prefix: &str) -> PrefixMatch {
     if prefix.is_empty() {
         return PrefixMatch::None;
     }

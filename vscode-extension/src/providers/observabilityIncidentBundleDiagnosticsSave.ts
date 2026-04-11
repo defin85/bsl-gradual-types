@@ -15,6 +15,10 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     save_fastlane_outcome?: string;
     idle_heavy_outcome?: string;
     followup_syntax_work_mode?: string;
+    followup_semantic_path?: string;
+    followup_semantic_parse_source?: string;
+    followup_semantic_ir_source?: string;
+    followup_semantic_attribution_note?: string;
     followup_wait_reason?: string;
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;
@@ -40,6 +44,17 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         };
     }
 
+    const semanticAttributionNote =
+        diagnosticsSaveTimeline.response.version < 8
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
+    const gaps =
+        diagnosticsSaveTimeline.response.version < 8
+            ? [
+                `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose semantic path/source attribution by design.`,
+            ]
+            : [];
+
     return {
         requestCount: diagnosticsSaveTimeline.response.traces.length,
         requests: diagnosticsSaveTimeline.response.traces.map((trace) => ({
@@ -54,6 +69,10 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             save_fastlane_outcome: trace.save_fastlane_outcome,
             idle_heavy_outcome: trace.idle_heavy_outcome,
             followup_syntax_work_mode: trace.followup_syntax_work_mode,
+            followup_semantic_path: trace.followup_semantic_path,
+            followup_semantic_parse_source: trace.followup_semantic_parse_source,
+            followup_semantic_ir_source: trace.followup_semantic_ir_source,
+            followup_semantic_attribution_note: semanticAttributionNote,
             followup_wait_reason: trace.followup_wait_reason,
             followup_runtime_queue_wait_ms: trace.followup_runtime_queue_wait_ms,
             followup_apply_lag_ms: trace.followup_apply_lag_ms,
@@ -61,7 +80,7 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_snapshot_with_deps_ms: trace.followup_snapshot_with_deps_ms,
             terminal_outcome: trace.terminal_outcome,
         })),
-        gaps: [],
+        gaps,
     };
 }
 
@@ -176,6 +195,32 @@ function formatFollowupWait(
     return parts.join(' | ');
 }
 
+function formatFollowupSemanticAttribution(
+    semanticAttributionNote: string | undefined,
+    semanticPath: string | undefined,
+    semanticParseSource: string | undefined,
+    semanticIrSource: string | undefined
+): string | undefined {
+    if (semanticAttributionNote) {
+        return `followup_semantic_attribution=${semanticAttributionNote}`;
+    }
+    if (!semanticPath && !semanticParseSource && !semanticIrSource) {
+        return undefined;
+    }
+
+    const parts: string[] = [];
+    if (semanticPath) {
+        parts.push(`followup_semantic_path=${semanticPath}`);
+    }
+    if (semanticParseSource) {
+        parts.push(`followup_semantic_parse_source=${semanticParseSource}`);
+    }
+    if (semanticIrSource) {
+        parts.push(`followup_semantic_ir_source=${semanticIrSource}`);
+    }
+    return parts.join(' | ');
+}
+
 export function renderDiagnosticsSaveSummaryLines(
     section: ObservabilityIncidentDiagnosticsSaveSection
 ): string[] {
@@ -187,6 +232,12 @@ export function renderDiagnosticsSaveSummaryLines(
         `trace=${request.trace_id} | uri=${request.uri} | requested_version=${request.requested_version} | save_cycle_sequence=${request.save_cycle_sequence} | diagnostics_generation=${request.diagnostics_generation} | trigger=${request.trigger} | save_fastlane_outcome=${renderProfileOutcome(request.save_fastlane_outcome, request.terminal_outcome)} | idle_heavy_outcome=${renderProfileOutcome(request.idle_heavy_outcome, request.terminal_outcome)} | terminal=${renderTerminalOutcome(request.terminal_outcome)}`,
         formatPublishWithLifecycle('first_publish', request.first_publish, request.terminal_outcome),
         formatPublishWithLifecycle('followup_publish', request.followup_publish, request.terminal_outcome),
+        formatFollowupSemanticAttribution(
+            request.followup_semantic_attribution_note,
+            request.followup_semantic_path,
+            request.followup_semantic_parse_source,
+            request.followup_semantic_ir_source
+        ),
         formatFollowupWait(
             request.followup_syntax_work_mode,
             request.followup_wait_reason,

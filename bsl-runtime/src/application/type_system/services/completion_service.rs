@@ -3,9 +3,9 @@
 //! Functions for LSP completion requests and contextual auto-completion.
 
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tracing::{debug, info, Span};
 
@@ -20,7 +20,9 @@ use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 use super::super::extractors::symbol_extractor::{
     extract_word_at_position, is_identifier_char, utf16_to_byte_offset,
 };
-use super::completion_ranking::{rank_candidates_with_trace, RankingCandidate};
+use super::completion_ranking::{
+    match_prefix, rank_candidates_with_trace, PrefixMatch, RankingCandidate,
+};
 use super::completion_target::{
     extract_member_access_receiver_chain, extract_member_access_receiver_spans,
 };
@@ -48,7 +50,14 @@ impl IndexSnapshotSource for IndexSnapshot {
 
 pub const COMPLETION_MAX_ITEMS: usize = 200;
 const CONTEXT_WINDOW_CHARS: usize = 256;
+const IMMUTABLE_NON_MEMBER_CATALOG_CACHE_LIMIT: usize = 16;
 static COMPLETION_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+static IMMUTABLE_NON_MEMBER_CATALOG_CACHE: OnceLock<Mutex<ImmutableNonMemberCatalogCache>> =
+    OnceLock::new();
+#[cfg(test)]
+static IMMUTABLE_NON_MEMBER_CATALOG_BUILD_COUNTS: OnceLock<
+    Mutex<HashMap<ImmutableNonMemberCatalogKey, u64>>,
+> = OnceLock::new();
 
 fn completion_trace_enabled() -> bool {
     crate::system::runtime_config::global_runtime_config()
@@ -117,6 +126,111 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub member_access_owner_type_hints: Vec<TypeResolution>,
     #[allow(dead_code)]
     pub include_flow_sensitive: bool,
+    pub deps_id: Option<bsl_analysis_v2::DepsSnapshotId>,
+    pub settings_id: Option<bsl_analysis_v2::SettingsId>,
+}
+
+impl CompletionAnalysisContext<'_> {
+    fn immutable_non_member_catalog_key(&self) -> Option<ImmutableNonMemberCatalogKey> {
+        Some(ImmutableNonMemberCatalogKey {
+            deps_id: self.deps_id.clone()?,
+            settings_id: self.settings_id.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ImmutableNonMemberCatalogKey {
+    deps_id: bsl_analysis_v2::DepsSnapshotId,
+    settings_id: Option<bsl_analysis_v2::SettingsId>,
+}
+
+#[derive(Debug, Clone)]
+struct ImmutableCandidateTemplate {
+    item: CompletionItem,
+    source_priority: u8,
+    label_lower: String,
+    scope: Option<SymbolScope>,
+}
+
+impl ImmutableCandidateTemplate {
+    fn from_candidate(candidate: Candidate) -> Self {
+        debug_assert!(
+            candidate.owner_type.is_none(),
+            "immutable non-member catalogs must not carry owner-bound candidates"
+        );
+        debug_assert!(
+            candidate.member_identity.is_none(),
+            "immutable non-member catalogs must not carry member identities"
+        );
+        Self {
+            item: candidate.item,
+            source_priority: candidate.source_priority,
+            label_lower: candidate.label_lower,
+            scope: candidate.scope,
+        }
+    }
+
+    fn materialize(&self) -> Candidate {
+        Candidate {
+            item: self.item.clone(),
+            source_priority: self.source_priority,
+            label_lower: self.label_lower.clone(),
+            owner_type: None,
+            member_identity: None,
+            scope: self.scope,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct ImmutableNonMemberCatalog {
+    global_functions: Vec<ImmutableCandidateTemplate>,
+    metadata_items: Vec<ImmutableCandidateTemplate>,
+    repository_types: Vec<ImmutableCandidateTemplate>,
+    keywords: Vec<ImmutableCandidateTemplate>,
+}
+
+#[derive(Default)]
+struct ImmutableNonMemberCatalogCache {
+    entries: HashMap<ImmutableNonMemberCatalogKey, Arc<ImmutableNonMemberCatalog>>,
+    insertion_order: VecDeque<ImmutableNonMemberCatalogKey>,
+}
+
+impl ImmutableNonMemberCatalogCache {
+    fn get(&self, key: &ImmutableNonMemberCatalogKey) -> Option<Arc<ImmutableNonMemberCatalog>> {
+        self.entries.get(key).cloned()
+    }
+
+    fn insert(
+        &mut self,
+        key: ImmutableNonMemberCatalogKey,
+        catalog: Arc<ImmutableNonMemberCatalog>,
+    ) {
+        if self.entries.contains_key(&key) {
+            return;
+        }
+
+        if self.entries.len() >= IMMUTABLE_NON_MEMBER_CATALOG_CACHE_LIMIT {
+            if let Some(evicted_key) = self.insertion_order.pop_front() {
+                self.entries.remove(&evicted_key);
+            }
+        }
+
+        self.insertion_order.push_back(key.clone());
+        self.entries.insert(key, catalog);
+    }
+}
+
+fn immutable_non_member_catalog_cache() -> &'static Mutex<ImmutableNonMemberCatalogCache> {
+    IMMUTABLE_NON_MEMBER_CATALOG_CACHE
+        .get_or_init(|| Mutex::new(ImmutableNonMemberCatalogCache::default()))
+}
+
+#[cfg(test)]
+fn immutable_non_member_catalog_build_counts(
+) -> &'static Mutex<HashMap<ImmutableNonMemberCatalogKey, u64>> {
+    IMMUTABLE_NON_MEMBER_CATALOG_BUILD_COUNTS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Clone, Copy)]
@@ -594,6 +708,8 @@ pub async fn get_completion_with_semantic_program(
         file_path,
         member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     get_completion_with_analysis(
@@ -718,12 +834,50 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        member_access_owner_type_hints,
+        include_flow_sensitive,
+        None,
+        None,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+    deps_id: Option<&bsl_analysis_v2::DepsSnapshotId>,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
         file_path,
         member_access_owner_type_hints,
         include_flow_sensitive,
+        deps_id: deps_id.cloned(),
+        settings_id: settings_id.cloned(),
     };
 
     get_completion_with_analysis(
@@ -753,12 +907,48 @@ pub async fn get_completion_with_trigger_hint_and_owner_hints_without_ir(
     include_flow_sensitive: bool,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
+    get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        member_access_owner_type_hints,
+        include_flow_sensitive,
+        None,
+        None,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+    deps_id: Option<&bsl_analysis_v2::DepsSnapshotId>,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: None,
         resolver,
         file_path,
         member_access_owner_type_hints,
         include_flow_sensitive,
+        deps_id: deps_id.cloned(),
+        settings_id: settings_id.cloned(),
     };
 
     get_completion_with_analysis(
@@ -826,6 +1016,8 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
         file_path,
         member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive,
+        deps_id: None,
+        settings_id: None,
     };
 
     get_completion_with_analysis(
@@ -884,6 +1076,7 @@ async fn get_completion_internal(
     let analysis_file_path = evidence.file_path();
     let context =
         analyze_completion_context_with_trigger_hint(file_content, line, column, trigger_char_hint);
+    let prefix_lower = context.current_word.to_lowercase();
     let snapshot_started = Instant::now();
     let snapshot = index.snapshot();
     let snapshot_elapsed = snapshot_started.elapsed();
@@ -976,6 +1169,7 @@ async fn get_completion_internal(
                 line,
                 column,
                 metadata_lookup,
+                &prefix_lower,
                 &mut candidates,
             ),
             #[cfg(test)]
@@ -1102,6 +1296,104 @@ async fn get_completion_internal(
     })
 }
 
+fn get_or_build_immutable_non_member_catalog(
+    key: &ImmutableNonMemberCatalogKey,
+    metadata_lookup: &TypeMetadataLookup,
+) -> Arc<ImmutableNonMemberCatalog> {
+    if let Some(existing) = immutable_non_member_catalog_cache()
+        .lock()
+        .expect("immutable non-member catalog cache lock poisoned")
+        .get(key)
+    {
+        return existing;
+    }
+
+    #[cfg(test)]
+    {
+        let mut counts = immutable_non_member_catalog_build_counts()
+            .lock()
+            .expect("immutable non-member catalog build counts lock poisoned");
+        *counts.entry(key.clone()).or_insert(0) += 1;
+    }
+    let built = Arc::new(build_immutable_non_member_catalog(metadata_lookup));
+
+    let mut cache = immutable_non_member_catalog_cache()
+        .lock()
+        .expect("immutable non-member catalog cache lock poisoned");
+    if let Some(existing) = cache.get(key) {
+        return existing;
+    }
+    cache.insert(key.clone(), built.clone());
+    built
+}
+
+fn build_immutable_non_member_catalog(
+    metadata_lookup: &TypeMetadataLookup,
+) -> ImmutableNonMemberCatalog {
+    let mut global_functions = Vec::new();
+    add_global_functions_from_lookup(metadata_lookup, &mut global_functions, 1);
+
+    let mut metadata_items = Vec::new();
+    add_all_metadata_items_from_lookup(metadata_lookup, &mut metadata_items, 2);
+
+    let mut repository_types = Vec::new();
+    add_repository_types_from_lookup(metadata_lookup, &mut repository_types, 3);
+
+    let mut keywords = Vec::new();
+    add_default_keywords(&mut keywords, 4);
+
+    ImmutableNonMemberCatalog {
+        global_functions: global_functions
+            .into_iter()
+            .map(ImmutableCandidateTemplate::from_candidate)
+            .collect(),
+        metadata_items: metadata_items
+            .into_iter()
+            .map(ImmutableCandidateTemplate::from_candidate)
+            .collect(),
+        repository_types: repository_types
+            .into_iter()
+            .map(ImmutableCandidateTemplate::from_candidate)
+            .collect(),
+        keywords: keywords
+            .into_iter()
+            .map(ImmutableCandidateTemplate::from_candidate)
+            .collect(),
+    }
+}
+
+fn add_matching_immutable_candidates(
+    templates: &[ImmutableCandidateTemplate],
+    prefix_lower: &str,
+    target: &mut Vec<Candidate>,
+) {
+    for template in templates {
+        if !prefix_lower.is_empty()
+            && match_prefix(&template.label_lower, prefix_lower) == PrefixMatch::None
+        {
+            continue;
+        }
+        target.push(template.materialize());
+    }
+}
+
+#[cfg(test)]
+fn immutable_non_member_catalog_build_count_for_tests(
+    deps_id: &bsl_analysis_v2::DepsSnapshotId,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+) -> u64 {
+    let key = ImmutableNonMemberCatalogKey {
+        deps_id: deps_id.clone(),
+        settings_id: settings_id.cloned(),
+    };
+    immutable_non_member_catalog_build_counts()
+        .lock()
+        .expect("immutable non-member catalog build counts lock poisoned")
+        .get(&key)
+        .copied()
+        .unwrap_or(0)
+}
+
 fn collect_member_access_candidates(
     analysis: &CompletionAnalysisContext<'_>,
     file_content: &str,
@@ -1142,6 +1434,7 @@ fn collect_non_member_candidates(
     line: u32,
     column: u32,
     metadata_lookup: &TypeMetadataLookup,
+    prefix_lower: &str,
     candidates: &mut Vec<Candidate>,
 ) -> CompletionCollectBreakdown {
     let mut breakdown = CompletionCollectBreakdown::default();
@@ -1158,20 +1451,40 @@ fn collect_non_member_candidates(
     add_module_routines_from_ir(Some(analysis), file_content, line, column, candidates, 1);
     breakdown.non_member_module_routines = module_routines_started.elapsed();
 
+    let immutable_catalog = analysis
+        .immutable_non_member_catalog_key()
+        .map(|key| get_or_build_immutable_non_member_catalog(&key, metadata_lookup));
+
     let global_functions_started = Instant::now();
-    add_global_functions_from_lookup(metadata_lookup, candidates, 1);
+    if let Some(catalog) = immutable_catalog.as_ref() {
+        add_matching_immutable_candidates(&catalog.global_functions, prefix_lower, candidates);
+    } else {
+        add_global_functions_from_lookup(metadata_lookup, candidates, 1);
+    }
     breakdown.non_member_global_functions = global_functions_started.elapsed();
 
     let metadata_items_started = Instant::now();
-    add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+    if let Some(catalog) = immutable_catalog.as_ref() {
+        add_matching_immutable_candidates(&catalog.metadata_items, prefix_lower, candidates);
+    } else {
+        add_all_metadata_items_from_lookup(metadata_lookup, candidates, 2);
+    }
     breakdown.non_member_metadata_items = metadata_items_started.elapsed();
 
     let repository_types_started = Instant::now();
-    add_repository_types_from_lookup(metadata_lookup, candidates, 3);
+    if let Some(catalog) = immutable_catalog.as_ref() {
+        add_matching_immutable_candidates(&catalog.repository_types, prefix_lower, candidates);
+    } else {
+        add_repository_types_from_lookup(metadata_lookup, candidates, 3);
+    }
     breakdown.non_member_repository_types = repository_types_started.elapsed();
 
     let keywords_started = Instant::now();
-    add_default_keywords(candidates, 4);
+    if let Some(catalog) = immutable_catalog.as_ref() {
+        add_matching_immutable_candidates(&catalog.keywords, prefix_lower, candidates);
+    } else {
+        add_default_keywords(candidates, 4);
+    }
     breakdown.non_member_keywords = keywords_started.elapsed();
 
     breakdown

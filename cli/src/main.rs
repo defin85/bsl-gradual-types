@@ -18,7 +18,7 @@ use std::time::Instant;
 use args::{CacheCommand, CliArgs, CliOutputFormat, Commands};
 use bsl_backend::application::{
     completion_member_access_owner_type_hints_from_analysis,
-    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints,
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids,
     SemanticOperation,
 };
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeResolution};
@@ -589,7 +589,7 @@ async fn collect_cli_completion_items(
 
     let owner_hints = cli_completion_owner_hints(expression, &inline, &prepared);
     let completions =
-        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
             inline.file_text.as_ref(),
             inline.line,
             inline.cursor_column,
@@ -601,6 +601,8 @@ async fn collect_cli_completion_items(
             ir_program,
             owner_hints,
             false,
+            prepared.context.expected_deps_id.as_ref(),
+            Some(&prepared.context.settings.settings_id),
             trigger_char_hint,
         )
         .await
@@ -732,7 +734,7 @@ mod tests {
         );
 
         let completions =
-            get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints(
+            get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
                 inline.file_text.as_ref(),
                 inline.line,
                 inline.cursor_column,
@@ -744,6 +746,8 @@ mod tests {
                 ir_program,
                 owner_hints,
                 false,
+                prepared.context.expected_deps_id.as_ref(),
+                Some(&prepared.context.settings.settings_id),
                 Some('.'),
             )
             .await

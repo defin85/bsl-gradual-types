@@ -31,6 +31,9 @@ struct SaveFollowupReadyArtifactsReply {
     syntax_elapsed: Option<Duration>,
     semantic_elapsed: Option<Duration>,
     syntax_work_mode: Option<&'static str>,
+    semantic_path: Option<&'static str>,
+    semantic_parse_source: Option<&'static str>,
+    semantic_ir_source: Option<&'static str>,
 }
 
 enum DidSaveFollowupAdmissionOutcome {
@@ -270,6 +273,9 @@ impl BslLanguageServer {
                 None,
                 None,
                 None,
+                None,
+                None,
+                None,
             );
 
             tokio::select! {
@@ -319,6 +325,9 @@ impl BslLanguageServer {
         semantic_diagnostics_query_ms: Option<Duration>,
         publish_wait_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
+        semantic_path: Option<&'static str>,
+        semantic_parse_source: Option<&'static str>,
+        semantic_ir_source: Option<&'static str>,
         pipeline_started: Instant,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
         if !matches!(
@@ -337,6 +346,9 @@ impl BslLanguageServer {
             || runtime_queue_wait_ms.is_some()
             || apply_lag_ms.is_some()
             || syntax_work_mode.is_some()
+            || semantic_path.is_some()
+            || semantic_parse_source.is_some()
+            || semantic_ir_source.is_some()
             || blocking_queue_wait_ms.is_some()
             || wait_for_file_version_ms.is_some()
             || snapshot_with_deps_ms.is_some()
@@ -349,6 +361,9 @@ impl BslLanguageServer {
             outcome: disposition.as_str().to_string(),
             elapsed_ms: pipeline_started.elapsed().as_millis().min(u64::MAX as u128) as u64,
             syntax_work_mode: syntax_work_mode.map(str::to_string),
+            semantic_path: semantic_path.map(str::to_string),
+            semantic_parse_source: semantic_parse_source.map(str::to_string),
+            semantic_ir_source: semantic_ir_source.map(str::to_string),
             runtime_queue_wait_ms,
             apply_lag_ms,
             blocking_queue_wait_ms: blocking_queue_wait_ms
@@ -853,6 +868,9 @@ impl BslLanguageServer {
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
+        semantic_path: Option<&'static str>,
+        semantic_parse_source: Option<&'static str>,
+        semantic_ir_source: Option<&'static str>,
     ) {
         let Some(cycle_key) =
             Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
@@ -868,6 +886,9 @@ impl BslLanguageServer {
             wait_for_file_version_ms,
             snapshot_with_deps_ms,
             syntax_work_mode,
+            semantic_path,
+            semantic_parse_source,
+            semantic_ir_source,
         );
     }
 
@@ -1011,6 +1032,7 @@ impl BslLanguageServer {
         let context_for_blocking = context.clone();
         let path_for_blocking: Arc<str> = Arc::from(path);
         let syntax_work_mode = Some("reused");
+        let semantic_path = Some("shadow_state");
         self.record_diagnostics_save_followup_wait_state_v2(
             uri,
             supersession_key,
@@ -1020,6 +1042,9 @@ impl BslLanguageServer {
             None,
             None,
             syntax_work_mode,
+            semantic_path,
+            None,
+            None,
         );
         let queued_wait_server = self.clone();
         let queued_wait_uri = uri.clone();
@@ -1048,6 +1073,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         queued_wait_syntax_work_mode,
+                        semantic_path,
+                        None,
+                        None,
                     );
                 }),
                 Some(move |queue_wait_elapsed| {
@@ -1060,6 +1088,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         exec_started_syntax_work_mode,
+                        semantic_path,
+                        None,
+                        None,
                     );
                 }),
                 move || {
@@ -1099,6 +1130,8 @@ impl BslLanguageServer {
                     ));
 
                     let semantic_started = Instant::now();
+                    let mut semantic_parse_source = None;
+                    let mut semantic_ir_source = None;
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
                         &context_for_blocking,
                         bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
@@ -1127,6 +1160,10 @@ impl BslLanguageServer {
                                     duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
                                 }),
                             );
+                        semantic_parse_source =
+                            profiled.profile.parse_source.map(|source| source.as_str());
+                        semantic_ir_source =
+                            profiled.profile.ir_source.map(|source| source.as_str());
                         for error in profiled.diagnostics.iter() {
                             if !show_hints
                                 && matches!(
@@ -1153,6 +1190,9 @@ impl BslLanguageServer {
                         syntax_elapsed: None,
                         semantic_elapsed: Some(semantic_elapsed),
                         syntax_work_mode,
+                        semantic_path,
+                        semantic_parse_source,
+                        semantic_ir_source,
                     })
                 },
             )
@@ -1190,6 +1230,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        semantic_path,
+                        None,
+                        None,
                         pipeline_started,
                     )
                     .await,
@@ -1225,6 +1268,9 @@ impl BslLanguageServer {
                     reply.semantic_elapsed,
                     None,
                     reply.syntax_work_mode,
+                    reply.semantic_path,
+                    reply.semantic_parse_source,
+                    reply.semantic_ir_source,
                     pipeline_started,
                 )
                 .await,
@@ -1240,6 +1286,9 @@ impl BslLanguageServer {
             None,
             None,
             reply.syntax_work_mode,
+            reply.semantic_path,
+            reply.semantic_parse_source,
+            reply.semantic_ir_source,
         );
         if let Some(guard) = followup_lane_guard {
             guard.release();
@@ -1271,6 +1320,9 @@ impl BslLanguageServer {
                 reply.semantic_elapsed,
                 Some(publish_started.elapsed()),
                 reply.syntax_work_mode,
+                reply.semantic_path,
+                reply.semantic_parse_source,
+                reply.semantic_ir_source,
                 pipeline_started,
             )
             .await,
@@ -1283,6 +1335,7 @@ impl BslLanguageServer {
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         trigger: bsl_runtime::application::DiagnosticsTrigger,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        wait_budget: Duration,
         pipeline_started: Instant,
         show_hints: bool,
         flow_sensitive_semantic: bool,
@@ -1302,7 +1355,7 @@ impl BslLanguageServer {
             .wait_for_ready_parse_snapshot_state_for_version_v2(
                 supersession_key,
                 cancel_token,
-                SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+                wait_budget,
             )
             .await?;
         let apply_lag = self
@@ -1336,6 +1389,7 @@ impl BslLanguageServer {
         let diagnostics_detail_level = context.settings.diagnostics_detail_level;
         let context_for_blocking = context.clone();
         let path_for_blocking: Arc<str> = Arc::from(path);
+        let semantic_path = Some("ready_artifacts");
         self.record_diagnostics_save_followup_wait_state_v2(
             uri,
             supersession_key,
@@ -1345,6 +1399,9 @@ impl BslLanguageServer {
             None,
             None,
             Some("reused"),
+            semantic_path,
+            None,
+            None,
         );
         let queued_wait_server = self.clone();
         let queued_wait_uri = uri.clone();
@@ -1370,6 +1427,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         Some("reused"),
+                        semantic_path,
+                        None,
+                        None,
                     );
                 }),
                 Some(move |queue_wait_elapsed| {
@@ -1382,6 +1442,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         Some("reused"),
+                        semantic_path,
+                        None,
+                        None,
                     );
                 }),
                 move || {
@@ -1415,6 +1478,8 @@ impl BslLanguageServer {
                     ));
 
                     let semantic_started = Instant::now();
+                    let mut semantic_parse_source = None;
+                    let mut semantic_ir_source = None;
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
                         &context_for_blocking,
                         bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
@@ -1443,6 +1508,10 @@ impl BslLanguageServer {
                                     duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
                                 }),
                             );
+                        semantic_parse_source =
+                            profiled.profile.parse_source.map(|source| source.as_str());
+                        semantic_ir_source =
+                            profiled.profile.ir_source.map(|source| source.as_str());
                         for error in profiled.diagnostics.iter() {
                             if !show_hints
                                 && matches!(
@@ -1469,6 +1538,9 @@ impl BslLanguageServer {
                         syntax_elapsed: None,
                         semantic_elapsed: Some(semantic_elapsed),
                         syntax_work_mode: Some("reused"),
+                        semantic_path,
+                        semantic_parse_source,
+                        semantic_ir_source,
                     })
                 },
             )
@@ -1506,6 +1578,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        semantic_path,
+                        None,
+                        None,
                         pipeline_started,
                     )
                     .await,
@@ -1541,6 +1616,9 @@ impl BslLanguageServer {
                     reply.semantic_elapsed,
                     None,
                     reply.syntax_work_mode,
+                    reply.semantic_path,
+                    reply.semantic_parse_source,
+                    reply.semantic_ir_source,
                     pipeline_started,
                 )
                 .await,
@@ -1556,6 +1634,9 @@ impl BslLanguageServer {
             None,
             None,
             reply.syntax_work_mode,
+            reply.semantic_path,
+            reply.semantic_parse_source,
+            reply.semantic_ir_source,
         );
         if let Some(guard) = followup_lane_guard {
             guard.release();
@@ -1587,6 +1668,9 @@ impl BslLanguageServer {
                 reply.semantic_elapsed,
                 Some(publish_started.elapsed()),
                 reply.syntax_work_mode,
+                reply.semantic_path,
+                reply.semantic_parse_source,
+                reply.semantic_ir_source,
                 pipeline_started,
             )
             .await,
@@ -1663,6 +1747,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
+                        None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -1684,6 +1771,9 @@ impl BslLanguageServer {
                         blocking_queue_wait_elapsed,
                         wait_for_file_version_elapsed,
                         snapshot_with_deps_elapsed,
+                        None,
+                        None,
+                        None,
                         None,
                         None,
                         None,
@@ -1755,6 +1845,9 @@ impl BslLanguageServer {
                             None,
                             None,
                             Some("recomputed"),
+                            None,
+                            None,
+                            None,
                             pipeline_started,
                         )
                         .await;
@@ -1797,6 +1890,9 @@ impl BslLanguageServer {
                             None,
                             None,
                             None,
+                            None,
+                            None,
+                            None,
                             pipeline_started,
                         )
                         .await;
@@ -1834,6 +1930,9 @@ impl BslLanguageServer {
                     None,
                     None,
                     Some("recomputed"),
+                    None,
+                    None,
+                    None,
                     pipeline_started,
                 )
                 .await;
@@ -1865,6 +1964,9 @@ impl BslLanguageServer {
             None,
             Some(publish_started.elapsed()),
             Some("recomputed"),
+            None,
+            None,
+            None,
             pipeline_started,
         )
         .await
@@ -2160,6 +2262,9 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
+                    None,
+                    None,
+                    None,
                     pipeline_started,
                 )
                 .await;
@@ -2178,6 +2283,9 @@ impl BslLanguageServer {
                 uri,
                 &supersession_key,
                 "pending_publish",
+                None,
+                None,
+                None,
                 None,
                 None,
                 None,
@@ -2225,6 +2333,9 @@ impl BslLanguageServer {
                             None,
                             None,
                             None,
+                            None,
+                            None,
+                            None,
                             pipeline_started,
                         )
                         .await;
@@ -2239,6 +2350,22 @@ impl BslLanguageServer {
                     .is_some();
 
             if save_fastlane_first_publish_completed {
+                if let Some(disposition) = self
+                    .try_execute_save_followup_from_ready_artifacts_v2(
+                        uri,
+                        &supersession_key,
+                        trigger,
+                        cancel_token,
+                        Duration::ZERO,
+                        pipeline_started,
+                        show_hints,
+                        plan.flow_sensitive_semantic,
+                        did_save_followup_lane_guard.as_ref(),
+                    )
+                    .await
+                {
+                    return disposition;
+                }
                 if let Some(disposition) = self
                     .try_execute_save_followup_from_shadow_state_v2(
                         uri,
@@ -2260,6 +2387,7 @@ impl BslLanguageServer {
                         &supersession_key,
                         trigger,
                         cancel_token,
+                        SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
                         pipeline_started,
                         show_hints,
                         plan.flow_sensitive_semantic,
@@ -2286,6 +2414,9 @@ impl BslLanguageServer {
                 followup_admission_queue_wait_elapsed,
                 apply_lag,
                 None,
+                None,
+                None,
+                Some("generic_pipeline"),
                 None,
                 None,
             );
@@ -2362,6 +2493,9 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
+                        None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -2412,6 +2546,13 @@ impl BslLanguageServer {
             } else {
                 None
             };
+        let followup_semantic_path = if save_followup_from_did_save && run_semantic {
+            Some("generic_pipeline")
+        } else {
+            None
+        };
+        let mut followup_semantic_parse_source: Option<&'static str> = None;
+        let mut followup_semantic_ir_source: Option<&'static str> = None;
         if save_followup_from_did_save && run_semantic {
             self.record_diagnostics_save_followup_wait_state_v2(
                 uri,
@@ -2422,6 +2563,9 @@ impl BslLanguageServer {
                 Some(wait_elapsed),
                 Some(snapshot_elapsed),
                 followup_syntax_work_mode,
+                followup_semantic_path,
+                None,
+                None,
             );
         }
         if wait_elapsed > Duration::ZERO {
@@ -2546,6 +2690,9 @@ impl BslLanguageServer {
                             Some(wait_elapsed),
                             Some(snapshot_elapsed),
                             queued_wait_syntax_work_mode,
+                            followup_semantic_path,
+                            None,
+                            None,
                         );
                     })
                 } else {
@@ -2571,6 +2718,9 @@ impl BslLanguageServer {
                             Some(wait_elapsed),
                             Some(snapshot_elapsed),
                             exec_started_syntax_work_mode,
+                            followup_semantic_path,
+                            None,
+                            None,
                         );
                     })
                 } else {
@@ -2698,6 +2848,9 @@ impl BslLanguageServer {
                     semantic_stage_elapsed,
                     None,
                     None,
+                    followup_semantic_path,
+                    followup_semantic_parse_source,
+                    followup_semantic_ir_source,
                     pipeline_started,
                 )
                 .await;
@@ -2732,6 +2885,9 @@ impl BslLanguageServer {
                         semantic_stage_elapsed,
                         None,
                         followup_syntax_work_mode,
+                        followup_semantic_path,
+                        followup_semantic_parse_source,
+                        followup_semantic_ir_source,
                         pipeline_started,
                     )
                     .await;
@@ -2763,6 +2919,9 @@ impl BslLanguageServer {
                         Some(wait_elapsed),
                         Some(snapshot_elapsed),
                         queued_wait_syntax_work_mode,
+                        followup_semantic_path,
+                        None,
+                        None,
                     );
                 })
             } else {
@@ -2788,6 +2947,9 @@ impl BslLanguageServer {
                         Some(wait_elapsed),
                         Some(snapshot_elapsed),
                         exec_started_syntax_work_mode,
+                        followup_semantic_path,
+                        None,
+                        None,
                     );
                 })
             } else {
@@ -2848,10 +3010,16 @@ impl BslLanguageServer {
                                     diagnostics.push(semantic_error_to_diagnostic(error, text, index));
                                 }
                             }
-                            (diagnostics, false, elapsed)
+                            (
+                                diagnostics,
+                                false,
+                                elapsed,
+                                profiled.profile.parse_source.map(|source| source.as_str()),
+                                profiled.profile.ir_source.map(|source| source.as_str()),
+                            )
                         }
-                        Ok(None) => (Vec::new(), false, elapsed),
-                        Err(_) => (Vec::new(), true, elapsed),
+                        Ok(None) => (Vec::new(), false, elapsed, None, None),
+                        Err(_) => (Vec::new(), true, elapsed, None, None),
                     }
                 },
             )
@@ -2867,10 +3035,18 @@ impl BslLanguageServer {
                 ]);
             }
             match semantic_call.join_result {
-                Ok((semantic_diagnostics, semantic_cancelled, semantic_elapsed)) => {
+                Ok((
+                    semantic_diagnostics,
+                    semantic_cancelled,
+                    semantic_elapsed,
+                    semantic_parse_source,
+                    semantic_ir_source,
+                )) => {
                     diagnostics.extend(semantic_diagnostics);
                     was_cancelled |= semantic_cancelled;
                     semantic_stage_elapsed = Some(semantic_elapsed);
+                    followup_semantic_parse_source = semantic_parse_source;
+                    followup_semantic_ir_source = semantic_ir_source;
                     if let Some(threshold) =
                         super::super::intellisense_v2_slow_query_warn_threshold()
                     {
@@ -2989,6 +3165,9 @@ impl BslLanguageServer {
                     semantic_stage_elapsed,
                     None,
                     followup_syntax_work_mode,
+                    followup_semantic_path,
+                    followup_semantic_parse_source,
+                    followup_semantic_ir_source,
                     pipeline_started,
                 )
                 .await;
@@ -3033,6 +3212,9 @@ impl BslLanguageServer {
                     semantic_stage_elapsed,
                     None,
                     followup_syntax_work_mode,
+                    followup_semantic_path,
+                    followup_semantic_parse_source,
+                    followup_semantic_ir_source,
                     pipeline_started,
                 )
                 .await;
@@ -3062,6 +3244,9 @@ impl BslLanguageServer {
                 Some(wait_elapsed),
                 Some(snapshot_elapsed),
                 followup_syntax_work_mode,
+                followup_semantic_path,
+                followup_semantic_parse_source,
+                followup_semantic_ir_source,
             );
         }
         let publish_kind = if run_semantic { "full" } else { "syntax_only" };
@@ -3094,6 +3279,9 @@ impl BslLanguageServer {
             semantic_stage_elapsed,
             Some(publish_started.elapsed()),
             followup_syntax_work_mode,
+            followup_semantic_path,
+            followup_semantic_parse_source,
+            followup_semantic_ir_source,
             pipeline_started,
         )
         .await

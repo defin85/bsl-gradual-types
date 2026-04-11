@@ -414,6 +414,7 @@ fn build_pre_dispatch_terminal_completion_trace(
         total_duration_ms: queued_before_dispatch_ms,
         dominant_stage: Some("queued_before_dispatch".to_string()),
         prepare_details: None,
+        collect_breakdown: None,
         server_edge_details: None,
         turn_attribution: None,
         stages: vec![
@@ -700,6 +701,9 @@ impl BslLanguageServer {
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
@@ -742,6 +746,9 @@ impl BslLanguageServer {
                     save_fastlane_outcome: None,
                     idle_heavy_outcome: None,
                     followup_syntax_work_mode: None,
+                    followup_semantic_path: None,
+                    followup_semantic_parse_source: None,
+                    followup_semantic_ir_source: None,
                     followup_wait_reason: None,
                     followup_runtime_queue_wait_ms: None,
                     followup_apply_lag_ms: None,
@@ -767,6 +774,16 @@ impl BslLanguageServer {
                     bsl_runtime::application::DiagnosticsProfile::IdleHeavy
                 ) {
                     trace.followup_syntax_work_mode = publish.syntax_work_mode.clone();
+                    if publish.semantic_path.is_some() {
+                        trace.followup_semantic_path = publish.semantic_path.clone();
+                    }
+                    if publish.semantic_parse_source.is_some() {
+                        trace.followup_semantic_parse_source =
+                            publish.semantic_parse_source.clone();
+                    }
+                    if publish.semantic_ir_source.is_some() {
+                        trace.followup_semantic_ir_source = publish.semantic_ir_source.clone();
+                    }
                     update_followup_timing_max(
                         &mut trace.followup_runtime_queue_wait_ms,
                         publish.runtime_queue_wait_ms,
@@ -830,6 +847,9 @@ impl BslLanguageServer {
         wait_for_file_version_ms: Option<Duration>,
         snapshot_with_deps_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
+        semantic_path: Option<&'static str>,
+        semantic_parse_source: Option<&'static str>,
+        semantic_ir_source: Option<&'static str>,
     ) {
         let mut store = self
             .diagnostics_save_timeline_store
@@ -856,6 +876,9 @@ impl BslLanguageServer {
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
@@ -866,6 +889,15 @@ impl BslLanguageServer {
         });
         if let Some(syntax_work_mode) = syntax_work_mode {
             trace.followup_syntax_work_mode = Some(syntax_work_mode.to_string());
+        }
+        if let Some(semantic_path) = semantic_path {
+            trace.followup_semantic_path = Some(semantic_path.to_string());
+        }
+        if let Some(semantic_parse_source) = semantic_parse_source {
+            trace.followup_semantic_parse_source = Some(semantic_parse_source.to_string());
+        }
+        if let Some(semantic_ir_source) = semantic_ir_source {
+            trace.followup_semantic_ir_source = Some(semantic_ir_source.to_string());
         }
         trace.followup_wait_reason = Some(reason.to_string());
         update_followup_timing_max(

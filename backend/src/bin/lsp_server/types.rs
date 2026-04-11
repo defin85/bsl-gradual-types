@@ -281,6 +281,21 @@ pub struct CompletionTimelinePrepareDetailsTrace {
     pub exact_wait: Option<CompletionTimelineExactWaitDetailsTrace>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompletionTimelineCollectBreakdownTrace {
+    pub member_owner_resolve_ms: u64,
+    pub member_methods_ms: u64,
+    pub member_properties_ms: u64,
+    pub member_metadata_ms: u64,
+    pub non_member_local_symbols_ms: u64,
+    pub non_member_contextual_symbols_ms: u64,
+    pub non_member_module_routines_ms: u64,
+    pub non_member_global_functions_ms: u64,
+    pub non_member_metadata_items_ms: u64,
+    pub non_member_repository_types_ms: u64,
+    pub non_member_keywords_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -391,6 +406,8 @@ pub struct CompletionTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prepare_details: Option<CompletionTimelinePrepareDetailsTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub collect_breakdown: Option<CompletionTimelineCollectBreakdownTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub server_edge_details: Option<CompletionTimelineServerEdgeDetailsTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_attribution: Option<CompletionTimelineTurnAttributionTrace>,
@@ -418,6 +435,12 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     pub elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub syntax_work_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_parse_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_ir_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_queue_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -455,6 +478,12 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub idle_heavy_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_syntax_work_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_semantic_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_semantic_parse_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_semantic_ir_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_wait_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

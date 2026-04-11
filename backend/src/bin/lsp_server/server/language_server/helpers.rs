@@ -845,8 +845,8 @@ pub(super) async fn completion_checkpoint_outcome_if_enabled(
 pub(super) async fn resolve_completion_without_ir(
     _server: &BslLanguageServer,
     _file_id: bsl_analysis_v2::FileId,
-    _observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
-    _observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
+    observed_deps_id: bsl_analysis_v2::DepsSnapshotId,
+    observed_settings_id: Option<bsl_analysis_v2::SettingsId>,
     _observed_file_version: Option<i32>,
     _member_access_context: bool,
     file_content: Arc<str>,
@@ -868,7 +868,7 @@ pub(super) async fn resolve_completion_without_ir(
         return ("ok_empty", Some(completion_empty_response(false)));
     }
 
-    match crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+    match crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot_ids(
         file_content,
         file_path,
         None,
@@ -879,6 +879,8 @@ pub(super) async fn resolve_completion_without_ir(
         index_snapshot,
         snippet_support,
         include_flow_sensitive,
+        Some(&observed_deps_id),
+        observed_settings_id.as_ref(),
         trigger_char_hint,
     )
     .await

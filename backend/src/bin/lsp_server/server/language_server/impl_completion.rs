@@ -338,6 +338,7 @@ struct CompletionTimelineCapture {
     cancel_observed_at_ms: Option<u64>,
     timeline_cursor_ms: u64,
     prepare_details: Option<crate::types::CompletionTimelinePrepareDetailsTrace>,
+    collect_breakdown: Option<crate::types::CompletionTimelineCollectBreakdownTrace>,
     turn_attribution: Option<crate::types::CompletionTimelineTurnAttributionTrace>,
     stages: Vec<crate::types::CompletionTimelineStageTrace>,
 }
@@ -431,6 +432,7 @@ impl CompletionTimelineCapture {
             cancel_observed_at_ms: None,
             timeline_cursor_ms: 0,
             prepare_details: None,
+            collect_breakdown: None,
             turn_attribution: None,
             stages: Vec::new(),
         }
@@ -1007,6 +1009,35 @@ impl CompletionTimelineCapture {
             });
     }
 
+    fn set_collect_breakdown(
+        &mut self,
+        breakdown: &bsl_runtime::application::CompletionCollectBreakdown,
+    ) {
+        self.collect_breakdown = Some(crate::types::CompletionTimelineCollectBreakdownTrace {
+            member_owner_resolve_ms: Self::duration_to_ms(breakdown.member_owner_resolve),
+            member_methods_ms: Self::duration_to_ms(breakdown.member_methods),
+            member_properties_ms: Self::duration_to_ms(breakdown.member_properties),
+            member_metadata_ms: Self::duration_to_ms(breakdown.member_metadata),
+            non_member_local_symbols_ms: Self::duration_to_ms(breakdown.non_member_local_symbols),
+            non_member_contextual_symbols_ms: Self::duration_to_ms(
+                breakdown.non_member_contextual_symbols,
+            ),
+            non_member_module_routines_ms: Self::duration_to_ms(
+                breakdown.non_member_module_routines,
+            ),
+            non_member_global_functions_ms: Self::duration_to_ms(
+                breakdown.non_member_global_functions,
+            ),
+            non_member_metadata_items_ms: Self::duration_to_ms(
+                breakdown.non_member_metadata_items,
+            ),
+            non_member_repository_types_ms: Self::duration_to_ms(
+                breakdown.non_member_repository_types,
+            ),
+            non_member_keywords_ms: Self::duration_to_ms(breakdown.non_member_keywords),
+        });
+    }
+
     fn into_trace(
         self,
         trace_id: String,
@@ -1040,6 +1071,7 @@ impl CompletionTimelineCapture {
             total_duration_ms,
             dominant_stage,
             prepare_details: self.prepare_details,
+            collect_breakdown: self.collect_breakdown,
             server_edge_details,
             turn_attribution: self.turn_attribution,
             stages: self.stages,
@@ -3528,7 +3560,7 @@ impl BslLanguageServer {
                         maybe_inject_response_build_delay_for_test().await;
                         match (file_content, file_path, deps, ir_program) {
                             (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot_ids(
                                     file_content,
                                     file_path,
                                     Some(ir_program),
@@ -3539,6 +3571,8 @@ impl BslLanguageServer {
                                     index_snapshot.as_ref(),
                                     snippet_support,
                                     include_flow_sensitive,
+                                    Some(&observed_deps_id),
+                                    observed_settings_id.as_ref(),
                                     trigger_char_hint,
                                 )
                                 .await
@@ -3547,7 +3581,7 @@ impl BslLanguageServer {
                                 if member_access_context
                                     && !member_access_owner_type_hints.is_empty() =>
                             {
-                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints(
+                                crate::handlers::handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot_ids(
                                     file_content,
                                     file_path,
                                     None,
@@ -3558,6 +3592,8 @@ impl BslLanguageServer {
                                     index_snapshot.as_ref(),
                                     snippet_support,
                                     include_flow_sensitive,
+                                    Some(&observed_deps_id),
+                                    observed_settings_id.as_ref(),
                                     trigger_char_hint,
                                 )
                                 .await
@@ -3691,6 +3727,12 @@ impl BslLanguageServer {
                             resolve_context_attach: resolve_context_attach_elapsed,
                         }
                     });
+                    if let Some(stats) = completion_response
+                        .as_ref()
+                        .and_then(|response| response.stats.as_ref())
+                    {
+                        timeline_capture.set_collect_breakdown(&stats.collect_breakdown);
+                    }
                     timeline_capture.push_response_build_stage(
                         response_build_elapsed,
                         response_build_breakdown,
@@ -4431,6 +4473,37 @@ mod tests {
         assert_eq!(capture.stages.len(), 1);
         assert_eq!(capture.stages[0].name, "response_build");
         assert_eq!(capture.stages[0].duration_ms, 3);
+    }
+
+    #[test]
+    fn collect_breakdown_is_embedded_into_completion_timeline_trace() {
+        let mut capture = sample_capture();
+        capture.set_collect_breakdown(&bsl_runtime::application::CompletionCollectBreakdown {
+            non_member_local_symbols: std::time::Duration::from_millis(1),
+            non_member_contextual_symbols: std::time::Duration::from_millis(2),
+            non_member_module_routines: std::time::Duration::from_millis(3),
+            non_member_global_functions: std::time::Duration::from_millis(4),
+            non_member_metadata_items: std::time::Duration::from_millis(5),
+            non_member_repository_types: std::time::Duration::from_millis(6),
+            non_member_keywords: std::time::Duration::from_millis(7),
+            ..Default::default()
+        });
+
+        let trace = capture.into_trace(
+            "trace-collect-breakdown".to_string(),
+            std::time::Duration::from_millis(12),
+            "ok_non_empty",
+        );
+        let collect_breakdown = trace
+            .collect_breakdown
+            .expect("collect_breakdown must be present");
+        assert_eq!(collect_breakdown.non_member_local_symbols_ms, 1);
+        assert_eq!(collect_breakdown.non_member_contextual_symbols_ms, 2);
+        assert_eq!(collect_breakdown.non_member_module_routines_ms, 3);
+        assert_eq!(collect_breakdown.non_member_global_functions_ms, 4);
+        assert_eq!(collect_breakdown.non_member_metadata_items_ms, 5);
+        assert_eq!(collect_breakdown.non_member_repository_types_ms, 6);
+        assert_eq!(collect_breakdown.non_member_keywords_ms, 7);
     }
 
     #[test]

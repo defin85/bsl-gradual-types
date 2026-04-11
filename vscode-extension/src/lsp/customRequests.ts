@@ -736,6 +736,9 @@ export interface DiagnosticsSaveTimelinePublishTrace {
     outcome: string;
     elapsed_ms: number;
     syntax_work_mode?: 'reused' | 'recomputed';
+    semantic_path?: 'ready_artifacts' | 'shadow_state' | 'generic_pipeline';
+    semantic_parse_source?: 'snapshot' | 'salsa';
+    semantic_ir_source?: 'exact_cache' | 'snapshot_build' | 'salsa';
     runtime_queue_wait_ms?: number;
     apply_lag_ms?: number;
     blocking_queue_wait_ms?: number;
@@ -759,6 +762,9 @@ export interface DiagnosticsSaveTimelineTrace {
     save_fastlane_outcome?: string;
     idle_heavy_outcome?: string;
     followup_syntax_work_mode?: 'reused' | 'recomputed';
+    followup_semantic_path?: 'ready_artifacts' | 'shadow_state' | 'generic_pipeline';
+    followup_semantic_parse_source?: 'snapshot' | 'salsa';
+    followup_semantic_ir_source?: 'exact_cache' | 'snapshot_build' | 'salsa';
     followup_wait_reason?: 'apply_lag' | 'runtime_queue_wait' | 'semantic_work' | 'pending_publish' | 'superseded';
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;

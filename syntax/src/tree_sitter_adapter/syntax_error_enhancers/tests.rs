@@ -52,3 +52,27 @@ fn line_cap_prefers_parser_origin_even_if_message_looks_heuristic() {
     assert_eq!(out[0].message, parser_error.message);
     assert_eq!(out[0].error_type, parser_error.error_type);
 }
+
+#[test]
+fn parse_error_try_rewrite_tolerates_non_char_boundary_span() {
+    let source = "Попытка\n    Сообщить(1);\nИсключение\n    Сообщить(2);\n";
+    let line_index = LineIndex::new(source);
+    let parser_error = ParseError {
+        error_type: ErrorType::ParseError,
+        message: "raw parse error".to_string(),
+        span: Span::new(1, source.len() as u32),
+        related: Vec::new(),
+    };
+
+    let out = normalize_syntax_errors(source, &line_index, vec![parser_error], Vec::new());
+
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].error_type, ErrorType::MissingToken);
+    assert!(
+        out[0].message.contains("КонецПопытки"),
+        "expected try rewrite, got: {:?}",
+        out
+    );
+    assert_eq!(out[0].span.start, 0);
+    assert_eq!(out[0].span.end, "Попытка".len() as u32);
+}

@@ -252,6 +252,38 @@ pub struct TypeAtByteOffsetProfiledResult {
     pub serve_reason_code: TypeIndexServeReasonCode,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticDiagnosticsParseSource {
+    Snapshot,
+    Salsa,
+}
+
+impl SemanticDiagnosticsParseSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Snapshot => "snapshot",
+            Self::Salsa => "salsa",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IrArtifactSource {
+    ExactCache,
+    SnapshotBuild,
+    Salsa,
+}
+
+impl IrArtifactSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExactCache => "exact_cache",
+            Self::SnapshotBuild => "snapshot_build",
+            Self::Salsa => "salsa",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct SemanticDiagnosticsProfile {
     pub inputs_ms: u128,
@@ -260,6 +292,8 @@ pub struct SemanticDiagnosticsProfile {
     pub collect_ms: u128,
     pub flow_sensitive_ms: u128,
     pub total_ms: u128,
+    pub parse_source: Option<SemanticDiagnosticsParseSource>,
+    pub ir_source: Option<IrArtifactSource>,
 }
 
 #[derive(Debug, Clone)]
@@ -289,6 +323,7 @@ pub struct IrBuildProfile {
 pub struct IrProfiledResult {
     pub program: Arc<SemanticProgram>,
     pub profile: IrBuildProfile,
+    pub source: Option<IrArtifactSource>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

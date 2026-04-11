@@ -902,6 +902,7 @@ impl AnalysisV2 {
             return Ok(Some(IrProfiledResult {
                 program: cached,
                 profile: IrBuildProfile::default(),
+                source: Some(IrArtifactSource::ExactCache),
             }));
         }
         if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
@@ -924,10 +925,11 @@ impl AnalysisV2 {
                 return Ok(Some(IrProfiledResult {
                     program: reused,
                     profile: IrBuildProfile::default(),
+                    source: Some(IrArtifactSource::ExactCache),
                 }));
             }
             let deps_data = self.deps.data(&self.db).0.clone();
-            let parsed = parse_result(&self.db, file, self.settings).0;
+            let parsed = snapshot.parse_result.clone();
             let file_path = file.path(&self.db);
             tracing::debug!(
                 target: "bsl_backend::analysis_v2",
@@ -938,7 +940,7 @@ impl AnalysisV2 {
                 "ir_profiled: build_ir_from_parsed start"
             );
             let checkpoint = || cancellation_checkpoint(&self.db);
-            let profiled = cancellable(|| {
+            let mut profiled = cancellable(|| {
                 build_ir_from_parsed_profiled_with_checkpoint(
                     parsed,
                     source.as_ref(),
@@ -964,6 +966,7 @@ impl AnalysisV2 {
                 settings_id,
                 profiled.program.clone(),
             );
+            profiled.source = Some(IrArtifactSource::SnapshotBuild);
             return Ok(Some(profiled));
         }
         let ir_started = Instant::now();
@@ -977,6 +980,7 @@ impl AnalysisV2 {
                 total_ms: ir_started.elapsed().as_millis(),
                 ..IrBuildProfile::default()
             },
+            source: Some(IrArtifactSource::Salsa),
         }))
     }
 
@@ -1028,7 +1032,14 @@ impl AnalysisV2 {
         let inputs_ms = inputs_started.elapsed().as_millis();
 
         let parse_started = Instant::now();
-        let parsed = cancellable(|| parse_result(&self.db, file, self.settings).0)?;
+        let parse_source = if self.parse_snapshot_for_file(file_id, file).is_some() {
+            SemanticDiagnosticsParseSource::Snapshot
+        } else {
+            SemanticDiagnosticsParseSource::Salsa
+        };
+        let parsed = self
+            .parse_result(file_id)?
+            .expect("file present for semantic diagnostics parse_result");
         let parse_result_ms = parse_started.elapsed().as_millis();
         if !parsed.syntax_errors.is_empty()
             && !syntax_errors_only_in_directives(
@@ -1042,13 +1053,17 @@ impl AnalysisV2 {
                     inputs_ms,
                     parse_result_ms,
                     total_ms: started.elapsed().as_millis(),
+                    parse_source: Some(parse_source),
                     ..SemanticDiagnosticsProfile::default()
                 },
             }));
         }
 
         let ir_started = Instant::now();
-        let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
+        let ir_profiled = self
+            .ir_profiled(file_id)?
+            .expect("file present for semantic diagnostics ir");
+        let program = ir_profiled.program;
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();
@@ -1066,6 +1081,8 @@ impl AnalysisV2 {
                 collect_ms,
                 flow_sensitive_ms: 0,
                 total_ms: started.elapsed().as_millis(),
+                parse_source: Some(parse_source),
+                ir_source: ir_profiled.source,
             },
         }))
     }
@@ -1097,7 +1114,9 @@ impl AnalysisV2 {
         };
 
         let parse_started = Instant::now();
-        let parsed = cancellable(|| parse_result(&self.db, file, self.settings).0)?;
+        let parsed = self
+            .parse_result(file_id)?
+            .expect("file present for flow-sensitive semantic diagnostics parse_result");
         base.profile.parse_result_ms = base
             .profile
             .parse_result_ms
@@ -1113,11 +1132,17 @@ impl AnalysisV2 {
         }
 
         let ir_started = Instant::now();
-        let program = cancellable(|| ir(&self.db, file, self.deps, self.settings).0)?;
+        let ir_profiled = self
+            .ir_profiled(file_id)?
+            .expect("file present for flow-sensitive semantic diagnostics ir");
+        let program = ir_profiled.program;
         base.profile.ir_ms = base
             .profile
             .ir_ms
             .saturating_add(ir_started.elapsed().as_millis());
+        if base.profile.ir_source.is_none() {
+            base.profile.ir_source = ir_profiled.source;
+        }
 
         let flow_started = Instant::now();
         let deps_data = cancellable(|| self.deps.data(&self.db).0.clone())?;

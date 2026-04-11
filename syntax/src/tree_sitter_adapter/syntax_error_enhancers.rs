@@ -221,14 +221,7 @@ fn rewrite_try_structure(ctx: &Context<'_>, error: &ParseError) -> Option<ParseE
                 msg.contains("EXCEPT_KEYWORD") || msg.contains("ИСКЛЮЧЕНИЕ_KEYWORD");
         }
         ErrorType::ParseError => {
-            let start = (error.span.start as usize).min(ctx.source.len());
-            let end = (error.span.end as usize).min(ctx.source.len());
-            let (start, end) = if start <= end {
-                (start, end)
-            } else {
-                (end, start)
-            };
-            let slice = &ctx.source[start..end];
+            let slice = source_slice_for_span(ctx.source, error.span);
 
             // В `ParseError` мы видим сырой кусок текста. Для безопасности маскируем строки/комментарии
             // перед поиском ключевых слов, чтобы избежать ложных матчей.
@@ -429,6 +422,25 @@ fn origin_rank(origin: Origin) -> u8 {
 
 fn span_len(span: Span) -> u32 {
     span.end.saturating_sub(span.start)
+}
+
+fn source_slice_for_span(source: &str, span: Span) -> &str {
+    let start = (span.start as usize).min(source.len());
+    let end = (span.end as usize).min(source.len());
+    let (mut start, mut end) = if start <= end {
+        (start, end)
+    } else {
+        (end, start)
+    };
+
+    while start > 0 && !source.is_char_boundary(start) {
+        start -= 1;
+    }
+    while end < source.len() && !source.is_char_boundary(end) {
+        end += 1;
+    }
+
+    &source[start..end]
 }
 
 fn error_line_number(ctx: &Context<'_>, error: &ParseError) -> Option<usize> {

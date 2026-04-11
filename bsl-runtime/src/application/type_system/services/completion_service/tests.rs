@@ -1,5 +1,5 @@
 use super::*;
-use crate::system::{IndexItem, SymbolKind, SymbolScope, TypeKind};
+use crate::system::{IndexItem, IndexSnapshot, SymbolKind, SymbolScope, TypeKind};
 use bsl_analysis_v2::{
     AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
 };
@@ -695,6 +695,8 @@ async fn completion_labels_non_member(
         file_path,
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -717,8 +719,122 @@ async fn completion_labels_non_member(
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
+async fn completion_labels_non_member_with_snapshot_ids(
+    content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    file_path: &str,
+    index: &IntellisenseIndexStore,
+    metadata_lookup: &TypeMetadataLookup,
+    resolver: &TypeResolver,
+    ir_program: Arc<bsl_shared::ir::SemanticProgram>,
+    deps_id: &DepsSnapshotId,
+    settings_id: &SettingsId,
+) -> Vec<String> {
+    let snapshot = index.snapshot();
+    let result =
+        get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
+            content,
+            line,
+            column,
+            file_uri,
+            &snapshot,
+            metadata_lookup,
+            file_path,
+            resolver,
+            ir_program,
+            Vec::new(),
+            false,
+            Some(deps_id),
+            Some(settings_id),
+            None,
+        )
+        .await
+        .expect("completion ok");
+
+    result
+        .items
+        .into_iter()
+        .map(|candidate| candidate.item.label)
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn completion_labels_non_member_without_ir_with_snapshot_ids(
+    content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    file_path: &str,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    resolver: &TypeResolver,
+    deps_id: &DepsSnapshotId,
+    settings_id: &SettingsId,
+) -> Vec<String> {
+    let result = get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
+        content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        Vec::new(),
+        false,
+        Some(deps_id),
+        Some(settings_id),
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    result
+        .items
+        .into_iter()
+        .map(|candidate| candidate.item.label)
+        .collect()
+}
+
 fn owner_hint(type_name: &str) -> Vec<TypeResolution> {
     vec![TypeResolution::explicit(type_name)]
+}
+
+fn build_prefiltered_non_member_repository() -> Arc<InMemoryTypeRepository> {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "Справочники.ЭтотСправочник".to_string(),
+                source: RawDataSource::Configuration,
+                kind: Some(MetadataKind::Catalog),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ЭтотТип".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load prefitered non-member types");
+
+    let method = MethodSignature::new(
+        "ЭтотГлобал".to_string(),
+        None,
+        vec![],
+        None,
+        None,
+        None,
+        SignatureSource::Configuration,
+        None,
+        ContextRequirements::default(),
+    );
+    repository.add_global_function_signature("ЭтотГлобал", method);
+
+    repository
 }
 
 #[tokio::test]
@@ -1196,6 +1312,231 @@ async fn completion_non_member_after_try_end_does_not_leak_except_locals() {
 }
 
 #[tokio::test]
+async fn completion_non_member_warm_snapshot_reuses_immutable_catalogs() {
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотЛокал = 1;\n",
+        "    Этот\n",
+        "КонецПроцедуры\n"
+    );
+    let file_path = "completion_non_member_cached_catalog_test.bsl";
+    let repository = build_prefiltered_non_member_repository();
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo,
+        platform_signatures_loaded: false,
+    });
+
+    let deps_id = DepsSnapshotId::from_hash("refactor-13-cache-reuse");
+    let settings_id = SettingsId::from_hash("refactor-13-cache-reuse");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(file_path.to_string()),
+    });
+
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let column = "    Этот".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let builds_before =
+        immutable_non_member_catalog_build_count_for_tests(&deps_id, Some(&settings_id));
+    let first_labels = completion_labels_non_member_with_snapshot_ids(
+        content,
+        2,
+        column,
+        Some("file:///completion_non_member_cached_catalog_test.bsl"),
+        file_path,
+        &index,
+        &metadata_lookup,
+        resolver.as_ref(),
+        ir_program.clone(),
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    let builds_after_first =
+        immutable_non_member_catalog_build_count_for_tests(&deps_id, Some(&settings_id));
+    let second_labels = completion_labels_non_member_with_snapshot_ids(
+        content,
+        2,
+        column,
+        Some("file:///completion_non_member_cached_catalog_test.bsl"),
+        file_path,
+        &index,
+        &metadata_lookup,
+        resolver.as_ref(),
+        ir_program,
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    let builds_after_second =
+        immutable_non_member_catalog_build_count_for_tests(&deps_id, Some(&settings_id));
+
+    assert_eq!(
+        builds_after_first.saturating_sub(builds_before),
+        1,
+        "first warm request must build immutable catalog exactly once"
+    );
+    assert_eq!(
+        builds_after_second, builds_after_first,
+        "second warm request must reuse immutable catalog without rebuilding"
+    );
+    assert_eq!(
+        first_labels, second_labels,
+        "warm snapshot completion must stay stable across immutable catalog reuse"
+    );
+    for expected in ["ЭтотЛокал", "ЭтотГлобал", "ЭтотСправочник", "ЭтотТип"]
+    {
+        assert!(
+            second_labels.iter().any(|label| label == expected),
+            "expected {expected} in warm non-member labels: {second_labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn completion_non_member_cache_keeps_local_and_contextual_candidates_stable() {
+    let repository = build_prefiltered_non_member_repository();
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo,
+        platform_signatures_loaded: false,
+    });
+    let deps_id = DepsSnapshotId::from_hash("refactor-13-local-contextual");
+    let settings_id = SettingsId::from_hash("refactor-13-local-contextual");
+
+    let semantic_content = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотЛокал = 1;\n",
+        "    Этот\n",
+        "КонецПроцедуры\n"
+    );
+    let semantic_file_path = "completion_non_member_local_stability_test.bsl";
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_id.clone(),
+        deps: deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: settings_id.clone(),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(semantic_content.to_string()),
+        version: 0,
+        path: Arc::from(semantic_file_path.to_string()),
+    });
+    let analysis = host.analysis();
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let semantic_column = "    Этот".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+    let semantic_labels_first = completion_labels_non_member_with_snapshot_ids(
+        semantic_content,
+        2,
+        semantic_column,
+        Some("file:///completion_non_member_local_stability_test.bsl"),
+        semantic_file_path,
+        &index,
+        &metadata_lookup,
+        resolver.as_ref(),
+        ir_program.clone(),
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    let semantic_labels_second = completion_labels_non_member_with_snapshot_ids(
+        semantic_content,
+        2,
+        semantic_column,
+        Some("file:///completion_non_member_local_stability_test.bsl"),
+        semantic_file_path,
+        &index,
+        &metadata_lookup,
+        resolver.as_ref(),
+        ir_program,
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    assert_eq!(
+        semantic_labels_first, semantic_labels_second,
+        "local non-member labels must stay unchanged across immutable catalog reuse"
+    );
+    assert!(
+        semantic_labels_second
+            .iter()
+            .any(|label| label == "ЭтотЛокал"),
+        "local candidate must survive cached immutable catalog path: {semantic_labels_second:?}"
+    );
+
+    let contextual_content = concat!("Процедура Тест()\n", "    Этот\n", "КонецПроцедуры\n");
+    let contextual_file_path = "Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl";
+    let contextual_column = "    Этот".chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+    let index_snapshot = IndexSnapshot::empty(crate::system::IndexSnapshotId::from_hash(
+        "refactor-13-contextual-stability",
+    ));
+    let contextual_labels_first = completion_labels_non_member_without_ir_with_snapshot_ids(
+        contextual_content,
+        1,
+        contextual_column,
+        Some("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl"),
+        contextual_file_path,
+        &index_snapshot,
+        &metadata_lookup,
+        resolver.as_ref(),
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    let contextual_labels_second = completion_labels_non_member_without_ir_with_snapshot_ids(
+        contextual_content,
+        1,
+        contextual_column,
+        Some("file:///Documents/Док1/Forms/Форма1/Ext/Form/Module.bsl"),
+        contextual_file_path,
+        &index_snapshot,
+        &metadata_lookup,
+        resolver.as_ref(),
+        &deps_id,
+        &settings_id,
+    )
+    .await;
+    assert_eq!(
+        contextual_labels_first, contextual_labels_second,
+        "context-sensitive non-member labels must stay unchanged across immutable catalog reuse"
+    );
+    assert!(
+        contextual_labels_second
+            .iter()
+            .any(|label| label == "ЭтотОбъект"),
+        "implicit contextual candidate must survive cached immutable catalog path: {contextual_labels_second:?}"
+    );
+}
+
+#[tokio::test]
 async fn completion_non_member_semantic_path_ignores_polluted_index_snapshot() {
     let content = concat!("Процедура Тест()\n", "    Кан\n", "КонецПроцедуры\n");
     let file_path = "completion_lexical_sources_test.bsl";
@@ -1394,6 +1735,8 @@ async fn completion_resolves_variable_type_for_member_access() {
         file_path: "completion_test.bsl",
         member_access_owner_type_hints: owner_hint("ТаблицаЗначений"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач")
@@ -1498,6 +1841,8 @@ async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact(
         file_path: "completion_no_owner_hint_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
@@ -1624,6 +1969,8 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         file_path: "completion_unknown_receiver_member_access_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -1737,6 +2084,8 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         file_path: "completion_type_name_receiver_without_owner_hint_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -1847,6 +2196,8 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         file_path,
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -1976,6 +2327,8 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         file_path,
         member_access_owner_type_hints: member_access_owner_type_hint.into_iter().collect(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2073,6 +2426,8 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         file_path: "completion_narrowing_test.bsl",
         member_access_owner_type_hints: owner_hint("Строка"),
         include_flow_sensitive: true,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2185,6 +2540,8 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
             file_path,
             member_access_owner_type_hints: Vec::new(),
             include_flow_sensitive: false,
+            deps_id: None,
+            settings_id: None,
         };
 
         let without_hint = resolve_member_owner_type_sync(
@@ -2205,6 +2562,8 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
             file_path,
             member_access_owner_type_hints: shared_owner_hints,
             include_flow_sensitive: false,
+            deps_id: None,
+            settings_id: None,
         };
         let resolved = resolve_member_owner_type_sync(
             Some(&ctx_with_hint),
@@ -2261,6 +2620,8 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         file_path: "CommonModules/ОбщегоНазначения/Ext/Module.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let fallback = resolve_member_owner_type_sync(Some(&ctx), content, 1, access_column, "Объект");
@@ -2343,6 +2704,8 @@ async fn completion_resolves_nested_member_access_chain() {
         file_path: "completion_nested_chain_test.bsl",
         member_access_owner_type_hints: owner_hint("КоллекцияКолонокТаблицыЗначений"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2448,6 +2811,8 @@ async fn completion_supports_member_access_after_method_call() {
         file_path: "completion_call_chain_test.bsl",
         member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2536,6 +2901,8 @@ async fn completion_supports_member_access_after_index_access() {
         file_path: "completion_index_access_test.bsl",
         member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2624,6 +2991,8 @@ async fn completion_supports_member_access_after_map_index_access() {
         file_path: "completion_map_index_access_test.bsl",
         member_access_owner_type_hints: owner_hint("КолонкаТаблицыЗначений"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2712,6 +3081,8 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         file_path: "completion_map_index_access_no_hint_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2799,6 +3170,8 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         file_path: "completion_type_name_no_hint_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2893,6 +3266,8 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         file_path: "completion_type_name_chain_no_hint_test.bsl",
         member_access_owner_type_hints: Vec::new(),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3005,6 +3380,8 @@ async fn completion_supports_member_access_after_ternary_expression() {
         file_path: "completion_ternary_test.bsl",
         member_access_owner_type_hints: owner_types,
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3125,6 +3502,8 @@ async fn completion_supports_member_access_after_choice_expression() {
         file_path: "completion_choice_test.bsl",
         member_access_owner_type_hints: owner_types,
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3230,6 +3609,8 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         file_path: "completion_facet_substitution_test.bsl",
         member_access_owner_type_hints: owner_hint("Справочники.Контрагенты"),
         include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
     };
 
     let result = get_completion_with_analysis(

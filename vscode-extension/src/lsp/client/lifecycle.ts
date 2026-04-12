@@ -41,6 +41,8 @@ function StateToString(state: State): string {
 let client: CompletionProbeLanguageClient | null = null;
 let completionTriggerWarningShown = false;
 let completionProbeSelectionDisposable: vscode.Disposable | undefined;
+let activeServerPath: string | undefined;
+let activeServerMode: string | undefined;
 
 /** Output channel для логирования */
 let outputChannel: vscode.OutputChannel;
@@ -95,6 +97,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 
     outputChannel.appendLine(`Starting LSP server in ${serverMode} mode...`);
     outputChannel.appendLine(`Server path: ${serverPath}`);
+    activeServerPath = serverPath;
+    activeServerMode = serverMode;
 
     // Build options
     const serverOptions = buildServerOptions(serverPath, outputChannel);
@@ -143,6 +147,8 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
         await warnIfCompletionTriggerDisabled(outputChannel);
 
     } catch (error) {
+        activeServerPath = undefined;
+        activeServerMode = undefined;
         outputChannel.appendLine(`Failed to start LSP client: ${error}`);
         vscode.window.showErrorMessage(`Failed to start BSL Analyzer: ${error}`);
         updateStatusBar('$(error) BSL Analyzer: Failed to start');
@@ -168,6 +174,8 @@ export async function stopLanguageClient(): Promise<void> {
         }
         client = null;
     }
+    activeServerPath = undefined;
+    activeServerMode = undefined;
 }
 
 /**
@@ -207,6 +215,21 @@ export function getServerVersion(): string | undefined {
         return info.version;
     }
     return undefined;
+}
+
+export function getActiveServerLaunchInfo():
+    | {
+          serverPath?: string;
+          serverMode?: string;
+      }
+    | undefined {
+    if (!activeServerPath && !activeServerMode) {
+        return undefined;
+    }
+    return {
+        serverPath: activeServerPath,
+        serverMode: activeServerMode,
+    };
 }
 
 /**

@@ -1,6 +1,7 @@
+import * as fs from 'fs/promises';
 import * as vscode from 'vscode';
 import { CommandHandler } from '../types';
-import { getLanguageClient } from '../lsp';
+import { getActiveServerLaunchInfo, getLanguageClient } from '../lsp';
 import {
     getCompletionTimeline,
     getDiagnosticsSaveTimeline,
@@ -12,7 +13,10 @@ import {
     CompletionTimelineExportCapture,
     getSharedCompletionTimelineExportCapture,
 } from '../providers/completionTimelineExportCapture';
-import { buildObservabilityIncidentBundle } from '../providers/observabilityIncidentBundle';
+import {
+    buildObservabilityIncidentBundle,
+    ObservabilityIncidentBundleBuildIdentity,
+} from '../providers/observabilityIncidentBundle';
 import { CompletionProbe } from '../providers/completionProbe';
 
 function tryGet(obj: any, path: string): any {
@@ -58,6 +62,7 @@ function mergeExportCaptures(
 
 async function exportObservabilityIncidentBundleToFolder(
     targetFolder: vscode.Uri,
+    context: vscode.ExtensionContext,
     outputChannel: vscode.OutputChannel,
     capture: CompletionTimelineExportCapture = {}
 ): Promise<void> {
@@ -82,6 +87,7 @@ async function exportObservabilityIncidentBundleToFolder(
         diagnosticsSaveTimelinePromise,
         observabilityMetricsPromise,
     ]);
+    const buildIdentity = await buildCurrentIncidentBundleBuildIdentity(context);
 
     const bundle = buildObservabilityIncidentBundle({
         capturedAtMs,
@@ -90,6 +96,7 @@ async function exportObservabilityIncidentBundleToFolder(
         completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
         clientProbes,
         observabilityMetrics,
+        buildIdentity,
     });
 
     const bundleRoot = vscode.Uri.joinPath(targetFolder, bundle.folderName);
@@ -109,6 +116,62 @@ async function exportObservabilityIncidentBundleToFolder(
     void vscode.window.showInformationMessage(
         `Observability incident bundle exported to ${bundleRoot.fsPath}`
     );
+}
+
+async function buildCurrentIncidentBundleBuildIdentity(
+    context: vscode.ExtensionContext
+): Promise<ObservabilityIncidentBundleBuildIdentity | undefined> {
+    const extensionHost = (context as { extension?: { packageJSON?: any; id?: string } }).extension;
+    const extensionIdentity =
+        extensionHost?.packageJSON || context.extensionPath
+            ? {
+                  display_name:
+                      typeof extensionHost?.packageJSON?.displayName === 'string'
+                          ? extensionHost.packageJSON.displayName
+                          : undefined,
+                  version:
+                      typeof extensionHost?.packageJSON?.version === 'string'
+                          ? extensionHost.packageJSON.version
+                          : undefined,
+                  id: typeof extensionHost?.id === 'string' ? extensionHost.id : undefined,
+                  extension_path: context.extensionPath || undefined,
+              }
+            : undefined;
+
+    const client = getLanguageClient();
+    const serverInfo = (client as any)?.initializeResult?.serverInfo;
+    const launchInfo = getActiveServerLaunchInfo();
+    let binaryMtimeIso: string | undefined;
+    let binarySizeBytes: number | undefined;
+    if (launchInfo?.serverPath) {
+        try {
+            const stat = await fs.stat(launchInfo.serverPath);
+            binaryMtimeIso = stat.mtime.toISOString();
+            binarySizeBytes = stat.size;
+        } catch {
+            // Ignore missing or transient binary paths; serverInfo.version still identifies the build.
+        }
+    }
+    const lspServerIdentity =
+        serverInfo || launchInfo?.serverPath || launchInfo?.serverMode
+            ? {
+                  name: typeof serverInfo?.name === 'string' ? serverInfo.name : undefined,
+                  version: typeof serverInfo?.version === 'string' ? serverInfo.version : undefined,
+                  server_mode: launchInfo?.serverMode,
+                  binary_path: launchInfo?.serverPath,
+                  binary_mtime_iso: binaryMtimeIso,
+                  binary_size_bytes: binarySizeBytes,
+              }
+            : undefined;
+
+    if (!extensionIdentity && !lspServerIdentity) {
+        return undefined;
+    }
+
+    return {
+        extension: extensionIdentity,
+        lsp_server: lspServerIdentity,
+    };
 }
 
 /**
@@ -188,6 +251,7 @@ export function registerObservabilityCommands(
         try {
             await exportObservabilityIncidentBundleToFolder(
                 targetFolder[0],
+                context,
                 outputChannel,
                 asExportCapture(args[0]) ?? {}
             );

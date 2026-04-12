@@ -29,13 +29,32 @@ const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
 const DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH = 'raw/diagnostics_save_timeline.json';
 const CLIENT_PROBES_RAW_PATH = 'raw/client_probes.json';
 const OBSERVABILITY_METRICS_RAW_PATH = 'raw/observability_metrics.json';
+const BUILD_IDENTITY_RAW_PATH = 'raw/build_identity.json';
 
 type IncidentSourceStatus = 'available' | 'unsupported' | 'unavailable';
 
 type IncidentSourceClassification =
     | 'authoritative_server_trace'
     | 'local_only_client_probes'
-    | 'cumulative_metrics_snapshot';
+    | 'cumulative_metrics_snapshot'
+    | 'runtime_build_identity';
+
+export interface ObservabilityIncidentBundleBuildIdentity {
+    extension?: {
+        id?: string;
+        display_name?: string;
+        version?: string;
+        extension_path?: string;
+    };
+    lsp_server?: {
+        name?: string;
+        version?: string;
+        server_mode?: string;
+        binary_path?: string;
+        binary_mtime_iso?: string;
+        binary_size_bytes?: number;
+    };
+}
 
 export interface ObservabilityIncidentBundleInput {
     capturedAtMs: number;
@@ -44,6 +63,7 @@ export interface ObservabilityIncidentBundleInput {
     completionTraceLimit: number;
     clientProbes: CompletionProbe[];
     observabilityMetrics: ObservabilityMetricsFetchResult;
+    buildIdentity?: ObservabilityIncidentBundleBuildIdentity;
 }
 
 export interface ObservabilityIncidentBundleFile {
@@ -65,6 +85,7 @@ export interface ObservabilityIncidentBundleSource {
 export interface ObservabilityIncidentBundleReport {
     bundle_format: string;
     captured_at: string;
+    build_identity?: ObservabilityIncidentBundleBuildIdentity;
     capture_scope: ObservabilityIncidentCaptureScope;
     request_window: {
         completion_trace_limit: number;
@@ -93,7 +114,8 @@ export interface ObservabilityIncidentBundleReport {
             | 'completion_timeline'
             | 'diagnostics_save_timeline'
             | 'client_probes'
-            | 'observability_metrics';
+            | 'observability_metrics'
+            | 'build_identity';
         classification: IncidentSourceClassification;
     }>;
 }
@@ -127,6 +149,11 @@ export function buildObservabilityIncidentBundle(
             diagnosticsSaveSection.requests
         );
     const findings = deriveFindings(input, requestSection);
+    const buildIdentity = attachBuildIdentity(
+        input.buildIdentity,
+        rawAttachments,
+        files
+    );
 
     const completionTimelineSource = buildCompletionTimelineSource(
         input.completionTimeline,
@@ -151,6 +178,7 @@ export function buildObservabilityIncidentBundle(
     const incidentReport: ObservabilityIncidentBundleReport = {
         bundle_format: BUNDLE_FORMAT,
         captured_at: capturedAtIso,
+        build_identity: buildIdentity,
         capture_scope: requestSection.captureScope,
         request_window: {
             completion_trace_limit: input.completionTraceLimit,
@@ -650,6 +678,27 @@ function deriveFindings(
     return findings;
 }
 
+function attachBuildIdentity(
+    buildIdentity: ObservabilityIncidentBundleBuildIdentity | undefined,
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    files: ObservabilityIncidentBundleFile[]
+): ObservabilityIncidentBundleBuildIdentity | undefined {
+    if (!hasBuildIdentityContent(buildIdentity)) {
+        return undefined;
+    }
+
+    rawAttachments.push({
+        path: BUILD_IDENTITY_RAW_PATH,
+        section: 'build_identity',
+        classification: 'runtime_build_identity',
+    });
+    files.push({
+        relativePath: BUILD_IDENTITY_RAW_PATH,
+        contents: `${JSON.stringify(buildIdentity, null, 2)}\n`,
+    });
+    return buildIdentity;
+}
+
 function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): string {
     const lines: string[] = [
         '# Observability Incident Bundle',
@@ -657,6 +706,9 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         `Captured at: ${report.captured_at}`,
         `Bundle format: ${report.bundle_format}`,
         `Completion trace limit: ${report.request_window.completion_trace_limit}`,
+        '',
+        '## Build Identity',
+        ...renderBuildIdentityLines(report.build_identity),
         '',
         '## Request Scope',
         renderRequestScopeLine({
@@ -746,6 +798,69 @@ function renderSourceStatusLine(
 
 function renderBulletSection(values: string[]): string[] {
     return values.map((value) => `- ${value}`);
+}
+
+function renderBuildIdentityLines(
+    buildIdentity: ObservabilityIncidentBundleBuildIdentity | undefined
+): string[] {
+    if (!hasBuildIdentityContent(buildIdentity)) {
+        return ['- unavailable'];
+    }
+
+    const lines: string[] = [];
+    if (buildIdentity?.extension) {
+        const details = [
+            buildIdentity.extension.display_name
+                ? `display_name=${buildIdentity.extension.display_name}`
+                : null,
+            buildIdentity.extension.version
+                ? `version=${buildIdentity.extension.version}`
+                : null,
+            buildIdentity.extension.id ? `id=${buildIdentity.extension.id}` : null,
+            buildIdentity.extension.extension_path
+                ? `extension_path=${buildIdentity.extension.extension_path}`
+                : null,
+        ].filter((value): value is string => Boolean(value));
+        lines.push(`- extension: ${details.join(' | ')}`);
+    }
+    if (buildIdentity?.lsp_server) {
+        const details = [
+            buildIdentity.lsp_server.name ? `name=${buildIdentity.lsp_server.name}` : null,
+            buildIdentity.lsp_server.version
+                ? `version=${buildIdentity.lsp_server.version}`
+                : null,
+            buildIdentity.lsp_server.server_mode
+                ? `server_mode=${buildIdentity.lsp_server.server_mode}`
+                : null,
+            buildIdentity.lsp_server.binary_path
+                ? `binary_path=${buildIdentity.lsp_server.binary_path}`
+                : null,
+            buildIdentity.lsp_server.binary_mtime_iso
+                ? `binary_mtime_iso=${buildIdentity.lsp_server.binary_mtime_iso}`
+                : null,
+            typeof buildIdentity.lsp_server.binary_size_bytes === 'number'
+                ? `binary_size_bytes=${buildIdentity.lsp_server.binary_size_bytes}`
+                : null,
+        ].filter((value): value is string => Boolean(value));
+        lines.push(`- lsp_server: ${details.join(' | ')}`);
+    }
+    return lines;
+}
+
+function hasBuildIdentityContent(
+    buildIdentity: ObservabilityIncidentBundleBuildIdentity | undefined
+): boolean {
+    if (!buildIdentity) {
+        return false;
+    }
+
+    const hasExtension =
+        buildIdentity.extension !== undefined
+        && Object.values(buildIdentity.extension).some((value) => value !== undefined);
+    const hasLspServer =
+        buildIdentity.lsp_server !== undefined
+        && Object.values(buildIdentity.lsp_server).some((value) => value !== undefined);
+    return hasExtension || hasLspServer;
 }
 
 function getHistogramPercentile(

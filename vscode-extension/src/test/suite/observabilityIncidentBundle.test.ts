@@ -840,6 +840,55 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('raw/completion_timeline.json'));
     });
 
+    test('bundle should render provided build identity into incident report and raw attachments', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+            buildIdentity: {
+                extension: {
+                    display_name: 'BSL Gradual Type System',
+                    version: '0.4.142',
+                    id: 'bsl-gradual-types-team.bsl-gradual-types',
+                    extension_path: '/tmp/extension',
+                },
+                lsp_server: {
+                    name: 'BSL Language Server',
+                    version: '0.4.142 (build: 2026-04-12T11:00:00Z, git: 6658d174)',
+                    server_mode: 'stdio',
+                    binary_path: '/tmp/bsl-lsp-server',
+                    binary_mtime_iso: '2026-04-12T10:59:59.000Z',
+                    binary_size_bytes: 12_345_678,
+                },
+            },
+        });
+
+        assert.strictEqual(bundle.incidentReport.build_identity?.extension?.version, '0.4.142');
+        assert.strictEqual(
+            bundle.incidentReport.build_identity?.lsp_server?.version,
+            '0.4.142 (build: 2026-04-12T11:00:00Z, git: 6658d174)'
+        );
+        assert.ok(
+            bundle.files.some((file) => file.relativePath === 'raw/build_identity.json'),
+            'build identity must be exported as a raw attachment when provided'
+        );
+        assert.ok(bundle.summaryMarkdown.includes('## Build Identity'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'extension: display_name=BSL Gradual Type System | version=0.4.142 | id=bsl-gradual-types-team.bsl-gradual-types | extension_path=/tmp/extension'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'lsp_server: name=BSL Language Server | version=0.4.142 (build: 2026-04-12T11:00:00Z, git: 6658d174) | server_mode=stdio | binary_path=/tmp/bsl-lsp-server | binary_mtime_iso=2026-04-12T10:59:59.000Z | binary_size_bytes=12345678'
+            )
+        );
+        assert.ok(bundle.summaryMarkdown.includes('raw/build_identity.json'));
+    });
+
     test('unsupported completion timeline should produce partial bundle without fabricated raw trace', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),

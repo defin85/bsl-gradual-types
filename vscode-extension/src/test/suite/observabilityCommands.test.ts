@@ -108,6 +108,74 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(incident.sources.observability_metrics.status, 'available');
     });
 
+    test('exportObservabilityIncidentBundle should include extension build identity when context is available', async () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+
+        sinon.stub(customRequestsModule, 'getCompletionTimeline').resolves({
+            kind: 'ok',
+            response: {
+                version: 8,
+                traces: [],
+            },
+        });
+        sinon.stub(customRequestsModule, 'getDiagnosticsSaveTimeline').resolves({
+            kind: 'ok',
+            response: {
+                version: 7,
+                traces: [],
+            },
+        });
+        sinon.stub(customRequestsModule, 'getObservabilityMetricsFetchResult').resolves({
+            kind: 'ok',
+            response: {
+                metrics: {
+                    uptime_seconds: 42,
+                },
+            },
+        });
+        tempRootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'bsl-incident-export-'));
+        sinon.stub(vscode.window, 'showOpenDialog').resolves([vscode.Uri.file(tempRootDir)]);
+        sinon.stub(vscode.window, 'showInformationMessage').resolves(undefined);
+
+        registerObservabilityCommands(
+            {
+                extensionPath: '/tmp/fake-extension',
+                extension: {
+                    id: 'bsl-gradual-types-team.bsl-gradual-types',
+                    packageJSON: {
+                        displayName: 'BSL Gradual Type System',
+                        version: '0.4.142',
+                    },
+                },
+            } as unknown as vscode.ExtensionContext,
+            safeRegisterCommand,
+            outputChannel
+        );
+
+        const command = registeredCommands.get('bslAnalyzer.exportObservabilityIncidentBundle');
+        assert.ok(command, 'export command should be registered');
+
+        await command!();
+
+        const bundleFolders = await fs.readdir(tempRootDir);
+        assert.strictEqual(bundleFolders.length, 1, 'export should create exactly one bundle folder');
+        const bundleRoot = path.join(tempRootDir, bundleFolders[0]);
+        const incident = JSON.parse(await fs.readFile(path.join(bundleRoot, 'incident.json'), 'utf8'));
+        const rawDirEntries = await fs.readdir(path.join(bundleRoot, 'raw'));
+        assert.ok(
+            rawDirEntries.includes('build_identity.json'),
+            'build identity raw attachment must be exported when extension identity is available'
+        );
+        assert.strictEqual(incident.build_identity.extension.display_name, 'BSL Gradual Type System');
+        assert.strictEqual(incident.build_identity.extension.version, '0.4.142');
+        assert.strictEqual(
+            incident.build_identity.extension.id,
+            'bsl-gradual-types-team.bsl-gradual-types'
+        );
+    });
+
     test('exportObservabilityIncidentBundle should honor provided capture overrides without refetching timeline', async () => {
         const outputChannel = {
             appendLine: sinon.stub(),

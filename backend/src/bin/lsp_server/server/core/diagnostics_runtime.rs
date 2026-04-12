@@ -970,9 +970,19 @@ impl BslLanguageServer {
             match tasks.get(&supersession_key.file_id) {
                 Some(task)
                     if task.requested_version.load(Ordering::Relaxed)
+                        == supersession_key.requested_version
+                        && task.source
+                            != super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave =>
+                {
+                    // refactor-17 only reorders for already-known exact-task evidence.
+                    // The didSave refresh task seeded by the current save cycle does not qualify.
+                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                }
+                Some(task)
+                    if task.requested_version.load(Ordering::Relaxed)
                         == supersession_key.requested_version =>
                 {
-                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                    ReadySnapshotTaskStateV2::Absent
                 }
                 Some(_) => ReadySnapshotTaskStateV2::InFlightOtherVersion,
                 None => ReadySnapshotTaskStateV2::Absent,

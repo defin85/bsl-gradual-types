@@ -548,9 +548,17 @@ pub(crate) struct CurrentRevisionHeadPrecomputeTaskV2 {
 
 type CurrentRevisionHeadPrecomputeTasksV2 = HashMap<V2FileId, CurrentRevisionHeadPrecomputeTaskV2>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackgroundParseSnapshotApplyTaskSourceV2 {
+    DidOpen,
+    DidChange,
+    DidSave,
+}
+
 pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
     pub requested_version: Arc<AtomicI32>,
     pub text_hash: [u8; 32],
+    pub source: BackgroundParseSnapshotApplyTaskSourceV2,
     pub handle: JoinHandle<()>,
 }
 

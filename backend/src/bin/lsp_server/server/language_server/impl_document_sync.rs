@@ -188,6 +188,7 @@ struct BackgroundParseSnapshotApplyArgs {
     async_delay_mode: ParseSnapshotAsyncDelayMode,
     blocking_delay_env_key: Option<&'static str>,
     force_reschedule_same_version: bool,
+    source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
     did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
 }
 
@@ -349,6 +350,7 @@ impl BslLanguageServer {
 
         let requested_version_state =
             Arc::new(std::sync::atomic::AtomicI32::new(args.requested_version));
+        let task_source = args.source;
         let server = self.clone();
         let worker_requested_version_state = Arc::clone(&requested_version_state);
         let handle = tokio::spawn(async move {
@@ -361,6 +363,7 @@ impl BslLanguageServer {
             super::super::BackgroundParseSnapshotApplyTaskV2 {
                 requested_version: requested_version_state,
                 text_hash,
+                source: task_source,
                 handle,
             },
         );
@@ -1230,6 +1233,7 @@ impl BslLanguageServer {
             async_delay_mode: ParseSnapshotAsyncDelayMode::None,
             blocking_delay_env_key: Some("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS"),
             force_reschedule_same_version: false,
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen,
             did_change_attribution: None,
         })
         .await;
@@ -1540,6 +1544,7 @@ impl BslLanguageServer {
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: false,
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                 did_change_attribution: Some(DidChangeParseSnapshotAttributionV2 {
                     uri: uri.clone(),
                     base_text_source: parse_snapshot_base_text_source,
@@ -1677,6 +1682,7 @@ impl BslLanguageServer {
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: true,
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
                 did_change_attribution: None,
             })
             .await;

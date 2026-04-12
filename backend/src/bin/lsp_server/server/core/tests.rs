@@ -3445,7 +3445,7 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already_ready() {
+async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task_exists() {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -3609,6 +3609,21 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
     })
     .await
     .expect("didChange must materialize applied state and ready parse snapshot for version 2");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            if !server
+                .background_parse_snapshot_apply_tasks_v2
+                .lock()
+                .await
+                .contains_key(&file_id)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("completed didChange parse snapshot task must clean up before absent-exact-task didSave regression");
     while published_rx.try_recv().is_ok() {}
 
     let did_save_response = service
@@ -3629,16 +3644,23 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         .await
         .expect("didSave notification");
     assert!(did_save_response.is_none(), "didSave is a notification");
-
-    if let Some(task) = server
-        .background_parse_snapshot_apply_tasks_v2
-        .lock()
-        .await
-        .remove(&file_id)
     {
-        task.requested_version.store(0, Ordering::Relaxed);
-        task.handle.abort();
+        let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+        let task = tasks
+            .get(&file_id)
+            .expect("didSave must seed a same-version refresh task for this regression");
+        assert_eq!(
+            task.requested_version.load(Ordering::Relaxed),
+            2,
+            "didSave refresh task must target the saved revision"
+        );
+        assert_eq!(
+            task.source,
+            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+            "regression must exercise the same-version didSave refresh task that should not count as exact-task evidence"
+        );
     }
+
     server
         .latest_ready_parse_snapshots_v2
         .write()
@@ -3691,7 +3713,9 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         }
     })
     .await
-    .expect("applied-state follow-up must publish full diagnostics even after ready parse snapshot cache is cleared");
+    .expect(
+        "follow-up must publish full diagnostics even when only the didSave refresh task exists",
+    );
 
     let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_709, 8).await;
     let traces = timeline

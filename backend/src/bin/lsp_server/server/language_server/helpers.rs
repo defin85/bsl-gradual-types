@@ -287,6 +287,58 @@ pub(super) fn should_defer_heavy_diagnostics_for_large_churn(
         && !matches!(profile, bsl_runtime::application::DiagnosticsProfile::Fast)
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct CanonicalRangedDidChangeReplayStep {
+    pub range: Range,
+    pub new_text: String,
+    pub parser_edit: bsl_runtime::system::parser_coordinator::TextEdit,
+}
+
+pub(super) fn canonicalize_ranged_did_change_replay_plan(
+    changes: &[TextDocumentContentChangeEvent],
+) -> Vec<CanonicalRangedDidChangeReplayStep> {
+    let mut steps = changes
+        .iter()
+        .enumerate()
+        .filter_map(|(original_index, change)| {
+            let range = change.range?;
+            let parser_edit = lsp_range_change_to_parser_edit(change)?;
+            Some((
+                original_index,
+                CanonicalRangedDidChangeReplayStep {
+                    range,
+                    new_text: change.text.clone(),
+                    parser_edit,
+                },
+            ))
+        })
+        .collect::<Vec<_>>();
+    steps.sort_by(|(left_idx, left_step), (right_idx, right_step)| {
+        right_step
+            .range
+            .start
+            .line
+            .cmp(&left_step.range.start.line)
+            .then_with(|| {
+                right_step
+                    .range
+                    .start
+                    .character
+                    .cmp(&left_step.range.start.character)
+            })
+            .then_with(|| right_step.range.end.line.cmp(&left_step.range.end.line))
+            .then_with(|| {
+                right_step
+                    .range
+                    .end
+                    .character
+                    .cmp(&left_step.range.end.character)
+            })
+            .then_with(|| left_idx.cmp(right_idx))
+    });
+    steps.into_iter().map(|(_, step)| step).collect()
+}
+
 pub(super) fn lsp_range_change_to_parser_edit(
     change: &TextDocumentContentChangeEvent,
 ) -> Option<bsl_runtime::system::parser_coordinator::TextEdit> {
@@ -937,4 +989,88 @@ pub(super) fn normalize_optional_string(value: Option<String>) -> Option<String>
             Some(trimmed.to_string())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canonicalize_ranged_did_change_replay_plan, CanonicalRangedDidChangeReplayStep};
+    use crate::handlers::apply_text_edit;
+    use bsl_line_index::byte_offset_to_utf16;
+    use std::path::PathBuf;
+    use tower_lsp::lsp_types::{Position, Range, TextDocumentContentChangeEvent};
+
+    fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
+        let start_byte = line
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        Range {
+            start: Position::new(line_number, byte_offset_to_utf16(line, start_byte)),
+            end: Position::new(line_number, byte_offset_to_utf16(line, end_byte)),
+        }
+    }
+
+    fn apply_replay_plan(
+        base_text: &str,
+        replay_plan: &[CanonicalRangedDidChangeReplayStep],
+    ) -> String {
+        replay_plan
+            .iter()
+            .fold(base_text.to_string(), |current, step| {
+                apply_text_edit(&current, step.range, &step.new_text)
+            })
+    }
+
+    #[test]
+    fn canonical_ranged_replay_plan_keeps_multi_range_incremental_parse_consistent() {
+        let parser = bsl_runtime::system::parser_coordinator::ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("canonical-ranged-replay-plan.bsl");
+        let base_text =
+            "Процедура Тест()\n    Сообщить(\"один два\");\nКонецПроцедуры\n".to_string();
+        let target_line = "    Сообщить(\"один два\");";
+        let replay_plan = canonicalize_ranged_did_change_replay_plan(&[
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(target_line, 1, "один")),
+                range_length: None,
+                text: "оченьдлинно".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(target_line, 1, "два")),
+                range_length: None,
+                text: "три".to_string(),
+            },
+        ]);
+
+        assert_eq!(replay_plan.len(), 2);
+        assert_eq!(replay_plan[0].new_text, "три");
+        assert_eq!(replay_plan[1].new_text, "оченьдлинно");
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base_text.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let updated_text = apply_replay_plan(&base_text, &replay_plan);
+        assert_eq!(
+            updated_text,
+            "Процедура Тест()\n    Сообщить(\"оченьдлинно три\");\nКонецПроцедуры\n"
+        );
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                updated_text,
+                replay_plan
+                    .iter()
+                    .map(|step| step.parser_edit.clone())
+                    .collect(),
+            )
+            .expect("incremental parse report");
+
+        assert!(
+            report.incremental,
+            "canonical multi-range replay plan must stay incremental"
+        );
+        assert_eq!(report.fallback_reason, None);
+        assert_eq!(report.changed_ranges.len(), 2);
+    }
 }

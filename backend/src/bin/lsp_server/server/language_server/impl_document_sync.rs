@@ -1350,15 +1350,12 @@ impl BslLanguageServer {
                             )
                         };
 
+                    let replay_plan = canonicalize_ranged_did_change_replay_plan(&changes);
                     let mut current_text = base_text;
-                    let mut parser_edits = Vec::new();
-                    for change in &changes {
-                        if let Some(range) = change.range {
-                            if let Some(edit) = lsp_range_change_to_parser_edit(change) {
-                                parser_edits.push(edit);
-                            }
-                            current_text = apply_text_edit(&current_text, range, &change.text);
-                        }
+                    let mut parser_edits = Vec::with_capacity(replay_plan.len());
+                    for step in replay_plan {
+                        current_text = apply_text_edit(&current_text, step.range, &step.new_text);
+                        parser_edits.push(step.parser_edit);
                     }
                     (current_text, parser_edits, parse_snapshot_base_text_source)
                 };

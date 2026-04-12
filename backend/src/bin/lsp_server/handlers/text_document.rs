@@ -6,8 +6,7 @@
 use tower_lsp::lsp_types::Range;
 
 use bsl_line_index::byte_offset_to_utf16;
-
-use crate::converters::position::utf16_to_byte_offset;
+use bsl_runtime::system::positioning::LineIndex;
 
 fn utf16_end_position(source: &str) -> (u32, u32) {
     match source.rsplit_once('\n') {
@@ -33,50 +32,18 @@ pub fn apply_text_edit(source: &str, range: Range, new_text: &str) -> String {
         return result;
     }
 
-    let lines: Vec<&str> = source.lines().collect();
-    let start_line = range.start.line as usize;
-    let end_line = range.end.line as usize;
+    let index = LineIndex::new(source);
+    let start_byte =
+        index.utf16_position_to_byte_offset(source, range.start.line, range.start.character);
+    let end_byte = index.utf16_position_to_byte_offset(source, range.end.line, range.end.character);
+    let start_byte = start_byte.min(source.len());
+    let end_byte = end_byte.min(source.len()).max(start_byte);
 
-    // Convert UTF-16 offsets to UTF-8 byte offsets
-    let start_char = if let Some(start_line_text) = lines.get(start_line) {
-        utf16_to_byte_offset(start_line_text, range.start.character)
-    } else {
-        0
-    };
-
-    let end_char = if let Some(end_line_text) = lines.get(end_line) {
-        utf16_to_byte_offset(end_line_text, range.end.character)
-    } else {
-        0
-    };
-
-    let mut result = String::new();
-
-    // Lines before change
-    for line in lines.iter().take(start_line) {
-        result.push_str(line);
-        result.push('\n');
-    }
-
-    // Start of changed line
-    if let Some(start_line_text) = lines.get(start_line) {
-        result.push_str(&start_line_text[..start_char.min(start_line_text.len())]);
-    }
-
-    // New text
+    let mut result =
+        String::with_capacity(source.len().saturating_sub(end_byte - start_byte) + new_text.len());
+    result.push_str(&source[..start_byte]);
     result.push_str(new_text);
-
-    // End of changed line
-    if let Some(end_line_text) = lines.get(end_line) {
-        result.push_str(&end_line_text[end_char.min(end_line_text.len())..]);
-    }
-
-    // Lines after change
-    for line in lines.iter().skip(end_line + 1) {
-        result.push('\n');
-        result.push_str(line);
-    }
-
+    result.push_str(&source[end_byte..]);
     result
 }
 
@@ -104,5 +71,23 @@ mod tests {
         );
 
         assert_eq!(updated, "Строка1\nСтрока2\n");
+    }
+
+    #[test]
+    fn apply_text_edit_preserves_trailing_newline_for_interior_edit() {
+        let source = "Процедура Тест()\n    Сообщить(\"один два\");\nКонецПроцедуры\n";
+        let updated = apply_text_edit(
+            source,
+            Range {
+                start: Position::new(1, "    Сообщить(\"один ".encode_utf16().count() as u32),
+                end: Position::new(1, "    Сообщить(\"один два".encode_utf16().count() as u32),
+            },
+            "три",
+        );
+
+        assert_eq!(
+            updated,
+            "Процедура Тест()\n    Сообщить(\"один три\");\nКонецПроцедуры\n"
+        );
     }
 }

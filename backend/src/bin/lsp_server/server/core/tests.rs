@@ -15829,6 +15829,161 @@ async fn p22_get_observability_metrics_exposes_input_edit_conversion_failure_rea
 }
 
 #[tokio::test]
+async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_range_did_change() {
+    fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
+        let start_byte = line
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        Range {
+            start: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, start_byte),
+            ),
+            end: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, end_byte),
+            ),
+        }
+    }
+
+    let base_text = "Процедура Тест()\n    Сообщить(\"один два\");\nКонецПроцедуры\n";
+    let target_line = "    Сообщить(\"один два\");";
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        base_text,
+        "file:///did_change_parse_snapshot_multi_range_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize same-version ready parse snapshot before multi-range didChange");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(target_line, 1, "один")),
+                range_length: None,
+                text: "оченьдлинно".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(target_line, 1, "два")),
+                range_length: None,
+                text: "три".to_string(),
+            },
+        ],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let evidence = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2219)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(2)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break (result, entry);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("valid multi-range didChange evidence must appear in observability metrics response");
+
+    let (result, entry) = evidence;
+    assert_eq!(
+        result
+            .get("didChangeParseSnapshotEvidence")
+            .and_then(|value| value.get("version"))
+            .and_then(|value| value.as_u64()),
+        Some(crate::server::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION as u64)
+    );
+    assert_eq!(
+        entry.get("parseMode").and_then(|value| value.as_str()),
+        Some("incremental")
+    );
+    assert_eq!(
+        entry.get("baseTextSource").and_then(|value| value.as_str()),
+        Some("shadow_state")
+    );
+    assert_eq!(
+        entry.get("changeShape").and_then(|value| value.as_str()),
+        Some("ranged")
+    );
+    assert_eq!(
+        entry
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        entry.get("fallbackReason").and_then(|value| value.as_str()),
+        None,
+        "valid multi-range didChange must not false-fallback to edits_do_not_match_new_content"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p22_get_observability_metrics_exposes_semantic_diagnostics_breakdown() {
     const SEMANTIC_FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.НесуществующийМетод();\nКонецПроцедуры\n";
 

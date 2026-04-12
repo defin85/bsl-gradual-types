@@ -140,7 +140,6 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_reused",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_other",
-    "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_edits_do_not_match_new_content",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_input_edit_conversion_failed",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_parse_failed",
@@ -333,6 +332,13 @@ fn assert_unified_intellisense_v2_stage_contract(payload: &serde_json::Value) {
             gauges.keys().collect::<Vec<_>>()
         );
     }
+
+    assert!(
+        !counters.contains_key(
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed"
+        ),
+        "legacy generic incremental_failed fallback bucket must not remain in the exported contract"
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -2968,6 +2974,477 @@ async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_art
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
+async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_before_shadow_state() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const CHANGE_ID: &str = "refactor-17-diagnostics-save-inflight-snapshot-preference";
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const DID_CHANGE_PARSE_DELAY_MS: u64 = 1_200;
+    const DID_SAVE_PARSE_DELAY_MS: u64 = 0;
+    const APPLY_DELAY_MS: u64 = 4_000;
+    const FIRST_PUBLISH_BUDGET_MS: u64 = 3_500;
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 5_000;
+
+    let _env_lock = lock_test_env().await;
+    let _did_change_parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+        &DID_CHANGE_PARSE_DELAY_MS.to_string(),
+    );
+    let _apply_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS",
+        &APPLY_DELAY_MS.to_string(),
+    );
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_followup_inflight_exact_snapshot_fixture.bsl")
+        .expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks
+                    .get(&file_id)
+                    .map(|task| task.requested_version.load(Ordering::Relaxed))
+            };
+            if task_requested_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must register an in-flight same-version parse snapshot task");
+    assert_ne!(
+        server
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.parse_snapshot.file_version),
+        Some(2),
+        "exact same-version ready snapshot must still be absent before didSave"
+    );
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_started = Instant::now();
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks
+                    .get(&file_id)
+                    .map(|task| task.requested_version.load(Ordering::Relaxed))
+            };
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if task_requested_version == Some(2) && ready_version != Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didSave must keep the exact same-version snapshot task in-flight before follow-up");
+
+    let first_publish =
+        tokio::time::timeout(Duration::from_millis(FIRST_PUBLISH_BUDGET_MS), async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri == uri && params.version == Some(2) {
+                    break params;
+                }
+            }
+        })
+        .await
+        .expect("didSave must still publish save_fastlane before the bounded exact wait");
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "didSave first publish must remain syntax-only before the in-flight exact wait resolves, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("bounded exact wait must let same-version ready artifacts win the same save cycle");
+
+    let followup_elapsed = did_save_started.elapsed();
+    assert!(
+        followup_elapsed
+            <= diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET
+                + Duration::from_millis(2_000),
+        "exact in-flight wait must stay bounded (elapsed={followup_elapsed:?})"
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_710, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let first_publish_trace = trace
+        .get("first_publish")
+        .and_then(|value| value.as_object())
+        .expect("save_fastlane first publish trace");
+    assert_eq!(
+        first_publish_trace
+            .get("profile")
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_eq!(
+        first_publish_trace
+            .get("publish_kind")
+            .and_then(|value| value.as_str()),
+        Some("syntax_only")
+    );
+    let full_publish = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .filter(|publish| {
+            publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+        })
+        .or_else(|| {
+            trace
+                .get("first_publish")
+                .and_then(|value| value.as_object())
+                .filter(|publish| {
+                    publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+                })
+        })
+        .expect("idle_heavy full publish trace");
+    assert_eq!(
+        full_publish.get("profile").and_then(|value| value.as_str()),
+        Some("idle_heavy")
+    );
+    assert_eq!(
+        full_publish
+            .get("publish_kind")
+            .and_then(|value| value.as_str()),
+        Some("full")
+    );
+    assert!(
+        full_publish.get("wait_for_file_version_ms").is_none(),
+        "exact-task wait success must not regress into wait_for_file_version gating, trace={trace:?}"
+    );
+    assert_eq!(
+        full_publish
+            .get("syntax_work_mode")
+            .and_then(|value| value.as_str()),
+        Some("reused")
+    );
+    assert_eq!(
+        full_publish
+            .get("semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+    assert_eq!(
+        full_publish
+            .get("semantic_parse_source")
+            .and_then(|value| value.as_str()),
+        Some("snapshot")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        Some(true)
+    );
+    assert_eq!(
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+    assert_eq!(
+        trace
+            .get("followup_semantic_parse_source")
+            .and_then(|value| value.as_str()),
+        Some("snapshot")
+    );
+    assert_eq!(
+        trace
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("published")
+    );
+
+    let report = serde_json::json!({
+        "change_id": CHANGE_ID,
+        "uri": uri.to_string(),
+        "did_change_parse_delay_ms": DID_CHANGE_PARSE_DELAY_MS,
+        "did_save_parse_delay_ms": DID_SAVE_PARSE_DELAY_MS,
+        "apply_delay_ms": APPLY_DELAY_MS,
+        "first_publish_budget_ms": FIRST_PUBLISH_BUDGET_MS,
+        "followup_publish_budget_ms": FOLLOWUP_PUBLISH_BUDGET_MS,
+        "first_publish_elapsed_ms": first_publish_trace
+            .get("elapsed_ms")
+            .and_then(|value| value.as_u64()),
+        "first_publish_syntax_only": true,
+        "followup_publish_elapsed_ms": full_publish
+            .get("elapsed_ms")
+            .and_then(|value| value.as_u64()),
+        "followup_ready_snapshot_zero_probe": trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        "followup_ready_snapshot_wait_probe": trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        "followup_ready_snapshot_task_state": trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        "followup_shadow_state_available": trace
+            .get("followup_shadow_state_available")
+            .and_then(|value| value.as_bool()),
+        "followup_wait_reason": trace
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str()),
+        "followup_semantic_path": trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
+        "followup_semantic_parse_source": trace
+            .get("followup_semantic_parse_source")
+            .and_then(|value| value.as_str()),
+        "followup_semantic_ir_source": trace
+            .get("followup_semantic_ir_source")
+            .and_then(|value| value.as_str()),
+        "followup_wait_for_file_version_ms": trace
+            .get("followup_wait_for_file_version_ms")
+            .and_then(|value| value.as_u64()),
+        "save_cycle_sequence": trace
+            .get("save_cycle_sequence")
+            .and_then(|value| value.as_u64()),
+        "diagnostics_generation": trace
+            .get("diagnostics_generation")
+            .and_then(|value| value.as_u64()),
+    });
+    let report_path = std::env::var("BSL_V2_DID_SAVE_FOLLOWUP_INFLIGHT_EXACT_REPORT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("tests")
+                .join("perf")
+                .join("reports")
+                .join(format!("{CHANGE_ID}-did-save-followup-inflight-exact.json"))
+        });
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .expect("failed to create directory for refactor-17 in-flight exact report");
+    }
+    std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&report)
+            .expect("serialize refactor-17 in-flight exact report"),
+    )
+    .expect("write refactor-17 in-flight exact report");
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
 async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already_ready() {
     struct EnvVarGuard {
         key: &'static str,
@@ -3153,6 +3630,21 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
         .expect("didSave notification");
     assert!(did_save_response.is_none(), "didSave is a notification");
 
+    if let Some(task) = server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id)
+    {
+        task.requested_version.store(0, Ordering::Relaxed);
+        task.handle.abort();
+    }
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
+
     tokio::time::timeout(Duration::from_millis(1000), async {
         loop {
             let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_708, 8).await;
@@ -3179,12 +3671,6 @@ async fn p7_did_save_followup_prefers_applied_state_when_writer_state_is_already
     })
     .await
     .expect("didSave must publish save_fastlane first before applied-state follow-up");
-
-    server
-        .latest_ready_parse_snapshots_v2
-        .write()
-        .await
-        .remove(&file_id);
 
     tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
         loop {

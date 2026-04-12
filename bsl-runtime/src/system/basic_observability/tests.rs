@@ -109,6 +109,37 @@ fn sidebar_metrics_export_filters_histograms_to_sidebar_subset() {
 }
 
 #[test]
+fn parse_snapshot_export_uses_only_canonical_fallback_buckets() {
+    let observability = BasicObservability::default();
+    observability.record_intellisense_v2_parse_snapshot(
+        "lsp",
+        "full",
+        0,
+        0,
+        Some("incremental_parse_failed"),
+        Duration::from_millis(12),
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let exported_counters = counters(&exported);
+
+    assert_eq!(
+        counter_value(
+            exported_counters,
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_parse_failed"
+        ),
+        1,
+        "canonical incremental-parse failure bucket must be exported"
+    );
+    assert!(
+        !exported_counters.contains_key(
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed"
+        ),
+        "legacy generic incremental_failed bucket must not remain pre-registered in the export"
+    );
+}
+
+#[test]
 fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
     let observability = BasicObservability::default();
     observability

@@ -2537,6 +2537,10 @@ impl BslLanguageServer {
                 let branch_context = self
                     .diagnostics_save_followup_branch_context_v2(&supersession_key)
                     .await;
+                let prefer_inflight_exact_wait = matches!(
+                    branch_context.ready_snapshot_task_state,
+                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                );
                 self.record_diagnostics_save_followup_probe_state_v2(
                     uri,
                     &supersession_key,
@@ -2562,29 +2566,31 @@ impl BslLanguageServer {
                 {
                     return disposition;
                 }
+                if prefer_inflight_exact_wait {
+                    if let Some(disposition) = self
+                        .try_execute_save_followup_from_ready_artifacts_v2(
+                            uri,
+                            &supersession_key,
+                            trigger,
+                            cancel_token,
+                            ReadyParseSnapshotProbeSlotV2::BoundedWait,
+                            SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
+                            pipeline_started,
+                            show_hints,
+                            plan.flow_sensitive_semantic,
+                            did_save_followup_lane_guard.as_ref(),
+                        )
+                        .await
+                    {
+                        return disposition;
+                    }
+                }
                 if let Some(disposition) = self
                     .try_execute_save_followup_from_shadow_state_v2(
                         uri,
                         &supersession_key,
                         trigger,
                         cancel_token,
-                        pipeline_started,
-                        show_hints,
-                        plan.flow_sensitive_semantic,
-                        did_save_followup_lane_guard.as_ref(),
-                    )
-                    .await
-                {
-                    return disposition;
-                }
-                if let Some(disposition) = self
-                    .try_execute_save_followup_from_ready_artifacts_v2(
-                        uri,
-                        &supersession_key,
-                        trigger,
-                        cancel_token,
-                        ReadyParseSnapshotProbeSlotV2::BoundedWait,
-                        SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET,
                         pipeline_started,
                         show_hints,
                         plan.flow_sensitive_semantic,

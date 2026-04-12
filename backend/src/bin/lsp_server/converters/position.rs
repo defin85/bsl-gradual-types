@@ -3,10 +3,11 @@
 //! LSP protocol uses UTF-16 code units for positions (due to VSCode/TypeScript),
 //! but Rust strings are UTF-8. This module provides conversion functions.
 
-/// Converts UTF-16 offset (LSP character) to UTF-8 byte offset
+/// Converts UTF-16 offset (LSP character) to UTF-8 byte offset for converter unit tests.
 ///
-/// LSP protocol uses UTF-16 code units for positions, but Rust strings use UTF-8.
-/// This function correctly converts UTF-16 offset to byte offset for working with &str[..].
+/// Production callers now use `bsl_backend::system::utf16_to_byte_offset` or `LineIndex`
+/// directly, but the converter tests still exercise the shared helper through this module.
+#[cfg(test)]
 pub fn utf16_to_byte_offset(line: &str, utf16_offset: u32) -> usize {
     bsl_backend::system::utf16_to_byte_offset(line, utf16_offset)
 }

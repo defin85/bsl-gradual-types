@@ -36,7 +36,7 @@ pub(crate) fn convert_for_statement_cached(
         match child.kind() {
             "identifier" => {
                 if variable.is_empty() {
-                    variable = node_text(&child, source);
+                    variable = node_text(&child, source)?;
                 }
             }
             "DO_KEYWORD" | "ЦИКЛ_KEYWORD" => {
@@ -102,7 +102,7 @@ pub(crate) fn convert_for_each_statement_cached(
         match child.kind() {
             "identifier" => {
                 if variable.is_empty() {
-                    variable = node_text(&child, source);
+                    variable = node_text(&child, source)?;
                 }
             }
             "DO_KEYWORD" | "ЦИКЛ_KEYWORD" => {

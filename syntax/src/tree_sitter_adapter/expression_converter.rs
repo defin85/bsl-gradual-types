@@ -67,7 +67,7 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
             }
 
             // Fallback: парсим текст напрямую
-            let text = node_text(node, source);
+            let text = node_text(node, source)?;
             let span = node_to_span(node, source);
             if let Ok(num) = text.parse::<f64>() {
                 Ok(Some(Expression::Number { value: num, span }))
@@ -85,12 +85,12 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
         }
 
         "identifier" => Ok(Some(Expression::Identifier {
-            name: node_text(node, source),
+            name: node_text(node, source)?,
             span: node_to_span(node, source),
         })),
 
         "number" => {
-            let text = node_text(node, source);
+            let text = node_text(node, source)?;
             let span = node_to_span(node, source);
             if let Ok(num) = text.parse::<f64>() {
                 Ok(Some(Expression::Number { value: num, span }))
@@ -106,14 +106,14 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
             for child in node.children(&mut cursor) {
                 if child.kind() == "string_content" {
                     return Ok(Some(Expression::String {
-                        value: node_text(&child, source),
+                        value: node_text(&child, source)?,
                         span,
                     }));
                 }
             }
 
             // Fallback: берём весь текст и убираем кавычки
-            let text = node_text(node, source);
+            let text = node_text(node, source)?;
             let trimmed = text.trim_matches('"');
             Ok(Some(Expression::String {
                 value: trimmed.to_string(),
@@ -135,7 +135,7 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
             }
 
             // Fallback: парсим текст
-            let text = node_text(node, source);
+            let text = node_text(node, source)?;
             if text.eq_ignore_ascii_case("истина") || text.eq_ignore_ascii_case("true") {
                 Ok(Some(Expression::Boolean { value: true, span }))
             } else {
@@ -145,7 +145,7 @@ pub fn convert_expression(node: &Node, source: &str) -> Result<Option<Expression
 
         "date" => {
             Ok(Some(Expression::Date {
-                value: node_text(node, source),
+                value: node_text(node, source)?,
                 span: node_to_span(node, source),
             }))
         }
@@ -219,17 +219,17 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
                 // Простой идентификатор (leaf node)
                 if object.is_none() {
                     object = Some(Expression::Identifier {
-                        name: node_text(&child, source),
+                        name: node_text(&child, source)?,
                         span: node_to_span(&child, source),
                     });
                 } else if property_name.is_none() {
-                    property_name = Some(node_text(&child, source));
+                    property_name = Some(node_text(&child, source)?);
                     property_span = Some(node_to_span(&child, source));
                 }
             }
             "property" => {
                 // Свойство после точки
-                property_name = Some(node_text(&child, source));
+                property_name = Some(node_text(&child, source)?);
                 property_span = Some(node_to_span(&child, source));
             }
             "method_call" => {
@@ -283,7 +283,7 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
             for child in method.children(&mut method_cursor) {
                 match child.kind() {
                     "identifier" => {
-                        method_name = node_text(&child, source);
+                        method_name = node_text(&child, source)?;
                         method_identifier_span = node_to_span(&child, source);
                     }
                     "arguments" => {
@@ -327,7 +327,7 @@ fn convert_access(node: &Node, source: &str) -> Result<Option<Expression>, Strin
             for child in method.children(&mut method_cursor) {
                 match child.kind() {
                     "identifier" => {
-                        method_name = node_text(&child, source);
+                        method_name = node_text(&child, source)?;
                         method_identifier_span = node_to_span(&child, source);
                     }
                     "arguments" => {
@@ -394,7 +394,7 @@ fn convert_binary_expression(node: &Node, source: &str) -> Result<Option<Express
                 right = Some(expr);
             }
         } else if child.kind() == "operator" {
-            operator = node_text(&child, source);
+            operator = node_text(&child, source)?;
         } else if child.kind() == "+" || child.kind() == "-" || child.kind() == "*" {
             operator = child.kind().to_string();
         }
@@ -472,7 +472,7 @@ fn convert_call_expression(node: &Node, source: &str) -> Result<Option<Expressio
         for child in method.children(&mut method_cursor) {
             match child.kind() {
                 "identifier" => {
-                    method_name = node_text(&child, source);
+                    method_name = node_text(&child, source)?;
                     method_identifier_span = node_to_span(&child, source);
                     // Span только имени метода!
                 }
@@ -559,11 +559,11 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
                 if object.is_none() {
                     let child_span = node_to_span(&child, source);
                     object = Some(Expression::Identifier {
-                        name: node_text(&child, source),
+                        name: node_text(&child, source)?,
                         span: child_span,
                     });
                 } else {
-                    property = node_text(&child, source);
+                    property = node_text(&child, source)?;
                     property_span = Some(node_to_span(&child, source));
                 }
             }
@@ -584,7 +584,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
                 }
             }
             "property" => {
-                property = node_text(&child, source);
+                property = node_text(&child, source)?;
                 property_span = Some(node_to_span(&child, source));
             }
             "index" => {
@@ -623,7 +623,7 @@ fn convert_property_access(node: &Node, source: &str) -> Result<Option<Expressio
         None => {
             // Fallback: возвращаем как Identifier
             Ok(Some(Expression::Identifier {
-                name: node_text(node, source),
+                name: node_text(node, source)?,
                 span,
             }))
         }
@@ -689,7 +689,7 @@ fn convert_new_expression(node: &Node, source: &str) -> Result<Option<Expression
             "identifier" | "property_access" => {
                 // Новый Тип или Новый Модуль.Тип - прямой identifier
                 if type_expr.is_none() {
-                    type_expr = Some(node_text(&child, source));
+                    type_expr = Some(node_text(&child, source)?);
                 }
             }
             "arguments" => {
@@ -702,7 +702,7 @@ fn convert_new_expression(node: &Node, source: &str) -> Result<Option<Expression
                             if type_expr.is_none() {
                                 // Первое выражение - это тип для конструктора
                                 // Сохраняем как строку из исходного кода
-                                type_expr = Some(node_text(&arg_child, source));
+                                type_expr = Some(node_text(&arg_child, source)?);
                             } else {
                                 // Остальные выражения - аргументы конструктора
                                 args.push(expr);

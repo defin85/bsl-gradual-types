@@ -204,12 +204,12 @@ fn parse_decl_ts(
 
     for child in node.children(&mut cursor) {
         match child.kind() {
-            "identifier" if name.is_empty() => name = node_text(&child, source),
+            "identifier" if name.is_empty() => name = node_text(&child, source).ok()?,
             "parameters" => {
                 params = parse_parameters_ts(&child, source);
             }
             _ if child.kind().ends_with("_KEYWORD") => {
-                let kw = node_text(&child, source).trim().to_lowercase();
+                let kw = node_text(&child, source).ok()?.trim().to_lowercase();
                 if kw == "экспорт" || kw == "export" {
                     is_export = true;
                 }
@@ -222,7 +222,10 @@ fn parse_decl_ts(
         return None;
     }
 
-    let directive_ctx = find_preceding_directive(node, source).map(context_from_directive);
+    let directive_ctx = find_preceding_directive(node, source)
+        .ok()
+        .flatten()
+        .map(context_from_directive);
 
     Some(ParsedDecl {
         name,
@@ -488,7 +491,7 @@ fn parse_parameters_ts(node: &tree_sitter::Node, source: &str) -> Vec<super::typ
         let mut param_cursor = child.walk();
         for param_child in child.children(&mut param_cursor) {
             if param_child.kind() == "identifier" && name.is_none() {
-                name = Some(node_text(&param_child, source));
+                name = node_text(&param_child, source).ok();
                 continue;
             }
 
@@ -498,7 +501,9 @@ fn parse_parameters_ts(node: &tree_sitter::Node, source: &str) -> Vec<super::typ
         }
 
         if !is_optional {
-            let param_text = node_text(&child, source);
+            let Some(param_text) = node_text(&child, source).ok() else {
+                continue;
+            };
             if param_text.contains('=') {
                 is_optional = true;
             }
@@ -532,7 +537,7 @@ fn parse_call_ts(
             "access" => access_node = Some(child),
             "method_call" => method_call_node = Some(child),
             "identifier" if func_name.is_none() => {
-                func_name = Some(node_text(&child, source));
+                func_name = node_text(&child, source).ok();
             }
             "arguments" => {
                 let mut args_cursor = child.walk();
@@ -551,7 +556,7 @@ fn parse_call_ts(
         for child in method_call.children(&mut method_cursor) {
             match child.kind() {
                 "identifier" if func_name.is_none() => {
-                    func_name = Some(node_text(&child, source));
+                    func_name = node_text(&child, source).ok();
                 }
                 "arguments" if args.is_empty() => {
                     let mut args_cursor = child.walk();
@@ -609,7 +614,7 @@ fn split_assignment_ts<'a>(
         match child.kind() {
             "=" => seen_eq = true,
             "identifier" if !seen_eq && target_name.is_none() => {
-                target_name = Some(node_text(&child, source));
+                target_name = node_text(&child, source).ok();
             }
             "expression" | "call_expression" | "const_expression" | "method_call"
                 if seen_eq && value_expr.is_none() =>
@@ -645,7 +650,7 @@ fn infer_expr_type_ts(
         "number" => Some("Число".to_string()),
         "date" | "date_literal" => Some("Дата".to_string()),
         "identifier" => {
-            let name = node_text(node, source);
+            let name = node_text(node, source).ok()?;
             if name.eq_ignore_ascii_case("неопределено") {
                 return Some("Неопределено".to_string());
             }
@@ -653,7 +658,7 @@ fn infer_expr_type_ts(
         }
         "new_expression" | "new_expression_method" => extract_new_type_ts(node, source),
         _ => {
-            let text = node_text(node, source).to_lowercase();
+            let text = node_text(node, source).ok()?.to_lowercase();
             if text == "истина" || text == "true" || text == "ложь" || text == "false" {
                 Some("Булево".to_string())
             } else {
@@ -672,14 +677,14 @@ fn extract_new_type_ts(node: &tree_sitter::Node, source: &str) -> Option<String>
             "NEW_KEYWORD" | "НОВЫЙ_KEYWORD" => {}
             "identifier" | "property_access" => {
                 if type_expr.is_none() {
-                    type_expr = Some(node_text(&child, source));
+                    type_expr = node_text(&child, source).ok();
                 }
             }
             "arguments" => {
                 let mut arg_cursor = child.walk();
                 for arg_child in child.children(&mut arg_cursor) {
                     if arg_child.kind() == "expression" && type_expr.is_none() {
-                        type_expr = Some(node_text(&arg_child, source));
+                        type_expr = node_text(&arg_child, source).ok();
                         break;
                     }
                 }
@@ -692,7 +697,9 @@ fn extract_new_type_ts(node: &tree_sitter::Node, source: &str) -> Option<String>
 }
 
 fn split_dotted_path(node: &tree_sitter::Node, source: &str) -> Vec<String> {
-    let text = node_text(node, source);
+    let Ok(text) = node_text(node, source) else {
+        return Vec::new();
+    };
     text.split('.')
         .map(|p| p.trim())
         .filter(|p| !p.is_empty())
@@ -704,7 +711,7 @@ fn first_identifier(node: &tree_sitter::Node, source: &str) -> Option<String> {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "identifier" {
-            return Some(node_text(&child, source));
+            return node_text(&child, source).ok();
         }
     }
     None
@@ -740,8 +747,8 @@ fn extract_export_decls_from_tree(
     tree: &tree_sitter::Tree,
     source: &str,
 ) -> Result<Vec<ParsedDecl>> {
-    fn node_text(node: &tree_sitter::Node, source: &str) -> String {
-        source[node.byte_range()].to_string()
+    fn node_text(node: &tree_sitter::Node, source: &str) -> Option<String> {
+        source.get(node.byte_range()).map(str::to_string)
     }
 
     fn convert_parameters(
@@ -753,7 +760,10 @@ fn extract_export_decls_from_tree(
         for child in node.children(&mut cursor) {
             if child.kind() == "identifier" {
                 out.push(super::types::ParsedParam {
-                    name: node_text(&child, source),
+                    name: match node_text(&child, source) {
+                        Some(name) => name,
+                        None => continue,
+                    },
                     is_optional: false,
                 });
             }
@@ -775,10 +785,18 @@ fn extract_export_decls_from_tree(
         let mut child_cursor = node.walk();
         for child in node.children(&mut child_cursor) {
             match child.kind() {
-                "identifier" if name.is_empty() => name = node_text(&child, source),
+                "identifier" if name.is_empty() => {
+                    name = match node_text(&child, source) {
+                        Some(name) => name,
+                        None => continue,
+                    }
+                }
                 "parameters" => params = convert_parameters(&child, source),
                 _ if child.kind().ends_with("_KEYWORD") => {
-                    let kw = node_text(&child, source).trim().to_lowercase();
+                    let Some(text) = node_text(&child, source) else {
+                        continue;
+                    };
+                    let kw = text.trim().to_lowercase();
                     if kw == "экспорт" || kw == "export" {
                         is_export = true;
                     }
@@ -791,7 +809,10 @@ fn extract_export_decls_from_tree(
             continue;
         }
 
-        let directive_ctx = find_preceding_directive(&node, source).map(context_from_directive);
+        let directive_ctx = find_preceding_directive(&node, source)
+            .ok()
+            .flatten()
+            .map(context_from_directive);
         let span = node_to_span_cached(&node, source, &line_index);
 
         out.push(ParsedDecl {

@@ -27,15 +27,18 @@ use super::utils::node_text;
 ///
 /// В этом случае для узла procedure_definition функция найдёт
 /// предшествующий "preprocessor" узел с текстом "&НаСервере".
-pub fn find_preceding_directive(node: &Node, source: &str) -> Option<CompilerDirective> {
+pub fn find_preceding_directive(
+    node: &Node,
+    source: &str,
+) -> Result<Option<CompilerDirective>, String> {
     let mut prev = node.prev_sibling();
 
     while let Some(sibling) = prev {
         match sibling.kind() {
             "preprocessor" => {
-                let text = node_text(&sibling, source);
+                let text = node_text(&sibling, source)?;
                 debug!("Found preprocessor before function/procedure: '{}'", text);
-                return parse_directive(&text);
+                return Ok(parse_directive(&text));
             }
             // Пропускаем комментарии между директивой и функцией
             "comment" | "line_comment" => {
@@ -48,7 +51,7 @@ pub fn find_preceding_directive(node: &Node, source: &str) -> Option<CompilerDir
         }
     }
 
-    scan_directive_in_source(node, source)
+    Ok(scan_directive_in_source(node, source))
 }
 
 /// Парсит текст директивы в CompilerDirective enum

@@ -118,6 +118,21 @@ fn maybe_force_incremental_parse_failure_for_test() -> bool {
 }
 
 #[cfg(test)]
+fn maybe_force_incremental_adapter_error_for_test() -> Option<String> {
+    const KEY: &str = "BSL_TEST_FORCE_INCREMENTAL_ADAPTER_ERROR";
+    if std::env::var(KEY).ok().as_deref() == Some("1") {
+        std::env::remove_var(KEY);
+        return Some("Forced incremental adapter error for test".to_string());
+    }
+    None
+}
+
+#[cfg(not(test))]
+fn maybe_force_incremental_adapter_error_for_test() -> Option<String> {
+    None
+}
+
+#[cfg(test)]
 pub(crate) fn reset_parse_snapshot_full_parse_attempts_for_test() {
     PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS.store(0, std::sync::atomic::Ordering::SeqCst);
 }
@@ -979,7 +994,19 @@ impl TreeSitterParser {
                 new_content.len()
             );
 
-            let program = TreeSitterAdapter::convert_tree(&new_tree, new_content)?;
+            if let Some(forced_error) = maybe_force_incremental_adapter_error_for_test() {
+                warn!(
+                    "Incremental tree-to-AST conversion failed: {}",
+                    forced_error
+                );
+                return Err("Incremental parsing failed".to_string());
+            }
+
+            let program =
+                TreeSitterAdapter::convert_tree(&new_tree, new_content).map_err(|error| {
+                    warn!("Incremental tree-to-AST conversion failed: {}", error);
+                    "Incremental parsing failed".to_string()
+                })?;
             Ok((new_tree, program, changed_ranges))
         } else {
             // Нет старого дерева — полный парсинг

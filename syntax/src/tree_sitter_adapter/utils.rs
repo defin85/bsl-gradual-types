@@ -4,8 +4,19 @@ use crate::ast::Expression;
 use tree_sitter::Node;
 
 /// Получить текст узла из исходного кода
-pub fn node_text(node: &Node, source: &str) -> String {
-    source[node.byte_range()].to_string()
+pub fn node_text(node: &Node, source: &str) -> Result<String, String> {
+    source
+        .get(node.byte_range())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            format!(
+                "node byte range is not a valid UTF-8 boundary: kind={}, start_byte={}, end_byte={}, source_len={}",
+                node.kind(),
+                node.start_byte(),
+                node.end_byte(),
+                source.len()
+            )
+        })
 }
 
 /// Конвертировать parameters
@@ -19,7 +30,7 @@ pub fn convert_parameters(node: &Node, source: &str) -> Result<Vec<String>, Stri
             let mut param_cursor = child.walk();
             for param_child in child.children(&mut param_cursor) {
                 if param_child.kind() == "identifier" {
-                    params.push(node_text(&param_child, source));
+                    params.push(node_text(&param_child, source)?);
                     break; // Берём только имя параметра
                 }
             }

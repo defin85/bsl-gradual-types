@@ -20,7 +20,7 @@ pub(crate) fn convert_goto_statement_cached(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "identifier" {
-            let label = node_text(&child, source);
+            let label = node_text(&child, source)?;
             return Ok(Statement::Goto { label, span });
         }
     }
@@ -37,7 +37,7 @@ pub(crate) fn convert_label_statement_cached(
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if child.kind() == "identifier" {
-            let name = node_text(&child, source);
+            let name = node_text(&child, source)?;
             return Ok(Statement::Label { name, span });
         }
     }

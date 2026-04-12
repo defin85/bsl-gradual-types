@@ -305,6 +305,7 @@ mod parse_snapshot_tests {
 
     #[test]
     fn incremental_snapshot_matches_full_parse_result() {
+        let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-parity.bsl");
         let base = "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string();
@@ -344,6 +345,7 @@ mod parse_snapshot_tests {
 
     #[test]
     fn incremental_snapshot_reports_fallback_reason_when_edits_missing() {
+        let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-fallback.bsl");
 
@@ -368,6 +370,7 @@ mod parse_snapshot_tests {
 
     #[test]
     fn incremental_snapshot_reports_fallback_reason_when_edit_base_is_stale() {
+        let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-stale-base.bsl");
 
@@ -436,7 +439,51 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn incremental_snapshot_reports_fallback_reason_when_adapter_conversion_fails() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _force_guard = EnvVarGuard::set("BSL_TEST_FORCE_INCREMENTAL_ADAPTER_ERROR", "1");
+
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-incremental-adapter-error.bsl");
+        let base = "Процедура Тест()\n    Знач = 1;\nКонецПроцедуры".to_string();
+        let updated = "Процедура Тест()\n    Знач = 2;\nКонецПроцедуры".to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base, Vec::new())
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                updated.clone(),
+                vec![TextEdit {
+                    start_line: 1,
+                    start_utf16_column: 11,
+                    old_end_line: 1,
+                    old_end_utf16_column: 12,
+                    new_text: "2".to_string(),
+                }],
+            )
+            .expect("fallback parse report");
+
+        assert!(!report.incremental);
+        assert_eq!(
+            report.fallback_reason.as_deref(),
+            Some("incremental_parse_failed")
+        );
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let fallback_json =
+            serde_json::to_string(&report.parse_result).expect("serialize fallback parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(fallback_json, full_json);
+    }
+
+    #[test]
     fn incremental_snapshot_reports_fallback_reason_when_input_edit_conversion_fails() {
+        let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-input-edit-conversion-failure.bsl");
 
@@ -470,6 +517,7 @@ mod parse_snapshot_tests {
 
     #[test]
     fn incremental_snapshot_handles_edit_burst_without_drift() {
+        let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-burst.bsl");
         let initial_text = "Процедура Тест()\n    x = 0;\nКонецПроцедуры".to_string();

@@ -27,20 +27,20 @@ pub(crate) fn convert_function_definition_cached(
     let mut is_export = false;
 
     // Ищем директиву компилятора перед функцией/процедурой
-    let compiler_directive = find_preceding_directive(node, source);
+    let compiler_directive = find_preceding_directive(node, source)?;
 
     for child in node.children(&mut cursor) {
         match child.kind() {
             "identifier" => {
                 if name.is_empty() {
-                    name = node_text(&child, source);
+                    name = node_text(&child, source)?;
                 }
             }
             "parameters" => {
                 params = convert_parameters(&child, source)?;
             }
             _ if child.kind().ends_with("_KEYWORD") => {
-                let kw = node_text(&child, source).trim().to_lowercase();
+                let kw = node_text(&child, source)?.trim().to_lowercase();
                 if kw == "экспорт" || kw == "export" {
                     is_export = true;
                 }
@@ -86,7 +86,7 @@ pub(crate) fn convert_var_definition_cached(
 
     for child in node.children(&mut cursor) {
         if child.kind() == "identifier" {
-            name = node_text(&child, source);
+            name = node_text(&child, source)?;
             break;
         }
     }

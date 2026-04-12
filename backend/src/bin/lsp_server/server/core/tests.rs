@@ -141,6 +141,9 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_full",
     "intellisense_v2_parse_snapshot_total_origin_lsp_mode_other",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_failed",
+    "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_edits_do_not_match_new_content",
+    "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_input_edit_conversion_failed",
+    "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_incremental_parse_failed",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_previous_tree",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_edits_provided",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_other",
@@ -3648,9 +3651,8 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_version_mismatch_on_sta
         .clone()
         .expect("server must be captured");
 
-    let uri =
-        Url::parse("file:///did_save_wait_probe_version_mismatch_trace_fixture.bsl")
-            .expect("fixture");
+    let uri = Url::parse("file:///did_save_wait_probe_version_mismatch_trace_fixture.bsl")
+        .expect("fixture");
     let key = crate::server::DiagnosticsSaveTimelineCycleKey {
         file_id: bsl_analysis_v2::FileId(93),
         diagnostics_generation: 17,
@@ -3792,8 +3794,8 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_superseded_when_newer_c
         .clone()
         .expect("server must be captured");
 
-    let uri = Url::parse("file:///did_save_wait_probe_superseded_trace_fixture.bsl")
-        .expect("fixture");
+    let uri =
+        Url::parse("file:///did_save_wait_probe_superseded_trace_fixture.bsl").expect("fixture");
     let key = crate::server::DiagnosticsSaveTimelineCycleKey {
         file_id: bsl_analysis_v2::FileId(94),
         diagnostics_generation: 19,
@@ -15011,6 +15013,306 @@ async fn p22_get_observability_metrics_sidebar_shape_filters_unrelated_histogram
     assert!(
         !histograms.contains_key("completion_duration_ms"),
         "sidebar shape must omit unrelated full histograms"
+    );
+    assert!(
+        result.get("didChangeParseSnapshotEvidence").is_none(),
+        "sidebar shape must omit didChange parse-snapshot evidence payload"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_get_observability_metrics_exposes_did_change_parse_snapshot_evidence() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri =
+        Url::parse("file:///did_change_parse_snapshot_evidence_fixture.bsl").expect("fixture uri");
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 1,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 0),
+            }),
+            range_length: None,
+            text: "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n".to_string(),
+        }],
+    };
+    let did_change_req = Request::build("textDocument/didChange")
+        .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+        .finish();
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(did_change_req)
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let evidence = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2216)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(1)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break (result, entry);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("didChange parse-snapshot evidence must appear in observability metrics response");
+
+    let (result, entry) = evidence;
+    assert_eq!(
+        result
+            .get("didChangeParseSnapshotEvidence")
+            .and_then(|value| value.get("version"))
+            .and_then(|value| value.as_u64()),
+        Some(crate::server::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION as u64)
+    );
+    assert_eq!(
+        entry.get("parseMode").and_then(|value| value.as_str()),
+        Some("full")
+    );
+    assert_eq!(
+        entry.get("baseTextSource").and_then(|value| value.as_str()),
+        Some("analysis_snapshot")
+    );
+    assert_eq!(
+        entry.get("changeShape").and_then(|value| value.as_str()),
+        Some("ranged")
+    );
+    assert_eq!(
+        entry.get("fallbackReason").and_then(|value| value.as_str()),
+        Some("no_previous_tree")
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_get_observability_metrics_exposes_input_edit_conversion_failure_reason() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        move |client| BslLanguageServer::new(client, coordinator.clone())
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let uri = Url::parse("file:///did_change_parse_snapshot_input_edit_failure_fixture.bsl")
+        .expect("fixture uri");
+    let seeded_text = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n".to_string();
+    let seeded_did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 1,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position::new(0, 0),
+                end: Position::new(0, 0),
+            }),
+            range_length: None,
+            text: seeded_text,
+        }],
+    };
+    let seeded_did_change_req = Request::build("textDocument/didChange")
+        .params(serde_json::to_value(seeded_did_change).expect("DidChangeTextDocumentParams"))
+        .finish();
+    let seeded_did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(seeded_did_change_req)
+        .await
+        .expect("didChange notification");
+    assert!(
+        seeded_did_change_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2217)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let has_seed_entry = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .is_some_and(|entries| {
+                    entries.iter().any(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(1)
+                    })
+                });
+            if has_seed_entry {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("seed didChange parse-snapshot evidence must appear before forcing failure");
+
+    let failing_did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(Range {
+                start: Position::new(99, 0),
+                end: Position::new(99, 0),
+            }),
+            range_length: None,
+            text: "2".to_string(),
+        }],
+    };
+    let failing_did_change_req = Request::build("textDocument/didChange")
+        .params(serde_json::to_value(failing_did_change).expect("DidChangeTextDocumentParams"))
+        .finish();
+    let failing_did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(failing_did_change_req)
+        .await
+        .expect("didChange notification");
+    assert!(
+        failing_did_change_response.is_none(),
+        "didChange is a notification"
+    );
+
+    let evidence = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2218)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(2)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break (result, entry);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("invalid input-edit conversion failure must appear in observability metrics response");
+
+    let (result, entry) = evidence;
+    assert_eq!(
+        result
+            .get("didChangeParseSnapshotEvidence")
+            .and_then(|value| value.get("version"))
+            .and_then(|value| value.as_u64()),
+        Some(crate::server::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION as u64)
+    );
+    assert_eq!(
+        entry.get("parseMode").and_then(|value| value.as_str()),
+        Some("full")
+    );
+    assert_eq!(
+        entry.get("baseTextSource").and_then(|value| value.as_str()),
+        Some("shadow_state")
+    );
+    assert_eq!(
+        entry.get("changeShape").and_then(|value| value.as_str()),
+        Some("ranged")
+    );
+    assert_eq!(
+        entry.get("fallbackReason").and_then(|value| value.as_str()),
+        Some("input_edit_conversion_failed")
     );
 
     drain_task.abort();

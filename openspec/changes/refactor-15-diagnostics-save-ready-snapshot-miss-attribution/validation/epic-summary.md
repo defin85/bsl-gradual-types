@@ -37,8 +37,8 @@ Interpretation:
 As of 2026-04-11:
 
 - `refactor-15` / `bsl-gradual-types-1rkq.1`: implemented and validated
-- `refactor-16` / `bsl-gradual-types-1rkq.2`: planned, blocked by completed step 1 evidence
-- `refactor-17` / `bsl-gradual-types-1rkq.3`: planned, still blocked by step 2
+- `refactor-16` / `bsl-gradual-types-1rkq.2`: implemented and validated
+- `refactor-17` / `bsl-gradual-types-1rkq.3`: planned, unblocked by completed step 2 evidence
 
 ## Why This Is One Epic
 

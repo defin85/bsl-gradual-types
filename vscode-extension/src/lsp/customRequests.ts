@@ -481,6 +481,24 @@ export interface WorkspaceStatsResponse {
  */
 export interface ObservabilityMetricsResponse {
     metrics: any;
+    didChangeParseSnapshotEvidence?: DidChangeParseSnapshotEvidenceResponse;
+}
+
+export interface DidChangeParseSnapshotEvidenceTrace {
+    evidenceId: string;
+    uri: string;
+    requestedVersion: number;
+    startedAtMs: number;
+    parseMode: string;
+    baseTextSource: string;
+    changeShape: string;
+    changedRangesCount: number;
+    fallbackReason?: string;
+}
+
+export interface DidChangeParseSnapshotEvidenceResponse {
+    version: number;
+    entries: DidChangeParseSnapshotEvidenceTrace[];
 }
 
 export interface ObservabilityMetricsRequest {

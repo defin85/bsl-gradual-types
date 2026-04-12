@@ -550,12 +550,20 @@ pub(super) fn normalize_parse_snapshot_mode_label(mode: &str) -> &'static str {
 }
 
 pub(super) fn normalize_parse_snapshot_fallback_reason_label(reason: &str) -> &'static str {
-    if reason.starts_with("incremental_failed:") {
-        return "incremental_failed";
-    }
     match reason {
+        "edits_do_not_match_new_content" | "incremental_failed:Edits do not match new content" => {
+            "edits_do_not_match_new_content"
+        }
+        "input_edit_conversion_failed" => "input_edit_conversion_failed",
+        "incremental_parse_failed" | "incremental_failed:Incremental parsing failed" => {
+            "incremental_parse_failed"
+        }
         "no_previous_tree" => "no_previous_tree",
         "no_edits_provided" => "no_edits_provided",
+        reason if reason.starts_with("Input edit conversion failed:") => {
+            "input_edit_conversion_failed"
+        }
+        reason if reason.starts_with("incremental_failed:") => "other",
         _ => "other",
     }
 }

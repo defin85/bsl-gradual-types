@@ -1221,7 +1221,20 @@ impl BslLanguageServer {
         } else {
             self.coordinator.observability_metrics()
         };
-        Ok(ObservabilityMetricsResponse { metrics })
+        let did_change_parse_snapshot_evidence = if request.shape.as_deref() == Some("sidebar") {
+            None
+        } else {
+            Some(crate::types::DidChangeParseSnapshotEvidenceResponse {
+                version: super::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION,
+                entries: self.snapshot_did_change_parse_snapshot_evidence(
+                    super::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES,
+                ),
+            })
+        };
+        Ok(ObservabilityMetricsResponse {
+            metrics,
+            did_change_parse_snapshot_evidence,
+        })
     }
 
     pub(crate) async fn handle_get_completion_timeline(

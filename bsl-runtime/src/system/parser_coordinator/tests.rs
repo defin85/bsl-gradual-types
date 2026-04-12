@@ -367,6 +367,108 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn incremental_snapshot_reports_fallback_reason_when_edit_base_is_stale() {
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-stale-base.bsl");
+
+        parser
+            .parse_incremental_with_report(
+                file_path.clone(),
+                "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string(),
+                Vec::new(),
+            )
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                "Процедура Тест()\n    x = 3;\nКонецПроцедуры".to_string(),
+                vec![TextEdit {
+                    start_line: 1,
+                    start_utf16_column: 8,
+                    old_end_line: 1,
+                    old_end_utf16_column: 9,
+                    new_text: "2".to_string(),
+                }],
+            )
+            .expect("fallback parse report");
+        assert!(!report.incremental);
+        assert_eq!(
+            report.fallback_reason.as_deref(),
+            Some("edits_do_not_match_new_content")
+        );
+    }
+
+    #[test]
+    fn incremental_snapshot_reports_fallback_reason_when_incremental_parser_rejects() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _force_guard = EnvVarGuard::set("BSL_TEST_FORCE_INCREMENTAL_PARSE_FAILURE", "1");
+
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-incremental-reject.bsl");
+
+        parser
+            .parse_incremental_with_report(
+                file_path.clone(),
+                "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string(),
+                Vec::new(),
+            )
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                "Процедура Тест()\n    x = 2;\nКонецПроцедуры".to_string(),
+                vec![TextEdit {
+                    start_line: 1,
+                    start_utf16_column: 8,
+                    old_end_line: 1,
+                    old_end_utf16_column: 9,
+                    new_text: "2".to_string(),
+                }],
+            )
+            .expect("fallback parse report");
+        assert!(!report.incremental);
+        assert_eq!(
+            report.fallback_reason.as_deref(),
+            Some("incremental_parse_failed")
+        );
+    }
+
+    #[test]
+    fn incremental_snapshot_reports_fallback_reason_when_input_edit_conversion_fails() {
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-input-edit-conversion-failure.bsl");
+
+        parser
+            .parse_incremental_with_report(
+                file_path.clone(),
+                "Процедура Тест()\n    x = 1;\nКонецПроцедуры".to_string(),
+                Vec::new(),
+            )
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report(
+                file_path,
+                "Процедура Тест()\n    x = 2;\nКонецПроцедуры".to_string(),
+                vec![TextEdit {
+                    start_line: 99,
+                    start_utf16_column: 0,
+                    old_end_line: 99,
+                    old_end_utf16_column: 0,
+                    new_text: "2".to_string(),
+                }],
+            )
+            .expect("fallback parse report");
+        assert!(!report.incremental);
+        assert_eq!(
+            report.fallback_reason.as_deref(),
+            Some("input_edit_conversion_failed")
+        );
+    }
+
+    #[test]
     fn incremental_snapshot_handles_edit_burst_without_drift() {
         let parser = ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("snapshot-burst.bsl");

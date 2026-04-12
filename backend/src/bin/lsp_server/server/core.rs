@@ -77,6 +77,13 @@ fn next_diagnostics_save_timeline_trace_id_from(counter: &std::sync::atomic::Ato
     format!("diagnostics-save-trace-{id}")
 }
 
+fn next_did_change_parse_snapshot_evidence_id_from(
+    counter: &std::sync::atomic::AtomicU64,
+) -> String {
+    let id = counter.fetch_add(1, Ordering::Relaxed);
+    format!("did-change-parse-snapshot-{id}")
+}
+
 fn diagnostics_save_timeline_cycle_terminal_outcome(
     trace: &crate::types::DiagnosticsSaveTimelineTrace,
 ) -> Option<String> {
@@ -150,6 +157,20 @@ fn snapshot_diagnostics_save_timeline_traces_inner(
         traces = traces.split_off(traces.len().saturating_sub(limit));
     }
     traces
+}
+
+fn snapshot_did_change_parse_snapshot_evidence_inner(
+    store: &super::DidChangeParseSnapshotEvidenceStore,
+    limit: usize,
+) -> Vec<crate::types::DidChangeParseSnapshotEvidenceTrace> {
+    let len = store.order.len();
+    let start = len.saturating_sub(limit);
+    store
+        .order
+        .iter()
+        .skip(start)
+        .filter_map(|key| store.entries.get(key).cloned())
+        .collect()
 }
 
 fn finalize_diagnostics_save_timeline_trace_for_terminal_outcome(
@@ -517,6 +538,11 @@ impl BslLanguageServer {
             Arc::new(StdMutex::new(super::DiagnosticsSaveTimelineStore::default()));
         let next_diagnostics_save_timeline_trace_id =
             Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let did_change_parse_snapshot_evidence_store = Arc::new(StdMutex::new(
+            super::DidChangeParseSnapshotEvidenceStore::default(),
+        ));
+        let next_did_change_parse_snapshot_evidence_id =
+            Arc::new(std::sync::atomic::AtomicU64::new(1));
 
         let server = Self {
             client,
@@ -566,11 +592,15 @@ impl BslLanguageServer {
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
             diagnostics_save_timeline_store: diagnostics_save_timeline_store.clone(),
+            did_change_parse_snapshot_evidence_store: did_change_parse_snapshot_evidence_store
+                .clone(),
             diagnostics_did_save_followup_lane_v2: Arc::new(StdMutex::new(
                 super::DiagnosticsDidSaveFollowupLaneStateV2::default(),
             )),
             diagnostics_did_save_followup_lane_notify_v2: Arc::new(tokio::sync::Notify::new()),
             next_diagnostics_save_timeline_trace_id: next_diagnostics_save_timeline_trace_id
+                .clone(),
+            next_did_change_parse_snapshot_evidence_id: next_did_change_parse_snapshot_evidence_id
                 .clone(),
             next_document_symbol_request_epoch_v2: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             next_type_index_precompute_task_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
@@ -1039,6 +1069,58 @@ impl BslLanguageServer {
             .terminal_keys
             .keys
             .retain(|key| key.file_id != file_id);
+    }
+
+    pub(crate) fn record_did_change_parse_snapshot_evidence(
+        &self,
+        uri: &Url,
+        key: super::DidChangeParseSnapshotEvidenceKey,
+        parse_mode: &'static str,
+        base_text_source: &'static str,
+        change_shape: &'static str,
+        changed_ranges_count: usize,
+        fallback_reason: Option<&str>,
+    ) {
+        let mut store = self
+            .did_change_parse_snapshot_evidence_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !store.entries.contains_key(&key) {
+            store.order.push_back(key);
+        }
+        store.entries.insert(
+            key,
+            crate::types::DidChangeParseSnapshotEvidenceTrace {
+                evidence_id: next_did_change_parse_snapshot_evidence_id_from(
+                    self.next_did_change_parse_snapshot_evidence_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                started_at_ms: super::unix_timestamp_ms(),
+                parse_mode: parse_mode.to_string(),
+                base_text_source: base_text_source.to_string(),
+                change_shape: change_shape.to_string(),
+                changed_ranges_count,
+                fallback_reason: fallback_reason.map(str::to_string),
+            },
+        );
+        while store.order.len() > super::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES {
+            let Some(oldest_key) = store.order.pop_front() else {
+                break;
+            };
+            store.entries.remove(&oldest_key);
+        }
+    }
+
+    pub(crate) fn snapshot_did_change_parse_snapshot_evidence(
+        &self,
+        limit: usize,
+    ) -> Vec<crate::types::DidChangeParseSnapshotEvidenceTrace> {
+        let store = self
+            .did_change_parse_snapshot_evidence_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        snapshot_did_change_parse_snapshot_evidence_inner(&store, limit)
     }
 
     pub(crate) fn snapshot_diagnostics_save_timeline_traces(

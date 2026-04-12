@@ -240,6 +240,38 @@ suite('Observability Incident Bundle Test Suite', () => {
                         },
                     },
                 },
+                didChangeParseSnapshotEvidence: {
+                    version: 1,
+                    entries: [
+                        {
+                            evidenceId: 'did-change-parse-snapshot-1',
+                            uri: 'file:///tmp/test.bsl',
+                            requestedVersion: 9,
+                            startedAtMs: 1_700_000_019_700,
+                            parseMode: 'full',
+                            baseTextSource: 'analysis_snapshot',
+                            changeShape: 'ranged',
+                            changedRangesCount: 1,
+                            fallbackReason: 'edits_do_not_match_new_content',
+                        },
+                    ],
+                },
+            } as ObservabilityMetricsResponse,
+        };
+    }
+
+    function sampleMetricsWithoutDidChangeParseSnapshotEvidence(): ObservabilityMetricsFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                metrics: {
+                    uptime_seconds: 184,
+                    histograms: {
+                        intellisense_v2_semantic_diagnostics_query_ms: {
+                            p95: 3374,
+                        },
+                    },
+                },
             } as ObservabilityMetricsResponse,
         };
     }
@@ -582,9 +614,19 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests.length, 2);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_window.request_count, 1);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_requests.length, 1);
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_window.entry_count, 1);
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_entries.length, 1);
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0].first_publish?.profile,
             'save_fastlane'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.did_change_parse_snapshot_entries[0].base_text_source,
+            'analysis_snapshot'
+        );
+        assert.deepStrictEqual(
+            bundle.incidentReport.did_change_parse_snapshot_entries[0].correlated_diagnostics_save_trace_ids,
+            ['diagnostics-save-trace-1']
         );
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0].followup_publish?.profile,
@@ -740,6 +782,12 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('## Diagnostics Save Summary'));
         assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('save_cycle_sequence=2'));
+        assert.ok(bundle.summaryMarkdown.includes('## DidChange Parse Snapshot Summary'));
+        assert.ok(bundle.summaryMarkdown.includes('evidence=did-change-parse-snapshot-1'));
+        assert.ok(bundle.summaryMarkdown.includes('base_text_source=analysis_snapshot'));
+        assert.ok(bundle.summaryMarkdown.includes('change_shape=ranged'));
+        assert.ok(bundle.summaryMarkdown.includes('fallback_reason=edits_do_not_match_new_content'));
+        assert.ok(bundle.summaryMarkdown.includes('correlated_diagnostics_save_traces=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('first_publish=save_fastlane:syntax_only:published@84ms'));
         assert.ok(bundle.summaryMarkdown.includes('runtime_queue_wait_ms=6'));
         assert.ok(bundle.summaryMarkdown.includes('blocking_queue_wait_ms=17'));
@@ -904,6 +952,30 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'unavailable');
         assert.ok(bundle.incidentReport.gaps.some((gap) => gap.includes('Diagnostics save timeline is unavailable')));
         assert.ok(bundle.summaryMarkdown.includes('Diagnostics save timeline: status=unavailable'));
+    });
+
+    test('missing didChange parse snapshot evidence should stay explicit in bundle gaps', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleDiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetricsWithoutDidChangeParseSnapshotEvidence(),
+        });
+
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_window.entry_count, 0);
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_entries.length, 0);
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose version-bound didChange parse-snapshot evidence by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'No didChange parse-snapshot fallback evidence was recorded for this bundle.'
+            )
+        );
     });
 
     test('v7 diagnostics save timeline should mark semantic attribution as unavailable by design', () => {

@@ -98,6 +98,30 @@ pub struct ObservabilityMetricsRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ObservabilityMetricsResponse {
     pub metrics: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_change_parse_snapshot_evidence: Option<DidChangeParseSnapshotEvidenceResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DidChangeParseSnapshotEvidenceTrace {
+    pub evidence_id: String,
+    pub uri: String,
+    pub requested_version: i32,
+    pub started_at_ms: u64,
+    pub parse_mode: String,
+    pub base_text_source: String,
+    pub change_shape: String,
+    pub changed_ranges_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DidChangeParseSnapshotEvidenceResponse {
+    pub version: u32,
+    pub entries: Vec<DidChangeParseSnapshotEvidenceTrace>,
 }
 
 /// Custom request: bsl/getCompletionTimeline - per-request completion timeline traces

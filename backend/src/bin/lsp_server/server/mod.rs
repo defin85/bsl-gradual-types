@@ -113,6 +113,8 @@ pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 9;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
+pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 1;
+pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompletionResponseEgressTraceInputs {
@@ -335,10 +337,13 @@ pub struct BslLanguageServer {
         Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) diagnostics_save_timeline_store: Arc<StdMutex<DiagnosticsSaveTimelineStore>>,
+    pub(crate) did_change_parse_snapshot_evidence_store:
+        Arc<StdMutex<DidChangeParseSnapshotEvidenceStore>>,
     pub(crate) diagnostics_did_save_followup_lane_v2:
         Arc<StdMutex<DiagnosticsDidSaveFollowupLaneStateV2>>,
     pub(crate) diagnostics_did_save_followup_lane_notify_v2: Arc<Notify>,
     pub(crate) next_diagnostics_save_timeline_trace_id: Arc<AtomicU64>,
+    pub(crate) next_did_change_parse_snapshot_evidence_id: Arc<AtomicU64>,
     pub(crate) next_document_symbol_request_epoch_v2: Arc<AtomicU64>,
     pub(crate) next_type_index_precompute_task_id: Arc<AtomicU64>,
 }
@@ -411,6 +416,21 @@ pub(crate) struct ReadyParseSnapshotStateV2 {
 pub(crate) struct SaveFastlaneSyntaxArtifactsV2 {
     pub version: i32,
     pub syntax_errors: Arc<Vec<bsl_shared::domain::types::ParseError>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DidChangeParseSnapshotEvidenceKey {
+    pub file_id: V2FileId,
+    pub requested_version: i32,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct DidChangeParseSnapshotEvidenceStore {
+    pub entries: HashMap<
+        DidChangeParseSnapshotEvidenceKey,
+        crate::types::DidChangeParseSnapshotEvidenceTrace,
+    >,
+    pub order: VecDeque<DidChangeParseSnapshotEvidenceKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

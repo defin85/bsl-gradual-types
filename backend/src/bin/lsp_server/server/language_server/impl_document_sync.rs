@@ -13,6 +13,14 @@ struct BuildParseSnapshotRequest {
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     blocking_delay_env_key: Option<&'static str>,
     requested_version_state: Option<Arc<std::sync::atomic::AtomicI32>>,
+    did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
+}
+
+#[derive(Debug, Clone)]
+struct DidChangeParseSnapshotAttributionV2 {
+    uri: Url,
+    base_text_source: &'static str,
+    change_shape: &'static str,
 }
 
 #[cfg(test)]
@@ -130,6 +138,33 @@ fn parse_snapshot_from_report(
     }
 }
 
+fn parse_snapshot_mode_from_report(
+    report: &bsl_runtime::system::parser_coordinator::ParseSnapshotReport,
+) -> &'static str {
+    if report.incremental {
+        if report.changed_ranges.is_empty() {
+            "reused"
+        } else {
+            "incremental"
+        }
+    } else {
+        "full"
+    }
+}
+
+fn did_change_parse_snapshot_change_shape(
+    changes: &[TextDocumentContentChangeEvent],
+) -> &'static str {
+    let has_full_replace = changes.iter().any(|change| change.range.is_none());
+    let has_ranged = changes.iter().any(|change| change.range.is_some());
+    match (has_full_replace, has_ranged) {
+        (true, true) => "mixed",
+        (true, false) => "full_replace",
+        (false, true) => "ranged",
+        (false, false) => "other",
+    }
+}
+
 enum ParseSnapshotAsyncDelayMode {
     None,
     DidChangeTestOnly,
@@ -153,6 +188,7 @@ struct BackgroundParseSnapshotApplyArgs {
     async_delay_mode: ParseSnapshotAsyncDelayMode,
     blocking_delay_env_key: Option<&'static str>,
     force_reschedule_same_version: bool,
+    did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
 }
 
 impl BslLanguageServer {
@@ -176,15 +212,7 @@ impl BslLanguageServer {
         report: &bsl_runtime::system::parser_coordinator::ParseSnapshotReport,
         parse_elapsed: Duration,
     ) {
-        let mode = if report.incremental {
-            if report.changed_ranges.is_empty() {
-                "reused"
-            } else {
-                "incremental"
-            }
-        } else {
-            "full"
-        };
+        let mode = parse_snapshot_mode_from_report(report);
         let changed_ranges_count = report.changed_ranges.len();
         let changed_ranges_bytes: usize = report
             .changed_ranges
@@ -247,6 +275,7 @@ impl BslLanguageServer {
         let parse_started = Instant::now();
         let blocking_delay_env_key_for_parse = request.blocking_delay_env_key;
         let requested_version_state_for_parse = request.requested_version_state;
+        let did_change_attribution = request.did_change_attribution.clone();
         let version = request.version;
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
@@ -279,6 +308,20 @@ impl BslLanguageServer {
         .ok()
         .flatten()?;
         self.record_parse_snapshot_report_v2(&report, parse_started.elapsed());
+        if let Some(attribution) = did_change_attribution.as_ref() {
+            self.record_did_change_parse_snapshot_evidence(
+                &attribution.uri,
+                super::super::DidChangeParseSnapshotEvidenceKey {
+                    file_id,
+                    requested_version: version,
+                },
+                parse_snapshot_mode_from_report(&report),
+                attribution.base_text_source,
+                attribution.change_shape,
+                report.changed_ranges.len(),
+                report.fallback_reason.as_deref(),
+            );
+        }
         Some(parse_snapshot_from_report(file_id, version, report))
     }
 
@@ -383,6 +426,7 @@ impl BslLanguageServer {
                     parser_edits: args.parser_edits,
                     blocking_delay_env_key: args.blocking_delay_env_key,
                     requested_version_state: Some(Arc::clone(&requested_version_state)),
+                    did_change_attribution: args.did_change_attribution.clone(),
                 })
                 .await
             else {
@@ -1186,6 +1230,7 @@ impl BslLanguageServer {
             async_delay_mode: ParseSnapshotAsyncDelayMode::None,
             blocking_delay_env_key: Some("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS"),
             force_reschedule_same_version: false,
+            did_change_attribution: None,
         })
         .await;
         self.schedule_type_index_precompute_v2(file_id, version)
@@ -1222,6 +1267,7 @@ impl BslLanguageServer {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
         let changes = params.content_changes;
+        let parse_snapshot_change_shape = did_change_parse_snapshot_change_shape(&changes);
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
@@ -1259,6 +1305,7 @@ impl BslLanguageServer {
             identical_text_previous_version,
             tail_whitespace_append_previous_version,
             previous_analysis_for_identical_text_reuse,
+            parse_snapshot_base_text_source,
         ) = {
             let _sync_guard = self.text_sync_v2.lock().await;
             let previous_shadow_state = {
@@ -1266,9 +1313,9 @@ impl BslLanguageServer {
                 shadow.get(&file_id).cloned()
             };
 
-            let (updated_text, parser_edits) =
+            let (updated_text, parser_edits, parse_snapshot_base_text_source) =
                 if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-                    (full_change.text.clone(), Vec::new())
+                    (full_change.text.clone(), Vec::new(), "not_applicable")
                 } else {
                     if let Some(state) = previous_shadow_state.as_ref() {
                         if version < state.version {
@@ -1282,18 +1329,22 @@ impl BslLanguageServer {
                             return;
                         }
                     }
-                    let base_text = if let Some(state) = previous_shadow_state.clone() {
-                        state.text.to_string()
-                    } else {
-                        self.analysis_v2
-                            .snapshot()
-                            .await
-                            .file_text(file_id)
-                            .ok()
-                            .flatten()
-                            .map(|text| text.to_string())
-                            .unwrap_or_default()
-                    };
+                    let (base_text, parse_snapshot_base_text_source) =
+                        if let Some(state) = previous_shadow_state.clone() {
+                            (state.text.to_string(), "shadow_state")
+                        } else {
+                            (
+                                self.analysis_v2
+                                    .snapshot()
+                                    .await
+                                    .file_text(file_id)
+                                    .ok()
+                                    .flatten()
+                                    .map(|text| text.to_string())
+                                    .unwrap_or_default(),
+                                "analysis_snapshot",
+                            )
+                        };
 
                     let mut current_text = base_text;
                     let mut parser_edits = Vec::new();
@@ -1305,7 +1356,7 @@ impl BslLanguageServer {
                             current_text = apply_text_edit(&current_text, range, &change.text);
                         }
                     }
-                    (current_text, parser_edits)
+                    (current_text, parser_edits, parse_snapshot_base_text_source)
                 };
             let identical_text_previous_version =
                 previous_shadow_state.as_ref().and_then(|state| {
@@ -1435,6 +1486,7 @@ impl BslLanguageServer {
                 identical_text_previous_version,
                 tail_whitespace_append_previous_version,
                 previous_analysis_for_identical_text_reuse,
+                parse_snapshot_base_text_source,
             )
         };
 
@@ -1488,6 +1540,11 @@ impl BslLanguageServer {
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: false,
+                did_change_attribution: Some(DidChangeParseSnapshotAttributionV2 {
+                    uri: uri.clone(),
+                    base_text_source: parse_snapshot_base_text_source,
+                    change_shape: parse_snapshot_change_shape,
+                }),
             })
             .await;
         }
@@ -1620,6 +1677,7 @@ impl BslLanguageServer {
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: true,
+                did_change_attribution: None,
             })
             .await;
         }

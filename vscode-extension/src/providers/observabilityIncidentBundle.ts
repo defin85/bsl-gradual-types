@@ -18,6 +18,11 @@ import {
     buildObservabilityIncidentDiagnosticsSaveSection,
     renderDiagnosticsSaveSummaryLines,
 } from './observabilityIncidentBundleDiagnosticsSave';
+import {
+    ObservabilityIncidentDidChangeParseSnapshotSummary,
+    buildObservabilityIncidentDidChangeParseSnapshotSection,
+    renderDidChangeParseSnapshotSummaryLines,
+} from './observabilityIncidentBundleParseSnapshot';
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
@@ -70,6 +75,10 @@ export interface ObservabilityIncidentBundleReport {
         request_count: number;
     };
     diagnostics_save_requests: ObservabilityIncidentDiagnosticsSaveSummary[];
+    did_change_parse_snapshot_window: {
+        entry_count: number;
+    };
+    did_change_parse_snapshot_entries: ObservabilityIncidentDidChangeParseSnapshotSummary[];
     sources: {
         completion_timeline: ObservabilityIncidentBundleSource;
         diagnostics_save_timeline: ObservabilityIncidentBundleSource;
@@ -112,6 +121,11 @@ export function buildObservabilityIncidentBundle(
     const diagnosticsSaveSection = buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline
     );
+    const didChangeParseSnapshotSection =
+        buildObservabilityIncidentDidChangeParseSnapshotSection(
+            input.observabilityMetrics,
+            diagnosticsSaveSection.requests
+        );
     const findings = deriveFindings(input, requestSection);
 
     const completionTimelineSource = buildCompletionTimelineSource(
@@ -147,6 +161,10 @@ export function buildObservabilityIncidentBundle(
             request_count: diagnosticsSaveSection.requestCount,
         },
         diagnostics_save_requests: diagnosticsSaveSection.requests,
+        did_change_parse_snapshot_window: {
+            entry_count: didChangeParseSnapshotSection.entryCount,
+        },
+        did_change_parse_snapshot_entries: didChangeParseSnapshotSection.entries,
         sources: {
             completion_timeline: completionTimelineSource,
             diagnostics_save_timeline: diagnosticsSaveTimelineSource,
@@ -154,7 +172,7 @@ export function buildObservabilityIncidentBundle(
             observability_metrics: observabilityMetricsSource,
         },
         findings: findings.length > 0 ? findings : ['No derived bottleneck heuristic matched this capture window.'],
-        gaps: [...gaps, ...requestSection.gaps, ...diagnosticsSaveSection.gaps],
+        gaps: [...gaps, ...requestSection.gaps, ...diagnosticsSaveSection.gaps, ...didChangeParseSnapshotSection.gaps],
         raw_attachments: rawAttachments,
     };
 
@@ -660,6 +678,13 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         ...renderDiagnosticsSaveSummaryLines({
             requestCount: report.diagnostics_save_window.request_count,
             requests: report.diagnostics_save_requests,
+            gaps: [],
+        }),
+        '',
+        '## DidChange Parse Snapshot Summary',
+        ...renderDidChangeParseSnapshotSummaryLines({
+            entryCount: report.did_change_parse_snapshot_window.entry_count,
+            entries: report.did_change_parse_snapshot_entries,
             gaps: [],
         }),
         '',

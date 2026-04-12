@@ -45,6 +45,13 @@ fn is_cache_disabled_env() -> bool {
 }
 
 const PARSE_COORDINATOR_CANCELLED_ERROR: &str = "Tree-sitter parsing cancelled";
+const PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE: &str = "no_previous_tree";
+const PARSE_SNAPSHOT_FALLBACK_NO_EDITS_PROVIDED: &str = "no_edits_provided";
+const PARSE_SNAPSHOT_FALLBACK_EDITS_DO_NOT_MATCH_NEW_CONTENT: &str =
+    "edits_do_not_match_new_content";
+const PARSE_SNAPSHOT_FALLBACK_INPUT_EDIT_CONVERSION_FAILED: &str = "input_edit_conversion_failed";
+const PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED: &str = "incremental_parse_failed";
+const PARSE_SNAPSHOT_FALLBACK_OTHER: &str = "other";
 
 #[cfg(test)]
 static PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
@@ -79,6 +86,35 @@ fn maybe_inject_current_context_parse_progress_delay_for_test() {
     {
         std::thread::sleep(Duration::from_millis(delay_ms));
     }
+}
+
+fn canonical_parse_snapshot_fallback_reason(error: &str) -> &'static str {
+    if error == "No edits provided for incremental parsing" {
+        return PARSE_SNAPSHOT_FALLBACK_NO_EDITS_PROVIDED;
+    }
+    if error == "Edits do not match new content" {
+        return PARSE_SNAPSHOT_FALLBACK_EDITS_DO_NOT_MATCH_NEW_CONTENT;
+    }
+    if error == "Incremental parsing failed" {
+        return PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED;
+    }
+    if error.starts_with("Input edit conversion failed:") {
+        return PARSE_SNAPSHOT_FALLBACK_INPUT_EDIT_CONVERSION_FAILED;
+    }
+    PARSE_SNAPSHOT_FALLBACK_OTHER
+}
+
+#[cfg(test)]
+fn maybe_force_incremental_parse_failure_for_test() -> bool {
+    std::env::var("BSL_TEST_FORCE_INCREMENTAL_PARSE_FAILURE")
+        .ok()
+        .as_deref()
+        == Some("1")
+}
+
+#[cfg(not(test))]
+fn maybe_force_incremental_parse_failure_for_test() -> bool {
+    false
 }
 
 #[cfg(test)]
@@ -524,11 +560,8 @@ impl ParserCoordinator {
                         "Incremental parsing failed: {}, falling back to full parse",
                         e
                     );
-                    let fallback_reason = if e == "No edits provided for incremental parsing" {
-                        Some("no_edits_provided".to_string())
-                    } else {
-                        Some(format!("incremental_failed:{e}"))
-                    };
+                    let fallback_reason =
+                        Some(canonical_parse_snapshot_fallback_reason(&e).to_string());
                     debug!("Full parse for file (fallback): {:?}", file_path);
                     maybe_inject_parse_snapshot_full_parse_delay_for_test();
                     record_parse_snapshot_full_parse_attempt_for_test();
@@ -582,7 +615,7 @@ impl ParserCoordinator {
                     backend_tree,
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
-                    fallback_reason: Some("no_previous_tree".to_string()),
+                    fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
                 })
             }
             Err(e) => {
@@ -913,7 +946,8 @@ impl TreeSitterParser {
             let mut changed_ranges = Vec::with_capacity(edits.len());
             for edit in edits {
                 let (input_edit, start_byte, old_end_byte) =
-                    Self::text_edit_to_input_edit(&edit, &current_source)?;
+                    Self::text_edit_to_input_edit(&edit, &current_source)
+                        .map_err(|err| format!("Input edit conversion failed: {err}"))?;
                 tree.edit(&input_edit);
                 debug!("Applied edit: {:?}", input_edit);
                 changed_ranges.push(ParseChangedRange {
@@ -928,6 +962,10 @@ impl TreeSitterParser {
 
             if current_source != new_content {
                 return Err("Edits do not match new content".to_string());
+            }
+
+            if maybe_force_incremental_parse_failure_for_test() {
+                return Err("Incremental parsing failed".to_string());
             }
 
             // Парсим с использованием отредактированного дерева
@@ -962,6 +1000,20 @@ impl TreeSitterParser {
         use crate::system::positioning::LineIndex;
 
         let index = LineIndex::new(source);
+        Self::validate_utf16_position(
+            &index,
+            source,
+            edit.start_line,
+            edit.start_utf16_column,
+            "start",
+        )?;
+        Self::validate_utf16_position(
+            &index,
+            source,
+            edit.old_end_line,
+            edit.old_end_utf16_column,
+            "old_end",
+        )?;
         let start_byte =
             index.utf16_position_to_byte_offset(source, edit.start_line, edit.start_utf16_column);
         let old_end_byte = index.utf16_position_to_byte_offset(
@@ -969,6 +1021,9 @@ impl TreeSitterParser {
             edit.old_end_line,
             edit.old_end_utf16_column,
         );
+        if old_end_byte < start_byte {
+            return Err("Edit end precedes start".to_string());
+        }
 
         let start_position =
             index.utf16_position_to_point(source, edit.start_line, edit.start_utf16_column);
@@ -991,6 +1046,25 @@ impl TreeSitterParser {
             start_byte,
             old_end_byte,
         ))
+    }
+
+    fn validate_utf16_position(
+        index: &crate::system::positioning::LineIndex,
+        source: &str,
+        line: u32,
+        utf16_column: u32,
+        label: &str,
+    ) -> Result<(), String> {
+        let line = line as usize;
+        if line >= index.line_count() {
+            return Err(format!("{label} line out of range"));
+        }
+        let line_text = index.line_text(source, line);
+        let max_utf16 = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+        if utf16_column > max_utf16 {
+            return Err(format!("{label} utf16 column out of range"));
+        }
+        Ok(())
     }
 }
 

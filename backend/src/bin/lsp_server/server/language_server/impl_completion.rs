@@ -1028,9 +1028,7 @@ impl CompletionTimelineCapture {
             non_member_global_functions_ms: Self::duration_to_ms(
                 breakdown.non_member_global_functions,
             ),
-            non_member_metadata_items_ms: Self::duration_to_ms(
-                breakdown.non_member_metadata_items,
-            ),
+            non_member_metadata_items_ms: Self::duration_to_ms(breakdown.non_member_metadata_items),
             non_member_repository_types_ms: Self::duration_to_ms(
                 breakdown.non_member_repository_types,
             ),

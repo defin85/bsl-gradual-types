@@ -1309,14 +1309,7 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         text: text.clone(),
         version: 1,
         path: Arc::from("semantic-profiled-snapshot.bsl"),
-        parse_snapshot: parse_snapshot_for_test(
-            file_id,
-            1,
-            text.as_ref(),
-            Vec::new(),
-            true,
-            None,
-        ),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
     });
 
     let analysis = host.analysis();
@@ -1328,7 +1321,10 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         first.profile.parse_source,
         Some(SemanticDiagnosticsParseSource::Snapshot)
     );
-    assert_eq!(first.profile.ir_source, Some(IrArtifactSource::SnapshotBuild));
+    assert_eq!(
+        first.profile.ir_source,
+        Some(IrArtifactSource::SnapshotBuild)
+    );
 
     let second = analysis
         .semantic_diagnostics_profiled(file_id)

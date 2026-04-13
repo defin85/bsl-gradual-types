@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 
 import * as customRequestsModule from '../../lsp/customRequests';
 import {
+    formatSnapshotStatusLogLine,
     getActiveSnapshotStatusSnapshot,
     handleSnapshotStatusNotification,
     initializeSnapshotStatus,
@@ -246,5 +247,30 @@ suite('Snapshot Status Test Suite', () => {
         } finally {
             disposable.dispose();
         }
+    });
+
+    test('snapshot status log line includes bounded readiness details', () => {
+        const line = formatSnapshotStatusLogLine({
+            schemaVersion: 1,
+            uri: 'file:///snapshot-status-log.bsl',
+            requestedVersion: 17,
+            readyVersion: 16,
+            state: 'building',
+            exact: false,
+            taskState: 'in_flight_same_revision',
+            phase: 'parsing',
+            trigger: 'did_change',
+            fallbackReason: 'input_edit_conversion_failed',
+            updatedAtMs: 777,
+        });
+
+        assert.ok(line.includes('state=building'));
+        assert.ok(line.includes('requested=v17'));
+        assert.ok(line.includes('ready=v16'));
+        assert.ok(line.includes('task=in_flight_same_revision'));
+        assert.ok(line.includes('phase=parsing'));
+        assert.ok(line.includes('trigger=did_change'));
+        assert.ok(line.includes('fallback=input_edit_conversion_failed'));
+        assert.ok(line.includes('updatedAtMs=777'));
     });
 });

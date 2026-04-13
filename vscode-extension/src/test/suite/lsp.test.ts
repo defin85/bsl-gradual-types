@@ -3,6 +3,7 @@ import * as vscode from 'vscode';
 import { State } from 'vscode-languageclient/node';
 import {
     buildCompletionTriggerWarningPayload,
+    formatServerLaunchForLogging,
     isCompletionTriggerEnabledForBsl,
 } from '../../lsp/client/lifecycle';
 import { updateLspStatus } from '../../lsp/progress';
@@ -51,6 +52,30 @@ suite('LSP Integration Test Suite', () => {
     test('Completion warning payload is absent when trigger is enabled', () => {
         const payload = buildCompletionTriggerWarningPayload(true);
         assert.strictEqual(payload, null, 'no warning payload expected when trigger is enabled');
+    });
+
+    test('Server launch summary redacts inherited env payload', () => {
+        const summary = formatServerLaunchForLogging({
+            run: {
+                command: '/tmp/bsl-lsp-server',
+                options: {
+                    env: {
+                        RUST_LOG: 'debug',
+                        BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS: '500',
+                        TAVILY_API_KEY: 'tvly-secret',
+                        HTTP_PROXY: 'http://127.0.0.1:7891',
+                    },
+                },
+            },
+        });
+
+        assert.ok(summary.includes('/tmp/bsl-lsp-server'));
+        assert.ok(summary.includes('RUST_LOG'));
+        assert.ok(summary.includes('BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS'));
+        assert.ok(!summary.includes('TAVILY_API_KEY'));
+        assert.ok(!summary.includes('tvly-secret'));
+        assert.ok(!summary.includes('HTTP_PROXY'));
+        assert.ok(!summary.includes('127.0.0.1:7891'));
     });
 
     /**

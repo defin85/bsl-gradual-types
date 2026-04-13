@@ -53,6 +53,25 @@ fn snapshot_status_eq_ignoring_updated_at(
     left == right
 }
 
+fn snapshot_status_eq_for_live_notification(
+    left: &SnapshotReadinessDto,
+    right: &SnapshotReadinessDto,
+) -> bool {
+    let mut left = left.clone();
+    let mut right = right.clone();
+    left.updated_at_ms = 0;
+    right.updated_at_ms = 0;
+
+    // Keep request/manual fetch truthful about the latest coarse worker phase, but do not
+    // fan out live notifications for phase/trigger-only churn under the same semantic state.
+    left.phase = None;
+    right.phase = None;
+    left.trigger = None;
+    right.trigger = None;
+
+    left == right
+}
+
 impl BslLanguageServer {
     pub(crate) async fn snapshot_status_for_uri_v2(&self, uri: &Url) -> SnapshotReadinessDto {
         let file_id = self.get_or_create_file_id_v2(uri).await;
@@ -84,7 +103,9 @@ impl BslLanguageServer {
                     let mut next = computed;
                     next.updated_at_ms =
                         unix_timestamp_ms().max(previous.updated_at_ms.saturating_add(1));
-                    if emit_notification {
+                    if emit_notification
+                        && !snapshot_status_eq_for_live_notification(&previous, &next)
+                    {
                         notification = Some(next.clone());
                     }
                     store.insert(file_id, next.clone());

@@ -21,7 +21,9 @@ use bsl_backend::system::{
     build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
     IndexSnapshot, IndexSnapshotId, TypeKind,
 };
-use bsl_shared::api::dtos::{SnapshotPhaseDto, SnapshotReadinessStateDto, SnapshotTaskStateDto};
+use bsl_shared::api::dtos::{
+    SnapshotPhaseDto, SnapshotReadinessDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
+};
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;
 use std::collections::BTreeSet;
@@ -34667,6 +34669,133 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
         ready.updated_at_ms > building.updated_at_ms,
         "updatedAtMs must increase across a real state transition"
     );
+
+    harness.shutdown().await;
+}
+
+async fn wait_for_snapshot_status_notification(
+    harness: &mut LiveLspTransportHarness,
+    timeout: Duration,
+) -> SnapshotReadinessDto {
+    tokio::time::timeout(timeout, async {
+        loop {
+            let message = harness.read_message().await;
+            if message.get("method").and_then(|value| value.as_str())
+                != Some("bsl/snapshotStatus")
+            {
+                continue;
+            }
+            let params = message.get("params").cloned().expect("snapshot status params");
+            break serde_json::from_value(params).expect("snapshot status params dto");
+        }
+    })
+    .await
+    .expect("timed out waiting for snapshot status notification")
+}
+
+async fn assert_no_snapshot_status_notification(
+    harness: &mut LiveLspTransportHarness,
+    timeout: Duration,
+) {
+    let maybe_notification = tokio::time::timeout(timeout, async {
+        loop {
+            let message = harness.read_message().await;
+            if message.get("method").and_then(|value| value.as_str())
+                == Some("bsl/snapshotStatus")
+            {
+                break message;
+            }
+        }
+    })
+    .await;
+
+    assert!(
+        maybe_notification.is_err(),
+        "unexpected snapshot status notification: {:?}",
+        maybe_notification.ok()
+    );
+}
+
+#[tokio::test]
+async fn snapshot_status_live_notifications_coalesce_phase_only_building_transitions() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-phase-coalesce.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 21);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 21,
+            text: text.clone(),
+        },
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                requested_version: Arc::new(std::sync::atomic::AtomicI32::new(21)),
+                text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    control.phase.store(
+        super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
+        Ordering::SeqCst,
+    );
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let building = wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+    assert_eq!(building.phase, Some(SnapshotPhaseDto::Waiting));
+
+    control.phase.store(
+        super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
+        Ordering::SeqCst,
+    );
+    server.refresh_snapshot_status_v2(file_id).await;
+    assert_no_snapshot_status_notification(&mut harness, Duration::from_millis(100)).await;
+
+    control.phase.store(
+        super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Materializing as u8,
+        Ordering::SeqCst,
+    );
+    server.refresh_snapshot_status_v2(file_id).await;
+    assert_no_snapshot_status_notification(&mut harness, Duration::from_millis(100)).await;
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    server.latest_ready_parse_snapshots_v2.write().await.insert(
+        file_id,
+        ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot: parse_snapshot_for_test(file_id, 21, text.as_ref(), vec![], true, None),
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        },
+    );
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let ready = wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(ready.state, SnapshotReadinessStateDto::Ready);
+    assert!(ready.updated_at_ms > building.updated_at_ms);
 
     harness.shutdown().await;
 }

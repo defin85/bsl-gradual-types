@@ -37,6 +37,30 @@ function formatRevision(value: number | undefined): string {
     return typeof value === 'number' ? `v${value}` : 'n/a';
 }
 
+export function formatSnapshotStatusLogLine(status: SnapshotStatusResponse): string {
+    const parts = [
+        `[SnapshotStatus] uri=${status.uri ?? '<none>'}`,
+        `state=${status.state}`,
+        `requested=${formatRevision(status.requestedVersion)}`,
+        `ready=${formatRevision(status.readyVersion)}`,
+        `exact=${status.exact}`,
+        `task=${status.taskState}`,
+    ];
+
+    if (status.phase) {
+        parts.push(`phase=${status.phase}`);
+    }
+    if (status.trigger) {
+        parts.push(`trigger=${status.trigger}`);
+    }
+    if (status.fallbackReason) {
+        parts.push(`fallback=${status.fallbackReason}`);
+    }
+
+    parts.push(`updatedAtMs=${status.updatedAtMs}`);
+    return parts.join(' ');
+}
+
 function renderStatusBar(status: SnapshotStatusResponse): void {
     if (!statusBarItem) {
         return;
@@ -209,9 +233,7 @@ export function initializeSnapshotStatus(
 }
 
 export function handleSnapshotStatusNotification(status: SnapshotStatusResponse): void {
-    outputChannel?.appendLine(
-        `[SnapshotStatus] uri=${status.uri ?? '<none>'} state=${status.state} updatedAtMs=${status.updatedAtMs}`
-    );
+    outputChannel?.appendLine(formatSnapshotStatusLogLine(status));
     applySnapshotStatusUpdate(status);
 }
 

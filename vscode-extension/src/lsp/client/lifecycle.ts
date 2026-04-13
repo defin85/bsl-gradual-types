@@ -26,6 +26,13 @@ import { startHealthCheck, stopHealthCheck } from './health-check';
 import { getSharedCompletionProbeRecorder } from '../../providers/completionProbeRecorder';
 import { resetObservabilityCapabilityCaches } from '../customRequests';
 
+const SAFE_SERVER_ENV_KEYS = [
+    'RUST_LOG',
+    'RUST_BACKTRACE',
+    'BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS',
+    'BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS',
+] as const;
+
 /**
  * Преобразует состояние LSP клиента в читаемую строку
  */
@@ -36,6 +43,62 @@ function StateToString(state: State): string {
         case State.Running: return 'Running';
         default: return `Unknown(${state})`;
     }
+}
+
+function summarizeExecutableEnvForLogging(executable: unknown): Record<string, string> {
+    if (!executable || typeof executable !== 'object') {
+        return {};
+    }
+
+    const options = (executable as { options?: { env?: Record<string, unknown> } }).options;
+    const env = options?.env;
+    if (!env) {
+        return {};
+    }
+
+    const safeEnv: Record<string, string> = {};
+    for (const key of SAFE_SERVER_ENV_KEYS) {
+        const value = env[key];
+        if (typeof value === 'string' && value.length > 0) {
+            safeEnv[key] = value;
+        }
+    }
+    return safeEnv;
+}
+
+export function formatServerLaunchForLogging(serverOptions: unknown): string {
+    if (!serverOptions || typeof serverOptions !== 'object') {
+        return 'Server launch: unavailable';
+    }
+
+    const run = (serverOptions as { run?: unknown }).run;
+    if (!run || typeof run !== 'object') {
+        return 'Server launch: unavailable';
+    }
+
+    const executable = run as {
+        command?: unknown;
+        transport?: unknown;
+        port?: unknown;
+    };
+
+    if (typeof executable.command === 'string') {
+        return `Server launch: ${JSON.stringify({
+            mode: 'stdio',
+            command: executable.command,
+            envOverrides: summarizeExecutableEnvForLogging(run),
+        })}`;
+    }
+
+    if (typeof executable.transport !== 'undefined') {
+        return `Server launch: ${JSON.stringify({
+            mode: 'transport',
+            transport: executable.transport,
+            port: executable.port ?? null,
+        })}`;
+    }
+
+    return 'Server launch: unsupported server options shape';
 }
 
 /** Текущий LSP клиент */
@@ -130,7 +193,7 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
     // Start the client
     try {
         outputChannel.appendLine('Starting LSP client...');
-        outputChannel.appendLine(`Server command: ${JSON.stringify(serverOptions)}`);
+        outputChannel.appendLine(formatServerLaunchForLogging(serverOptions));
 
         await client.start();
 

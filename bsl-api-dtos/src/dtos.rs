@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 use bsl_repository::RepositoryStats;
 
@@ -144,6 +145,157 @@ pub struct SnapshotMetaDto {
     pub strict_fingerprint: bool,
     pub repository_stats: RepositoryStats,
     pub inputs: SnapshotInputsDto,
+}
+
+pub const SNAPSHOT_READINESS_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotReadinessStateDto {
+    Idle,
+    Building,
+    Ready,
+    Stale,
+    ShadowOnly,
+    Failed,
+}
+
+impl SnapshotReadinessStateDto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Building => "building",
+            Self::Ready => "ready",
+            Self::Stale => "stale",
+            Self::ShadowOnly => "shadow_only",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotReadinessStateDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotTaskStateDto {
+    Absent,
+    InFlightSameRevision,
+    InFlightOtherRevision,
+    ReadySameRevision,
+    ReadyStaleRevision,
+    NotApplicable,
+}
+
+impl SnapshotTaskStateDto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Absent => "absent",
+            Self::InFlightSameRevision => "in_flight_same_revision",
+            Self::InFlightOtherRevision => "in_flight_other_revision",
+            Self::ReadySameRevision => "ready_same_revision",
+            Self::ReadyStaleRevision => "ready_stale_revision",
+            Self::NotApplicable => "not_applicable",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotTaskStateDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotPhaseDto {
+    Waiting,
+    Parsing,
+    Materializing,
+}
+
+impl SnapshotPhaseDto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::Parsing => "parsing",
+            Self::Materializing => "materializing",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotPhaseDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotTriggerDto {
+    DidOpen,
+    DidChange,
+    DidSave,
+    CurrentContext,
+    DocumentsSet,
+    Job,
+}
+
+impl SnapshotTriggerDto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DidOpen => "did_open",
+            Self::DidChange => "did_change",
+            Self::DidSave => "did_save",
+            Self::CurrentContext => "current_context",
+            Self::DocumentsSet => "documents_set",
+            Self::Job => "job",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotTriggerDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotReadinessDto {
+    pub schema_version: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis_revision: Option<u64>,
+    pub state: SnapshotReadinessStateDto,
+    pub exact: bool,
+    pub task_state: SnapshotTaskStateDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<SnapshotPhaseDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<SnapshotTriggerDto>,
+    pub updated_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSnapshotStatusResponseDto {
+    pub schema_version: u32,
+    pub entries: Vec<SnapshotReadinessDto>,
 }
 
 /// The main structure representing the complete analysis result.

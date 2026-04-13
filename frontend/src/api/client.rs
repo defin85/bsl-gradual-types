@@ -160,6 +160,22 @@ pub async fn fetch_mcp_metrics(session_id: Option<&str>) -> Result<MetricsDto, S
         .map_err(|e| format!("API error: {:?}", e))
 }
 
+/// Получить snapshot readiness из `bsl-agent` через parity API (`/api/mcp/snapshot-status`).
+pub async fn fetch_mcp_snapshot_status(
+    session_id: Option<&str>
+) -> Result<McpSnapshotStatusResponseDto, String> {
+    let config = get_config();
+    let base_url = config.api_url("mcp/snapshot-status");
+    let url = if let Some(session_id) = session_id {
+        format!("{base_url}?sessionId={session_id}")
+    } else {
+        base_url
+    };
+    fetch_json::<McpSnapshotStatusResponseDto>(&url)
+        .await
+        .map_err(|e| format!("API error: {:?}", e))
+}
+
 /// Пересобрать deps/index на backend и вернуть новую мету снапшота
 pub async fn reload_snapshot() -> Result<SnapshotMetaDto, String> {
     let config = get_config();

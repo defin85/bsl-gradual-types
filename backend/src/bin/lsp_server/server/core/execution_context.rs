@@ -18,17 +18,31 @@ impl BslLanguageServer {
         };
 
         if let Some(&file_id) = self.file_key_to_file_id_v2.read().await.get(&key) {
+            self.file_id_to_uri_v2
+                .write()
+                .await
+                .insert(file_id, uri.clone());
             return file_id;
         }
 
         let mut map = self.file_key_to_file_id_v2.write().await;
         if let Some(&file_id) = map.get(&key) {
+            drop(map);
+            self.file_id_to_uri_v2
+                .write()
+                .await
+                .insert(file_id, uri.clone());
             return file_id;
         }
 
         let raw = self.next_file_id_v2.fetch_add(1, Ordering::Relaxed);
         let file_id = V2FileId(raw);
         map.insert(key, file_id);
+        drop(map);
+        self.file_id_to_uri_v2
+            .write()
+            .await
+            .insert(file_id, uri.clone());
         file_id
     }
 

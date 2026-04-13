@@ -44,6 +44,8 @@ pub(crate) use deps_and_precompute::ExactTypeIndexWaitOutcomeV2;
 mod diagnostics_runtime;
 #[path = "core/execution_context.rs"]
 mod execution_context;
+#[path = "core/snapshot_status.rs"]
+mod snapshot_status;
 
 fn diagnostics_debounce_duration() -> Duration {
     // Diagnostics are triggered on every `textDocument/didChange`. Computing full diagnostics is
@@ -559,6 +561,7 @@ impl BslLanguageServer {
             analysis_v2,
             text_sync_v2: Arc::new(Mutex::new(())),
             file_key_to_file_id_v2: Arc::new(RwLock::new(HashMap::new())),
+            file_id_to_uri_v2: Arc::new(RwLock::new(HashMap::new())),
             next_file_id_v2: Arc::new(std::sync::atomic::AtomicU32::new(1)),
             diagnostics_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
             type_index_precompute_tasks_v2: Arc::new(Mutex::new(HashMap::new())),
@@ -571,6 +574,7 @@ impl BslLanguageServer {
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_snapshot_status_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_save_fastlane_syntax_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_diagnostics_publish_state_v2: Arc::new(RwLock::new(HashMap::new())),

@@ -121,6 +121,10 @@ async fn main() -> Result<()> {
         BslLanguageServer::handle_get_index_state,
     )
     .custom_method(
+        "bsl/getSnapshotStatus",
+        BslLanguageServer::handle_get_snapshot_status,
+    )
+    .custom_method(
         "bsl/incrementalUpdate",
         BslLanguageServer::handle_incremental_update,
     )

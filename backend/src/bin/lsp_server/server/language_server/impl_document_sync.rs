@@ -292,14 +292,17 @@ impl BslLanguageServer {
         file_id: bsl_analysis_v2::FileId,
         text: Arc<str>,
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
+        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
     ) {
         self.latest_ready_parse_snapshots_v2.write().await.insert(
             file_id,
             ReadyParseSnapshotStateV2 {
                 text,
                 parse_snapshot: parse_snapshot.clone(),
+                source,
             },
         );
+        self.refresh_snapshot_status_v2(file_id).await;
     }
 
     async fn prime_parser_tree_cache_from_matching_ready_snapshot_v2(
@@ -670,6 +673,8 @@ impl BslLanguageServer {
                 handle,
             },
         );
+        drop(tasks);
+        self.refresh_snapshot_status_v2(file_id).await;
     }
 
     async fn run_background_parse_snapshot_apply_worker_v2(
@@ -691,6 +696,11 @@ impl BslLanguageServer {
         );
 
         let run = async {
+            task_control.phase.store(
+                super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
+                Ordering::SeqCst,
+            );
+            self.refresh_snapshot_status_v2(file_id).await;
             let debounce = parse_snapshot_apply_debounce_duration();
             if debounce > Duration::ZERO
                 && !task_control.cancel_requested.load(Ordering::SeqCst)
@@ -751,6 +761,11 @@ impl BslLanguageServer {
                 return;
             }
 
+            task_control.phase.store(
+                super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
+                Ordering::SeqCst,
+            );
+            self.refresh_snapshot_status_v2(file_id).await;
             let parse_snapshot = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
                     file_id: args.file_id,
@@ -792,8 +807,18 @@ impl BslLanguageServer {
                     return;
                 }
             };
-            self.record_ready_parse_snapshot_v2(args.file_id, args.text.clone(), &parse_snapshot)
-                .await;
+            task_control.phase.store(
+                super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Materializing as u8,
+                Ordering::SeqCst,
+            );
+            self.refresh_snapshot_status_v2(file_id).await;
+            self.record_ready_parse_snapshot_v2(
+                args.file_id,
+                args.text.clone(),
+                &parse_snapshot,
+                args.source,
+            )
+            .await;
             lifecycle_guard.mark_materialized();
             task_control.materialized.store(true, Ordering::SeqCst);
             task_control.materialized_notify.notify_waiters();
@@ -915,6 +940,8 @@ impl BslLanguageServer {
         {
             tasks.remove(&file_id);
         }
+        drop(tasks);
+        self.refresh_snapshot_status_v2(file_id).await;
         task_control.control_notify.notify_waiters();
     }
 
@@ -1521,7 +1548,12 @@ impl BslLanguageServer {
 
             let parse_snapshot = parse_snapshot_from_report(file_id, requested_version, report);
             server
-                .record_ready_parse_snapshot_v2(file_id, text.clone(), &parse_snapshot)
+                .record_ready_parse_snapshot_v2(
+                    file_id,
+                    text.clone(),
+                    &parse_snapshot,
+                    super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                )
                 .await;
             let analysis = server.analysis_v2.snapshot().await;
             let _ = analysis.try_publish_completion_head_from_parse_snapshot_reuse(
@@ -2185,6 +2217,7 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.latest_snapshot_status_v2.write().await.remove(&file_id);
             self.latest_save_fastlane_syntax_artifacts_v2
                 .write()
                 .await
@@ -2219,6 +2252,7 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.file_id_to_uri_v2.write().await.remove(&file_id);
             let had_large_churn = self
                 .scale_aware_churn_state_v2
                 .write()

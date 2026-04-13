@@ -27,9 +27,11 @@ use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, DiagnosticsSaveTimelineRequest,
     DiagnosticsSaveTimelineResponse, GetCurrentContextParams, GetIndexStateParams,
-    GetIndexStateResponse, IncrementalUpdateParams, IncrementalUpdateResponse,
-    ObservabilityMetricsRequest, ObservabilityMetricsResponse, WorkspaceStatsResponse,
+    GetIndexStateResponse, GetSnapshotStatusRequest, IncrementalUpdateParams,
+    IncrementalUpdateResponse, ObservabilityMetricsRequest, ObservabilityMetricsResponse,
+    WorkspaceStatsResponse,
 };
+use bsl_shared::api::dtos::SnapshotReadinessDto;
 
 use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
 
@@ -1343,6 +1345,17 @@ impl BslLanguageServer {
         })
     }
 
+    /// Custom request: bsl/getSnapshotStatus
+    pub(crate) async fn handle_get_snapshot_status(
+        &self,
+        request: GetSnapshotStatusRequest,
+    ) -> JsonRpcResult<SnapshotReadinessDto> {
+        let uri = Url::parse(request.uri.as_str()).map_err(|err| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid uri: {err}"))
+        })?;
+        Ok(self.snapshot_status_for_uri_v2(&uri).await)
+    }
+
     /// Custom request: bsl/getObservabilityMetrics
     pub(crate) async fn handle_get_observability_metrics(
         &self,
@@ -1518,6 +1531,10 @@ mod tests {
         .custom_method(
             "bsl/getIndexState",
             BslLanguageServer::handle_get_index_state,
+        )
+        .custom_method(
+            "bsl/getSnapshotStatus",
+            BslLanguageServer::handle_get_snapshot_status,
         )
         .finish();
 

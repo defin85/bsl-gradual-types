@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::notification::Notification;
 
+use bsl_shared::api::dtos::SnapshotReadinessDto;
+
 // ============================================================================
 // MILESTONE 2.20.3: Server Status notification
 // ============================================================================
@@ -39,6 +41,20 @@ impl ServerStatusParams {
             message: None,
         }
     }
+}
+
+/// Custom bsl/snapshotStatus notification type
+pub enum SnapshotStatusNotification {}
+
+impl Notification for SnapshotStatusNotification {
+    type Params = SnapshotReadinessDto;
+    const METHOD: &'static str = "bsl/snapshotStatus";
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetSnapshotStatusRequest {
+    pub uri: String,
 }
 
 // ============================================================================

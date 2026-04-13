@@ -26,6 +26,7 @@ import { initializeContextProvider } from './lsp/contextProvider';
 import { initializeStatsProvider } from './lsp/statsProvider';
 // MILESTONE 2.20.3: Server Status Handler (rust-analyzer approach)
 import { initializeServerStatus } from './lsp/serverStatus';
+import { initializeSnapshotStatus } from './lsp/snapshotStatus';
 import {
     getPlatformDocsArchive,
     initializeUtils,
@@ -59,6 +60,7 @@ import { registerCommands as registerAllCommands, initializeCommands } from './c
 let indexServerPath: string;
 let outputChannel: vscode.OutputChannel;
 let statusBarItem: vscode.StatusBarItem;
+let snapshotStatusBarItem: vscode.StatusBarItem;
 let extensionContext: vscode.ExtensionContext;
 
 // Функции прогресса теперь импортируются из модуля lsp/progress
@@ -95,10 +97,16 @@ export async function activate(context: vscode.ExtensionContext) {
         statusBarItem.show();
         context.subscriptions.push(statusBarItem);
 
+        snapshotStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+        snapshotStatusBarItem.command = 'bslAnalyzer.refreshObservability';
+        snapshotStatusBarItem.hide();
+        context.subscriptions.push(snapshotStatusBarItem);
+
         // Инициализируем модули
         initializeUtils(outputChannel);
         initializeProgress(outputChannel, statusBarItem);
         initializeServerStatus(outputChannel, statusBarItem);
+        context.subscriptions.push(initializeSnapshotStatus(outputChannel, snapshotStatusBarItem));
         // MILESTONE 2.20.3: Initialize Current Context Provider
         initializeContextProvider(context, statusBarItem);
         // MILESTONE 2.20.4: Initialize Type Repository Stats Provider

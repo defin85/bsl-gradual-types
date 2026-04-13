@@ -88,6 +88,58 @@ export interface GetIndexStateResponse {
     updated_at_ms: number;
 }
 
+export interface SnapshotStatusRequest {
+    uri: string;
+}
+
+export type SnapshotReadinessState =
+    | 'idle'
+    | 'building'
+    | 'ready'
+    | 'stale'
+    | 'shadow_only'
+    | 'failed';
+
+export type SnapshotTaskState =
+    | 'absent'
+    | 'in_flight_same_revision'
+    | 'in_flight_other_revision'
+    | 'ready_same_revision'
+    | 'ready_stale_revision'
+    | 'not_applicable';
+
+export type SnapshotPhase = 'waiting' | 'parsing' | 'materializing';
+
+export type SnapshotTrigger =
+    | 'did_open'
+    | 'did_change'
+    | 'did_save'
+    | 'current_context'
+    | 'documents_set'
+    | 'job';
+
+export interface SnapshotStatusResponse {
+    schemaVersion: number;
+    uri?: string;
+    path?: string;
+    sessionId?: string;
+    requestedVersion?: number;
+    readyVersion?: number;
+    analysisRevision?: number;
+    state: SnapshotReadinessState;
+    exact: boolean;
+    taskState: SnapshotTaskState;
+    phase?: SnapshotPhase;
+    trigger?: SnapshotTrigger;
+    updatedAtMs: number;
+    fallbackReason?: string;
+}
+
+export type SnapshotStatusFetchResult =
+    | { kind: 'ok'; response: SnapshotStatusResponse }
+    | { kind: 'unsupported' }
+    | { kind: 'error'; message: string };
+
 export interface ValidateMethodParams {
     object_type: string;
     method_name: string;
@@ -259,6 +311,45 @@ export async function getIndexState(
 ): Promise<GetIndexStateResponse> {
     const { sendCustomRequest } = await import('./client/index');
     return await sendCustomRequest<GetIndexStateResponse>('bsl/getIndexState', params);
+}
+
+let snapshotStatusUnsupported = false;
+
+export function resetSnapshotStatusCapabilityCacheForTests(): void {
+    snapshotStatusUnsupported = false;
+}
+
+export async function getSnapshotStatusFetchResult(
+    request: SnapshotStatusRequest
+): Promise<SnapshotStatusFetchResult> {
+    if (snapshotStatusUnsupported) {
+        return { kind: 'unsupported' };
+    }
+
+    const { sendCustomRequest } = await import('./client/index');
+    try {
+        const response = await sendCustomRequest<SnapshotStatusResponse>(
+            'bsl/getSnapshotStatus',
+            request
+        );
+        return { kind: 'ok', response };
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            snapshotStatusUnsupported = true;
+            logger.warn('[Snapshot Status] LSP server does not support bsl/getSnapshotStatus');
+            return { kind: 'unsupported' };
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to get snapshot status', error);
+        return { kind: 'error', message };
+    }
+}
+
+export async function getSnapshotStatus(
+    request: SnapshotStatusRequest
+): Promise<SnapshotStatusResponse | null> {
+    const result = await getSnapshotStatusFetchResult(request);
+    return result.kind === 'ok' ? result.response : null;
 }
 
 /**
@@ -970,6 +1061,7 @@ let observabilityMetricsUnsupportedNotified = false;
 const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
 export function resetObservabilityCapabilityCaches(): void {
+    snapshotStatusUnsupported = false;
     observabilityMetricsUnsupported = false;
     observabilityMetricsUnsupportedNotified = false;
     completionTimelineUnsupported = false;

@@ -6,7 +6,8 @@ use axum::{
     Json, Router,
 };
 use bsl_shared::api::dtos::{
-    McpBackendModeDto, McpJobDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
+    McpBackendModeDto, McpJobDto, McpJobsResponseDto, McpSessionsResponseDto,
+    McpSnapshotStatusResponseDto, McpStatusDto,
 };
 use serde::Deserialize;
 use std::{
@@ -232,6 +233,23 @@ async fn get_mcp_metrics(
     }
 }
 
+async fn get_mcp_snapshot_status(
+    Query(query): Query<DepsMetaQuery>,
+    State(state): State<HttpUiState>,
+) -> impl IntoResponse {
+    match state
+        .session_manager
+        .http_snapshot_status(query.session_id.as_deref())
+        .await
+    {
+        Ok(dto) => Json::<McpSnapshotStatusResponseDto>(dto).into_response(),
+        Err(err) => {
+            let (status, msg) = map_rmcp_error(err);
+            json_error(status, msg).into_response()
+        }
+    }
+}
+
 fn serve_embedded_response(path: &str) -> Option<Response> {
     let file = EMBEDDED_SITE.get_file(path)?;
     let mut headers = HeaderMap::new();
@@ -302,6 +320,7 @@ fn router(state: HttpUiState, static_source: HttpUiStaticSource) -> Router {
         .route("/api/mcp/types", get(get_mcp_types))
         .route("/api/mcp/search", get(get_mcp_search))
         .route("/api/mcp/metrics", get(get_mcp_metrics))
+        .route("/api/mcp/snapshot-status", get(get_mcp_snapshot_status))
         .with_state(state)
         .layer(SetResponseHeaderLayer::overriding(
             x_frame_options,

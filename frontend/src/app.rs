@@ -33,6 +33,7 @@ pub fn App() -> impl IntoView {
     let mcp_status = RwSignal::new(None::<McpStatusDto>);
     let mcp_sessions = RwSignal::new(None::<McpSessionsResponseDto>);
     let mcp_jobs = RwSignal::new(None::<McpJobsResponseDto>);
+    let mcp_snapshot_status = RwSignal::new(None::<McpSnapshotStatusResponseDto>);
     let filters = RwSignal::new(TypeFilters::new());
     let search_query = RwSignal::new(String::new());
 
@@ -75,6 +76,7 @@ pub fn App() -> impl IntoView {
         error.set(None);
         parity_blocked.set(None);
         snapshot_error.set(None);
+        mcp_snapshot_status.set(None);
 
         spawn_local(async move {
             let sessions = match fetch_mcp_sessions().await {
@@ -100,6 +102,7 @@ pub fn App() -> impl IntoView {
                 types.set(Vec::new());
                 search_result.set(None);
                 metrics.set(None);
+                mcp_snapshot_status.set(None);
 
                 if ready_sessions.is_empty() {
                     parity_blocked.set(Some(
@@ -133,6 +136,11 @@ pub fn App() -> impl IntoView {
             match fetch_mcp_metrics(Some(&session_id)).await {
                 Ok(metrics_data) => metrics.set(Some(metrics_data)),
                 Err(_) => metrics.set(None),
+            }
+
+            match fetch_mcp_snapshot_status(Some(&session_id)).await {
+                Ok(snapshot_status) => mcp_snapshot_status.set(Some(snapshot_status)),
+                Err(_) => mcp_snapshot_status.set(None),
             }
 
             match fetch_mcp_types(filters.get(), Some(&session_id)).await {
@@ -582,6 +590,51 @@ pub fn App() -> impl IntoView {
                                                                                 }
                                                                             }).collect_view()}
                                                                         </div>
+                                                                    }.into_any()
+                                                                })
+                                                            }}
+                                                        </div>
+
+                                                        <div class="card">
+                                                            <h2 class="text-lg font-semibold mb-2">"Snapshot Readiness"</h2>
+                                                            {move || {
+                                                                mcp_snapshot_status.get().map(|resp| {
+                                                                    if resp.entries.is_empty() {
+                                                                        view! {
+                                                                            <div class="text-sm opacity-70">"Нет tracked documents."</div>
+                                                                        }.into_any()
+                                                                    } else {
+                                                                        view! {
+                                                                            <div class="space-y-2">
+                                                                                {resp.entries.into_iter().map(|entry| {
+                                                                                    let path = entry.path.unwrap_or_else(|| "<unknown>".to_string());
+                                                                                    let analysis_revision = entry.analysis_revision;
+                                                                                    let requested_version = entry.requested_version;
+                                                                                    let ready_version = entry.ready_version;
+                                                                                    view! {
+                                                                                        <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20 text-sm">
+                                                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                                                <code class="font-mono text-[11px] select-all">{path}</code>
+                                                                                                <span class="font-semibold">{entry.state.to_string()}</span>
+                                                                                                <span class="opacity-70">{format!("exact={}", entry.exact)}</span>
+                                                                                                {analysis_revision.map(|revision| view! { <span class="opacity-70">{format!("analysis_revision={revision}")}</span> })}
+                                                                                                {requested_version.map(|revision| view! { <span class="opacity-70">{format!("requested={revision}")}</span> })}
+                                                                                                {ready_version.map(|revision| view! { <span class="opacity-70">{format!("ready={revision}")}</span> })}
+                                                                                            </div>
+                                                                                            <div class="mt-1 text-xs opacity-70">
+                                                                                                {format!("task={} updatedAtMs={}", entry.task_state, entry.updated_at_ms)}
+                                                                                                {entry.trigger.map(|trigger| format!(" trigger={trigger}")).unwrap_or_default()}
+                                                                                                {entry.fallback_reason.map(|reason| format!(" fallback={reason}")).unwrap_or_default()}
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    }
+                                                                                }).collect_view()}
+                                                                            </div>
+                                                                        }.into_any()
+                                                                    }
+                                                                }).unwrap_or_else(|| {
+                                                                    view! {
+                                                                        <div class="text-sm opacity-70">"Snapshot readiness unavailable."</div>
                                                                     }.into_any()
                                                                 })
                                                             }}

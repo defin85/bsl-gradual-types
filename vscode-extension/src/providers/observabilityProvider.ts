@@ -4,9 +4,11 @@ import { BslAnalyzerConfig } from '../config/configHelper';
 import { getLanguageClient } from '../lsp/client';
 import { getObservabilityMetricsWithRequest } from '../lsp/customRequests';
 import { getServerStatusSnapshot, onServerStatusChange } from '../lsp/serverStatus';
+import { getActiveSnapshotStatusSnapshot, onSnapshotStatusChange } from '../lsp/snapshotStatus';
 
 type ObservabilitySection =
     | 'obs-status'
+    | 'obs-snapshot'
     | 'obs-sla'
     | 'obs-latency'
     | 'obs-rates'
@@ -97,6 +99,11 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         });
         this.disposables.push(serverStatusDisposable);
 
+        const snapshotStatusDisposable = onSnapshotStatusChange(() => {
+            this.refresh(false);
+        });
+        this.disposables.push(snapshotStatusDisposable);
+
         this.startAutoRefresh();
     }
 
@@ -126,6 +133,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
             if (this.compactModeEnabled) {
                 return Promise.resolve([
                     new BslOverviewItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'obs-status'),
+                    new BslOverviewItem('Snapshot Readiness', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot'),
                     new BslOverviewItem('SLA Metrics', vscode.TreeItemCollapsibleState.Expanded, 'obs-sla'),
                     new BslOverviewItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'obs-actions'),
                 ]);
@@ -133,6 +141,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
 
             return Promise.resolve([
                 new BslOverviewItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'obs-status'),
+                new BslOverviewItem('Snapshot Readiness', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot'),
                 new BslOverviewItem('Key Latencies', vscode.TreeItemCollapsibleState.Expanded, 'obs-latency'),
                 new BslOverviewItem('Rates', vscode.TreeItemCollapsibleState.Collapsed, 'obs-rates'),
                 new BslOverviewItem('Counters', vscode.TreeItemCollapsibleState.Collapsed, 'obs-counters'),
@@ -145,6 +154,8 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         switch (section) {
             case 'obs-status':
                 return this.getStatusItems();
+            case 'obs-snapshot':
+                return Promise.resolve(this.getSnapshotItems());
             case 'obs-sla':
                 return this.getSlaItems();
             case 'obs-latency':
@@ -262,6 +273,88 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         return items.length > 0
             ? items
             : [new BslOverviewItem('No SLA metrics', vscode.TreeItemCollapsibleState.None)];
+    }
+
+    private getSnapshotItems(): BslOverviewItem[] {
+        const snapshot = getActiveSnapshotStatusSnapshot();
+        switch (snapshot.kind) {
+            case 'inactive': {
+                const item = new BslOverviewItem(
+                    'Snapshot: no active BSL editor',
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.iconPath = new vscode.ThemeIcon('circle-slash');
+                return [item];
+            }
+            case 'unsupported': {
+                const item = new BslOverviewItem(
+                    'Snapshot: unsupported by current server',
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.iconPath = new vscode.ThemeIcon('warning');
+                return [item];
+            }
+            case 'unavailable': {
+                const item = new BslOverviewItem(
+                    `Snapshot: unavailable (${snapshot.message})`,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.iconPath = new vscode.ThemeIcon('warning');
+                return [item];
+            }
+            case 'ok': {
+                const status = snapshot.status;
+                const items = [
+                    new BslOverviewItem(
+                        `State: ${status.state}${status.exact ? ' (exact)' : ''}`,
+                        vscode.TreeItemCollapsibleState.None
+                    ),
+                    new BslOverviewItem(
+                        `Requested revision: ${status.requestedVersion ?? 'n/a'}`,
+                        vscode.TreeItemCollapsibleState.None
+                    ),
+                    new BslOverviewItem(
+                        `Ready revision: ${status.readyVersion ?? 'n/a'}`,
+                        vscode.TreeItemCollapsibleState.None
+                    ),
+                    new BslOverviewItem(
+                        `Task state: ${status.taskState}`,
+                        vscode.TreeItemCollapsibleState.None
+                    ),
+                ];
+                if (status.phase) {
+                    items.push(
+                        new BslOverviewItem(
+                            `Phase: ${status.phase}`,
+                            vscode.TreeItemCollapsibleState.None
+                        )
+                    );
+                }
+                if (status.trigger) {
+                    items.push(
+                        new BslOverviewItem(
+                            `Trigger: ${status.trigger}`,
+                            vscode.TreeItemCollapsibleState.None
+                        )
+                    );
+                }
+                if (status.fallbackReason) {
+                    items.push(
+                        new BslOverviewItem(
+                            `Fallback: ${status.fallbackReason}`,
+                            vscode.TreeItemCollapsibleState.None
+                        )
+                    );
+                }
+                items.push(
+                    new BslOverviewItem(
+                        `Updated: ${formatRelativeTime(status.updatedAtMs)}`,
+                        vscode.TreeItemCollapsibleState.None
+                    )
+                );
+                return items;
+            }
+        }
     }
 
     private async getLatencyItems(): Promise<BslOverviewItem[]> {

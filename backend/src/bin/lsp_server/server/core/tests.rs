@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::ReadyParseSnapshotStateV2;
 use axum::http::{header, Request as AxumRequest};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
@@ -18,6 +19,9 @@ use bsl_backend::presentation::web::{create_router, AppState};
 use bsl_backend::system::{
     build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
     IndexSnapshot, IndexSnapshotId, TypeKind,
+};
+use bsl_shared::api::dtos::{
+    SnapshotPhaseDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
 };
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;
@@ -34489,6 +34493,231 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     drain_task.abort();
     });
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-ready.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 7);
+    server
+        .latest_document_shadow_state_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            DocumentShadowStateV2 {
+                version: 7,
+                text: text.clone(),
+            },
+        );
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            ReadyParseSnapshotStateV2 {
+                text: text.clone(),
+                parse_snapshot: parse_snapshot_for_test(file_id, 7, text.as_ref(), vec![], true, None),
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+            },
+        );
+
+    let status = server
+        .handle_get_snapshot_status(crate::types::GetSnapshotStatusRequest {
+            uri: uri.to_string(),
+        })
+        .await
+        .expect("snapshot status request");
+    assert_eq!(status.uri.as_deref(), Some(uri.as_str()));
+    assert_eq!(status.requested_version, Some(7));
+    assert_eq!(status.ready_version, Some(7));
+    assert_eq!(status.state, SnapshotReadinessStateDto::Ready);
+    assert!(status.exact, "matching ready snapshot must be exact");
+    assert_eq!(status.task_state, SnapshotTaskStateDto::ReadySameRevision);
+    assert!(status.updated_at_ms > 0);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_building_for_matching_inflight_worker() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-building.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2 {
+        cancel_requested: std::sync::atomic::AtomicBool::new(false),
+        promotion_requested: std::sync::atomic::AtomicBool::new(false),
+        materialized: std::sync::atomic::AtomicBool::new(false),
+        phase: std::sync::atomic::AtomicU8::new(
+            super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
+        ),
+        control_notify: tokio::sync::Notify::new(),
+        materialized_notify: tokio::sync::Notify::new(),
+    });
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 3);
+    server
+        .latest_document_shadow_state_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            DocumentShadowStateV2 {
+                version: 3,
+                text: text.clone(),
+            },
+        );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                requested_version: Arc::new(std::sync::atomic::AtomicI32::new(3)),
+                text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::Building);
+    assert!(!status.exact, "in-flight worker must not claim exact readiness");
+    assert_eq!(status.task_state, SnapshotTaskStateDto::InFlightSameRevision);
+    assert_eq!(status.phase, Some(SnapshotPhaseDto::Parsing));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transition() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-monotonic.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 11);
+    server
+        .latest_document_shadow_state_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            DocumentShadowStateV2 {
+                version: 11,
+                text: text.clone(),
+            },
+        );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                requested_version: Arc::new(std::sync::atomic::AtomicI32::new(11)),
+                text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                control: Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2 {
+                    cancel_requested: std::sync::atomic::AtomicBool::new(false),
+                    promotion_requested: std::sync::atomic::AtomicBool::new(false),
+                    materialized: std::sync::atomic::AtomicBool::new(false),
+                    phase: std::sync::atomic::AtomicU8::new(
+                        super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
+                    ),
+                    control_notify: tokio::sync::Notify::new(),
+                    materialized_notify: tokio::sync::Notify::new(),
+                }),
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let building = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            ReadyParseSnapshotStateV2 {
+                text: text.clone(),
+                parse_snapshot: parse_snapshot_for_test(file_id, 11, text.as_ref(), vec![], true, None),
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+            },
+        );
+
+    let ready = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(ready.state, SnapshotReadinessStateDto::Ready);
+    assert!(
+        ready.updated_at_ms > building.updated_at_ms,
+        "updatedAtMs must increase across a real state transition"
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_shadow_only_when_only_shadow_state_is_current() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-shadow-only.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 5);
+    server
+        .latest_document_shadow_state_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            DocumentShadowStateV2 {
+                version: 5,
+                text: Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n"),
+            },
+        );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::ShadowOnly);
+    assert!(!status.exact);
+    assert_eq!(status.task_state, SnapshotTaskStateDto::Absent);
+    assert_eq!(status.requested_version, Some(5));
+    assert_eq!(status.ready_version, None);
+
+    harness.shutdown().await;
 }
 
 #[test]

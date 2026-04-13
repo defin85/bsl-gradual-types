@@ -902,6 +902,130 @@ async fn observability_metrics_exposes_unified_stage_contract_for_ready_session(
 }
 
 #[tokio::test]
+async fn http_snapshot_status_rejects_missing_ready_session() {
+    let manager = SessionManager::new();
+    let err = manager
+        .http_snapshot_status(None)
+        .await
+        .expect_err("snapshot status must fail closed without a ready session");
+    assert_eq!(err.code.0, rmcp::model::ErrorCode::INVALID_PARAMS.0);
+    assert!(
+        err.message.contains("no ready sessions"),
+        "unexpected error message: {}",
+        err.message
+    );
+}
+
+#[tokio::test]
+async fn http_snapshot_status_returns_empty_entries_for_ready_session_without_tracked_documents() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(&job_manager, &open).await;
+
+    let response = manager
+        .http_snapshot_status(Some(&open.session_id))
+        .await
+        .expect("snapshot status");
+    assert_eq!(response.schema_version, SNAPSHOT_READINESS_SCHEMA_VERSION);
+    assert!(
+        response.entries.is_empty(),
+        "ready session without overlays/hot-set must return an empty entries list"
+    );
+}
+
+#[tokio::test]
+async fn http_snapshot_status_orders_tracked_documents_and_distinguishes_shadow_only_from_ready() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(&job_manager, &open).await;
+
+    let root_id = open.roots[0].root_id.clone();
+    let hot_only = DocumentRef::Canonical(CanonicalDocumentRef {
+        root_id: root_id.clone(),
+        path: "src/CommonModules/B/Module.bsl".to_string(),
+    });
+    let overlay_file = FileRef {
+        doc: DocumentRef::Canonical(CanonicalDocumentRef {
+            root_id,
+            path: "src/CommonModules/A/Module.bsl".to_string(),
+        }),
+        text: Some("Procedure Test()\nEndProcedure\n".to_string()),
+        version: Some(3),
+    };
+    manager
+        .documents_set(
+            &open.session_id,
+            &[
+                WorkspaceDocumentsSetFile::Document(hot_only.clone()),
+                WorkspaceDocumentsSetFile::File(overlay_file.clone()),
+            ],
+            true,
+        )
+        .await
+        .expect("documents_set");
+
+    let response = manager
+        .http_snapshot_status(Some(&open.session_id))
+        .await
+        .expect("snapshot status");
+    assert_eq!(
+        response
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_deref().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        vec!["src/CommonModules/A/Module.bsl", "src/CommonModules/B/Module.bsl"],
+        "tracked documents must use deterministic path ordering"
+    );
+
+    let overlay_entry = response
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_deref() == Some("src/CommonModules/A/Module.bsl"))
+        .expect("overlay entry");
+    assert_eq!(overlay_entry.state, SnapshotReadinessStateDto::ShadowOnly);
+    assert!(!overlay_entry.exact, "overlay-backed document must not be exact-ready");
+    assert_eq!(overlay_entry.trigger, Some(SnapshotTriggerDto::DocumentsSet));
+
+    let ready_entry = response
+        .entries
+        .iter()
+        .find(|entry| entry.path.as_deref() == Some("src/CommonModules/B/Module.bsl"))
+        .expect("ready entry");
+    assert_eq!(ready_entry.state, SnapshotReadinessStateDto::Ready);
+    assert!(ready_entry.exact, "hot-set document without overlay should stay exact-ready");
+    assert_eq!(ready_entry.trigger, Some(SnapshotTriggerDto::Job));
+}
+
+#[tokio::test]
 async fn bsl_members_does_not_execute_parse_result_query_on_semantic_path() {
     let temp = tempfile::TempDir::new().expect("tempdir");
     let job_manager = Arc::new(JobManager::new());

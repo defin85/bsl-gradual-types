@@ -13,7 +13,9 @@ use bsl_runtime::data::loaders::progress::ProgressUpdate;
 use bsl_runtime::data::loaders::ConfigurationDiscovery;
 use bsl_runtime::system::runtime_config::{global_runtime_config, RuntimeKey};
 use bsl_shared::api::dtos::{
-    AnalysisResultDto, McpRootDto, McpSessionDto, MetricsDto, SnapshotInputsDto, SnapshotMetaDto,
+    AnalysisResultDto, McpRootDto, McpSessionDto, McpSnapshotStatusResponseDto, MetricsDto,
+    SnapshotInputsDto, SnapshotMetaDto, SnapshotReadinessDto, SnapshotReadinessStateDto,
+    SnapshotTaskStateDto, SnapshotTriggerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
 };
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{Certainty, ResolutionResult};

@@ -365,6 +365,69 @@ impl SessionManager {
             .ok_or_else(|| rmcp::ErrorData::invalid_params("no ready sessions", None))
     }
 
+    pub async fn http_snapshot_status(
+        &self,
+        session_id: Option<&str>,
+    ) -> Result<McpSnapshotStatusResponseDto, rmcp::ErrorData> {
+        let sessions = self.sessions.read().await;
+        let uuid = Self::select_ready_session_uuid(&sessions, session_id)?;
+        let session = sessions
+            .get(&uuid)
+            .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
+
+        let mut tracked = session
+            .documents
+            .hot_set
+            .iter()
+            .cloned()
+            .collect::<Vec<DocumentKey>>();
+        for key in session.documents.overlays.keys() {
+            if !tracked.contains(key) {
+                tracked.push(key.clone());
+            }
+        }
+        tracked.sort_by(|left, right| {
+            (left.path.as_str(), left.root_id.as_str()).cmp(&(right.path.as_str(), right.root_id.as_str()))
+        });
+
+        let updated_at_ms = session.created_at.saturating_mul(1000);
+        let entries = tracked
+            .into_iter()
+            .map(|key| {
+                let overlay = session.documents.overlays.get(&key);
+                SnapshotReadinessDto {
+                    schema_version: SNAPSHOT_READINESS_SCHEMA_VERSION,
+                    uri: None,
+                    path: Some(key.path.clone()),
+                    session_id: Some(uuid.to_string()),
+                    requested_version: overlay.map(|value| value.version as i64),
+                    ready_version: None,
+                    analysis_revision: Some(session.analysis_revision),
+                    state: if overlay.is_some() {
+                        SnapshotReadinessStateDto::ShadowOnly
+                    } else {
+                        SnapshotReadinessStateDto::Ready
+                    },
+                    exact: overlay.is_none(),
+                    task_state: SnapshotTaskStateDto::NotApplicable,
+                    phase: None,
+                    trigger: Some(if overlay.is_some() {
+                        SnapshotTriggerDto::DocumentsSet
+                    } else {
+                        SnapshotTriggerDto::Job
+                    }),
+                    updated_at_ms,
+                    fallback_reason: None,
+                }
+            })
+            .collect();
+
+        Ok(McpSnapshotStatusResponseDto {
+            schema_version: SNAPSHOT_READINESS_SCHEMA_VERSION,
+            entries,
+        })
+    }
+
     pub async fn http_parity_types(
         &self,
         session_id: Option<&str>,

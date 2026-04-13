@@ -27,6 +27,7 @@ use tower_lsp::Client;
 
 use bsl_analysis_v2::{DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::SystemCoordinator;
+use bsl_shared::api::dtos::SnapshotReadinessDto;
 
 use crate::config::{BslSettings, LspConfig};
 use crate::types::GetIndexStateResponse;
@@ -290,6 +291,7 @@ pub struct BslLanguageServer {
     /// Session-stable mapping: once a `FileId` is assigned for a key, it is not revoked for the
     /// lifetime of the server process (even if the document is closed and re-opened).
     pub(crate) file_key_to_file_id_v2: Arc<RwLock<HashMap<V2FileKey, V2FileId>>>,
+    pub(crate) file_id_to_uri_v2: Arc<RwLock<HashMap<V2FileId, Url>>>,
     pub(crate) next_file_id_v2: Arc<AtomicU32>,
     pub(crate) diagnostics_tasks_v2: Arc<Mutex<DiagnosticsTasksV2>>,
     pub(crate) type_index_precompute_tasks_v2: Arc<Mutex<TypeIndexPrecomputeTasksV2>>,
@@ -309,6 +311,7 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_ready_parse_snapshots_v2:
         Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
+    pub(crate) latest_snapshot_status_v2: Arc<RwLock<HashMap<V2FileId, SnapshotReadinessDto>>>,
     pub(crate) latest_save_fastlane_syntax_artifacts_v2:
         Arc<RwLock<HashMap<V2FileId, SaveFastlaneSyntaxArtifactsV2>>>,
     pub(crate) latest_apply_enqueued_at_v2: Arc<RwLock<HashMap<V2FileId, Instant>>>,
@@ -411,6 +414,7 @@ pub(crate) struct DiagnosticsSaveTimelineProfileResult {
 pub(crate) struct ReadyParseSnapshotStateV2 {
     pub text: Arc<str>,
     pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
+    pub source: BackgroundParseSnapshotApplyTaskSourceV2,
 }
 
 #[derive(Debug, Clone)]
@@ -556,11 +560,30 @@ pub(crate) enum BackgroundParseSnapshotApplyTaskSourceV2 {
     DidSave,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BackgroundParseSnapshotApplyTaskPhaseV2 {
+    Waiting = 1,
+    Parsing = 2,
+    Materializing = 3,
+}
+
+impl BackgroundParseSnapshotApplyTaskPhaseV2 {
+    pub(crate) fn from_raw(raw: u8) -> Option<Self> {
+        match raw {
+            x if x == Self::Waiting as u8 => Some(Self::Waiting),
+            x if x == Self::Parsing as u8 => Some(Self::Parsing),
+            x if x == Self::Materializing as u8 => Some(Self::Materializing),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub cancel_requested: AtomicBool,
     pub promotion_requested: AtomicBool,
     pub materialized: AtomicBool,
+    pub phase: AtomicU8,
     pub control_notify: Notify,
     pub materialized_notify: Notify,
 }
@@ -571,6 +594,7 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             cancel_requested: AtomicBool::new(false),
             promotion_requested: AtomicBool::new(false),
             materialized: AtomicBool::new(false),
+            phase: AtomicU8::new(0),
             control_notify: Notify::new(),
             materialized_notify: Notify::new(),
         }

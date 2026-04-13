@@ -7,10 +7,14 @@ server-driven snapshot-status contract.
 
 The extension MUST:
 
-- показывать краткий state в правом `Status Bar` item для активного BSL editor;
+- показывать краткий state в dedicated правом `Status Bar` item для активного BSL editor;
+- не переиспользовать существующий левый global BSL status/progress item для file-scoped snapshot
+  readiness;
 - показывать detail view inside existing observability UI как минимум с requested/ready revision,
   state, `exact`, task state, coarse phase, and fallback reason when available;
 - использовать authoritative snapshot-status request/notification как source of truth;
+- питать и status bar, и observability detail из одного extension-side snapshot-status cache/store,
+  а не из независимых polling loops;
 - не реконструировать readiness из diagnostics save timeline, completion timeline, Output logs, или
   aggregate observability metrics;
 - явно различать `building`, exact `ready`, `stale`, `shadow_only`, and `failed`.
@@ -38,3 +42,9 @@ The extension MUST:
 - **WHEN** extension initializes snapshot readiness UI
 - **THEN** extension keeps the feature explicitly unavailable or hidden
 - **AND** extension does not guess readiness from other observability surfaces
+
+#### Scenario: Older snapshot notification does not overwrite newer state
+- **GIVEN** extension has already cached a newer snapshot-status update for the same URI
+- **WHEN** an older update for that URI arrives later
+- **THEN** extension ignores the stale update
+- **AND** the active-document UI keeps showing the newer state

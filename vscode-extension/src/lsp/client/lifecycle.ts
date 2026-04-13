@@ -12,6 +12,7 @@ import {
 import { getBinaryPath } from '../../utils/binaryPath';
 import { BslAnalyzerConfig } from '../../config/configHelper';
 import { handleServerStatus } from '../serverStatus';
+import { handleSnapshotStatusNotification, refreshSnapshotStatus } from '../snapshotStatus';
 import { updateStatusBar, updateLspStatus } from '../progress';
 import { buildServerOptions } from './server-options';
 import { buildClientOptions } from './client-options';
@@ -137,7 +138,9 @@ export async function startLanguageClient(context: vscode.ExtensionContext): Pro
 
         // Регистрируем обработчики после успешного запуска
         setupServerStatusHandler(client, outputChannel);
+        setupSnapshotStatusHandler(client, outputChannel);
         registerCustomHandlers(client, outputChannel);
+        await refreshSnapshotStatus();
 
         // Уведомляем провайдеры об изменении статуса
         vscode.commands.executeCommand('bslAnalyzer.refreshOverview');
@@ -323,6 +326,16 @@ function setupServerStatusHandler(
         handleServerStatus(params);
     });
     outputChannel.appendLine('bsl/serverStatus handler registered');
+}
+
+function setupSnapshotStatusHandler(
+    client: LanguageClient,
+    outputChannel: vscode.OutputChannel
+): void {
+    client.onNotification('bsl/snapshotStatus', (params: any) => {
+        handleSnapshotStatusNotification(params);
+    });
+    outputChannel.appendLine('bsl/snapshotStatus handler registered');
 }
 
 /**

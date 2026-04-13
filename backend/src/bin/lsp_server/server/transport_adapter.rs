@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
 use futures::future::BoxFuture;
-use futures::{future, pin_mut, stream, FutureExt, Sink, SinkExt, StreamExt, TryFutureExt};
+use futures::{FutureExt, Sink, SinkExt, StreamExt, TryFutureExt, future, pin_mut, stream};
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 use tower::Service;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Id, Request, Response};
 use tower_lsp::Loopback;
+use tower_lsp::jsonrpc::{Error, ErrorCode, Id, Request, Response};
 use tracing::{error, warn};
 
 const MESSAGE_QUEUE_SIZE: usize = 100;
@@ -572,7 +572,9 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                         .await
                         .is_err()
                     {
-                        error!("failed to forward completion handoff barrier response: transport closed");
+                        error!(
+                            "failed to forward completion handoff barrier response: transport closed"
+                        );
                         break;
                     }
                 }
@@ -2763,8 +2765,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_keeps_running_when_saturated_unrelated_general_notification_is_dropped(
-    ) {
+    async fn transport_adapter_keeps_running_when_saturated_unrelated_general_notification_is_dropped()
+     {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -2989,8 +2991,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_prioritises_did_change_handoff_before_completion_under_general_backlog(
-    ) {
+    async fn transport_adapter_prioritises_did_change_handoff_before_completion_under_general_backlog()
+     {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -3254,7 +3256,9 @@ mod tests {
             "general request must still finish exactly once, first_response={first_response:?}, second_response={second_response:?}"
         );
         assert_eq!(
-            cancelled_response.get("id").and_then(|value| value.as_i64()),
+            cancelled_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
             Some(2),
             "queued completion cancel must publish exactly one terminal response, first_response={first_response:?}, second_response={second_response:?}"
         );
@@ -3910,7 +3914,10 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .as_slice(),
-            &[DID_CHANGE_METHOD.to_string(), CANCEL_REQUEST_METHOD.to_string()],
+            &[
+                DID_CHANGE_METHOD.to_string(),
+                CANCEL_REQUEST_METHOD.to_string()
+            ],
             "didChange barrier and control request may dispatch, but cancelled completion must not reach service.call()"
         );
 

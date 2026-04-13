@@ -3384,3 +3384,123 @@ fn current_context_parse_source_metrics_are_exported() {
         );
     }
 }
+
+#[test]
+fn did_save_followup_ready_snapshot_metrics_are_exported() {
+    let observability = BasicObservability::default();
+
+    observability.record_intellisense_v2_ready_parse_snapshot_worker_started("lsp", "did_change");
+    observability
+        .record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+            "lsp",
+            "did_save",
+            "aborted",
+            Duration::from_millis(1200),
+        );
+    observability.record_intellisense_v2_ready_parse_snapshot_materialization(
+        "lsp",
+        "did_change",
+        Duration::from_millis(77),
+    );
+    observability.record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+        "zero_budget",
+        "not_ready",
+        Duration::from_millis(1),
+    );
+    observability.record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+        "bounded_wait",
+        "timeout",
+        Duration::from_millis(3500),
+    );
+    observability.record_intellisense_v2_diagnostics_save_followup_wait_state("apply_lag");
+    observability.record_intellisense_v2_diagnostics_save_followup_semantic_path("shadow_state");
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let histograms = histograms(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
+        ),
+        1,
+        "ready parse snapshot worker-start counter must be exported per source"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_aborted"
+        ),
+        1,
+        "ready parse snapshot worker termination counter must be exported per source/reason"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_aborted"
+        ) > 0,
+        "ready parse snapshot worker termination latency histogram must be exported per source/reason"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change"
+        ),
+        1,
+        "ready parse snapshot materialization counter must be exported per source"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change"
+        ) > 0,
+        "ready parse snapshot materialization latency histogram must be exported per source"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready"
+        ),
+        1,
+        "zero-budget probe outcome counter must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_not_ready"
+        ) > 0,
+        "zero-budget probe latency histogram must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_timeout"
+        ),
+        1,
+        "bounded-wait probe timeout counter must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout"
+        ) > 0,
+        "bounded-wait probe timeout latency histogram must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag"
+        ),
+        1,
+        "didSave follow-up wait-state counter must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state"
+        ),
+        1,
+        "didSave follow-up semantic path counter must be exported"
+    );
+}

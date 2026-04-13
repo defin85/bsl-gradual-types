@@ -113,12 +113,16 @@ fn queue_prioritizes_cancel_when_full() {
 
     let payloads = queue.debug_payloads();
     assert_eq!(payloads.len(), 2);
-    assert!(!payloads
-        .iter()
-        .any(|payload| matches!(payload, CompletionEventPayload::CompletionRequest { .. })));
-    assert!(payloads
-        .iter()
-        .any(|payload| matches!(payload, CompletionEventPayload::DidChange { .. })));
+    assert!(
+        !payloads
+            .iter()
+            .any(|payload| matches!(payload, CompletionEventPayload::CompletionRequest { .. }))
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|payload| matches!(payload, CompletionEventPayload::DidChange { .. }))
+    );
     assert!(payloads.iter().any(|payload| matches!(
         payload,
         CompletionEventPayload::Cancel { request_id } if request_id == "r1"

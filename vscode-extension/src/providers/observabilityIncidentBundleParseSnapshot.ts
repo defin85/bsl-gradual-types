@@ -9,6 +9,9 @@ export interface ObservabilityIncidentDidChangeParseSnapshotSummary {
     parse_mode: string;
     base_text_source: string;
     change_shape: string;
+    content_changes_count: number;
+    replay_order: string;
+    base_document_version?: number;
     changed_ranges_count: number;
     fallback_reason?: string;
     correlated_diagnostics_save_trace_ids: string[];
@@ -53,6 +56,9 @@ export function buildObservabilityIncidentDidChangeParseSnapshotSection(
             parse_mode: entry.parseMode,
             base_text_source: entry.baseTextSource,
             change_shape: entry.changeShape,
+            content_changes_count: entry.contentChangesCount,
+            replay_order: entry.replayOrder,
+            base_document_version: entry.baseDocumentVersion,
             changed_ranges_count: entry.changedRangesCount,
             fallback_reason: entry.fallbackReason,
             correlated_diagnostics_save_trace_ids: diagnosticsSaveRequests
@@ -86,8 +92,13 @@ export function renderDidChangeParseSnapshotSummaryLines(
             `parse_mode=${entry.parse_mode}`,
             `base_text_source=${entry.base_text_source}`,
             `change_shape=${entry.change_shape}`,
+            `content_changes_count=${entry.content_changes_count}`,
+            `replay_order=${entry.replay_order}`,
             `changed_ranges_count=${entry.changed_ranges_count}`,
         ];
+        if (typeof entry.base_document_version === 'number') {
+            parts.push(`base_document_version=${entry.base_document_version}`);
+        }
         if (entry.fallback_reason) {
             parts.push(`fallback_reason=${entry.fallback_reason}`);
         }

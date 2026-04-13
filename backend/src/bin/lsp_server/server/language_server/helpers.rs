@@ -297,46 +297,18 @@ pub(super) struct CanonicalRangedDidChangeReplayStep {
 pub(super) fn canonicalize_ranged_did_change_replay_plan(
     changes: &[TextDocumentContentChangeEvent],
 ) -> Vec<CanonicalRangedDidChangeReplayStep> {
-    let mut steps = changes
+    changes
         .iter()
-        .enumerate()
-        .filter_map(|(original_index, change)| {
+        .filter_map(|change| {
             let range = change.range?;
             let parser_edit = lsp_range_change_to_parser_edit(change)?;
-            Some((
-                original_index,
-                CanonicalRangedDidChangeReplayStep {
-                    range,
-                    new_text: change.text.clone(),
-                    parser_edit,
-                },
-            ))
+            Some(CanonicalRangedDidChangeReplayStep {
+                range,
+                new_text: change.text.clone(),
+                parser_edit,
+            })
         })
-        .collect::<Vec<_>>();
-    steps.sort_by(|(left_idx, left_step), (right_idx, right_step)| {
-        right_step
-            .range
-            .start
-            .line
-            .cmp(&left_step.range.start.line)
-            .then_with(|| {
-                right_step
-                    .range
-                    .start
-                    .character
-                    .cmp(&left_step.range.start.character)
-            })
-            .then_with(|| right_step.range.end.line.cmp(&left_step.range.end.line))
-            .then_with(|| {
-                right_step
-                    .range
-                    .end
-                    .character
-                    .cmp(&left_step.range.end.character)
-            })
-            .then_with(|| left_idx.cmp(right_idx))
-    });
-    steps.into_iter().map(|(_, step)| step).collect()
+        .collect()
 }
 
 pub(super) fn lsp_range_change_to_parser_edit(
@@ -993,7 +965,7 @@ pub(super) fn normalize_optional_string(value: Option<String>) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_ranged_did_change_replay_plan, CanonicalRangedDidChangeReplayStep};
+    use super::{CanonicalRangedDidChangeReplayStep, canonicalize_ranged_did_change_replay_plan};
     use crate::handlers::apply_text_edit;
     use bsl_line_index::byte_offset_to_utf16;
     use std::path::PathBuf;
@@ -1022,28 +994,31 @@ mod tests {
     }
 
     #[test]
-    fn canonical_ranged_replay_plan_keeps_multi_range_incremental_parse_consistent() {
+    fn canonical_ranged_replay_plan_preserves_receive_order_for_incremental_parse() {
         let parser = bsl_runtime::system::parser_coordinator::ParserCoordinator::with_fallback();
         let file_path = PathBuf::from("canonical-ranged-replay-plan.bsl");
         let base_text =
             "Процедура Тест()\n    Сообщить(\"один два\");\nКонецПроцедуры\n".to_string();
-        let target_line = "    Сообщить(\"один два\");";
+        let base_line = "    Сообщить(\"один два\");";
+        let first_range = utf16_range_for_line_fragment(base_line, 1, "один");
+        let state_after_first_line = "    Сообщить(\"оченьдлинно два\");";
+        let second_range = utf16_range_for_line_fragment(state_after_first_line, 1, "два");
         let replay_plan = canonicalize_ranged_did_change_replay_plan(&[
             TextDocumentContentChangeEvent {
-                range: Some(utf16_range_for_line_fragment(target_line, 1, "один")),
+                range: Some(first_range),
                 range_length: None,
                 text: "оченьдлинно".to_string(),
             },
             TextDocumentContentChangeEvent {
-                range: Some(utf16_range_for_line_fragment(target_line, 1, "два")),
+                range: Some(second_range),
                 range_length: None,
                 text: "три".to_string(),
             },
         ]);
 
         assert_eq!(replay_plan.len(), 2);
-        assert_eq!(replay_plan[0].new_text, "три");
-        assert_eq!(replay_plan[1].new_text, "оченьдлинно");
+        assert_eq!(replay_plan[0].new_text, "оченьдлинно");
+        assert_eq!(replay_plan[1].new_text, "три");
 
         parser
             .parse_incremental_with_report(file_path.clone(), base_text.clone(), Vec::new())

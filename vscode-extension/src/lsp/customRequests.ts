@@ -492,6 +492,9 @@ export interface DidChangeParseSnapshotEvidenceTrace {
     parseMode: string;
     baseTextSource: string;
     changeShape: string;
+    contentChangesCount: number;
+    replayOrder: string;
+    baseDocumentVersion?: number;
     changedRangesCount: number;
     fallbackReason?: string;
 }

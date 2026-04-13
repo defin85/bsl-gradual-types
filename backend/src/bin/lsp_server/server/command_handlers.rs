@@ -20,9 +20,9 @@ use bsl_analysis_v2::FileId as V2FileId;
 use tokio::sync::Notify;
 
 use crate::commands::{
-    handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
+    ParseConfigurationParams, handle_incremental_update, handle_parse_configuration,
 };
-use crate::handlers::{find_containing_function_in_parse_result, CurrentContextResponse};
+use crate::handlers::{CurrentContextResponse, find_containing_function_in_parse_result};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, DiagnosticsSaveTimelineRequest,
@@ -35,6 +35,7 @@ use super::{BslLanguageServer, FullIndexOperationKind, FullIndexStateKind};
 
 const ATTACHED_MESSAGE: &str = "already running (attached)";
 const CURRENT_CONTEXT_LATEST_GENERATIONS_MAX_SESSIONS: usize = 256;
+const CURRENT_CONTEXT_READY_SNAPSHOT_WAIT_BUDGET_MS: u64 = 100;
 const CURRENT_CONTEXT_PARSE_BROKER_WAIT_BUDGET_MS: u64 = 2_000;
 const CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS: u64 = 25;
 
@@ -73,6 +74,26 @@ fn record_get_current_context_parse_cancellation_for_test() {
 
 #[cfg(not(test))]
 fn record_get_current_context_parse_cancellation_for_test() {}
+
+#[cfg(test)]
+fn current_context_ready_snapshot_wait_budget() -> Duration {
+    std::env::var("BSL_TEST_GET_CURRENT_CONTEXT_READY_SNAPSHOT_WAIT_BUDGET_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_else(|| Duration::from_millis(CURRENT_CONTEXT_READY_SNAPSHOT_WAIT_BUDGET_MS))
+}
+
+#[cfg(not(test))]
+fn current_context_ready_snapshot_wait_budget() -> Duration {
+    Duration::from_millis(CURRENT_CONTEXT_READY_SNAPSHOT_WAIT_BUDGET_MS)
+}
+
+fn current_context_ready_snapshot_latest_only_stabilization_budget() -> Duration {
+    current_context_ready_snapshot_wait_budget().saturating_add(Duration::from_millis(
+        CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS,
+    ))
+}
 
 #[cfg(test)]
 fn current_context_parse_broker_wait_budget() -> Duration {
@@ -497,6 +518,41 @@ fn attach_current_context_generation_parse_cancellation_flag(
     state.active_parse_cancellation_flag = Some(Arc::downgrade(cancellation_flag));
 }
 
+async fn wait_for_current_context_ready_snapshot_latest_only_stabilization(
+    latest_generations: &CurrentContextLatestGenerationRegistry,
+    generation_notify: &Notify,
+    supersession_key: Option<&CurrentContextSupersessionKey>,
+) -> bool {
+    let Some(supersession_key) = supersession_key else {
+        return true;
+    };
+    let stabilization_budget = current_context_ready_snapshot_latest_only_stabilization_budget();
+    if stabilization_budget.is_zero() {
+        return is_latest_current_context_generation(latest_generations, supersession_key);
+    }
+
+    let deadline = tokio::time::Instant::now() + stabilization_budget;
+    loop {
+        if !is_latest_current_context_generation(latest_generations, supersession_key) {
+            return false;
+        }
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return true;
+        }
+
+        let notified = generation_notify.notified();
+        tokio::pin!(notified);
+        tokio::select! {
+            _ = &mut notified => {}
+            _ = tokio::time::sleep(
+                (deadline - now).min(Duration::from_millis(CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS))
+            ) => {}
+        }
+    }
+}
+
 impl BslLanguageServer {
     pub(crate) async fn handle_get_index_state(
         &self,
@@ -711,30 +767,100 @@ impl BslLanguageServer {
                 );
                 return Ok(CurrentContextResponse::empty());
             }
+            self.current_context_generation_notify.notify_waiters();
+        }
+
+        let mut exact_task_wait_superseded = false;
+        let ready_parse_snapshot = if ready_parse_snapshot.is_some() {
+            ready_parse_snapshot
+        } else if let Some(shadow_state) = shadow_state.as_ref() {
+            let wait_started = Instant::now();
+            let wait_budget = current_context_ready_snapshot_wait_budget();
+            let expected_text_hash = Some(broker_key.text_hash);
+            loop {
+                let ready = self
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .filter(|state| {
+                        state.parse_snapshot.file_version == shadow_state.version
+                            && state.text.as_ref() == shadow_state.text.as_ref()
+                    })
+                    .map(|state| {
+                        (
+                            Arc::clone(&state.parse_snapshot.parse_result),
+                            Arc::clone(&state.parse_snapshot.line_index),
+                        )
+                    });
+                if ready.is_some() {
+                    break ready;
+                }
+                if supersession_key.as_ref().is_some_and(|supersession_key| {
+                    !is_latest_current_context_generation(
+                        self.current_context_latest_generations.as_ref(),
+                        supersession_key,
+                    )
+                }) {
+                    exact_task_wait_superseded = true;
+                    break None;
+                }
+                let remaining = wait_budget.saturating_sub(wait_started.elapsed());
+                if remaining == Duration::ZERO {
+                    break None;
+                }
+                let Some(task_control) = self
+                    .matching_background_parse_snapshot_task_control_v2(
+                        file_id,
+                        shadow_state.version,
+                        expected_text_hash,
+                    )
+                    .await
+                else {
+                    break None;
+                };
+                let materialized = task_control.materialized_notify.notified();
+                let control = task_control.control_notify.notified();
+                tokio::pin!(materialized);
+                tokio::pin!(control);
+                tokio::select! {
+                    _ = tokio::time::sleep(remaining.min(Duration::from_millis(CURRENT_CONTEXT_PARSE_BROKER_WAIT_POLL_MS))) => {}
+                    _ = &mut materialized => {}
+                    _ = &mut control => {}
+                }
+            }
+        } else {
+            None
+        };
+
+        if exact_task_wait_superseded {
+            record_current_context_request_observability(
+                self.coordinator.as_ref(),
+                None,
+                CurrentContextTerminalOutcome::Superseded,
+                None,
+                current_context_started.elapsed(),
+            );
+            return Ok(CurrentContextResponse::empty());
         }
 
         if let Some((parse_result, line_index)) = ready_parse_snapshot.as_ref() {
-            let response = resolve_current_context_from_parse(
-                parse_result.as_ref(),
-                file_text.as_ref(),
-                line_index.as_ref(),
-                line,
-                character,
-            );
+            let latest_generation_stable =
+                wait_for_current_context_ready_snapshot_latest_only_stabilization(
+                    self.current_context_latest_generations.as_ref(),
+                    self.current_context_generation_notify.as_ref(),
+                    supersession_key.as_ref(),
+                )
+                .await;
             let wall_elapsed = current_context_started.elapsed();
             let parse_observability = CurrentContextParseObservability {
                 parse_source: "ready_snapshot",
                 parse_elapsed: Duration::ZERO,
             };
-            let terminal_outcome = if supersession_key.as_ref().is_some_and(|supersession_key| {
-                !is_latest_current_context_generation(
-                    self.current_context_latest_generations.as_ref(),
-                    supersession_key,
-                )
-            }) {
-                CurrentContextTerminalOutcome::Superseded
-            } else {
+            let terminal_outcome = if latest_generation_stable {
                 CurrentContextTerminalOutcome::Resolved
+            } else {
+                CurrentContextTerminalOutcome::Superseded
             };
             record_current_context_request_observability(
                 self.coordinator.as_ref(),
@@ -744,7 +870,13 @@ impl BslLanguageServer {
                 wall_elapsed,
             );
             return if matches!(terminal_outcome, CurrentContextTerminalOutcome::Resolved) {
-                Ok(response)
+                Ok(resolve_current_context_from_parse(
+                    parse_result.as_ref(),
+                    file_text.as_ref(),
+                    line_index.as_ref(),
+                    line,
+                    character,
+                ))
             } else {
                 Ok(CurrentContextResponse::empty())
             };
@@ -1339,9 +1471,9 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
     use tower::Service;
     use tower::ServiceExt;
+    use tower_lsp::LspService;
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{ClientCapabilities, InitializeParams, InitializedParams};
-    use tower_lsp::LspService;
 
     fn create_test_server() -> BslLanguageServer {
         let coordinator = Arc::new(SystemCoordinator::new());
@@ -1586,10 +1718,12 @@ mod tests {
                 .expect("state"),
             "idle"
         );
-        assert!(!object
-            .get("ready")
-            .and_then(|value| value.as_bool())
-            .expect("ready"));
+        assert!(
+            !object
+                .get("ready")
+                .and_then(|value| value.as_bool())
+                .expect("ready")
+        );
 
         drain_task.abort();
     }
@@ -1623,10 +1757,12 @@ mod tests {
         let value = serde_json::to_value(response).expect("serialize response");
         let result = value.get("result").expect("result field");
         let object = result.as_object().expect("result object");
-        assert!(object
-            .get("success")
-            .and_then(|value| value.as_bool())
-            .expect("success"));
+        assert!(
+            object
+                .get("success")
+                .and_then(|value| value.as_bool())
+                .expect("success")
+        );
         let message = object
             .get("message")
             .and_then(|value| value.as_str())

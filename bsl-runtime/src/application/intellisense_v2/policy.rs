@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use super::facade::SemanticOperation;
 use crate::system::{global_runtime_config, RuntimeKey, SystemCoordinator};
-use tokio::sync::Semaphore;
+use tokio::sync::{Notify, Semaphore};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RuntimePerfKnobs {
@@ -718,6 +718,241 @@ impl CpuBoundBudget {
         permit
     }
 
+    async fn acquire_with_dynamic_lane_queue_wait_hook<L, Q>(
+        &self,
+        class: CpuWorkClass,
+        current_lane: L,
+        lane_change_notify: &Notify,
+        on_queue_wait_started: Option<Q>,
+    ) -> (tokio::sync::OwnedSemaphorePermit, Option<AdmissionLane>)
+    where
+        L: Fn() -> Option<AdmissionLane>,
+        Q: FnOnce(),
+    {
+        let mut on_queue_wait_started = on_queue_wait_started;
+        loop {
+            let lane = current_lane();
+            let permit = match self
+                .acquire_with_lane_queue_wait_hook_until_notified(
+                    class,
+                    lane,
+                    lane_change_notify,
+                    &mut on_queue_wait_started,
+                )
+                .await
+            {
+                AcquireWithLaneQueueWaitOutcome::Acquired(permit) => permit,
+                AcquireWithLaneQueueWaitOutcome::Retry => continue,
+            };
+            if current_lane() != lane {
+                drop(permit);
+                continue;
+            }
+            return (permit, lane);
+        }
+    }
+
+    async fn acquire_with_lane_queue_wait_hook_until_notified<Q>(
+        &self,
+        class: CpuWorkClass,
+        lane: Option<AdmissionLane>,
+        lane_change_notify: &Notify,
+        on_queue_wait_started: &mut Option<Q>,
+    ) -> AcquireWithLaneQueueWaitOutcome
+    where
+        Q: FnOnce(),
+    {
+        struct WaiterCountGuard<'a> {
+            counter: &'a AtomicUsize,
+        }
+
+        impl<'a> WaiterCountGuard<'a> {
+            fn new(counter: &'a AtomicUsize) -> Self {
+                counter.fetch_add(1, Ordering::AcqRel);
+                Self { counter }
+            }
+        }
+
+        impl Drop for WaiterCountGuard<'_> {
+            fn drop(&mut self) {
+                self.counter.fetch_sub(1, Ordering::AcqRel);
+            }
+        }
+
+        let is_did_save_followup = matches!(
+            (class, lane),
+            (
+                CpuWorkClass::Background,
+                Some(AdmissionLane::DidSaveFollowup)
+            )
+        );
+        let (own_reserved, other_reserved, own_waiters, other_waiters) = match class {
+            CpuWorkClass::Interactive => (
+                self.interactive_reserved.clone(),
+                self.background_reserved.clone(),
+                &self.interactive_waiters,
+                &self.background_waiters,
+            ),
+            CpuWorkClass::Background => (
+                self.background_reserved.clone(),
+                self.interactive_reserved.clone(),
+                &self.background_waiters,
+                &self.interactive_waiters,
+            ),
+        };
+
+        let own_waiter_guard = WaiterCountGuard::new(own_waiters);
+        let lane_waiter_guard =
+            is_did_save_followup.then(|| WaiterCountGuard::new(&self.did_save_followup_waiters));
+        let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
+        let competing_did_save_waiters = self.did_save_followup_waiters.load(Ordering::Acquire)
+            > usize::from(is_did_save_followup);
+        let background_reserved_only = matches!(class, CpuWorkClass::Background)
+            && !is_did_save_followup
+            && background_reserved_only_for_test();
+        let can_borrow = !other_has_waiters && !background_reserved_only && !is_did_save_followup;
+        let can_take_shared = match class {
+            CpuWorkClass::Interactive => !background_reserved_only,
+            CpuWorkClass::Background if is_did_save_followup => !other_has_waiters,
+            CpuWorkClass::Background => {
+                !background_reserved_only && !other_has_waiters && !competing_did_save_waiters
+            }
+        };
+
+        if is_did_save_followup {
+            let permit = if can_take_shared {
+                if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                    permit
+                } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+                    permit
+                } else {
+                    mark_queue_wait_started(on_queue_wait_started);
+                    let shared = self.shared.clone().acquire_owned();
+                    let own = own_reserved.clone().acquire_owned();
+                    let lane_changed = lane_change_notify.notified();
+                    tokio::pin!(shared);
+                    tokio::pin!(own);
+                    tokio::pin!(lane_changed);
+                    tokio::select! {
+                        _ = &mut lane_changed => {
+                            drop(lane_waiter_guard);
+                            drop(own_waiter_guard);
+                            return AcquireWithLaneQueueWaitOutcome::Retry;
+                        }
+                        permit = &mut shared => permit.expect("shared semaphore closed"),
+                        permit = &mut own => permit.expect("background reserved semaphore closed"),
+                    }
+                }
+            } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+                permit
+            } else {
+                mark_queue_wait_started(on_queue_wait_started);
+                let own = own_reserved.clone().acquire_owned();
+                let lane_changed = lane_change_notify.notified();
+                tokio::pin!(own);
+                tokio::pin!(lane_changed);
+                tokio::select! {
+                    _ = &mut lane_changed => {
+                        drop(lane_waiter_guard);
+                        drop(own_waiter_guard);
+                        return AcquireWithLaneQueueWaitOutcome::Retry;
+                    }
+                    permit = &mut own => permit.expect("background reserved semaphore closed"),
+                }
+            };
+            drop(lane_waiter_guard);
+            drop(own_waiter_guard);
+            return AcquireWithLaneQueueWaitOutcome::Acquired(permit);
+        }
+
+        let permit = if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+            permit
+        } else if can_take_shared {
+            if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                permit
+            } else if can_borrow {
+                if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
+                    permit
+                } else {
+                    mark_queue_wait_started(on_queue_wait_started);
+                    let own = own_reserved.clone().acquire_owned();
+                    let shared = self.shared.clone().acquire_owned();
+                    let other = other_reserved.clone().acquire_owned();
+                    let lane_changed = lane_change_notify.notified();
+                    tokio::pin!(own);
+                    tokio::pin!(shared);
+                    tokio::pin!(other);
+                    tokio::pin!(lane_changed);
+                    tokio::select! {
+                        _ = &mut lane_changed => {
+                            drop(lane_waiter_guard);
+                            drop(own_waiter_guard);
+                            return AcquireWithLaneQueueWaitOutcome::Retry;
+                        }
+                        permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
+                        permit = &mut shared => permit.expect("shared semaphore closed"),
+                        permit = &mut other => permit.expect("borrowed semaphore closed"),
+                    }
+                }
+            } else {
+                mark_queue_wait_started(on_queue_wait_started);
+                let own = own_reserved.clone().acquire_owned();
+                let shared = self.shared.clone().acquire_owned();
+                let lane_changed = lane_change_notify.notified();
+                tokio::pin!(own);
+                tokio::pin!(shared);
+                tokio::pin!(lane_changed);
+                tokio::select! {
+                    _ = &mut lane_changed => {
+                        drop(lane_waiter_guard);
+                        drop(own_waiter_guard);
+                        return AcquireWithLaneQueueWaitOutcome::Retry;
+                    }
+                    permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
+                    permit = &mut shared => permit.expect("shared semaphore closed"),
+                }
+            }
+        } else if can_borrow {
+            if let Ok(permit) = other_reserved.clone().try_acquire_owned() {
+                permit
+            } else {
+                mark_queue_wait_started(on_queue_wait_started);
+                let own = own_reserved.clone().acquire_owned();
+                let other = other_reserved.clone().acquire_owned();
+                let lane_changed = lane_change_notify.notified();
+                tokio::pin!(own);
+                tokio::pin!(other);
+                tokio::pin!(lane_changed);
+                tokio::select! {
+                    _ = &mut lane_changed => {
+                        drop(lane_waiter_guard);
+                        drop(own_waiter_guard);
+                        return AcquireWithLaneQueueWaitOutcome::Retry;
+                    }
+                    permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
+                    permit = &mut other => permit.expect("borrowed semaphore closed"),
+                }
+            }
+        } else {
+            mark_queue_wait_started(on_queue_wait_started);
+            let own = own_reserved.clone().acquire_owned();
+            let lane_changed = lane_change_notify.notified();
+            tokio::pin!(own);
+            tokio::pin!(lane_changed);
+            tokio::select! {
+                _ = &mut lane_changed => {
+                    drop(lane_waiter_guard);
+                    drop(own_waiter_guard);
+                    return AcquireWithLaneQueueWaitOutcome::Retry;
+                }
+                permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
+            }
+        };
+        drop(lane_waiter_guard);
+        drop(own_waiter_guard);
+        AcquireWithLaneQueueWaitOutcome::Acquired(permit)
+    }
+
     fn saturation_snapshot(&self) -> CpuBudgetSaturationSnapshot {
         CpuBudgetSaturationSnapshot {
             interactive_waiters: self.interactive_waiters.load(Ordering::Acquire),
@@ -726,6 +961,20 @@ impl CpuBoundBudget {
             background_permits: self.background_reserved.available_permits(),
             shared_permits: self.shared.available_permits(),
         }
+    }
+}
+
+enum AcquireWithLaneQueueWaitOutcome {
+    Acquired(tokio::sync::OwnedSemaphorePermit),
+    Retry,
+}
+
+fn mark_queue_wait_started<Q>(on_queue_wait_started: &mut Option<Q>)
+where
+    Q: FnOnce(),
+{
+    if let Some(callback) = on_queue_wait_started.take() {
+        callback();
     }
 }
 
@@ -874,6 +1123,103 @@ where
                 .await
                 .expect("cpu-bound semaphore closed")
         }
+    };
+    let queue_wait_elapsed = queue_wait_started.elapsed();
+    if let Some(coordinator) = observability {
+        coordinator.record_intellisense_v2_runtime_queue_wait_class_latency_with_origin(
+            origin,
+            cpu_class_label(class),
+            queue_wait_elapsed,
+        );
+        if let Some(lane) = lane {
+            coordinator.record_intellisense_v2_runtime_lane_queue_wait_latency_with_origin(
+                origin,
+                lane.as_str(),
+                queue_wait_elapsed,
+            );
+        }
+    }
+    emit_runtime_saturation_gauges(origin, observability);
+    if let Some(callback) = on_exec_started {
+        callback(queue_wait_elapsed);
+    }
+
+    let exec_started = Instant::now();
+    let join_result = tokio::task::spawn_blocking(f).await;
+    let exec_elapsed = exec_started.elapsed();
+    if let Some(coordinator) = observability {
+        coordinator.record_intellisense_v2_runtime_exec_class_latency_with_origin(
+            origin,
+            cpu_class_label(class),
+            exec_elapsed,
+        );
+        if let Some(lane) = lane {
+            coordinator.record_intellisense_v2_runtime_lane_exec_latency_with_origin(
+                origin,
+                lane.as_str(),
+                exec_elapsed,
+            );
+        }
+    }
+    drop(permit);
+    emit_runtime_saturation_gauges(origin, observability);
+    ObservedBlockingCall {
+        queue_wait_elapsed,
+        exec_elapsed,
+        join_result,
+    }
+}
+
+pub async fn spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks<
+    F,
+    R,
+    L,
+    Q,
+    S,
+>(
+    class: CpuWorkClass,
+    origin: &'static str,
+    current_lane: L,
+    lane_change_notify: &Notify,
+    observability: Option<&SystemCoordinator>,
+    on_queue_wait_started: Option<Q>,
+    on_exec_started: Option<S>,
+    f: F,
+) -> ObservedBlockingCall<R>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+    L: Fn() -> Option<AdmissionLane>,
+    Q: FnOnce(),
+    S: FnOnce(Duration),
+{
+    let queue_wait_started = Instant::now();
+    let (permit, lane) = if std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get() >= 2)
+        .unwrap_or(true)
+    {
+        cpu_bound_budget()
+            .acquire_with_dynamic_lane_queue_wait_hook(
+                class,
+                current_lane,
+                lane_change_notify,
+                on_queue_wait_started,
+            )
+            .await
+    } else {
+        let semaphore = cpu_bound_semaphore();
+        let permit = if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+            permit
+        } else {
+            if let Some(callback) = on_queue_wait_started {
+                callback();
+            }
+            semaphore
+                .acquire_owned()
+                .await
+                .expect("cpu-bound semaphore closed")
+        };
+        (permit, current_lane())
     };
     let queue_wait_elapsed = queue_wait_started.elapsed();
     if let Some(coordinator) = observability {

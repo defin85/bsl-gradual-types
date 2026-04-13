@@ -17,21 +17,21 @@
     },
     "current_context_wall_ms_role_broker_follower": {
       "count": 1,
-      "p50": 849.0,
-      "p95": 849.0,
-      "p99": 849.0
+      "p50": 951.0,
+      "p95": 951.0,
+      "p99": 951.0
     },
     "current_context_wall_ms_role_broker_leader": {
       "count": 1,
-      "p50": 901.0,
-      "p95": 901.0,
-      "p99": 901.0
+      "p50": 1002.0,
+      "p95": 1002.0,
+      "p99": 1002.0
     },
     "current_context_wall_ms_source_parser_coordinator": {
       "count": 2,
-      "p50": 901.0,
-      "p95": 901.0,
-      "p99": 901.0
+      "p50": 1002.0,
+      "p95": 1002.0,
+      "p99": 1002.0
     }
   },
   "summary": {

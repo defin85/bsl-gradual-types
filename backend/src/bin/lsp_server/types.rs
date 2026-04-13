@@ -112,6 +112,10 @@ pub struct DidChangeParseSnapshotEvidenceTrace {
     pub parse_mode: String,
     pub base_text_source: String,
     pub change_shape: String,
+    pub content_changes_count: usize,
+    pub replay_order: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_document_version: Option<i32>,
     pub changed_ranges_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,

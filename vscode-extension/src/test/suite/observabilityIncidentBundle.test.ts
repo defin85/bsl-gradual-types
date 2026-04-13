@@ -234,14 +234,62 @@ suite('Observability Incident Bundle Test Suite', () => {
             response: {
                 metrics: {
                     uptime_seconds: 184,
+                    counters: {
+                        intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change: 4,
+                        intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_save: 3,
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_aborted: 1,
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_superseded: 1,
+                        intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change: 3,
+                        intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save: 1,
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready: 4,
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_ready: 1,
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_timeout: 2,
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_ready: 1,
+                        intellisense_v2_diagnostics_save_followup_wait_state_total_reason_pending_publish: 5,
+                        intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag: 2,
+                        intellisense_v2_diagnostics_save_followup_wait_state_total_reason_runtime_queue_wait: 1,
+                        intellisense_v2_diagnostics_save_followup_wait_state_total_reason_semantic_work: 3,
+                        intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts: 1,
+                        intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state: 1,
+                        intellisense_v2_diagnostics_save_followup_semantic_path_total_path_generic_pipeline: 2,
+                    },
                     histograms: {
                         intellisense_v2_semantic_diagnostics_query_ms: {
                             p95: 3374,
                         },
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_aborted: {
+                            count: 1,
+                            p95: 1200,
+                        },
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_superseded: {
+                            count: 1,
+                            p95: 2400,
+                        },
+                        intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change: {
+                            count: 3,
+                            p50: 124,
+                            p95: 612,
+                        },
+                        intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_save: {
+                            count: 1,
+                            p95: 88,
+                        },
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_not_ready: {
+                            count: 4,
+                            p95: 1,
+                        },
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout: {
+                            count: 2,
+                            p95: 3501,
+                        },
+                        intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_ready: {
+                            count: 1,
+                            p95: 42,
+                        },
                     },
                 },
                 didChangeParseSnapshotEvidence: {
-                    version: 1,
+                    version: 2,
                     entries: [
                         {
                             evidenceId: 'did-change-parse-snapshot-1',
@@ -251,8 +299,24 @@ suite('Observability Incident Bundle Test Suite', () => {
                             parseMode: 'full',
                             baseTextSource: 'analysis_snapshot',
                             changeShape: 'ranged',
+                            contentChangesCount: 2,
+                            replayOrder: 'receive_order',
                             changedRangesCount: 1,
                             fallbackReason: 'edits_do_not_match_new_content',
+                        },
+                        {
+                            evidenceId: 'did-change-parse-snapshot-2',
+                            uri: 'file:///tmp/shadow-state-test.bsl',
+                            requestedVersion: 10,
+                            startedAtMs: 1_700_000_019_900,
+                            parseMode: 'full',
+                            baseTextSource: 'shadow_state',
+                            changeShape: 'ranged',
+                            contentChangesCount: 1,
+                            replayOrder: 'receive_order',
+                            baseDocumentVersion: 8,
+                            changedRangesCount: 0,
+                            fallbackReason: 'input_edit_conversion_failed',
                         },
                     ],
                 },
@@ -614,8 +678,26 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests.length, 2);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_window.request_count, 1);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_requests.length, 1);
-        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_window.entry_count, 1);
-        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_entries.length, 1);
+        assert.deepStrictEqual(bundle.incidentReport.diagnostics_save_metrics.followup_wait_state, [
+            { name: 'apply_lag', count: 2 },
+            { name: 'runtime_queue_wait', count: 1 },
+            { name: 'semantic_work', count: 3 },
+            { name: 'pending_publish', count: 5 },
+        ]);
+        assert.deepStrictEqual(bundle.incidentReport.diagnostics_save_metrics.ready_snapshot_worker_started, [
+            { source: 'did_change', count: 4 },
+            { source: 'did_save', count: 3 },
+        ]);
+        assert.deepStrictEqual(
+            bundle.incidentReport.diagnostics_save_metrics.ready_snapshot_worker_in_flight_estimate,
+            [
+                { source: 'did_change', count: 1 },
+            ]
+        );
+        assert.strictEqual(bundle.incidentReport.diagnostics_save_metrics.materialization[0].source, 'did_change');
+        assert.strictEqual(bundle.incidentReport.diagnostics_save_metrics.materialization[0].p95_ms, 612);
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_window.entry_count, 2);
+        assert.strictEqual(bundle.incidentReport.did_change_parse_snapshot_entries.length, 2);
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0].first_publish?.profile,
             'save_fastlane'
@@ -627,6 +709,18 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.deepStrictEqual(
             bundle.incidentReport.did_change_parse_snapshot_entries[0].correlated_diagnostics_save_trace_ids,
             ['diagnostics-save-trace-1']
+        );
+        assert.strictEqual(
+            bundle.incidentReport.did_change_parse_snapshot_entries[1].base_text_source,
+            'shadow_state'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.did_change_parse_snapshot_entries[1].base_document_version,
+            8
+        );
+        assert.deepStrictEqual(
+            bundle.incidentReport.did_change_parse_snapshot_entries[1].correlated_diagnostics_save_trace_ids,
+            []
         );
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0].followup_publish?.profile,
@@ -782,10 +876,59 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('## Diagnostics Save Summary'));
         assert.ok(bundle.summaryMarkdown.includes('trace=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('save_cycle_sequence=2'));
+        assert.ok(bundle.summaryMarkdown.includes('## Diagnostics Save Metrics'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_wait_state | apply_lag=2 | runtime_queue_wait=1 | semantic_work=3 | pending_publish=5'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_probe | slot=bounded_wait | timeout=2 p95_ms=3501 | ready=1 p95_ms=42'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_probe | slot=zero_budget | not_ready=4 p95_ms=1 | ready=1'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_semantic_path | ready_artifacts=1 | shadow_state=1 | generic_pipeline=2'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_worker_started | did_change=4 | did_save=3'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_worker_terminated_without_materialization | source=did_save | aborted=1 p95_ms=1200 | superseded=1 p95_ms=2400'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_worker_in_flight_estimate | did_change=1'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_materialization | source=did_change | count=3 | p50_ms=124 | p95_ms=612'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'ready_snapshot_materialization | source=did_save | count=1 | p95_ms=88'
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('## DidChange Parse Snapshot Summary'));
         assert.ok(bundle.summaryMarkdown.includes('evidence=did-change-parse-snapshot-1'));
         assert.ok(bundle.summaryMarkdown.includes('base_text_source=analysis_snapshot'));
         assert.ok(bundle.summaryMarkdown.includes('change_shape=ranged'));
+        assert.ok(bundle.summaryMarkdown.includes('content_changes_count=2'));
+        assert.ok(bundle.summaryMarkdown.includes('replay_order=receive_order'));
+        assert.ok(bundle.summaryMarkdown.includes('base_document_version=8'));
         assert.ok(bundle.summaryMarkdown.includes('fallback_reason=edits_do_not_match_new_content'));
         assert.ok(bundle.summaryMarkdown.includes('correlated_diagnostics_save_traces=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('first_publish=save_fastlane:syntax_only:published@84ms'));
@@ -1784,6 +1927,11 @@ suite('Observability Incident Bundle Test Suite', () => {
             'missing metrics must not reuse stale output dumps as raw evidence'
         );
         assert.ok(bundle.summaryMarkdown.includes('status=unavailable'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'Diagnostics-save aggregate metrics are unavailable: Observability request timed out after 1500ms'
+            )
+        );
     });
 
     test('unsupported metrics should stay partial and be marked as unsupported', () => {
@@ -1804,6 +1952,11 @@ suite('Observability Incident Bundle Test Suite', () => {
             'unsupported metrics must not produce a fake raw attachment'
         );
         assert.ok(bundle.summaryMarkdown.includes('status=unsupported'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'Diagnostics-save aggregate metrics are unsupported by the connected server'
+            )
+        );
     });
 
     test('completion timeline error should mark authoritative server trace as unavailable', () => {

@@ -3,7 +3,7 @@ use super::*;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 struct BuildParseSnapshotRequest {
     file_id: bsl_analysis_v2::FileId,
@@ -13,7 +13,19 @@ struct BuildParseSnapshotRequest {
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     blocking_delay_env_key: Option<&'static str>,
     requested_version_state: Option<Arc<std::sync::atomic::AtomicI32>>,
+    task_control: Option<Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>>,
+    admission_lane: Option<bsl_runtime::application::AdmissionLane>,
     did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
+}
+
+enum BuildParseSnapshotAbortReasonV2 {
+    Superseded,
+    BuildSnapshotAborted,
+}
+
+enum BuildParseSnapshotOutcomeV2 {
+    Ready(bsl_analysis_v2::ParseSnapshot),
+    Aborted(BuildParseSnapshotAbortReasonV2),
 }
 
 #[derive(Debug, Clone)]
@@ -21,6 +33,9 @@ struct DidChangeParseSnapshotAttributionV2 {
     uri: Url,
     base_text_source: &'static str,
     change_shape: &'static str,
+    content_changes_count: usize,
+    replay_order: &'static str,
+    base_document_version: Option<i32>,
 }
 
 #[cfg(test)]
@@ -165,6 +180,16 @@ fn did_change_parse_snapshot_change_shape(
     }
 }
 
+fn did_change_parse_snapshot_replay_order(
+    changes: &[TextDocumentContentChangeEvent],
+) -> &'static str {
+    if changes.iter().any(|change| change.range.is_none()) {
+        "not_applicable"
+    } else {
+        "receive_order"
+    }
+}
+
 enum ParseSnapshotAsyncDelayMode {
     None,
     DidChangeTestOnly,
@@ -177,6 +202,75 @@ fn parse_snapshot_apply_debounce_duration() -> Duration {
 
 fn parse_snapshot_text_hash(text: &str) -> [u8; 32] {
     *blake3::hash(text.as_bytes()).as_bytes()
+}
+
+fn background_parse_snapshot_task_matches_v2(
+    task: &super::super::BackgroundParseSnapshotApplyTaskV2,
+    requested_version: i32,
+    expected_text_hash: Option<[u8; 32]>,
+) -> bool {
+    task.requested_version.load(Ordering::Relaxed) == requested_version
+        && expected_text_hash.map_or(true, |text_hash| task.text_hash == text_hash)
+}
+
+fn background_parse_snapshot_apply_source_label(
+    source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
+) -> &'static str {
+    match source {
+        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen => "did_open",
+        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => "did_change",
+        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => "did_save",
+    }
+}
+
+struct ReadyParseSnapshotWorkerLifecycleGuard {
+    coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
+    origin: &'static str,
+    source: &'static str,
+    started: Instant,
+    materialized: bool,
+    terminal_reason: Option<&'static str>,
+}
+
+impl ReadyParseSnapshotWorkerLifecycleGuard {
+    fn new(
+        coordinator: Arc<bsl_runtime::system::SystemCoordinator>,
+        origin: &'static str,
+        source: &'static str,
+    ) -> Self {
+        coordinator.record_intellisense_v2_ready_parse_snapshot_worker_started(origin, source);
+        Self {
+            coordinator,
+            origin,
+            source,
+            started: Instant::now(),
+            materialized: false,
+            terminal_reason: None,
+        }
+    }
+
+    fn mark_materialized(&mut self) {
+        self.materialized = true;
+    }
+
+    fn set_terminal_reason(&mut self, reason: &'static str) {
+        self.terminal_reason = Some(reason);
+    }
+}
+
+impl Drop for ReadyParseSnapshotWorkerLifecycleGuard {
+    fn drop(&mut self) {
+        if self.materialized {
+            return;
+        }
+        self.coordinator
+            .record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+                self.origin,
+                self.source,
+                self.terminal_reason.unwrap_or("aborted"),
+                self.started.elapsed(),
+            );
+    }
 }
 
 struct BackgroundParseSnapshotApplyArgs {
@@ -269,45 +363,166 @@ impl BslLanguageServer {
     async fn build_parse_snapshot_v2(
         &self,
         request: BuildParseSnapshotRequest,
-    ) -> Option<bsl_analysis_v2::ParseSnapshot> {
+    ) -> BuildParseSnapshotOutcomeV2 {
         let coordinator = self.coordinator.clone();
         let path_for_parse = request.path.clone();
         let text_for_parse = request.text.clone();
         let parse_started = Instant::now();
         let blocking_delay_env_key_for_parse = request.blocking_delay_env_key;
         let requested_version_state_for_parse = request.requested_version_state;
+        let task_control_for_parse = request.task_control;
         let did_change_attribution = request.did_change_attribution.clone();
         let version = request.version;
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
-        let report = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-            bsl_runtime::application::CpuWorkClass::Background,
-            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-            Some(self.coordinator.as_ref()),
-            move || {
-                if let Some(env_key) = blocking_delay_env_key_for_parse {
-                    maybe_inject_blocking_parse_delay_for_test(env_key);
-                }
-                if requested_version_state_for_parse
-                    .as_ref()
-                    .is_some_and(|state| state.load(Ordering::Relaxed) != version)
-                {
-                    return None;
-                }
-                coordinator.parser_coordinator().and_then(|parser| {
-                    parser
-                        .parse_incremental_with_report(
+        let parse_call = if let Some(task_control) = task_control_for_parse.clone() {
+            let task_control_for_lane = Arc::clone(&task_control);
+            let task_control_for_exec = Some(Arc::clone(&task_control));
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                move || {
+                    if task_control_for_lane
+                        .promotion_requested
+                        .load(Ordering::SeqCst)
+                    {
+                        Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+                    } else {
+                        request.admission_lane
+                    }
+                },
+                &task_control.control_notify,
+                Some(self.coordinator.as_ref()),
+                Option::<fn()>::None,
+                Option::<fn(Duration)>::None,
+                move || {
+                    if let Some(env_key) = blocking_delay_env_key_for_parse {
+                        maybe_inject_blocking_parse_delay_for_test(env_key);
+                    }
+                    if requested_version_state_for_parse
+                        .as_ref()
+                        .is_some_and(|state| state.load(Ordering::Relaxed) != version)
+                    {
+                        return Err(BuildParseSnapshotAbortReasonV2::Superseded);
+                    }
+                    if task_control_for_exec
+                        .as_ref()
+                        .is_some_and(|control| control.cancel_requested.load(Ordering::SeqCst))
+                    {
+                        return Err(BuildParseSnapshotAbortReasonV2::Superseded);
+                    }
+                    let Some(parser) = coordinator.parser_coordinator() else {
+                        return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
+                    };
+                    let parse_result = if let Some(control) = task_control_for_exec.as_ref() {
+                        parser.parse_incremental_with_report_with_cancellation(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                            &control.cancel_requested,
+                        )
+                    } else {
+                        parser.parse_incremental_with_report(
                             PathBuf::from(path_for_parse.as_ref()),
                             text_for_parse.to_string(),
                             parser_edits,
                         )
-                        .ok()
-                })
-            },
-        )
-        .await
-        .ok()
-        .flatten()?;
+                    };
+                    parse_result.map_err(|error| {
+                        if task_control_for_exec
+                            .as_ref()
+                            .is_some_and(|control| {
+                                control.cancel_requested.load(Ordering::SeqCst)
+                                    && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
+                            })
+                        {
+                            BuildParseSnapshotAbortReasonV2::Superseded
+                        } else {
+                            warn!(
+                                file_id = file_id.0,
+                                file_version = version,
+                                error = %error,
+                                "background parse snapshot build failed"
+                            );
+                            BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted
+                        }
+                    })
+                },
+            )
+            .await
+        } else {
+            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
+                bsl_runtime::application::CpuWorkClass::Background,
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                request.admission_lane,
+                Some(self.coordinator.as_ref()),
+                Option::<fn()>::None,
+                Option::<fn(Duration)>::None,
+                move || {
+                    if let Some(env_key) = blocking_delay_env_key_for_parse {
+                        maybe_inject_blocking_parse_delay_for_test(env_key);
+                    }
+                    if requested_version_state_for_parse
+                        .as_ref()
+                        .is_some_and(|state| state.load(Ordering::Relaxed) != version)
+                    {
+                        return Err(BuildParseSnapshotAbortReasonV2::Superseded);
+                    }
+                    if task_control_for_parse
+                        .as_ref()
+                        .is_some_and(|control| control.cancel_requested.load(Ordering::SeqCst))
+                    {
+                        return Err(BuildParseSnapshotAbortReasonV2::Superseded);
+                    }
+                    let Some(parser) = coordinator.parser_coordinator() else {
+                        return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
+                    };
+                    let parse_result = if let Some(control) = task_control_for_parse.as_ref() {
+                        parser.parse_incremental_with_report_with_cancellation(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                            &control.cancel_requested,
+                        )
+                    } else {
+                        parser.parse_incremental_with_report(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                        )
+                    };
+                    parse_result.map_err(|error| {
+                        if task_control_for_parse
+                            .as_ref()
+                            .is_some_and(|control| {
+                                control.cancel_requested.load(Ordering::SeqCst)
+                                    && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
+                            })
+                        {
+                            BuildParseSnapshotAbortReasonV2::Superseded
+                        } else {
+                            warn!(
+                                file_id = file_id.0,
+                                file_version = version,
+                                error = %error,
+                                "background parse snapshot build failed"
+                            );
+                            BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted
+                        }
+                    })
+                },
+            )
+            .await
+        };
+        let report = match parse_call.join_result {
+            Ok(Ok(report)) => report,
+            Ok(Err(reason)) => return BuildParseSnapshotOutcomeV2::Aborted(reason),
+            Err(_) => {
+                return BuildParseSnapshotOutcomeV2::Aborted(
+                    BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted,
+                );
+            }
+        };
         self.record_parse_snapshot_report_v2(&report, parse_started.elapsed());
         if let Some(attribution) = did_change_attribution.as_ref() {
             self.record_did_change_parse_snapshot_evidence(
@@ -319,11 +534,58 @@ impl BslLanguageServer {
                 parse_snapshot_mode_from_report(&report),
                 attribution.base_text_source,
                 attribution.change_shape,
+                attribution.content_changes_count,
+                attribution.replay_order,
+                attribution.base_document_version,
                 report.changed_ranges.len(),
                 report.fallback_reason.as_deref(),
             );
         }
-        Some(parse_snapshot_from_report(file_id, version, report))
+        BuildParseSnapshotOutcomeV2::Ready(parse_snapshot_from_report(file_id, version, report))
+    }
+
+    pub(crate) async fn matching_background_parse_snapshot_task_control_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> Option<Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>> {
+        let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
+        tasks
+            .get(&file_id)
+            .filter(|task| {
+                background_parse_snapshot_task_matches_v2(
+                    task,
+                    requested_version,
+                    expected_text_hash,
+                )
+            })
+            .map(|task| Arc::clone(&task.control))
+    }
+
+    pub(crate) async fn promote_background_parse_snapshot_apply_task_for_did_save_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> bool {
+        let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
+        let Some(task) = tasks.get(&file_id) else {
+            return false;
+        };
+        if !background_parse_snapshot_task_matches_v2(task, requested_version, expected_text_hash)
+            || matches!(
+                task.source,
+                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+            )
+        {
+            return false;
+        }
+        task.control
+            .promotion_requested
+            .store(true, Ordering::SeqCst);
+        task.control.control_notify.notify_waiters();
+        true
     }
 
     async fn schedule_background_parse_snapshot_apply_v2(
@@ -345,17 +607,27 @@ impl BslLanguageServer {
         }
         if let Some(previous) = tasks.remove(&file_id) {
             previous.requested_version.store(0, Ordering::Relaxed);
-            previous.handle.abort();
+            previous
+                .control
+                .cancel_requested
+                .store(true, Ordering::SeqCst);
+            previous.control.control_notify.notify_waiters();
         }
 
         let requested_version_state =
             Arc::new(std::sync::atomic::AtomicI32::new(args.requested_version));
+        let task_control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
         let task_source = args.source;
         let server = self.clone();
         let worker_requested_version_state = Arc::clone(&requested_version_state);
+        let worker_task_control = Arc::clone(&task_control);
         let handle = tokio::spawn(async move {
             server
-                .run_background_parse_snapshot_apply_worker_v2(args, worker_requested_version_state)
+                .run_background_parse_snapshot_apply_worker_v2(
+                    args,
+                    worker_requested_version_state,
+                    worker_task_control,
+                )
                 .await;
         });
         tasks.insert(
@@ -364,6 +636,7 @@ impl BslLanguageServer {
                 requested_version: requested_version_state,
                 text_hash,
                 source: task_source,
+                control: task_control,
                 handle,
             },
         );
@@ -373,18 +646,38 @@ impl BslLanguageServer {
         &self,
         args: BackgroundParseSnapshotApplyArgs,
         requested_version_state: Arc<std::sync::atomic::AtomicI32>,
+        task_control: Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>,
     ) {
         let still_requested = |state: &Arc<std::sync::atomic::AtomicI32>, version: i32| {
             state.load(Ordering::Relaxed) == version
         };
         let file_id = args.file_id;
+        let origin_label = bsl_runtime::application::ObservabilityOrigin::Lsp.as_str();
+        let source_label = background_parse_snapshot_apply_source_label(args.source);
+        let mut lifecycle_guard = ReadyParseSnapshotWorkerLifecycleGuard::new(
+            self.coordinator.clone(),
+            origin_label,
+            source_label,
+        );
 
         let run = async {
             let debounce = parse_snapshot_apply_debounce_duration();
-            if debounce > Duration::ZERO {
-                tokio::time::sleep(debounce).await;
+            if debounce > Duration::ZERO
+                && !task_control.cancel_requested.load(Ordering::SeqCst)
+                && !task_control.promotion_requested.load(Ordering::SeqCst)
+            {
+                let notified = task_control.control_notify.notified();
+                tokio::pin!(notified);
+                tokio::select! {
+                    _ = tokio::time::sleep(debounce) => {}
+                    _ = &mut notified => {}
+                }
             }
-            if !still_requested(&requested_version_state, args.requested_version) {
+            if task_control.cancel_requested.load(Ordering::SeqCst)
+                || !still_requested(&requested_version_state, args.requested_version)
+            {
+                lifecycle_guard.set_terminal_reason("superseded");
+                task_control.control_notify.notify_waiters();
                 return;
             }
             if self
@@ -395,6 +688,8 @@ impl BslLanguageServer {
                 .copied()
                 != Some(args.requested_version)
             {
+                lifecycle_guard.set_terminal_reason("latest_version_mismatch");
+                task_control.control_notify.notify_waiters();
                 return;
             }
             match args.async_delay_mode {
@@ -406,7 +701,11 @@ impl BslLanguageServer {
                     maybe_inject_did_save_parse_delay().await;
                 }
             }
-            if !still_requested(&requested_version_state, args.requested_version) {
+            if task_control.cancel_requested.load(Ordering::SeqCst)
+                || !still_requested(&requested_version_state, args.requested_version)
+            {
+                lifecycle_guard.set_terminal_reason("superseded");
+                task_control.control_notify.notify_waiters();
                 return;
             }
             if self
@@ -417,10 +716,12 @@ impl BslLanguageServer {
                 .copied()
                 != Some(args.requested_version)
             {
+                lifecycle_guard.set_terminal_reason("latest_version_mismatch");
+                task_control.control_notify.notify_waiters();
                 return;
             }
 
-            let Some(parse_snapshot) = self
+            let parse_snapshot = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
                     file_id: args.file_id,
                     version: args.requested_version,
@@ -429,19 +730,55 @@ impl BslLanguageServer {
                     parser_edits: args.parser_edits,
                     blocking_delay_env_key: args.blocking_delay_env_key,
                     requested_version_state: Some(Arc::clone(&requested_version_state)),
+                    task_control: Some(Arc::clone(&task_control)),
+                    admission_lane: matches!(
+                        args.source,
+                        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                    )
+                    .then_some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+                    .or_else(|| {
+                        task_control
+                            .promotion_requested
+                            .load(Ordering::SeqCst)
+                            .then_some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+                    }),
                     did_change_attribution: args.did_change_attribution.clone(),
                 })
                 .await
-            else {
-                return;
+            {
+                BuildParseSnapshotOutcomeV2::Ready(parse_snapshot) => parse_snapshot,
+                BuildParseSnapshotOutcomeV2::Aborted(
+                    BuildParseSnapshotAbortReasonV2::Superseded,
+                ) => {
+                    lifecycle_guard.set_terminal_reason("superseded");
+                    task_control.control_notify.notify_waiters();
+                    return;
+                }
+                BuildParseSnapshotOutcomeV2::Aborted(
+                    BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted,
+                ) => {
+                    lifecycle_guard.set_terminal_reason("build_snapshot_aborted");
+                    task_control.control_notify.notify_waiters();
+                    return;
+                }
             };
             self.record_ready_parse_snapshot_v2(args.file_id, args.text.clone(), &parse_snapshot)
                 .await;
+            lifecycle_guard.mark_materialized();
+            task_control.materialized.store(true, Ordering::SeqCst);
+            task_control.materialized_notify.notify_waiters();
+            task_control.control_notify.notify_waiters();
+            self.coordinator
+                .record_intellisense_v2_ready_parse_snapshot_materialization(
+                    origin_label,
+                    source_label,
+                    lifecycle_guard.started.elapsed(),
+                );
             let text_for_symbols = args.text.clone();
             let parse_result_for_symbols = Arc::clone(&parse_snapshot.parse_result);
             match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
                 bsl_runtime::application::CpuWorkClass::Background,
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                origin_label,
                 Some(self.coordinator.as_ref()),
                 move || {
                     build_document_symbols(
@@ -479,7 +816,10 @@ impl BslLanguageServer {
                 }
             }
 
-            if !still_requested(&requested_version_state, args.requested_version) {
+            if task_control.cancel_requested.load(Ordering::SeqCst)
+                || !still_requested(&requested_version_state, args.requested_version)
+            {
+                task_control.control_notify.notify_waiters();
                 return;
             }
             if self
@@ -490,6 +830,7 @@ impl BslLanguageServer {
                 .copied()
                 != Some(args.requested_version)
             {
+                task_control.control_notify.notify_waiters();
                 return;
             }
             if !self
@@ -497,9 +838,13 @@ impl BslLanguageServer {
                 .wait_for_file_version(args.file_id, args.requested_version)
                 .await
             {
+                task_control.control_notify.notify_waiters();
                 return;
             }
-            if !still_requested(&requested_version_state, args.requested_version) {
+            if task_control.cancel_requested.load(Ordering::SeqCst)
+                || !still_requested(&requested_version_state, args.requested_version)
+            {
+                task_control.control_notify.notify_waiters();
                 return;
             }
             if self
@@ -510,6 +855,7 @@ impl BslLanguageServer {
                 .copied()
                 != Some(args.requested_version)
             {
+                task_control.control_notify.notify_waiters();
                 return;
             }
 
@@ -528,6 +874,7 @@ impl BslLanguageServer {
                 args.file_id,
                 args.requested_version,
             );
+            task_control.control_notify.notify_waiters();
         };
         run.await;
 
@@ -538,6 +885,7 @@ impl BslLanguageServer {
         {
             tasks.remove(&file_id);
         }
+        task_control.control_notify.notify_waiters();
     }
 
     fn spawn_completion_head_reuse_from_previous_version_v2(
@@ -1272,6 +1620,8 @@ impl BslLanguageServer {
         let version = params.text_document.version;
         let changes = params.content_changes;
         let parse_snapshot_change_shape = did_change_parse_snapshot_change_shape(&changes);
+        let parse_snapshot_replay_order = did_change_parse_snapshot_replay_order(&changes);
+        let parse_snapshot_content_changes_count = changes.len();
 
         self.sync_v2_globals().await;
         let file_id = self.get_or_create_file_id_v2(&uri).await;
@@ -1310,6 +1660,7 @@ impl BslLanguageServer {
             tail_whitespace_append_previous_version,
             previous_analysis_for_identical_text_reuse,
             parse_snapshot_base_text_source,
+            parse_snapshot_base_document_version,
         ) = {
             let _sync_guard = self.text_sync_v2.lock().await;
             let previous_shadow_state = {
@@ -1317,48 +1668,61 @@ impl BslLanguageServer {
                 shadow.get(&file_id).cloned()
             };
 
-            let (updated_text, parser_edits, parse_snapshot_base_text_source) =
-                if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-                    (full_change.text.clone(), Vec::new(), "not_applicable")
+            let (
+                updated_text,
+                parser_edits,
+                parse_snapshot_base_text_source,
+                parse_snapshot_base_document_version,
+            ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
+                (full_change.text.clone(), Vec::new(), "not_applicable", None)
+            } else {
+                if let Some(state) = previous_shadow_state.as_ref() {
+                    if version < state.version {
+                        warn!(
+                            uri = %uri,
+                            file_id = file_id.0,
+                            requested_version = version,
+                            shadow_version = state.version,
+                            "Skipping out-of-order didChange for older version"
+                        );
+                        return;
+                    }
+                }
+                let (
+                    base_text,
+                    parse_snapshot_base_text_source,
+                    parse_snapshot_base_document_version,
+                ) = if let Some(state) = previous_shadow_state.clone() {
+                    (state.text.to_string(), "shadow_state", Some(state.version))
                 } else {
-                    if let Some(state) = previous_shadow_state.as_ref() {
-                        if version < state.version {
-                            warn!(
-                                uri = %uri,
-                                file_id = file_id.0,
-                                requested_version = version,
-                                shadow_version = state.version,
-                                "Skipping out-of-order didChange for older version"
-                            );
-                            return;
-                        }
-                    }
-                    let (base_text, parse_snapshot_base_text_source) =
-                        if let Some(state) = previous_shadow_state.clone() {
-                            (state.text.to_string(), "shadow_state")
-                        } else {
-                            (
-                                self.analysis_v2
-                                    .snapshot()
-                                    .await
-                                    .file_text(file_id)
-                                    .ok()
-                                    .flatten()
-                                    .map(|text| text.to_string())
-                                    .unwrap_or_default(),
-                                "analysis_snapshot",
-                            )
-                        };
-
-                    let replay_plan = canonicalize_ranged_did_change_replay_plan(&changes);
-                    let mut current_text = base_text;
-                    let mut parser_edits = Vec::with_capacity(replay_plan.len());
-                    for step in replay_plan {
-                        current_text = apply_text_edit(&current_text, step.range, &step.new_text);
-                        parser_edits.push(step.parser_edit);
-                    }
-                    (current_text, parser_edits, parse_snapshot_base_text_source)
+                    (
+                        self.analysis_v2
+                            .snapshot()
+                            .await
+                            .file_text(file_id)
+                            .ok()
+                            .flatten()
+                            .map(|text| text.to_string())
+                            .unwrap_or_default(),
+                        "analysis_snapshot",
+                        None,
+                    )
                 };
+
+                let replay_plan = canonicalize_ranged_did_change_replay_plan(&changes);
+                let mut current_text = base_text;
+                let mut parser_edits = Vec::with_capacity(replay_plan.len());
+                for step in replay_plan {
+                    current_text = apply_text_edit(&current_text, step.range, &step.new_text);
+                    parser_edits.push(step.parser_edit);
+                }
+                (
+                    current_text,
+                    parser_edits,
+                    parse_snapshot_base_text_source,
+                    parse_snapshot_base_document_version,
+                )
+            };
             let identical_text_previous_version =
                 previous_shadow_state.as_ref().and_then(|state| {
                     (state.text.as_ref() == updated_text.as_str()).then_some(state.version)
@@ -1488,6 +1852,7 @@ impl BslLanguageServer {
                 tail_whitespace_append_previous_version,
                 previous_analysis_for_identical_text_reuse,
                 parse_snapshot_base_text_source,
+                parse_snapshot_base_document_version,
             )
         };
 
@@ -1546,6 +1911,9 @@ impl BslLanguageServer {
                     uri: uri.clone(),
                     base_text_source: parse_snapshot_base_text_source,
                     change_shape: parse_snapshot_change_shape,
+                    content_changes_count: parse_snapshot_content_changes_count,
+                    replay_order: parse_snapshot_replay_order,
+                    base_document_version: parse_snapshot_base_document_version,
                 }),
             })
             .await;

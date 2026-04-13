@@ -1,6 +1,165 @@
 use super::*;
 
+struct HoverObservedSnapshotV2 {
+    analysis: bsl_analysis_v2::AnalysisV2,
+    file_content: Option<Arc<str>>,
+    file_path: Option<Arc<str>>,
+    deps: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
+    ir_program: Option<Arc<bsl_shared::ir::SemanticProgram>>,
+    exact_type_index_available: bool,
+}
+
 impl BslLanguageServer {
+    fn build_hover_observed_snapshot_v2(
+        &self,
+        context: &bsl_runtime::application::ExecutionContext,
+        analysis: bsl_analysis_v2::AnalysisV2,
+        file_id: bsl_analysis_v2::FileId,
+        position: Position,
+        uri: &Url,
+        index_snapshot_id: Option<&str>,
+    ) -> HoverObservedSnapshotV2 {
+        let observed_deps_id = analysis.deps_id().ok();
+        let observed_file_version = analysis.file_version(file_id).ok().flatten();
+        let observed_settings_id = analysis.settings_id().ok();
+        debug!(
+            "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+            uri,
+            file_id.0,
+            observed_file_version,
+            observed_deps_id.as_ref().map(|v| v.as_str()),
+            observed_settings_id.as_ref().map(|v| v.as_str()),
+            index_snapshot_id.unwrap_or("unavailable"),
+        );
+
+        let observed_byte_offset = analysis
+            .utf16_position_to_byte_offset(file_id, position.line, position.character)
+            .ok()
+            .flatten();
+        let observed_point = analysis
+            .utf16_position_to_point(file_id, position.line, position.character)
+            .ok()
+            .flatten();
+        debug!(
+            "Hover v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+            uri, file_id.0, position.line, position.character, observed_byte_offset, observed_point,
+        );
+        if let Some(offset) = observed_byte_offset {
+            let offset = offset.min(u32::MAX as usize) as u32;
+            if let Ok(profiled) = analysis.type_at_byte_offset_serve_only_profiled(file_id, offset)
+            {
+                self.coordinator
+                    .record_intellisense_v2_type_index_reason(profiled.serve_reason_code.as_str());
+            }
+        }
+
+        let file_content = analysis.file_text(file_id).ok().flatten();
+        let file_path = analysis.file_path(file_id).ok().flatten();
+        let deps = analysis.deps_data().ok();
+        let ir_started = Instant::now();
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+            context,
+            &analysis,
+            Some(self.coordinator.as_ref()),
+            file_id,
+        )
+        .ok()
+        .flatten();
+        let ir_elapsed = ir_started.elapsed();
+        if let Some(threshold) = super::super::intellisense_v2_slow_query_warn_threshold() {
+            if ir_elapsed >= threshold {
+                warn!(
+                    uri = %uri,
+                    file_id = file_id.0,
+                    ir_ms = ir_elapsed.as_millis(),
+                    threshold_ms = threshold.as_millis(),
+                    "Hover v2: ir query is slow"
+                );
+            }
+        }
+
+        let exact_type_index_available = file_content
+            .as_ref()
+            .zip(ir_program.as_ref())
+            .is_some_and(|(file_content, ir_program)| {
+                bsl_runtime::application::type_system::hover_exact_type_index_available_at_position(
+                    &analysis,
+                    file_id,
+                    file_content.as_ref(),
+                    position.line,
+                    position.character,
+                    ir_program.as_ref(),
+                )
+            });
+
+        HoverObservedSnapshotV2 {
+            analysis,
+            file_content,
+            file_path,
+            deps,
+            ir_program,
+            exact_type_index_available,
+        }
+    }
+
+    async fn wait_for_hover_exact_type_index_snapshot_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        expected_version: i32,
+    ) -> Option<bsl_analysis_v2::AnalysisV2> {
+        let wait_budget = std::time::Duration::from_millis(
+            bsl_runtime::system::global_runtime_config()
+                .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+                .unwrap_or(120),
+        );
+        let deadline = tokio::time::Instant::now() + wait_budget;
+
+        if !self
+            .has_matching_type_index_precompute_task_v2(file_id, Some(expected_version))
+            .await
+        {
+            self.schedule_type_index_precompute_v2(file_id, expected_version)
+                .await;
+        }
+        let _ = self
+            .promote_type_index_precompute_for_waiter_v2(file_id, Some(expected_version))
+            .await;
+
+        loop {
+            let analysis =
+                match tokio::time::timeout_at(deadline, self.analysis_v2.snapshot()).await {
+                    Ok(analysis) => analysis,
+                    Err(_) => {
+                        self.coordinator
+                            .record_intellisense_v2_interactive_wait_budget_exhausted();
+                        return None;
+                    }
+                };
+            let observed_version = analysis.file_version(file_id).ok().flatten();
+            if observed_version != Some(expected_version) {
+                return None;
+            }
+            if analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false)
+            {
+                self.cleanup_completed_type_index_precompute_task_v2(
+                    file_id,
+                    Some(expected_version),
+                )
+                .await;
+                return Some(analysis);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                self.coordinator
+                    .record_intellisense_v2_interactive_wait_budget_exhausted();
+                return None;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }
+
     pub(super) async fn lsp_completion_resolve(
         &self,
         item: CompletionItem,
@@ -109,105 +268,39 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let (analysis, file_content, file_path, deps, ir_program) = {
-                        let analysis = prepared.snapshot.analysis;
-                        let index_snapshot = prepared.index_snapshot;
-                        let observed_deps_id = Some(prepared.snapshot.deps_id);
-                        let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                        let observed_settings_id = analysis.settings_id().ok();
-                        debug!(
-                            "Hover v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
-                            uri,
-                            file_id.0,
-                            observed_file_version,
-                            observed_deps_id.as_ref().map(|v| v.as_str()),
-                            observed_settings_id.as_ref().map(|v| v.as_str()),
-                            index_snapshot.id.as_str(),
-                        );
-
-                        let observed_byte_offset = analysis
-                            .utf16_position_to_byte_offset(
-                                file_id,
-                                position.line,
-                                position.character,
-                            )
-                            .ok()
-                            .flatten();
-                        let observed_point = analysis
-                            .utf16_position_to_point(file_id, position.line, position.character)
-                            .ok()
-                            .flatten();
-                        debug!(
-                            "Hover v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                            uri,
-                            file_id.0,
-                            position.line,
-                            position.character,
-                            observed_byte_offset,
-                            observed_point,
-                        );
-                        if let Some(offset) = observed_byte_offset {
-                            let offset = offset.min(u32::MAX as usize) as u32;
-                            if let Ok(profiled) =
-                                analysis.type_at_byte_offset_serve_only_profiled(file_id, offset)
-                            {
-                                self.coordinator.record_intellisense_v2_type_index_reason(
-                                    profiled.serve_reason_code.as_str(),
-                                );
-                            }
-                        }
-
-                        let file_content = analysis.file_text(file_id).ok().flatten();
-                        let file_path = analysis.file_path(file_id).ok().flatten();
-                        let deps = analysis.deps_data().ok();
-                        let ir_started = Instant::now();
-                        let ir_program =
-                            bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                                &context,
-                                &analysis,
-                                Some(self.coordinator.as_ref()),
-                                file_id,
-                            )
-                            .ok()
-                            .flatten();
-                        let ir_elapsed = ir_started.elapsed();
-                        if let Some(threshold) =
-                            super::super::intellisense_v2_slow_query_warn_threshold()
+                    let mut observed = self.build_hover_observed_snapshot_v2(
+                        &context,
+                        prepared.snapshot.analysis,
+                        file_id,
+                        position,
+                        &uri,
+                        Some(prepared.index_snapshot.id.as_str()),
+                    );
+                    if !observed.exact_type_index_available {
+                        if let Some(refreshed_analysis) = self
+                            .wait_for_hover_exact_type_index_snapshot_v2(file_id, expected_version)
+                            .await
                         {
-                            if ir_elapsed >= threshold {
-                                warn!(
-                                    uri = %uri,
-                                    file_id = file_id.0,
-                                    ir_ms = ir_elapsed.as_millis(),
-                                    threshold_ms = threshold.as_millis(),
-                                    "Hover v2: ir query is slow"
-                                );
-                            }
+                            observed = self.build_hover_observed_snapshot_v2(
+                                &context,
+                                refreshed_analysis,
+                                file_id,
+                                position,
+                                &uri,
+                                None,
+                            );
                         }
-
-                        (analysis, file_content, file_path, deps, ir_program)
-                    };
+                    }
 
                     let settings = self.settings.read().await;
-                    let result = match (file_content, file_path, deps, ir_program) {
+                    let result = match (
+                        observed.file_content,
+                        observed.file_path,
+                        observed.deps,
+                        observed.ir_program,
+                    ) {
                         (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            let exact_type_index_available =
-                                bsl_runtime::application::type_system::hover_exact_type_index_available_at_position(
-                                    &analysis,
-                                    file_id,
-                                    file_content.as_ref(),
-                                    position.line,
-                                    position.character,
-                                    ir_program.as_ref(),
-                                );
-                            if !exact_type_index_available
-                                && !self
-                                    .has_matching_type_index_precompute_task_v2(
-                                        file_id,
-                                        Some(expected_version),
-                                    )
-                                    .await
-                            {
+                            if !observed.exact_type_index_available {
                                 super::helpers::record_lsp_interactive_fail_closed_reason(
                                     self.coordinator.as_ref(),
                                     "hover",
@@ -216,7 +309,7 @@ impl BslLanguageServer {
                                 None
                             } else {
                                 handle_hover_v2(
-                                    &analysis,
+                                    &observed.analysis,
                                     file_id,
                                     file_content,
                                     file_path,

@@ -18,7 +18,7 @@ pub(crate) mod transport_adapter;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -113,7 +113,7 @@ pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 9;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 1;
+pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 2;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]
@@ -332,6 +332,7 @@ pub struct BslLanguageServer {
     pub(crate) full_index_watchdog_timeout: Duration,
     pub(crate) current_context_latest_generations:
         Arc<command_handlers::CurrentContextLatestGenerationRegistry>,
+    pub(crate) current_context_generation_notify: Arc<Notify>,
     pub(crate) current_context_parse_broker: Arc<command_handlers::CurrentContextParseBroker>,
     pub(crate) completion_timeline_traces:
         Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
@@ -555,10 +556,32 @@ pub(crate) enum BackgroundParseSnapshotApplyTaskSourceV2 {
     DidSave,
 }
 
+#[derive(Debug)]
+pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
+    pub cancel_requested: AtomicBool,
+    pub promotion_requested: AtomicBool,
+    pub materialized: AtomicBool,
+    pub control_notify: Notify,
+    pub materialized_notify: Notify,
+}
+
+impl BackgroundParseSnapshotApplyTaskControlV2 {
+    fn new() -> Self {
+        Self {
+            cancel_requested: AtomicBool::new(false),
+            promotion_requested: AtomicBool::new(false),
+            materialized: AtomicBool::new(false),
+            control_notify: Notify::new(),
+            materialized_notify: Notify::new(),
+        }
+    }
+}
+
 pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
     pub requested_version: Arc<AtomicI32>,
     pub text_hash: [u8; 32],
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+    pub control: Arc<BackgroundParseSnapshotApplyTaskControlV2>,
     pub handle: JoinHandle<()>,
 }
 

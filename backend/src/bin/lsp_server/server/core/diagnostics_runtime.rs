@@ -29,6 +29,15 @@ enum ReadyParseSnapshotProbeSlotV2 {
     BoundedWait,
 }
 
+impl ReadyParseSnapshotProbeSlotV2 {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ZeroBudget => "zero_budget",
+            Self::BoundedWait => "bounded_wait",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadyParseSnapshotProbeOutcomeV2 {
     Ready,
@@ -83,6 +92,7 @@ impl ReadySnapshotTaskStateV2 {
 struct DiagnosticsSaveFollowupBranchContextV2 {
     ready_snapshot_task_state: ReadySnapshotTaskStateV2,
     shadow_state_available: bool,
+    shadow_text_hash: Option<[u8; 32]>,
 }
 
 struct SaveFollowupReadyArtifactsReply {
@@ -948,7 +958,28 @@ impl BslLanguageServer {
                     state: None,
                 };
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            let remaining_budget = wait_budget.saturating_sub(wait_started.elapsed());
+            let poll_sleep = remaining_budget.min(Duration::from_millis(25));
+            if let Some(task_control) = self
+                .matching_background_parse_snapshot_task_control_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                    None,
+                )
+                .await
+            {
+                let materialized = task_control.materialized_notify.notified();
+                let control = task_control.control_notify.notified();
+                tokio::pin!(materialized);
+                tokio::pin!(control);
+                tokio::select! {
+                    _ = tokio::time::sleep(poll_sleep) => {}
+                    _ = &mut materialized => {}
+                    _ = &mut control => {}
+                }
+            } else {
+                tokio::time::sleep(poll_sleep).await;
+            }
         }
     }
 
@@ -956,6 +987,16 @@ impl BslLanguageServer {
         &self,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
     ) -> DiagnosticsSaveFollowupBranchContextV2 {
+        let shadow_state = self
+            .latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&supersession_key.file_id)
+            .cloned()
+            .filter(|state| state.version == supersession_key.requested_version);
+        let shadow_text_hash = shadow_state
+            .as_ref()
+            .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
         let ready_snapshot_task_state = if self
             .ready_parse_snapshot_state_for_version_v2(
                 supersession_key.file_id,
@@ -971,6 +1012,8 @@ impl BslLanguageServer {
                 Some(task)
                     if task.requested_version.load(Ordering::Relaxed)
                         == supersession_key.requested_version
+                        && shadow_text_hash
+                            .map_or(true, |text_hash| task.text_hash == text_hash)
                         && task.source
                             != super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave =>
                 {
@@ -988,16 +1031,10 @@ impl BslLanguageServer {
                 None => ReadySnapshotTaskStateV2::Absent,
             }
         };
-        let shadow_state_available = self
-            .latest_document_shadow_state_v2
-            .read()
-            .await
-            .get(&supersession_key.file_id)
-            .is_some_and(|state| state.version == supersession_key.requested_version);
-
         DiagnosticsSaveFollowupBranchContextV2 {
             ready_snapshot_task_state,
-            shadow_state_available,
+            shadow_state_available: shadow_state.is_some(),
+            shadow_text_hash,
         }
     }
 
@@ -1035,6 +1072,8 @@ impl BslLanguageServer {
         else {
             return;
         };
+        self.coordinator
+            .record_intellisense_v2_diagnostics_save_followup_wait_state(reason);
         self.record_diagnostics_save_timeline_followup_wait_state(
             uri,
             cycle_key,
@@ -1186,6 +1225,8 @@ impl BslLanguageServer {
                 supersession_key.requested_version,
             )
             .await?;
+        self.coordinator
+            .record_intellisense_v2_diagnostics_save_followup_semantic_path("shadow_state");
         let apply_lag = self
             .diagnostics_followup_apply_lag_v2(supersession_key)
             .await;
@@ -1534,9 +1575,16 @@ impl BslLanguageServer {
             return None;
         }
 
+        let probe_started = Instant::now();
         let probe = self
             .wait_for_ready_parse_snapshot_probe_v2(supersession_key, cancel_token, wait_budget)
             .await;
+        self.coordinator
+            .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+                probe_slot.as_str(),
+                probe.outcome.as_str(),
+                probe_started.elapsed(),
+            );
         self.record_diagnostics_save_followup_probe_state_v2(
             uri,
             supersession_key,
@@ -1552,6 +1600,8 @@ impl BslLanguageServer {
             None,
         );
         let ready_state = probe.state?;
+        self.coordinator
+            .record_intellisense_v2_diagnostics_save_followup_semantic_path("ready_artifacts");
         let apply_lag = self
             .diagnostics_followup_apply_lag_v2(supersession_key)
             .await;
@@ -2577,6 +2627,13 @@ impl BslLanguageServer {
                     return disposition;
                 }
                 if prefer_inflight_exact_wait {
+                    let _ = self
+                        .promote_background_parse_snapshot_apply_task_for_did_save_v2(
+                            file_id,
+                            requested_version,
+                            branch_context.shadow_text_hash,
+                        )
+                        .await;
                     if let Some(disposition) = self
                         .try_execute_save_followup_from_ready_artifacts_v2(
                             uri,
@@ -2767,6 +2824,8 @@ impl BslLanguageServer {
         let mut followup_semantic_parse_source: Option<&'static str> = None;
         let mut followup_semantic_ir_source: Option<&'static str> = None;
         if save_followup_from_did_save && run_semantic {
+            self.coordinator
+                .record_intellisense_v2_diagnostics_save_followup_semantic_path("generic_pipeline");
             self.record_diagnostics_save_followup_wait_state_v2(
                 uri,
                 &supersession_key,

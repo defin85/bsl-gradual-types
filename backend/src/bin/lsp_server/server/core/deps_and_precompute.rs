@@ -358,7 +358,11 @@ impl BslLanguageServer {
             bundle.deps_id.as_str(),
             bundle.meta.index_snapshot_id,
             bundle.meta.platform_version,
-            bundle.meta.platform_fingerprint.as_deref().unwrap_or("none"),
+            bundle
+                .meta
+                .platform_fingerprint
+                .as_deref()
+                .unwrap_or("none"),
             bundle.meta.config_fingerprint.as_deref().unwrap_or("none"),
             bundle.meta.strict_fingerprint
         );
@@ -674,7 +678,7 @@ impl BslLanguageServer {
         }
     }
 
-    pub(super) async fn promote_type_index_precompute_for_waiter_v2(
+    pub(crate) async fn promote_type_index_precompute_for_waiter_v2(
         &self,
         file_id: V2FileId,
         expected_version: Option<i32>,

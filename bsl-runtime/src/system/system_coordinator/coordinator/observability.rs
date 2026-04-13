@@ -147,6 +147,60 @@ impl SystemCoordinator {
             .record_intellisense_v2_current_context_wall_latency_by_role(role, duration);
     }
 
+    pub fn record_intellisense_v2_ready_parse_snapshot_materialization(
+        &self,
+        origin: &str,
+        source: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_ready_parse_snapshot_materialization(origin, source, duration);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_worker_started(
+        &self,
+        origin: &str,
+        source: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_ready_parse_snapshot_worker_started(origin, source);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+        &self,
+        origin: &str,
+        source: &str,
+        reason: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+                origin, source, reason, duration,
+            );
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+        &self,
+        slot: &str,
+        outcome: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+                slot, outcome, duration,
+            );
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_semantic_path(&self, path: &str) {
+        self.observability
+            .record_intellisense_v2_diagnostics_save_followup_semantic_path(path);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_wait_state(&self, reason: &str) {
+        self.observability
+            .record_intellisense_v2_diagnostics_save_followup_wait_state(reason);
+    }
+
     pub fn record_intellisense_v2_completion_head_to_exact_upgrade(
         &self,
         duration: std::time::Duration,

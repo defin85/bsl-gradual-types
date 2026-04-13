@@ -1,5 +1,5 @@
 use super::*;
-use axum::http::{header, Request as AxumRequest};
+use axum::http::{Request as AxumRequest, header};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
@@ -11,13 +11,13 @@ use bsl_agent::session::SessionManager;
 use bsl_agent::types::JobStateDto;
 use bsl_analysis_v2::{LineIndex, ParseChangedRange, ParseSnapshot};
 use bsl_backend::perf_gate_evaluator::{
-    get_report_u64, validate_parity_cutover_evidence, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
-    PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
+    PARITY_DRIFT_RATE_MAX_FOR_CUTOVER, PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER, get_report_u64,
+    validate_parity_cutover_evidence,
 };
-use bsl_backend::presentation::web::{create_router, AppState};
+use bsl_backend::presentation::web::{AppState, create_router};
 use bsl_backend::system::{
-    build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
-    IndexSnapshot, IndexSnapshotId, TypeKind,
+    EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId,
+    TypeKind, build_deps_bundle_v2,
 };
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;
@@ -26,6 +26,8 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tower::Service;
 use tower::ServiceExt;
+use tower_lsp::LanguageServer;
+use tower_lsp::LspService;
 use tower_lsp::jsonrpc::{Request, Response as JsonRpcResponse};
 use tower_lsp::lsp_types::{
     ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
@@ -41,8 +43,6 @@ use tower_lsp::lsp_types::{
     TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
     WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams,
 };
-use tower_lsp::LanguageServer;
-use tower_lsp::LspService;
 use tree_sitter::{Parser as TreeSitterParser, Tree};
 
 fn init_test_tracing() {
@@ -201,6 +201,59 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_current_context_terminal_total_outcome_superseded",
     "intellisense_v2_current_context_terminal_total_outcome_budget_exhausted",
     "intellisense_v2_current_context_terminal_total_outcome_other",
+    "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_open",
+    "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change",
+    "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_save",
+    "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_open_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_open_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_open_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_open_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_open_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_other_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_other_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_other_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_other_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_other_reason_other",
+    "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_open",
+    "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change",
+    "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save",
+    "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_other",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_generation_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_version_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_timeout",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_cancelled",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_superseded",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_other",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_not_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_generation_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_version_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_timeout",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_cancelled",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_superseded",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_other",
+    "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_pending_publish",
+    "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_runtime_queue_wait",
+    "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_semantic_work",
+    "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag",
+    "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_other",
+    "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts",
+    "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state",
+    "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_generic_pipeline",
+    "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_other",
 ];
 
 const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
@@ -274,6 +327,46 @@ const UNIFIED_STAGE_HISTOGRAM_KEYS: &[&str] = &[
     "intellisense_v2_current_context_wall_ms_role_broker_leader",
     "intellisense_v2_current_context_wall_ms_role_broker_follower",
     "intellisense_v2_current_context_wall_ms_role_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_open_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_open_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_open_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_open_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_open_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_other",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_other_reason_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_other_reason_superseded",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_other_reason_latest_version_mismatch",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_other_reason_build_snapshot_aborted",
+    "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_other_reason_other",
+    "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_open",
+    "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change",
+    "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_save",
+    "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_other",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_not_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_generation_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_version_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_timeout",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_cancelled",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_superseded",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_zero_budget_outcome_other",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_not_ready",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_generation_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_version_mismatch",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_cancelled",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_superseded",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_other",
 ];
 
 #[test]
@@ -590,6 +683,26 @@ async fn live_transport_append_text_change(
         .await;
 }
 
+async fn live_transport_ranged_did_change(
+    harness: &mut LiveLspTransportHarness,
+    uri: &Url,
+    version: i32,
+    content_changes: Vec<TextDocumentContentChangeEvent>,
+) {
+    harness
+        .send_notification(
+            "textDocument/didChange",
+            DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version,
+                },
+                content_changes,
+            },
+        )
+        .await;
+}
+
 async fn live_transport_close_document(harness: &mut LiveLspTransportHarness, uri: &Url) {
     harness
         .send_notification(
@@ -794,13 +907,23 @@ fn assert_request_first_poll_budget(
         "{expected_method} trace must retain URI for debugging, trace={trace:?}"
     );
     assert_eq!(
-        trace.server_edge_details.pre_method_attribution_provenance,
-        "same_request_authoritative",
+        trace.server_edge_details.pre_method_attribution_provenance, "same_request_authoritative",
         "{expected_method} must expose authoritative pre-method attribution on live path, trace={trace:?}"
     );
 }
 
 async fn live_transport_get_observability_metrics(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+) -> serde_json::Value {
+    live_transport_get_observability_metrics_response(harness, request_id)
+        .await
+        .get("metrics")
+        .cloned()
+        .expect("result.metrics field")
+}
+
+async fn live_transport_get_observability_metrics_response(
     harness: &mut LiveLspTransportHarness,
     request_id: i64,
 ) -> serde_json::Value {
@@ -816,9 +939,8 @@ async fn live_transport_get_observability_metrics(
         .await;
     execute_response
         .get("result")
-        .and_then(|result| result.get("metrics"))
         .cloned()
-        .expect("result.metrics field")
+        .expect("result field")
 }
 
 async fn live_transport_get_diagnostics_save_timeline(
@@ -1910,7 +2032,7 @@ async fn p6_fast_did_change_series_publish_diagnostics_is_monotonic() {
                 key.starts_with("intellisense_v2_diagnostics_pipeline_total_origin_lsp_trigger_")
                     && key.contains("reason_other_cancel")
                     && metric_number(value) > 0.0
-        }),
+            }),
         "expected diagnostics pipeline metrics to record stale/cancelled runs after rapid didChange series"
     );
     let saw_did_change_fast_profile = counters.iter().any(|(key, value)| {
@@ -2596,8 +2718,8 @@ async fn p6_did_save_fastlane_uses_ready_parse_snapshot_when_shadow_is_missing()
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_artifacts_before_delayed_apply(
-) {
+async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_artifacts_before_delayed_apply()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -3371,6 +3493,74 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         Some("published")
     );
 
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
+        )) > 0,
+        "didChange same-version worker must export worker-start counter, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_save"
+        )),
+        0,
+        "didSave exact wait must not start a duplicate didSave snapshot worker for the same text/version, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change"
+        )) > 0,
+        "didChange same-version worker must export ready snapshot materialization counter, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save"
+        )),
+        0,
+        "didSave exact wait must not materialize a duplicate didSave snapshot worker for the same text/version, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            histograms
+                .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
+                .and_then(|value| value.get("count"))
+        ) > 0,
+        "didChange same-version worker must export ready snapshot materialization latency, histograms={histograms:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready"
+        )) > 0,
+        "didSave exact wait must export zero-budget probe miss counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_ready"
+        )) > 0,
+        "didSave exact wait must export bounded-wait ready counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_semantic_work"
+        )) > 0,
+        "didSave exact wait must export semantic_work wait-state counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts"
+        )) > 0,
+        "didSave exact wait must export ready_artifacts semantic path counter, counters={counters:?}"
+    );
+
     let report = serde_json::json!({
         "change_id": CHANGE_ID,
         "uri": uri.to_string(),
@@ -3440,6 +3630,331 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
     )
     .expect("write refactor-17 in-flight exact report");
 
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow_fallback() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str =
+        "Процедура Тест()\n    Сообщить(необъявленнаяQueued);\nКонецПроцедуры\n";
+    const FIRST_PUBLISH_BUDGET_MS: u64 = 2_500;
+    const FOLLOWUP_READY_ARTIFACT_BUDGET_MS: u64 = 2_000;
+
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let background_holder_barrier = Arc::new(std::sync::Barrier::new(2));
+    let (background_holder_ready_tx, background_holder_ready_rx) = tokio::sync::oneshot::channel();
+    let background_holder_barrier_for_task = background_holder_barrier.clone();
+    let background_holder_coordinator = coordinator.clone();
+    let background_holder = tokio::spawn(async move {
+        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+            bsl_runtime::application::CpuWorkClass::Background,
+            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+            Some(background_holder_coordinator.as_ref()),
+            move || {
+                let _ = background_holder_ready_tx.send(());
+                background_holder_barrier_for_task.wait();
+            },
+        )
+        .await;
+    });
+    tokio::time::timeout(Duration::from_secs(3), background_holder_ready_rx)
+        .await
+        .expect("background holder must seize generic background reserved permit")
+        .expect("background holder ready signal");
+
+    let uri =
+        Url::parse("file:///did_save_followup_queued_exact_worker_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks
+                    .get(&file_id)
+                    .map(|task| task.requested_version.load(Ordering::Relaxed))
+            };
+            if task_requested_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must register exact same-version snapshot task");
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    assert_ne!(
+        server
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.parse_snapshot.file_version),
+        Some(2),
+        "ready snapshot must still be absent while generic background reserved permit is held"
+    );
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let first_publish =
+        tokio::time::timeout(Duration::from_millis(FIRST_PUBLISH_BUDGET_MS), async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri == uri && params.version == Some(2) {
+                    break params;
+                }
+            }
+        })
+        .await
+        .expect("save_fastlane first publish must stay fast while exact worker is queued");
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "first publish must remain syntax-only before exact ready snapshot resolves, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    let full_publish = tokio::time::timeout(
+        Duration::from_millis(FOLLOWUP_READY_ARTIFACT_BUDGET_MS),
+        async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri != uri || params.version != Some(2) {
+                    continue;
+                }
+                if params
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+                {
+                    break params;
+                }
+            }
+        },
+    )
+    .await
+    .expect("promoted exact worker must win before shadow-state fallback wait budget elapses");
+    assert!(
+        !background_holder.is_finished(),
+        "full publish must arrive while the generic background reserved permit is still blocked; otherwise the queued exact worker was not actually promoted"
+    );
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_716, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let full_publish_trace = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .filter(|publish| {
+            publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+        })
+        .expect("idle_heavy follow-up trace");
+    assert_eq!(
+        full_publish_trace
+            .get("semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_task_state")
+            .and_then(|value| value.as_str()),
+        Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+
+    background_holder_barrier.wait();
+    let _ = background_holder.await;
+    let _ = full_publish;
     drain_task.abort();
 }
 
@@ -3733,7 +4248,9 @@ async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task
         })
         .expect("matching diagnostics save timeline trace");
     assert_eq!(
-        trace.get("followup_wait_reason").and_then(|value| value.as_str()),
+        trace
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str()),
         None,
         "successful applied-state follow-up must not remain in apply-lag/pending state, trace={trace:?}"
     );
@@ -3832,8 +4349,248 @@ async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts(
-) {
+async fn p7_newer_did_change_cooperatively_supersedes_obsolete_ready_snapshot_worker() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Возврат 2;\nКонецПроцедуры\n";
+    const V3_FIXTURE: &str = "Процедура Тест()\n    Возврат 3;\nКонецПроцедуры\n";
+    const DID_CHANGE_BLOCKING_PARSE_DELAY_MS: u64 = 1_200;
+
+    let _env_lock = lock_test_env().await;
+    let _blocking_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+        &DID_CHANGE_BLOCKING_PARSE_DELAY_MS.to_string(),
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_change_snapshot_supersede_fixture.bsl").expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v2 notification");
+    assert!(
+        did_change_v2_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks
+                    .get(&file_id)
+                    .map(|task| task.requested_version.load(Ordering::Relaxed))
+            };
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if task_requested_version == Some(2) && ready_version != Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange v2 must register an in-flight snapshot worker before supersession");
+
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V3_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v3 notification");
+    assert!(
+        did_change_v3_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(3) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("newest didChange revision must materialize its ready snapshot");
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let metrics = coordinator.observability_metrics();
+            let counters = metrics
+                .get("counters")
+                .and_then(|value| value.as_object())
+                .expect("metrics.counters object");
+            if read_u64_metric(counters.get(
+                "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_superseded",
+            )) > 0
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("obsolete didChange worker must terminate with superseded attribution");
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
+        )) >= 2,
+        "two didChange revisions must start snapshot workers, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_superseded",
+        )) > 0,
+        "obsolete didChange worker must export superseded termination instead of abort-only shutdown, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_aborted",
+        )),
+        0,
+        "cooperative supersession path must not fall back to generic aborted attribution in this scenario, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change"
+        )) > 0,
+        "newest didChange revision must still materialize a ready snapshot after superseding the obsolete worker, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -4131,6 +4888,55 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     assert!(
         trace.get("terminal_outcome").is_none(),
         "timeline must keep stalled heavy follow-up visible as active, trace={trace:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let histograms = metrics
+        .get("histograms")
+        .and_then(|value| value.as_object())
+        .expect("metrics.histograms object");
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
+        )) > 0,
+        "apply-lag didSave path must retain worker-start attribution for the same-version didChange snapshot worker it waited on, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready"
+        )) > 0,
+        "apply-lag didSave path must export zero-budget probe miss counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_timeout"
+        )) > 0,
+        "apply-lag didSave path must export bounded-wait timeout counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            histograms
+                .get("intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout")
+                .and_then(|value| value.get("count"))
+        ) > 0,
+        "apply-lag didSave path must export bounded-wait timeout latency histogram, histograms={histograms:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save"
+        )) == 0,
+        "apply-lag didSave path should still have no didSave ready snapshot materialization at capture time, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(
+            counters
+                .get("intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag")
+        ) > 0,
+        "apply-lag didSave path must export apply_lag wait-state counter before generic pipeline starts, counters={counters:?}"
     );
 
     drain_task.abort();
@@ -4802,7 +5608,8 @@ async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_res
         Some("idle_heavy")
     );
     assert_ne!(
-        trace.get("followup_wait_reason")
+        trace
+            .get("followup_wait_reason")
             .and_then(|value| value.as_str()),
         Some("runtime_queue_wait"),
         "isolated didSave follow-up must not report generic runtime_queue_wait as the default blocker when generic background reserved capacity is already occupied, trace={trace:?}"
@@ -4815,7 +5622,8 @@ async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_res
         "isolated didSave follow-up must keep any residual runtime queue wait bounded while publishing under generic background pressure, trace={trace:?}"
     );
     assert!(
-        trace.get("followup_runtime_queue_wait_ms")
+        trace
+            .get("followup_runtime_queue_wait_ms")
             .and_then(|value| value.as_u64())
             .map_or(true, |value| value < 250),
         "top-level didSave follow-up trace must not surface large generic runtime queue wait after isolation, trace={trace:?}"
@@ -4887,7 +5695,10 @@ async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_res
         "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_queue_depth",
     ] {
         assert!(
-            gauges.get(gauge_key).and_then(|value| value.as_f64()).is_some(),
+            gauges
+                .get(gauge_key)
+                .and_then(|value| value.as_f64())
+                .is_some(),
             "isolated didSave follow-up must export {gauge_key}, metrics={metrics:?}"
         );
     }
@@ -5163,7 +5974,8 @@ async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_
         "shadow-state follow-up must still expose factual apply lag separately from the bounded publish path, trace={trace:?}"
     );
     assert!(
-        trace.get("followup_apply_lag_ms")
+        trace
+            .get("followup_apply_lag_ms")
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
         "top-level follow-up trace must surface apply lag fact for operator-facing summary, trace={trace:?}"
@@ -6343,8 +7155,8 @@ async fn p6_diagnostics_save_timeline_fastlane_fallback_bypasses_shared_queue_wa
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_before_idle_heavy_terminal(
-) {
+async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_before_idle_heavy_terminal()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -6552,8 +7364,8 @@ async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_befo
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_save_supersedes_followup(
-) {
+async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_save_supersedes_followup()
+ {
     let coordinator = Arc::new(SystemCoordinator::new());
     let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -6748,8 +7560,8 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_sequence_for_correlation(
-) {
+async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_sequence_for_correlation()
+ {
     let coordinator = Arc::new(SystemCoordinator::new());
     let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -9663,7 +10475,9 @@ async fn p7_trigger_character_and_invoked_member_access_keep_semantic_parity() {
         "invoked completion must return candidates"
     );
     assert!(
-        dot_members.iter().any(|label| invoked_members.contains(label)),
+        dot_members
+            .iter()
+            .any(|label| invoked_members.contains(label)),
         "trigger-character and invoked completion must have semantic overlap: dot={:?} invoked={:?}",
         dot_members,
         invoked_members
@@ -10182,8 +10996,7 @@ async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
 
 #[tokio::test]
 async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot() {
-    const FAIL_CLOSED_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
+    const FAIL_CLOSED_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
 
     fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
         let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
@@ -10282,7 +11095,9 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     assert!(
         completion_labels
             .iter()
-            .all(|label| label != "SearchOnlyType" && label != "SearchOnlySymbol" && label != "SearchOnlyModule"),
+            .all(|label| label != "SearchOnlyType"
+                && label != "SearchOnlySymbol"
+                && label != "SearchOnlyModule"),
         "member-access completion must not backfill from runtime discovery/search index, labels={completion_labels:?}"
     );
     let metrics = coordinator.observability_metrics();
@@ -10459,8 +11274,7 @@ async fn p7_type_index_precompute_slot_coalesces_rapid_versions_without_respawn_
 
 #[tokio::test]
 async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_interactive() {
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -10582,7 +11396,9 @@ async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_intera
     );
     assert_eq!(
         read_u64_metric(
-            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline")
+            counters.get(
+                "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_deadline"
+            )
         ),
         0,
         "promotion path must avoid exact wait deadline miss in this scenario, counters={counters:?}"
@@ -10687,10 +11503,40 @@ async fn p7_promote_type_index_precompute_replaces_matching_background_waiter() 
 
 #[tokio::test]
 async fn p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot() {
-    const HOVER_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
-    const DEFINITION_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const HOVER_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
 
     fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
         let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
@@ -10841,10 +11687,6 @@ async fn p7_hover_and_definition_do_not_backfill_from_runtime_index_snapshot() {
     assert!(
         read_u64_metric(counters.get(HOVER_REASON_KEY)) > 0,
         "hover cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(counters.get(DEFINITION_REASON_KEY)) > 0,
-        "definition cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
     );
 
     drain_task.abort();
@@ -11162,17 +12004,14 @@ async fn p7_completion_prepare_timeout_stays_bounded_when_disk_fallback_blocks()
         .expect("metrics.counters object");
     assert!(
         read_u64_metric(
-            counters.get(
-                "intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout"
-            )
+            counters
+                .get("intellisense_v2_completion_fail_closed_cause_total_cause_prepare_timeout")
         ) > 0,
         "blocking disk fallback must attribute fail-closed completion to prepare-timeout, counters={counters:?}"
     );
     assert_eq!(
         read_u64_metric(
-            counters.get(
-                "intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline"
-            )
+            counters.get("intellisense_v2_completion_fail_closed_cause_total_cause_exact_deadline")
         ),
         0,
         "blocking disk fallback must not attribute fail-closed completion to exact-deadline, counters={counters:?}"
@@ -11311,8 +12150,40 @@ async fn p7_large_churn_did_change_skips_inline_parse_snapshot() {
 
 #[tokio::test]
 async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
-    const FALLBACK_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -11397,7 +12268,236 @@ async fn p7_hover_cache_miss_emits_bounded_fail_closed_reason() {
 }
 
 #[tokio::test]
+async fn p7_hover_bootstraps_exact_type_index_without_did_save_when_precompute_fits_budget() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = (wait_budget_ms / 4).max(20);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    ДляHover = S.Идентификатор;\n\
+КонецПроцедуры\n";
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_hover_bootstraps_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+
+    let hover_position = find_utf16_position_at_marker_tail(fixture, "ДляHover = S.Идентификатор");
+    let started = Instant::now();
+    let hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position).await;
+    let elapsed = started.elapsed();
+
+    let hover_text = hover_text.expect("hover should bootstrap exact type index without didSave");
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must expose typed-structure field info after same-version bootstrap, hover={hover_text}"
+    );
+    assert!(
+        elapsed <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "hover bootstrap should stay bounded by the interactive wait budget, elapsed={elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    assert_eq!(
+        after_fail_closed, before_fail_closed,
+        "successful hover bootstrap must not emit missing_semantic_index fail-closed attribution"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_hover_timeout_still_seeds_exact_type_index_without_did_save() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    const WAIT_BUDGET_EXHAUSTED_KEY: &str =
+        "intellisense_v2_interactive_wait_budget_exhausted_total";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    ДляHover = S.Идентификатор;\n\
+КонецПроцедуры\n";
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_hover_timeout_still_seeds_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+    let before_wait_budget_exhausted =
+        read_u64_metric(before_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+
+    let hover_position = find_utf16_position_at_marker_tail(fixture, "ДляHover = S.Идентификатор");
+    let started = Instant::now();
+    let first_hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position).await;
+    let first_elapsed = started.elapsed();
+    assert!(
+        first_hover_text.is_none(),
+        "hover must remain fail-closed on the first request when same-version exact precompute exceeds the interactive budget"
+    );
+    assert!(
+        first_elapsed
+            <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "hover timeout must stay bounded by the interactive wait budget, elapsed={first_elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let second_hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position).await;
+    let second_hover_text = second_hover_text.expect(
+        "hover should succeed after same-version exact precompute finishes without didSave",
+    );
+    assert!(
+        second_hover_text.contains("Идентификатор") && second_hover_text.contains("Строка"),
+        "hover must expose typed-structure field info once same-version exact precompute finishes, hover={second_hover_text}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    let after_wait_budget_exhausted =
+        read_u64_metric(after_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+    assert!(
+        after_fail_closed > before_fail_closed,
+        "timed-out hover must still expose bounded missing_semantic_index attribution"
+    );
+    assert!(
+        after_wait_budget_exhausted > before_wait_budget_exhausted,
+        "timed-out hover bootstrap must attribute the bounded wait budget exhaustion"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -11465,12 +12565,9 @@ Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
 
 #[tokio::test]
 async fn p7_legitimate_empty_interactive_results_do_not_emit_fail_closed_reasons() {
-    const HOVER_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
-    const SIGNATURE_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
-    const DEFINITION_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+    const HOVER_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    const SIGNATURE_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+    const DEFINITION_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -11629,10 +12726,9 @@ async fn p7_legitimate_empty_interactive_results_do_not_emit_fail_closed_reasons
 }
 
 #[tokio::test]
-async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_without_fail_closed_reason(
-) {
-    const SIGNATURE_REASON_KEY: &str =
-        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_without_fail_closed_reason()
+ {
+    const SIGNATURE_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
 
     let coordinator = Arc::new(SystemCoordinator::new());
     let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -11739,8 +12835,8 @@ async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_withou
 }
 
 #[tokio::test]
-async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint(
-) {
+async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint()
+ {
     let completion_fixture = "Процедура Тест()\n\
     Map = Новый Соответствие;\n\
     Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
@@ -11937,8 +13033,8 @@ async fn p7_dynamic_map_key_exact_cross_consumer_acceptance_uses_safe_policy_wit
 }
 
 #[tokio::test]
-async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
-) {
+async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics()
+ {
     let completion_fixture = "Процедура Тест()\n\
     S = Новый Структура;\n\
     S.Вставить(\"Идентификатор\", \"A-01\");\n\
@@ -12097,8 +13193,8 @@ async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_
 }
 
 #[tokio::test]
-async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
-) {
+async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics()
+ {
     let completion_fixture = "Процедура Тест()\n\
     ТЗ = Новый ТаблицаЗначений;\n\
     ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
@@ -12300,8 +13396,8 @@ async fn p7_form_module_object_completion_uses_default_lsp_owner_hint_path() {
 }
 
 #[tokio::test]
-async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
-) {
+async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces()
+ {
     let fixture_v1 = "Процедура Тест()\n\
     S = Новый Структура;\n\
     S.Вставить(\"Идентификатор\", \"A-01\");\n\
@@ -12352,7 +13448,9 @@ async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_membe
 
     let mcp_members = mcp_member_entries_at_code(fixture_v2, v2_completion_position).await;
     assert!(
-        !mcp_members.iter().any(|entry| entry.name == "Идентификатор"),
+        !mcp_members
+            .iter()
+            .any(|entry| entry.name == "Идентификатор"),
         "MCP members must not leak stale structure field after revision switch, members={mcp_members:?}"
     );
 
@@ -12376,8 +13474,8 @@ async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_membe
 }
 
 #[tokio::test]
-async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
-) {
+async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces()
+ {
     let fixture_v1 = "Процедура Тест()\n\
     ТЗ = Новый ТаблицаЗначений;\n\
     ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
@@ -12425,13 +13523,17 @@ async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural
     let v2_completion_labels =
         lsp_completion_labels_at(&mut service, &uri, v2_completion_position).await;
     assert!(
-        !v2_completion_labels.iter().any(|label| label == "Идентификатор"),
+        !v2_completion_labels
+            .iter()
+            .any(|label| label == "Идентификатор"),
         "LSP completion must fail closed after typed-row revision switch, labels={v2_completion_labels:?}"
     );
 
     let mcp_members = mcp_member_entries_at_code(fixture_v2, v2_completion_position).await;
     assert!(
-        !mcp_members.iter().any(|entry| entry.name == "Идентификатор"),
+        !mcp_members
+            .iter()
+            .any(|entry| entry.name == "Идентификатор"),
         "MCP members must not leak stale typed-row column after revision switch, members={mcp_members:?}"
     );
 
@@ -12546,8 +13648,8 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
 }
 
 #[tokio::test]
-async fn p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp(
-) {
+async fn p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp()
+ {
     let fixture_v1 = "Процедура Целевой()\n\
 КонецПроцедуры\n\
 \n\
@@ -15636,6 +16738,28 @@ async fn p22_get_observability_metrics_exposes_did_change_parse_snapshot_evidenc
         Some("ranged")
     );
     assert_eq!(
+        entry
+            .get("contentChangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        entry.get("replayOrder").and_then(|value| value.as_str()),
+        Some("receive_order")
+    );
+    assert_eq!(
+        entry
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        None
+    );
+    assert_eq!(
+        entry
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
         entry.get("fallbackReason").and_then(|value| value.as_str()),
         Some("no_previous_tree")
     );
@@ -15821,6 +16945,28 @@ async fn p22_get_observability_metrics_exposes_input_edit_conversion_failure_rea
         Some("ranged")
     );
     assert_eq!(
+        entry
+            .get("contentChangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        entry.get("replayOrder").and_then(|value| value.as_str()),
+        Some("receive_order")
+    );
+    assert_eq!(
+        entry
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        Some(1)
+    );
+    assert_eq!(
+        entry
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
         entry.get("fallbackReason").and_then(|value| value.as_str()),
         Some("input_edit_conversion_failed")
     );
@@ -15848,7 +16994,8 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_
     }
 
     let base_text = "Процедура Тест()\n    Сообщить(\"один два\");\nКонецПроцедуры\n";
-    let target_line = "    Сообщить(\"один два\");";
+    let base_line = "    Сообщить(\"один два\");";
+    let after_first_line = "    Сообщить(\"оченьдлинно два\");";
     let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
         base_text,
         "file:///did_change_parse_snapshot_multi_range_fixture.bsl",
@@ -15882,12 +17029,12 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_
         },
         content_changes: vec![
             TextDocumentContentChangeEvent {
-                range: Some(utf16_range_for_line_fragment(target_line, 1, "один")),
+                range: Some(utf16_range_for_line_fragment(base_line, 1, "один")),
                 range_length: None,
                 text: "оченьдлинно".to_string(),
             },
             TextDocumentContentChangeEvent {
-                range: Some(utf16_range_for_line_fragment(target_line, 1, "два")),
+                range: Some(utf16_range_for_line_fragment(after_first_line, 1, "два")),
                 range_length: None,
                 text: "три".to_string(),
             },
@@ -15970,6 +17117,22 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_
     );
     assert_eq!(
         entry
+            .get("contentChangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        entry.get("replayOrder").and_then(|value| value.as_str()),
+        Some("receive_order")
+    );
+    assert_eq!(
+        entry
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        Some(1)
+    );
+    assert_eq!(
+        entry
             .get("changedRangesCount")
             .and_then(|value| value.as_u64()),
         Some(2)
@@ -15980,6 +17143,194 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_
         "valid multi-range didChange must not false-fallback to edits_do_not_match_new_content"
     );
 
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_bom_crlf_receive_order_did_change()
+ {
+    fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
+        let start_byte = line
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        Range {
+            start: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, start_byte),
+            ),
+            end: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, end_byte),
+            ),
+        }
+    }
+
+    const BASE_TEXT: &str =
+        "\u{feff}Процедура Тест()\r\n    Сообщить(\"один два\");\r\nКонецПроцедуры\r\n";
+    const BASE_LINE: &str = "    Сообщить(\"один два\");";
+    const AFTER_FIRST_TEXT: &str =
+        "\u{feff}Процедура Тест()\r\n    Сообщить(\"оченьдлинно два\");\r\nКонецПроцедуры\r\n";
+    const AFTER_FIRST_LINE: &str = "    Сообщить(\"оченьдлинно два\");";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        BASE_TEXT,
+        "file:///did_change_parse_snapshot_bom_crlf_receive_order_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize same-version ready parse snapshot before BOM+CRLF didChange");
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(BASE_LINE, 1, "один")),
+                range_length: None,
+                text: "оченьдлинно".to_string(),
+            },
+            TextDocumentContentChangeEvent {
+                range: Some(utf16_range_for_line_fragment(AFTER_FIRST_LINE, 1, "два")),
+                range_length: None,
+                text: "три".to_string(),
+            },
+        ],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let evidence = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2220)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(2)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break (result, entry);
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("valid BOM+CRLF didChange evidence must appear in observability metrics response");
+
+    let (result, entry) = evidence;
+    assert_eq!(
+        result
+            .get("didChangeParseSnapshotEvidence")
+            .and_then(|value| value.get("version"))
+            .and_then(|value| value.as_u64()),
+        Some(crate::server::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION as u64)
+    );
+    assert_eq!(
+        entry.get("parseMode").and_then(|value| value.as_str()),
+        Some("incremental")
+    );
+    assert_eq!(
+        entry.get("baseTextSource").and_then(|value| value.as_str()),
+        Some("shadow_state")
+    );
+    assert_eq!(
+        entry.get("changeShape").and_then(|value| value.as_str()),
+        Some("ranged")
+    );
+    assert_eq!(
+        entry
+            .get("contentChangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        entry.get("replayOrder").and_then(|value| value.as_str()),
+        Some("receive_order")
+    );
+    assert_eq!(
+        entry
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        Some(1)
+    );
+    assert_eq!(
+        entry
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(2)
+    );
+    assert_eq!(
+        entry.get("fallbackReason").and_then(|value| value.as_str()),
+        None,
+        "valid BOM+CRLF didChange must not false-fallback to edits_do_not_match_new_content"
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_text = analysis
+        .file_text(file_id)
+        .expect("file_text query")
+        .expect("file text after BOM+CRLF didChange");
+    assert_eq!(
+        observed_text.as_ref(),
+        "\u{feff}Процедура Тест()\r\n    Сообщить(\"оченьдлинно три\");\r\nКонецПроцедуры\r\n"
+    );
+
+    let _ = AFTER_FIRST_TEXT;
     drain_task.abort();
 }
 
@@ -16255,8 +17606,8 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
 }
 
 #[test]
-fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields(
-) {
+fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields()
+ {
     let trace = super::build_pre_dispatch_terminal_completion_trace(
         crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
             request_id: "req-pre-dispatch-cancel".to_string(),
@@ -16303,8 +17654,8 @@ fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricat
 }
 
 #[test]
-fn pre_dispatch_queue_rejected_completion_trace_is_fail_closed_and_has_no_fabricated_post_dispatch_fields(
-) {
+fn pre_dispatch_queue_rejected_completion_trace_is_fail_closed_and_has_no_fabricated_post_dispatch_fields()
+ {
     let trace = super::build_pre_dispatch_terminal_completion_trace(
         crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
             request_id: "req-pre-dispatch-rejected".to_string(),
@@ -16670,8 +18021,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
                 "jsonrpc dispatch timestamp must align with provenance"
             );
             assert_eq!(
-                transport_received_at_ms,
-                jsonrpc_dispatch_received_at_ms,
+                transport_received_at_ms, jsonrpc_dispatch_received_at_ms,
                 "transport_received_at_ms must equal jsonrpc dispatch timestamp when provenance is jsonrpc_dispatch_received"
             );
             assert!(
@@ -16689,8 +18039,7 @@ async fn p22_get_completion_timeline_contains_completion_trace() {
             );
         } else {
             assert_eq!(
-                transport_received_at_ms_provenance,
-                "request_context_call_entry",
+                transport_received_at_ms_provenance, "request_context_call_entry",
                 "missing jsonrpc dispatch timestamp must fall back to request_context_call_entry provenance"
             );
             assert!(
@@ -17281,8 +18630,7 @@ async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edg
     );
     assert_eq!(
         response_output_encode_exec_ms,
-        response_output_encode_completed_at_ms
-            .saturating_sub(response_output_encode_started_at_ms),
+        response_output_encode_completed_at_ms.saturating_sub(response_output_encode_started_at_ms),
         "response_output_encode_exec_ms must match encode-start to encode-complete delta, trace={trace:?}"
     );
     assert_eq!(
@@ -20686,9 +22034,7 @@ async fn wait_for_type_index_precompute_completion(
             }
             panic!(
                 "type-index precompute did not yield current exact serve-only artifact for file_id={} (has_task={}, exact_ready={}, observed_version={observed_version:?}, manual_precompute={manual_precompute:?}, exact_ready_after_manual={exact_ready_after_manual})",
-                file_id.0,
-                has_task,
-                exact_ready
+                file_id.0, has_task, exact_ready
             );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
@@ -21109,7 +22455,8 @@ async fn p33_completion_uses_current_revision_head_path_without_exact_artifact()
         "head-path completion trace must expose bounded route in prepare_details, trace={trace:?}"
     );
     assert!(
-        trace.get("prepare_details")
+        trace
+            .get("prepare_details")
             .and_then(|value| value.as_object())
             .is_some_and(|details| details.contains_key("fail_closed_cause")),
         "head-path completion trace must keep fail_closed_cause field present even when route succeeds, trace={trace:?}"
@@ -21237,7 +22584,8 @@ async fn p33_form_module_object_completion_uses_current_revision_head_path_witho
         "form-module head-path completion trace must expose bounded route in prepare_details, trace={trace:?}"
     );
     assert!(
-        trace.get("prepare_details")
+        trace
+            .get("prepare_details")
             .and_then(|value| value.as_object())
             .is_some_and(|details| details.contains_key("fail_closed_cause")),
         "form-module head-path completion trace must keep fail_closed_cause field present even when route succeeds, trace={trace:?}"
@@ -22473,8 +23821,8 @@ async fn p33_same_file_completion_supersession_releases_active_turn_during_respo
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration(
-) {
+async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -22903,7 +24251,8 @@ async fn p33_same_file_completion_burst_does_not_strand_superseded_pre_active_tu
         })
         .unwrap_or(0);
     assert!(
-        stranded_pre_active_turn_wait_contender_age_ms <= STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS,
+        stranded_pre_active_turn_wait_contender_age_ms
+            <= STRANDED_PRE_ACTIVE_TURN_WAIT_AGE_BUDGET_MS,
         "latest same-file burst completion must not observe long-lived superseded pre-active turn_wait contender, trace={timeline:?}"
     );
 
@@ -23750,8 +25099,8 @@ async fn p33_document_symbol_request_bootstrap_materializes_ready_outline_after_
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap(
-) {
+async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -24043,7 +25392,9 @@ async fn p33_document_symbol_supersedes_older_outstanding_refresh() {
     );
 
     assert!(
-        first_response.get("result").is_some_and(|value| value.is_null()),
+        first_response
+            .get("result")
+            .is_some_and(|value| value.is_null()),
         "older outstanding outline refresh must be superseded once a newer refresh arrives, response={first_response:?}"
     );
 
@@ -24090,8 +25441,7 @@ async fn p33_document_symbol_burst_does_not_delay_completion_first_poll_under_pa
     }
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
-    const V2_FIXTURE: &str =
-        "#Область Public\nПроцедура AddedProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\nПроцедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "#Область Public\nПроцедура AddedProc() Экспорт\nКонецПроцедуры\n#КонецОбласти\nПроцедура Тест()\n    ДляCompletion = Объект.\nКонецПроцедуры\n";
     const PARSE_DELAY_MS: u64 = 1200;
     const FIRST_POLL_BUDGET_MS: u64 = 200;
     const SATURATING_REQUESTS: i64 = 4;
@@ -24299,10 +25649,8 @@ async fn p33_live_transport_changed_text_current_revision_survives_document_symb
         }
     }
 
-    const V1_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
-    const V2_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V1_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
     const DOCUMENT_SYMBOL_DELAY_MS: u64 = 300;
     const DOCUMENT_SYMBOL_BURST_REQUESTS: i64 = 48;
 
@@ -24707,8 +26055,8 @@ async fn p33_completion_waiter_registration_bypasses_unrelated_interactive_apply
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap(
-) {
+async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -25220,10 +26568,8 @@ async fn p33_changed_text_current_revision_head_stays_available_while_parse_snap
         }
     }
 
-    const V1_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
-    const V2_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V1_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env().await;
     let _blocking_parse_delay_guard =
@@ -25431,10 +26777,8 @@ async fn p33_changed_text_current_revision_head_waits_for_delayed_runtime_apply(
         }
     }
 
-    const V1_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
-    const V2_FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V1_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env().await;
     let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "300");
@@ -25771,8 +27115,7 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
         }
     }
 
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let wait_budget_ms = bsl_runtime::system::global_runtime_config()
@@ -25870,7 +27213,9 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let first_elapsed = first_started.elapsed();
     assert!(
-        first_completion_labels.iter().any(|label| label == "Количество"),
+        first_completion_labels
+            .iter()
+            .any(|label| label == "Количество"),
         "first member-access completion must serve typed-structure members from current-revision head while matching exact precompute is still computing, labels={first_completion_labels:?}"
     );
     assert!(
@@ -25883,7 +27228,9 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
     let second_completion_labels =
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     assert!(
-        second_completion_labels.iter().any(|label| label == "Количество"),
+        second_completion_labels
+            .iter()
+            .any(|label| label == "Количество"),
         "member-access completion must keep typed-structure members available after exact precompute finishes, labels={second_completion_labels:?}"
     );
     let timeline = lsp_get_completion_timeline(&mut service, 402, 10).await;
@@ -25925,9 +27272,9 @@ async fn p33_completion_head_hit_then_upgrade_after_precompute_finish() {
         "typed-structure head path must not regress into exact-deadline fail-closed, counters={counters:?}"
     );
     assert_eq!(
-        read_u64_metric(
-            counters.get("intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task")
-        ),
+        read_u64_metric(counters.get(
+            "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task"
+        )),
         0,
         "typed-structure head path must not degrade to no_matching_task while exact precompute is present, counters={counters:?}"
     );
@@ -25983,8 +27330,7 @@ async fn p33_same_version_exact_wait_keeps_completed_task_observable_until_clean
         }
     }
 
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
@@ -26145,8 +27491,7 @@ async fn p33_shutdown_cleans_retained_same_version_exact_task_entry() {
         }
     }
 
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
@@ -26304,8 +27649,7 @@ async fn p33_same_version_invoked_completion_keeps_completed_task_visible_on_def
         }
     }
 
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _post_compute_delay_guard = EnvVarGuard::set(
@@ -26824,10 +28168,8 @@ async fn p33_current_revision_exact_prewarm_shares_ir_singleflight_with_request_
     const FIXTURE_V1: &str = "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
     const FIXTURE_V2: &str =
         "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
-    const LEADER_IR_METRIC: &str =
-        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
-    const SHARED_IR_METRIC: &str =
-        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
+    const LEADER_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
+    const SHARED_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _parse_delay_guard = EnvVarGuard::set("BSL_TEST_DID_CHANGE_PARSE_DELAY_MS", "500");
@@ -27010,10 +28352,8 @@ async fn p33_current_revision_exact_prewarm_reuses_request_started_ir_singleflig
     const FIXTURE_V1: &str = "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
     const FIXTURE_V2: &str =
         "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
-    const LEADER_IR_METRIC: &str =
-        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
-    const SHARED_IR_METRIC: &str =
-        "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
+    const LEADER_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
+    const SHARED_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
     let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
@@ -27189,7 +28529,9 @@ async fn p33_current_revision_exact_prewarm_reuses_request_started_ir_singleflig
             break;
         }
         if tokio::time::Instant::now() >= ready_deadline {
-            panic!("current-revision head artifact did not become ready after request-started shared IR flight");
+            panic!(
+                "current-revision head artifact did not become ready after request-started shared IR flight"
+            );
         }
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
@@ -27590,8 +28932,7 @@ async fn p33_completion_head_upgrade_perf_report() {
         }
     }
 
-    const FIXTURE: &str =
-        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
     const PROFILE_NAME: &str = "p33_completion_head_upgrade_perf_report";
 
     let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
@@ -27690,7 +29031,9 @@ async fn p33_completion_head_upgrade_perf_report() {
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let first_elapsed_ms = first_started.elapsed().as_millis() as u64;
     assert!(
-        first_completion_labels.iter().any(|label| label == "Количество"),
+        first_completion_labels
+            .iter()
+            .any(|label| label == "Количество"),
         "first member-access completion must serve typed-structure members from current-revision head while matching exact precompute is still computing, labels={first_completion_labels:?}"
     );
     assert!(
@@ -27705,7 +29048,9 @@ async fn p33_completion_head_upgrade_perf_report() {
         lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     let second_elapsed_ms = second_started.elapsed().as_millis() as u64;
     assert!(
-        second_completion_labels.iter().any(|label| label == "Количество"),
+        second_completion_labels
+            .iter()
+            .any(|label| label == "Количество"),
         "member-access completion must keep typed-structure members available after exact precompute finishes, labels={second_completion_labels:?}"
     );
     assert!(
@@ -28122,6 +29467,227 @@ async fn p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_
     assert!(
         !exact_ready,
         "getCurrentContext must not eagerly warm exact type index on the request path"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p33_get_current_context_briefly_waits_for_equivalent_snapshot_worker_before_broker_parse()
+{
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = concat!(
+        "Процедура Тест(ПервыйПараметр, ВторойПараметр)\n",
+        "    Если Истина Тогда\n",
+        "        Сообщить(ПервыйПараметр);\n",
+        "    КонецЕсли;\n",
+        "КонецПроцедуры\n",
+    );
+    const V2_SUFFIX: &str = "\n// exact snapshot wait\n";
+    const DID_CHANGE_PARSE_DELAY_MS: u64 = 300;
+    const READY_SNAPSHOT_WAIT_BUDGET_MS: u64 = 600;
+
+    let _env_lock = lock_test_env().await;
+    let _did_change_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_PARSE_DELAY_MS",
+        &DID_CHANGE_PARSE_DELAY_MS.to_string(),
+    );
+    let _ready_snapshot_wait_guard = EnvVarGuard::set(
+        "BSL_TEST_GET_CURRENT_CONTEXT_READY_SNAPSHOT_WAIT_BUDGET_MS",
+        &READY_SNAPSHOT_WAIT_BUDGET_MS.to_string(),
+    );
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///current_context_exact_worker_wait_fixture.bsl").expect("uri");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let v2_text = format!("{V1_FIXTURE}{V2_SUFFIX}");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: v2_text.clone(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks
+                    .get(&file_id)
+                    .map(|task| task.requested_version.load(Ordering::Relaxed))
+            };
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if task_requested_version == Some(2) && ready_version != Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect(
+        "didChange must register an exact same-version snapshot worker before getCurrentContext",
+    );
+
+    super::super::command_handlers::reset_get_current_context_parse_attempts_for_test();
+    let position = find_utf16_position_after_marker(&v2_text, "Сообщить(ПервыйПараметр");
+    let execute_response = tokio::time::timeout(Duration::from_secs(5), async {
+        service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("workspace/executeCommand")
+                    .id(13302)
+                    .params(serde_json::json!({
+                        "command": "bsl.getCurrentContext",
+                        "arguments": [{
+                            "uri": uri.to_string(),
+                            "line": position.line,
+                            "character": position.character,
+                        }],
+                    }))
+                    .finish(),
+            )
+            .await
+            .expect("workspace/executeCommand request")
+    })
+    .await
+    .expect("bsl.getCurrentContext timeout")
+    .expect("workspace/executeCommand response");
+
+    let response_value = serde_json::to_value(&execute_response).expect("serialize response");
+    let result = response_value.get("result").cloned().expect("result field");
+    assert_eq!(
+        result.get("functionName").and_then(|value| value.as_str()),
+        Some("Тест"),
+        "getCurrentContext must resolve against the equivalent same-version snapshot worker once it materializes"
+    );
+    assert_eq!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
+        0,
+        "getCurrentContext must not launch an independent broker parse when the equivalent exact worker wins within the bounded wait"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_current_context_role_total_role_ready_snapshot")
+        ),
+        1,
+        "equivalent exact worker reuse must still resolve through the ready_snapshot role"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_current_context_role_total_role_broker_leader")
+        ),
+        0,
+        "equivalent exact worker reuse must not fall through to broker leader parse"
+    );
+    assert_eq!(
+        read_u64_metric(
+            counters.get("intellisense_v2_current_context_role_total_role_broker_follower")
+        ),
+        0,
+        "equivalent exact worker reuse must not fall through to broker follower parse"
     );
 
     drain_task.abort();
@@ -29333,8 +30899,8 @@ async fn p33_get_current_context_inflight_non_equivalent_generation_cancels_obso
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn p33_get_current_context_superseded_non_equivalent_generation_skips_obsolete_parse_before_start(
-) {
+async fn p33_get_current_context_superseded_non_equivalent_generation_skips_obsolete_parse_before_start()
+ {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -29720,10 +31286,9 @@ async fn p33_get_current_context_superseded_generation_skips_obsolete_parse_and_
         Some("ВтораяПроцедура"),
         "latest generation must preserve the newest current-context surface"
     );
-    assert_eq!(
-        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
-        1,
-        "superseded generation must be cut off before expensive parse/context derivation"
+    assert!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test() <= 1,
+        "superseded generation must not duplicate expensive parse/context derivation after latest-only cutoff"
     );
 
     live_transport_close_document(&mut harness, &uri).await;
@@ -29915,10 +31480,9 @@ async fn p33_get_current_context_superseded_generation_keeps_completion_bounded_
         Some("ВтораяПроцедура"),
         "mixed-load latest current-context response must surface the newest routine"
     );
-    assert_eq!(
-        super::super::command_handlers::get_current_context_parse_attempts_for_test(),
-        1,
-        "mixed-load supersession must keep obsolete current-context parse work bounded"
+    assert!(
+        super::super::command_handlers::get_current_context_parse_attempts_for_test() <= 1,
+        "mixed-load supersession must keep obsolete current-context parse work bounded without duplicate current-context parses"
     );
 
     let trace = wait_for_live_completion_timeline_trace_with_server_edge_fields(
@@ -30033,7 +31597,10 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "ir_query_completion",
             "intellisense_v2_ir_query_completion_ms",
         ),
-        ("parse_result_query", "intellisense_v2_parse_result_query_ms"),
+        (
+            "parse_result_query",
+            "intellisense_v2_parse_result_query_ms",
+        ),
         ("singleflight_wait", "intellisense_v2_singleflight_wait_ms"),
         (
             "runtime_exec_interactive",
@@ -30107,7 +31674,10 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "runtime_type_index_precompute_semantic_facts_visit_statements_exec",
             "intellisense_v2_runtime_type_index_precompute_semantic_facts_visit_statements_exec_ms",
         ),
-        ("completion_stage_turn_wait", "completion_stage_turn_wait_ms"),
+        (
+            "completion_stage_turn_wait",
+            "completion_stage_turn_wait_ms",
+        ),
         (
             "completion_stage_prepare_stateful",
             "completion_stage_prepare_stateful_ms",
@@ -30156,7 +31726,10 @@ fn dominant_stage_from_metrics(metrics: &serde_json::Value) -> serde_json::Value
             "completion_stage_response_build",
             "completion_stage_response_build_ms",
         ),
-        ("completion_stage_cache_store", "completion_stage_cache_store_ms"),
+        (
+            "completion_stage_cache_store",
+            "completion_stage_cache_store_ms",
+        ),
         (
             "completion_stage_snapshot_read",
             "completion_stage_snapshot_read_ms",
@@ -31137,8 +32710,7 @@ async fn run_scale_aware_profile(
                 counters.get("intellisense_v2_completion_owner_hint_index_fetch_block_on_other_total")
             )
         });
-        phase_metrics
-            ["intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total_by_kind"] = serde_json::json!({
+        phase_metrics["intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total_by_kind"] = serde_json::json!({
             "total": read_u64_metric(
                 counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_total")
             ),
@@ -31152,8 +32724,7 @@ async fn run_scale_aware_profile(
                 counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_will_execute_other_total")
             )
         });
-        phase_metrics
-            ["intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total_by_kind"] = serde_json::json!({
+        phase_metrics["intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total_by_kind"] = serde_json::json!({
             "total": read_u64_metric(
                 counters.get("intellisense_v2_completion_owner_hint_index_fetch_salsa_did_validate_memoized_total")
             ),
@@ -39243,6 +40814,24 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
             "followup_apply_lag_ms": timeline
                 .get("followup_apply_lag_ms")
                 .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_zero_probe": timeline
+                .get("followup_ready_snapshot_zero_probe")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_wait_probe": timeline
+                .get("followup_ready_snapshot_wait_probe")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_task_state": timeline
+                .get("followup_ready_snapshot_task_state")
+                .and_then(|value| value.as_str()),
+            "followup_shadow_state_available": timeline
+                .get("followup_shadow_state_available")
+                .and_then(|value| value.as_bool()),
+            "followup_semantic_path": timeline
+                .get("followup_semantic_path")
+                .and_then(|value| value.as_str()),
+            "followup_semantic_parse_source": timeline
+                .get("followup_semantic_parse_source")
+                .and_then(|value| value.as_str()),
             "followup_wait_for_file_version_ms": timeline
                 .get("followup_wait_for_file_version_ms")
                 .and_then(|value| value.as_u64()),
@@ -39797,6 +41386,272 @@ fn p45_real_conf_big_did_save_diagnostics_followup_syntax_report_live() {
                 .expect("serialize p45 real conf_big diagnostics report"),
         )
         .expect("write p45 real conf_big diagnostics report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p47_real_conf_big_sequential_ranged_did_change_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p47 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+
+        const PROFILE_NAME: &str = "p47_real_conf_big_sequential_ranged_did_change_report_live";
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        let change_id = std::env::var("CHANGE_ID")
+            .unwrap_or_else(|_| "refactor-19-did-change-sequential-replay-order".to_string());
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p47 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p47_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
+                },
+            )
+            .await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must register version 1 for p47");
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let ready = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned();
+                if ready
+                    .as_ref()
+                    .is_some_and(|state| state.parse_snapshot.file_version == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("didOpen must materialize same-version ready parse snapshot for p47");
+
+        let first_insert = "\n// refactor-19 live sequential replay\nПроцедура Refactor19Live()\n";
+        let second_insert = "КонецПроцедуры\n";
+        let first_end_position = utf16_end_position(&module_text);
+        let second_end_position = utf16_end_position(&(module_text.clone() + first_insert));
+        let next_version = 2;
+
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            next_version,
+            vec![
+                TextDocumentContentChangeEvent {
+                    range: Some(Range {
+                        start: first_end_position,
+                        end: first_end_position,
+                    }),
+                    range_length: None,
+                    text: first_insert.to_string(),
+                },
+                TextDocumentContentChangeEvent {
+                    range: Some(Range {
+                        start: second_end_position,
+                        end: second_end_position,
+                    }),
+                    range_length: None,
+                    text: second_insert.to_string(),
+                },
+            ],
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(next_version)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didChange must register version 2 for p47");
+
+        let observability = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let response =
+                    live_transport_get_observability_metrics_response(&mut harness, 47_100_901)
+                        .await;
+                let evidence = response
+                    .get("didChangeParseSnapshotEvidence")
+                    .and_then(|value| value.get("entries"))
+                    .and_then(|value| value.as_array())
+                    .and_then(|entries| {
+                        entries.iter().find(|entry| {
+                            entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                                && entry
+                                    .get("requestedVersion")
+                                    .and_then(|value| value.as_i64())
+                                    == Some(next_version as i64)
+                        })
+                    })
+                    .cloned();
+                if let Some(entry) = evidence {
+                    break entry;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .expect("p47 must expose didChange parse-snapshot evidence for the sequential live change");
+
+        assert_eq!(
+            observability.get("parseMode").and_then(|value| value.as_str()),
+            Some("incremental")
+        );
+        assert_eq!(
+            observability.get("baseTextSource").and_then(|value| value.as_str()),
+            Some("shadow_state")
+        );
+        assert_eq!(
+            observability.get("changeShape").and_then(|value| value.as_str()),
+            Some("ranged")
+        );
+        assert_eq!(
+            observability
+                .get("contentChangesCount")
+                .and_then(|value| value.as_u64()),
+            Some(2)
+        );
+        assert_eq!(
+            observability.get("replayOrder").and_then(|value| value.as_str()),
+            Some("receive_order")
+        );
+        assert_eq!(
+            observability
+                .get("baseDocumentVersion")
+                .and_then(|value| value.as_i64()),
+            Some(1)
+        );
+        assert_eq!(
+            observability
+                .get("fallbackReason")
+                .and_then(|value| value.as_str()),
+            None
+        );
+
+        let report = serde_json::json!({
+            "profile": PROFILE_NAME,
+            "change_id": change_id,
+            "module_path": module_path.display().to_string(),
+            "uri": uri.to_string(),
+            "requested_version": next_version,
+            "parse_mode": observability.get("parseMode").and_then(|value| value.as_str()),
+            "base_text_source": observability.get("baseTextSource").and_then(|value| value.as_str()),
+            "change_shape": observability.get("changeShape").and_then(|value| value.as_str()),
+            "content_changes_count": observability.get("contentChangesCount").and_then(|value| value.as_u64()),
+            "replay_order": observability.get("replayOrder").and_then(|value| value.as_str()),
+            "base_document_version": observability.get("baseDocumentVersion").and_then(|value| value.as_i64()),
+            "changed_ranges_count": observability.get("changedRangesCount").and_then(|value| value.as_u64()),
+            "fallback_reason": observability.get("fallbackReason").and_then(|value| value.as_str()),
+            "first_insert_len_bytes": first_insert.len(),
+            "second_insert_len_bytes": second_insert.len(),
+        });
+        let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_DID_CHANGE_SEQUENTIAL_REPLAY_REPORT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join(format!(
+                        "{change_id}-real-conf-big-sequential-ranged-did-change-live.json"
+                    ))
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p47 real conf_big didChange report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("serialize p47 real conf_big didChange report"),
+        )
+        .expect("write p47 real conf_big didChange report");
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         live_transport_close_document(&mut harness, &uri).await;

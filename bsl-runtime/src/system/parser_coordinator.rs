@@ -88,6 +88,16 @@ fn maybe_inject_current_context_parse_progress_delay_for_test() {
     }
 }
 
+fn maybe_inject_parse_snapshot_parse_progress_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_PARSE_SNAPSHOT_PARSE_PROGRESS_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
 fn canonical_parse_snapshot_fallback_reason(error: &str) -> &'static str {
     if error == "No edits provided for incremental parsing" {
         return PARSE_SNAPSHOT_FALLBACK_NO_EDITS_PROVIDED;
@@ -400,6 +410,66 @@ impl ParserCoordinator {
         result
     }
 
+    pub fn parse_incremental_with_report_with_cancellation(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
+            }
+        }
+
+        let key = ParseSnapshotSingleflightKey {
+            file_path: file_path.clone(),
+            content_hash: new_hash,
+        };
+        let (entry, is_leader) = self.begin_parse_snapshot_singleflight(key.clone());
+        if !is_leader {
+            return Self::wait_parse_snapshot_singleflight_with_cancellation(
+                entry.as_ref(),
+                cancellation_flag,
+            );
+        }
+
+        let result = self.parse_incremental_with_report_singleflight_leader_with_cancellation(
+            file_path,
+            new_content,
+            edits,
+            new_hash,
+            new_tree_hash,
+            cancellation_flag,
+        );
+        self.complete_parse_snapshot_singleflight(&key, &entry, &result);
+        result
+    }
+
     pub fn parse_current_context_with_cancellation(
         &self,
         file_path: PathBuf,
@@ -482,6 +552,29 @@ impl ParserCoordinator {
                 .ready
                 .wait(result)
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+        }
+    }
+
+    fn wait_parse_snapshot_singleflight_with_cancellation(
+        entry: &ParseSnapshotSingleflightEntry,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<ParseSnapshotReport, String> {
+        let mut result = entry
+            .result
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if let Some(ready) = result.as_ref() {
+                return ready.clone();
+            }
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+            let (next_result, _) = entry
+                .ready
+                .wait_timeout(result, Duration::from_millis(25))
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            result = next_result;
         }
     }
 
@@ -636,6 +729,174 @@ impl ParserCoordinator {
             Err(e) => {
                 error!("TreeSitter parsing failed: {}", e);
                 Err(format!("Tree-sitter parsing failed: {}", e))
+            }
+        }
+    }
+
+    fn parse_incremental_with_report_singleflight_leader_with_cancellation(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+        new_hash: [u8; 32],
+        new_tree_hash: u64,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
+            }
+
+            debug!("Applying {} edits incrementally", edits.len());
+
+            match self.tree_sitter.parse_incremental_with_cancellation(
+                &new_content,
+                Some(&old_tree),
+                edits,
+                &old_source,
+                cancellation_flag,
+            ) {
+                Ok((new_tree, program, changed_ranges)) => {
+                    let backend_tree = Arc::new(new_tree.clone());
+                    self.tree_cache.update(
+                        &file_path,
+                        new_tree,
+                        new_content.clone(),
+                        new_tree_hash,
+                    );
+                    self.store_ast_cache(
+                        new_hash,
+                        &program,
+                        Some(file_path.as_path()),
+                        &new_content,
+                    );
+                    return Ok(ParseSnapshotReport {
+                        parse_result: program,
+                        line_index,
+                        changed_ranges,
+                        backend_tree,
+                        backend_tree_hash: new_tree_hash,
+                        incremental: true,
+                        fallback_reason: None,
+                    });
+                }
+                Err(error) if is_parse_cancelled_error(&error) => {
+                    return Err(error);
+                }
+                Err(error) => {
+                    warn!(
+                        "Incremental parsing failed: {}, falling back to full parse",
+                        error
+                    );
+                    let fallback_reason =
+                        Some(canonical_parse_snapshot_fallback_reason(&error).to_string());
+                    debug!("Full parse for file (fallback): {:?}", file_path);
+                    if cancellation_flag.load(Ordering::SeqCst) {
+                        return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                    }
+                    maybe_inject_parse_snapshot_full_parse_delay_for_test();
+                    if cancellation_flag.load(Ordering::SeqCst) {
+                        return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                    }
+                    record_parse_snapshot_full_parse_attempt_for_test();
+                    return match self.tree_sitter.parse_with_tree_cancellation(
+                        &new_content,
+                        None,
+                        cancellation_flag,
+                    ) {
+                        Ok((tree, program)) => {
+                            let backend_tree = Arc::new(tree.clone());
+                            self.store_ast_cache(
+                                new_hash,
+                                &program,
+                                Some(file_path.as_path()),
+                                &new_content,
+                            );
+                            self.tree_cache.set(
+                                file_path,
+                                tree,
+                                new_content.clone(),
+                                new_tree_hash,
+                            );
+                            Ok(ParseSnapshotReport {
+                                parse_result: program,
+                                line_index,
+                                changed_ranges: Vec::new(),
+                                backend_tree,
+                                backend_tree_hash: new_tree_hash,
+                                incremental: false,
+                                fallback_reason,
+                            })
+                        }
+                        Err(parse_error) => {
+                            if is_parse_cancelled_error(&parse_error) {
+                                Err(parse_error)
+                            } else {
+                                error!("TreeSitter parsing failed after fallback: {}", parse_error);
+                                Err(format!("Tree-sitter parsing failed: {}", parse_error))
+                            }
+                        }
+                    };
+                }
+            }
+        }
+
+        debug!("Full parse for file: {:?}", file_path);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        record_parse_snapshot_full_parse_attempt_for_test();
+        match self
+            .tree_sitter
+            .parse_with_tree_cancellation(&new_content, None, cancellation_flag)
+        {
+            Ok((tree, program)) => {
+                let backend_tree = Arc::new(tree.clone());
+                self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
+                self.tree_cache
+                    .set(file_path, tree, new_content.clone(), new_tree_hash);
+                Ok(ParseSnapshotReport {
+                    parse_result: program,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree,
+                    backend_tree_hash: new_tree_hash,
+                    incremental: false,
+                    fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
+                })
+            }
+            Err(error) => {
+                if is_parse_cancelled_error(&error) {
+                    Err(error)
+                } else {
+                    error!("TreeSitter parsing failed: {}", error);
+                    Err(format!("Tree-sitter parsing failed: {}", error))
+                }
             }
         }
     }
@@ -912,6 +1173,7 @@ impl TreeSitterParser {
         let len = bytes.len();
         let mut progress = |_state: &tree_sitter::ParseState| {
             maybe_inject_current_context_parse_progress_delay_for_test();
+            maybe_inject_parse_snapshot_parse_progress_delay_for_test();
             cancellation_flag.load(Ordering::SeqCst)
         };
         let tree = parser
@@ -1015,6 +1277,140 @@ impl TreeSitterParser {
                 .ok_or_else(|| "Tree-sitter parsing failed".to_string())?;
 
             let program = TreeSitterAdapter::convert_tree(&tree, new_content)?;
+            Ok((tree, program, Vec::new()))
+        }
+    }
+
+    fn parse_incremental_with_cancellation(
+        &self,
+        new_content: &str,
+        old_tree: Option<&tree_sitter::Tree>,
+        edits: Vec<TextEdit>,
+        old_source: &str,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<(tree_sitter::Tree, ParseResult, Vec<ParseChangedRange>), String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let mut parser = self
+            .parser
+            .lock()
+            .map_err(|e| format!("Failed to lock parser: {}", e))?;
+
+        if let Some(mut tree) = old_tree.cloned() {
+            if edits.is_empty() {
+                return Err("No edits provided for incremental parsing".to_string());
+            }
+
+            let mut current_source = old_source.to_string();
+            let mut changed_ranges = Vec::with_capacity(edits.len());
+            for edit in edits {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                let (input_edit, start_byte, old_end_byte) =
+                    Self::text_edit_to_input_edit(&edit, &current_source)
+                        .map_err(|err| format!("Input edit conversion failed: {err}"))?;
+                tree.edit(&input_edit);
+                debug!("Applied edit: {:?}", input_edit);
+                changed_ranges.push(ParseChangedRange {
+                    start_byte: start_byte as u32,
+                    old_end_byte: old_end_byte as u32,
+                    new_end_byte: input_edit.new_end_byte as u32,
+                });
+
+                current_source =
+                    apply_edit_to_source(&current_source, start_byte, old_end_byte, &edit.new_text);
+            }
+
+            if current_source != new_content {
+                return Err("Edits do not match new content".to_string());
+            }
+
+            if maybe_force_incremental_parse_failure_for_test() {
+                return Err("Incremental parsing failed".to_string());
+            }
+
+            let bytes = new_content.as_bytes();
+            let len = bytes.len();
+            let mut progress = |_state: &tree_sitter::ParseState| {
+                maybe_inject_parse_snapshot_parse_progress_delay_for_test();
+                cancellation_flag.load(Ordering::SeqCst)
+            };
+            let new_tree = parser
+                .parse_with_options(
+                    &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                    Some(&tree),
+                    Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
+                )
+                .ok_or_else(|| {
+                    if cancellation_flag.load(Ordering::SeqCst) {
+                        PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
+                    } else {
+                        "Incremental parsing failed".to_string()
+                    }
+                })?;
+
+            debug!(
+                "Incremental parse: {} nodes, {} bytes",
+                new_tree.root_node().descendant_count(),
+                new_content.len()
+            );
+
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+
+            if let Some(forced_error) = maybe_force_incremental_adapter_error_for_test() {
+                warn!(
+                    "Incremental tree-to-AST conversion failed: {}",
+                    forced_error
+                );
+                return Err("Incremental parsing failed".to_string());
+            }
+
+            let program =
+                TreeSitterAdapter::convert_tree(&new_tree, new_content).map_err(|error| {
+                    if cancellation_flag.load(Ordering::SeqCst) {
+                        PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
+                    } else {
+                        warn!("Incremental tree-to-AST conversion failed: {}", error);
+                        "Incremental parsing failed".to_string()
+                    }
+                })?;
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+            Ok((new_tree, program, changed_ranges))
+        } else {
+            let bytes = new_content.as_bytes();
+            let len = bytes.len();
+            let mut progress = |_state: &tree_sitter::ParseState| {
+                maybe_inject_parse_snapshot_parse_progress_delay_for_test();
+                cancellation_flag.load(Ordering::SeqCst)
+            };
+            let tree = parser
+                .parse_with_options(
+                    &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                    None,
+                    Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
+                )
+                .ok_or_else(|| {
+                    if cancellation_flag.load(Ordering::SeqCst) {
+                        PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
+                    } else {
+                        "Tree-sitter parsing failed".to_string()
+                    }
+                })?;
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+
+            let program = TreeSitterAdapter::convert_tree(&tree, new_content)?;
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
             Ok((tree, program, Vec::new()))
         }
     }

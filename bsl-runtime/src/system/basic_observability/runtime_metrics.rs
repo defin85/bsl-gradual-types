@@ -1,5 +1,64 @@
 use super::*;
 
+fn normalize_ready_parse_snapshot_source_label(source: &str) -> &'static str {
+    match source {
+        "did_open" => "did_open",
+        "did_change" => "did_change",
+        "did_save" => "did_save",
+        _ => "other",
+    }
+}
+
+fn normalize_ready_parse_snapshot_worker_termination_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "aborted" => "aborted",
+        "superseded" => "superseded",
+        "latest_version_mismatch" => "latest_version_mismatch",
+        "build_snapshot_aborted" => "build_snapshot_aborted",
+        _ => "other",
+    }
+}
+
+fn normalize_diagnostics_save_followup_probe_slot_label(slot: &str) -> &'static str {
+    match slot {
+        "zero_budget" => "zero_budget",
+        "bounded_wait" => "bounded_wait",
+        _ => "other",
+    }
+}
+
+fn normalize_ready_parse_snapshot_probe_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "ready" => "ready",
+        "not_ready" => "not_ready",
+        "generation_mismatch" => "generation_mismatch",
+        "version_mismatch" => "version_mismatch",
+        "timeout" => "timeout",
+        "cancelled" => "cancelled",
+        "superseded" => "superseded",
+        _ => "other",
+    }
+}
+
+fn normalize_diagnostics_save_followup_semantic_path_label(path: &str) -> &'static str {
+    match path {
+        "ready_artifacts" => "ready_artifacts",
+        "shadow_state" => "shadow_state",
+        "generic_pipeline" => "generic_pipeline",
+        _ => "other",
+    }
+}
+
+fn normalize_diagnostics_save_followup_wait_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "pending_publish" => "pending_publish",
+        "runtime_queue_wait" => "runtime_queue_wait",
+        "semantic_work" => "semantic_work",
+        "apply_lag" => "apply_lag",
+        _ => "other",
+    }
+}
+
 impl BasicObservability {
     pub fn record_intellisense_v2_document_symbol_outcome(&self, outcome: &str) {
         let outcome = match outcome {
@@ -44,6 +103,91 @@ impl BasicObservability {
             .increment("intellisense_v2_revision_lag_sample_total");
         self.metrics
             .observe_histogram("intellisense_v2_revision_lag_versions", lag_versions);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_materialization(
+        &self,
+        origin: &str,
+        source: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let source = normalize_ready_parse_snapshot_source_label(source);
+        let counter_key = format!(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_{origin}_source_{source}"
+        );
+        let histogram_key = format!(
+            "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_{origin}_source_{source}"
+        );
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_worker_started(
+        &self,
+        origin: &str,
+        source: &str,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let source = normalize_ready_parse_snapshot_source_label(source);
+        let key =
+            format!("intellisense_v2_ready_parse_snapshot_worker_started_total_origin_{origin}_source_{source}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+        &self,
+        origin: &str,
+        source: &str,
+        reason: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let source = normalize_ready_parse_snapshot_source_label(source);
+        let reason = normalize_ready_parse_snapshot_worker_termination_reason_label(reason);
+        let counter_key = format!(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_{origin}_source_{source}_reason_{reason}"
+        );
+        let histogram_key = format!(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_{origin}_source_{source}_reason_{reason}"
+        );
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+        &self,
+        slot: &str,
+        outcome: &str,
+        duration: Duration,
+    ) {
+        let slot = normalize_diagnostics_save_followup_probe_slot_label(slot);
+        let outcome = normalize_ready_parse_snapshot_probe_outcome_label(outcome);
+        let counter_key = format!(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_{slot}_outcome_{outcome}"
+        );
+        let histogram_key = format!(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_{slot}_outcome_{outcome}"
+        );
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_semantic_path(&self, path: &str) {
+        let path = normalize_diagnostics_save_followup_semantic_path_label(path);
+        let key =
+            format!("intellisense_v2_diagnostics_save_followup_semantic_path_total_path_{path}");
+        self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_wait_state(&self, reason: &str) {
+        let reason = normalize_diagnostics_save_followup_wait_reason_label(reason);
+        let key =
+            format!("intellisense_v2_diagnostics_save_followup_wait_state_total_reason_{reason}");
+        self.metrics.increment(&key);
     }
 
     pub fn record_intellisense_v2_completion_exact_type_index_wait_outcome(&self, reason: &str) {

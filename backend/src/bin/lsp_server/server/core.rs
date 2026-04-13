@@ -7,19 +7,19 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
+use tower_lsp::Client;
+use tower_lsp::lsp_types::MessageType;
 use tower_lsp::lsp_types::request::{
     CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
     Request as LspRequest,
 };
-use tower_lsp::lsp_types::MessageType;
 use tower_lsp::lsp_types::{Registration, Unregistration};
-use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
 use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_backend::system::{
-    build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
+    DepsBundleV2, DepsBundleV2Meta, SystemCoordinator, build_deps_bundle_v2,
 };
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
@@ -588,6 +588,7 @@ impl BslLanguageServer {
             next_full_index_operation_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
             full_index_watchdog_timeout: Duration::from_millis(1_200_000),
             current_context_latest_generations: Arc::new(StdMutex::new(HashMap::new())),
+            current_context_generation_notify: Arc::new(tokio::sync::Notify::new()),
             current_context_parse_broker: Arc::new(StdMutex::new(HashMap::new())),
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
@@ -1078,6 +1079,9 @@ impl BslLanguageServer {
         parse_mode: &'static str,
         base_text_source: &'static str,
         change_shape: &'static str,
+        content_changes_count: usize,
+        replay_order: &'static str,
+        base_document_version: Option<i32>,
         changed_ranges_count: usize,
         fallback_reason: Option<&str>,
     ) {
@@ -1100,6 +1104,9 @@ impl BslLanguageServer {
                 parse_mode: parse_mode.to_string(),
                 base_text_source: base_text_source.to_string(),
                 change_shape: change_shape.to_string(),
+                content_changes_count,
+                replay_order: replay_order.to_string(),
+                base_document_version,
                 changed_ranges_count,
                 fallback_reason: fallback_reason.map(str::to_string),
             },

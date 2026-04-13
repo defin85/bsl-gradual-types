@@ -1390,8 +1390,8 @@ fn completion_checkpoint_delay_for_test(checkpoint: &'static str) -> Option<std:
 }
 
 #[cfg(test)]
-fn completion_checkpoint_hits_for_test_state(
-) -> &'static std::sync::Mutex<std::collections::HashMap<&'static str, u64>> {
+fn completion_checkpoint_hits_for_test_state()
+-> &'static std::sync::Mutex<std::collections::HashMap<&'static str, u64>> {
     static STATE: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
     > = std::sync::OnceLock::new();
@@ -2942,14 +2942,14 @@ impl BslLanguageServer {
                                 .clone()
                                 .or_else(|| analysis.settings_id().ok());
                             debug!(
-                            "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
+                                "Completion v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}, index_snapshot_id={}",
                                 uri,
                                 file_id.0,
                                 observed_file_version,
                                 Some(observed_deps_id.as_str()),
                                 observed_settings_id.as_ref().map(|v| v.as_str()),
                                 index_snapshot.id.as_str(),
-                        );
+                            );
                             match analysis.file_text_len(file_id) {
                                 Ok(Some(len)) => debug!(
                                     "Completion v2 (salsa) active: uri={}, file_id={}, text_len={}",
@@ -2978,14 +2978,14 @@ impl BslLanguageServer {
                                 .ok()
                                 .flatten();
                             debug!(
-                            "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
-                            uri,
-                            file_id.0,
-                            position.line,
-                            position.character,
-                            observed_byte_offset,
-                            observed_point,
-                        );
+                                "Completion v2 positioning: uri={}, file_id={}, lsp=({}:{}) -> byte_offset={:?}, point={:?}",
+                                uri,
+                                file_id.0,
+                                position.line,
+                                position.character,
+                                observed_byte_offset,
+                                observed_point,
+                            );
                             let context_for_query = context.clone();
                             let coordinator_for_query = self.coordinator.clone();
                             let uri_for_query = uri.clone();

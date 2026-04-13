@@ -19,6 +19,11 @@ import {
     renderDiagnosticsSaveSummaryLines,
 } from './observabilityIncidentBundleDiagnosticsSave';
 import {
+    ObservabilityIncidentDiagnosticsSaveMetricsSection,
+    buildObservabilityIncidentDiagnosticsSaveMetricsSection,
+    renderDiagnosticsSaveMetricsSummaryLines,
+} from './observabilityIncidentBundleDiagnosticsSaveMetrics';
+import {
     ObservabilityIncidentDidChangeParseSnapshotSummary,
     buildObservabilityIncidentDidChangeParseSnapshotSection,
     renderDidChangeParseSnapshotSummaryLines,
@@ -96,6 +101,7 @@ export interface ObservabilityIncidentBundleReport {
         request_count: number;
     };
     diagnostics_save_requests: ObservabilityIncidentDiagnosticsSaveSummary[];
+    diagnostics_save_metrics: ObservabilityIncidentDiagnosticsSaveMetricsSection;
     did_change_parse_snapshot_window: {
         entry_count: number;
     };
@@ -143,6 +149,8 @@ export function buildObservabilityIncidentBundle(
     const diagnosticsSaveSection = buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline
     );
+    const diagnosticsSaveMetricsSection =
+        buildObservabilityIncidentDiagnosticsSaveMetricsSection(input.observabilityMetrics);
     const didChangeParseSnapshotSection =
         buildObservabilityIncidentDidChangeParseSnapshotSection(
             input.observabilityMetrics,
@@ -189,6 +197,7 @@ export function buildObservabilityIncidentBundle(
             request_count: diagnosticsSaveSection.requestCount,
         },
         diagnostics_save_requests: diagnosticsSaveSection.requests,
+        diagnostics_save_metrics: diagnosticsSaveMetricsSection,
         did_change_parse_snapshot_window: {
             entry_count: didChangeParseSnapshotSection.entryCount,
         },
@@ -200,7 +209,13 @@ export function buildObservabilityIncidentBundle(
             observability_metrics: observabilityMetricsSource,
         },
         findings: findings.length > 0 ? findings : ['No derived bottleneck heuristic matched this capture window.'],
-        gaps: [...gaps, ...requestSection.gaps, ...diagnosticsSaveSection.gaps, ...didChangeParseSnapshotSection.gaps],
+        gaps: [
+            ...gaps,
+            ...requestSection.gaps,
+            ...diagnosticsSaveSection.gaps,
+            ...diagnosticsSaveMetricsSection.gaps,
+            ...didChangeParseSnapshotSection.gaps,
+        ],
         raw_attachments: rawAttachments,
     };
 
@@ -732,6 +747,9 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
             requests: report.diagnostics_save_requests,
             gaps: [],
         }),
+        '',
+        '## Diagnostics Save Metrics',
+        ...renderDiagnosticsSaveMetricsSummaryLines(report.diagnostics_save_metrics),
         '',
         '## DidChange Parse Snapshot Summary',
         ...renderDidChangeParseSnapshotSummaryLines({

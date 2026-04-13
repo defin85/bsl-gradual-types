@@ -47,8 +47,8 @@ fn cancel_request_hook_cell() -> &'static Mutex<Option<CancelRequestHook>> {
     CELL.get_or_init(|| Mutex::new(None))
 }
 
-fn pre_dispatch_completion_terminal_hook_cell(
-) -> &'static Mutex<Option<PreDispatchCompletionTerminalHook>> {
+fn pre_dispatch_completion_terminal_hook_cell()
+-> &'static Mutex<Option<PreDispatchCompletionTerminalHook>> {
     static CELL: std::sync::OnceLock<Mutex<Option<PreDispatchCompletionTerminalHook>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(None))
@@ -1455,8 +1455,8 @@ pub(crate) fn current_request_service_future_first_wake_scheduled_at_ms() -> Opt
         .flatten()
 }
 
-pub(crate) fn current_request_service_future_first_poll_contention_attribution(
-) -> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
+pub(crate) fn current_request_service_future_first_poll_contention_attribution()
+-> Option<crate::types::CompletionTimelineFirstPollContentionAttributionTrace> {
     LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
         .try_with(|state| {
             state
@@ -1467,8 +1467,8 @@ pub(crate) fn current_request_service_future_first_poll_contention_attribution(
         .flatten()
 }
 
-pub(crate) fn current_request_service_future_first_poll_contention_contenders(
-) -> Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>> {
+pub(crate) fn current_request_service_future_first_poll_contention_contenders()
+-> Option<Vec<crate::types::CompletionTimelineFirstPollContentionContenderTrace>> {
     LSP_REQUEST_SERVICE_FUTURE_POLL_OBSERVATION
         .try_with(|state| {
             state

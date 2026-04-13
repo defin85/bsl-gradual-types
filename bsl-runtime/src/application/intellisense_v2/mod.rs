@@ -24,6 +24,7 @@ pub use policy::{
     spawn_bounded_blocking, spawn_bounded_blocking_with_class,
     spawn_bounded_blocking_with_class_observed,
     spawn_bounded_blocking_with_class_observed_call_origin,
+    spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks,
     spawn_bounded_blocking_with_class_observed_call_origin_hooks,
     spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks,
     spawn_bounded_blocking_with_class_observed_origin, AdmissionLane,

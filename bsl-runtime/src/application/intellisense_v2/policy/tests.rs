@@ -1,6 +1,7 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 use tokio::time::timeout;
 
 #[test]
@@ -451,6 +452,69 @@ async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_sa
         .expect("generic background waiter should eventually make progress")
         .expect("generic background waiter join should succeed");
     drop(background_permit);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observed_spawn_dynamic_lane_reacquires_after_did_save_promotion_while_background_reserved_is_blocked(
+) {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+
+    let budget = Arc::new(CpuBoundBudget::with_total_permits(4));
+    let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+    let promotion_requested = Arc::new(AtomicBool::new(false));
+    let promotion_notify = Arc::new(Notify::new());
+    let (queue_wait_started_tx, queue_wait_started_rx) = oneshot::channel();
+
+    let worker = tokio::spawn({
+        let promotion_requested = promotion_requested.clone();
+        let promotion_notify = promotion_notify.clone();
+        let budget = budget.clone();
+        async move {
+            let (permit, lane) = budget
+                .acquire_with_dynamic_lane_queue_wait_hook(
+                    CpuWorkClass::Background,
+                    move || {
+                        promotion_requested
+                            .load(Ordering::SeqCst)
+                            .then_some(AdmissionLane::DidSaveFollowup)
+                    },
+                    promotion_notify.as_ref(),
+                    Some(move || {
+                        let _ = queue_wait_started_tx.send(());
+                    }),
+                )
+                .await;
+            drop(permit);
+            lane
+        }
+    });
+
+    timeout(Duration::from_millis(300), queue_wait_started_rx)
+        .await
+        .expect("worker must reach queue wait before promotion")
+        .expect("queue wait signal must arrive");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !worker.is_finished(),
+        "generic background worker must still be queued while background reserved permit is blocked"
+    );
+
+    promotion_requested.store(true, Ordering::SeqCst);
+    promotion_notify.notify_waiters();
+
+    let lane = timeout(Duration::from_millis(300), worker)
+        .await
+        .expect("promoted worker should reacquire through didSave follow-up lane without waiting for background reserved release")
+        .expect("promoted worker join should succeed");
+    assert_eq!(
+        lane,
+        Some(AdmissionLane::DidSaveFollowup),
+        "promoted worker must reacquire under didSave follow-up lane after queue-time promotion"
+    );
+
+    drop(background_reserved);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

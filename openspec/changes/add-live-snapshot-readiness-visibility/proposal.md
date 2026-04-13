@@ -15,13 +15,14 @@ documents.
 ## What Changes
 
 - Add an authoritative live snapshot-readiness contract on the LSP side:
-  - request `bsl.getSnapshotStatus`
+  - request `bsl/getSnapshotStatus`
   - notification `bsl/snapshotStatus`
 - Add VS Code extension visibility for the active BSL document:
   - concise right-side status bar state
   - detailed snapshot-readiness section in existing observability UI
 - Add a read-only `bsl-agent` parity HTTP surface and MCP UI section for snapshot readiness of
-  session-tracked documents, using the same bounded vocabulary.
+  session-tracked documents, reusing the shared DTO shape and the truthful subset of states that
+  the current agent session model can observe.
 - Keep the change additive and visibility-focused: it exposes existing runtime truth rather than
   changing snapshot scheduling, wait budgets, or writer semantics.
 
@@ -60,3 +61,5 @@ same runtime truth visible to normal users and operators without requiring incid
 - Do not add mutating UI controls like "force rebuild snapshot" or "cancel snapshot worker".
 - Do not require tracking every file in the workspace; initial scope is the active LSP document and
   session-tracked documents in `bsl-agent`.
+- Do not synthesize agent-side `building`, `stale`, or `failed` states without an authoritative
+  agent-native runtime signal for them.

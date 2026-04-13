@@ -1390,8 +1390,8 @@ fn completion_checkpoint_delay_for_test(checkpoint: &'static str) -> Option<std:
 }
 
 #[cfg(test)]
-fn completion_checkpoint_hits_for_test_state()
--> &'static std::sync::Mutex<std::collections::HashMap<&'static str, u64>> {
+fn completion_checkpoint_hits_for_test_state(
+) -> &'static std::sync::Mutex<std::collections::HashMap<&'static str, u64>> {
     static STATE: std::sync::OnceLock<
         std::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
     > = std::sync::OnceLock::new();

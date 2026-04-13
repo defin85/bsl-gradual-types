@@ -294,6 +294,10 @@ impl BslLanguageServer {
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
         source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
     ) {
+        self.latest_snapshot_failures_v2
+            .write()
+            .await
+            .remove(&file_id);
         self.latest_ready_parse_snapshots_v2.write().await.insert(
             file_id,
             ReadyParseSnapshotStateV2 {
@@ -303,6 +307,21 @@ impl BslLanguageServer {
             },
         );
         self.refresh_snapshot_status_v2(file_id).await;
+    }
+
+    async fn record_snapshot_build_failure_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        reason: &'static str,
+    ) {
+        self.latest_snapshot_failures_v2.write().await.insert(
+            file_id,
+            super::super::SnapshotBuildFailureStateV2 {
+                requested_version,
+                reason: Arc::from(reason),
+            },
+        );
     }
 
     async fn prime_parser_tree_cache_from_matching_ready_snapshot_v2(
@@ -802,6 +821,12 @@ impl BslLanguageServer {
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted,
                 ) => {
+                    self.record_snapshot_build_failure_v2(
+                        args.file_id,
+                        args.requested_version,
+                        "build_snapshot_aborted",
+                    )
+                    .await;
                     lifecycle_guard.set_terminal_reason("build_snapshot_aborted");
                     task_control.control_notify.notify_waiters();
                     return;
@@ -2217,7 +2242,14 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
-            self.latest_snapshot_status_v2.write().await.remove(&file_id);
+            self.latest_snapshot_failures_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.latest_snapshot_status_v2
+                .write()
+                .await
+                .remove(&file_id);
             self.latest_save_fastlane_syntax_artifacts_v2
                 .write()
                 .await

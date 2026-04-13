@@ -7,19 +7,19 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use std::time::Instant;
 use tokio::sync::{Mutex, RwLock};
-use tower_lsp::Client;
-use tower_lsp::lsp_types::MessageType;
 use tower_lsp::lsp_types::request::{
     CodeActionRequest, Formatting as DocumentFormattingRequest, InlayHintRequest, RangeFormatting,
     Request as LspRequest,
 };
+use tower_lsp::lsp_types::MessageType;
 use tower_lsp::lsp_types::{Registration, Unregistration};
+use tower_lsp::Client;
 use tracing::{debug, info, warn};
 
 use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_backend::system::{
-    DepsBundleV2, DepsBundleV2Meta, SystemCoordinator, build_deps_bundle_v2,
+    build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
 };
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
@@ -574,6 +574,7 @@ impl BslLanguageServer {
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_snapshot_failures_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_snapshot_status_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_save_fastlane_syntax_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_apply_enqueued_at_v2: Arc::new(RwLock::new(HashMap::new())),

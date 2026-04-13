@@ -20,9 +20,9 @@ use bsl_analysis_v2::FileId as V2FileId;
 use tokio::sync::Notify;
 
 use crate::commands::{
-    ParseConfigurationParams, handle_incremental_update, handle_parse_configuration,
+    handle_incremental_update, handle_parse_configuration, ParseConfigurationParams,
 };
-use crate::handlers::{CurrentContextResponse, find_containing_function_in_parse_result};
+use crate::handlers::{find_containing_function_in_parse_result, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
     CompletionTimelineRequest, CompletionTimelineResponse, DiagnosticsSaveTimelineRequest,
@@ -1484,9 +1484,9 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
     use tower::Service;
     use tower::ServiceExt;
-    use tower_lsp::LspService;
     use tower_lsp::jsonrpc::Request;
     use tower_lsp::lsp_types::{ClientCapabilities, InitializeParams, InitializedParams};
+    use tower_lsp::LspService;
 
     fn create_test_server() -> BslLanguageServer {
         let coordinator = Arc::new(SystemCoordinator::new());
@@ -1735,12 +1735,10 @@ mod tests {
                 .expect("state"),
             "idle"
         );
-        assert!(
-            !object
-                .get("ready")
-                .and_then(|value| value.as_bool())
-                .expect("ready")
-        );
+        assert!(!object
+            .get("ready")
+            .and_then(|value| value.as_bool())
+            .expect("ready"));
 
         drain_task.abort();
     }
@@ -1774,12 +1772,10 @@ mod tests {
         let value = serde_json::to_value(response).expect("serialize response");
         let result = value.get("result").expect("result field");
         let object = result.as_object().expect("result object");
-        assert!(
-            object
-                .get("success")
-                .and_then(|value| value.as_bool())
-                .expect("success")
-        );
+        assert!(object
+            .get("success")
+            .and_then(|value| value.as_bool())
+            .expect("success"));
         let message = object
             .get("message")
             .and_then(|value| value.as_str())

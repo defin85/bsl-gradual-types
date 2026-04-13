@@ -11,9 +11,12 @@ The endpoint SHALL:
 - remain strictly read-only;
 - define tracked documents as the deterministic union of session overlays and session hot-set
   entries;
-- use the same bounded state vocabulary as LSP snapshot readiness wherever the semantics match;
-- return enough information to distinguish building, exact ready, stale, `shadow_only`, and failed
-  states for tracked documents.
+- use the same DTO shape and bounded state vocabulary as LSP snapshot readiness wherever the
+  semantics match;
+- truthfully expose the subset of states currently observable from agent session state;
+- MUST NOT synthesize `building`, `stale`, or `failed` without an authoritative agent-native
+  signal for those states;
+- return enough information to distinguish exact ready from `shadow_only` for tracked documents.
 
 Each entry SHALL include at least:
 
@@ -27,11 +30,17 @@ Each entry SHALL include at least:
 
 The response SHALL be deterministic for the same session state, including stable path ordering.
 
-#### Scenario: Ready session reports building snapshot for a tracked document
-- **GIVEN** a ready MCP session tracks a document whose exact snapshot is still rebuilding
+#### Scenario: Ready session reports overlay-backed tracked document as `shadow_only`
+- **GIVEN** a ready MCP session tracks a document through an active overlay
 - **WHEN** UI calls `GET /api/mcp/snapshot-status`
-- **THEN** the endpoint returns an entry with `state=building`
+- **THEN** the endpoint returns an entry with `state=shadow_only`
 - **AND** the response does not claim the tracked document is exact-ready
+
+#### Scenario: Ready session reports hot-set tracked document without overlay as exact-ready
+- **GIVEN** a ready MCP session tracks a document only through the hot set
+- **WHEN** UI calls `GET /api/mcp/snapshot-status`
+- **THEN** the endpoint returns an entry with `state=ready`
+- **AND** the response marks that tracked document as exact-ready
 
 #### Scenario: No ready session keeps parity rule fail-closed
 - **GIVEN** there is no ready session and the request omits `sessionId`
@@ -55,7 +64,7 @@ The MCP UI MUST:
 
 - read snapshot readiness only from `/api/mcp/snapshot-status`;
 - keep the surface strictly read-only;
-- distinguish exact ready from `shadow_only` and `stale`;
+- distinguish exact ready from `shadow_only`;
 - avoid mutating controls such as rebuild or cancel actions.
 
 #### Scenario: MCP UI renders exact-ready and degraded states distinctly

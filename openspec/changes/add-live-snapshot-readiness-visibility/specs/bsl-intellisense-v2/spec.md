@@ -4,7 +4,7 @@
 
 LSP MUST provide an authoritative live snapshot-readiness contract for open documents through:
 
-- custom request `bsl.getSnapshotStatus`
+- custom request `bsl/getSnapshotStatus`
 - custom notification `bsl/snapshotStatus`
 
 The contract MUST stay file-scoped and MUST NOT be reconstructed from diagnostics save timeline,
@@ -42,7 +42,7 @@ have already observed a newer one.
 
 #### Scenario: Same-version worker in flight reports building state
 - **GIVEN** a matching same-version ready-snapshot worker is still in flight for an open document
-- **WHEN** the client requests `bsl.getSnapshotStatus` for that document
+- **WHEN** the client requests `bsl/getSnapshotStatus` for that document
 - **THEN** the server returns `state=building`
 - **AND** the payload stays truthful about the in-flight task state instead of claiming ready
 

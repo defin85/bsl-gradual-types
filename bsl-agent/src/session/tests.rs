@@ -1002,7 +1002,10 @@ async fn http_snapshot_status_orders_tracked_documents_and_distinguishes_shadow_
             .iter()
             .map(|entry| entry.path.as_deref().unwrap_or_default())
             .collect::<Vec<_>>(),
-        vec!["src/CommonModules/A/Module.bsl", "src/CommonModules/B/Module.bsl"],
+        vec![
+            "src/CommonModules/A/Module.bsl",
+            "src/CommonModules/B/Module.bsl"
+        ],
         "tracked documents must use deterministic path ordering"
     );
 
@@ -1012,8 +1015,14 @@ async fn http_snapshot_status_orders_tracked_documents_and_distinguishes_shadow_
         .find(|entry| entry.path.as_deref() == Some("src/CommonModules/A/Module.bsl"))
         .expect("overlay entry");
     assert_eq!(overlay_entry.state, SnapshotReadinessStateDto::ShadowOnly);
-    assert!(!overlay_entry.exact, "overlay-backed document must not be exact-ready");
-    assert_eq!(overlay_entry.trigger, Some(SnapshotTriggerDto::DocumentsSet));
+    assert!(
+        !overlay_entry.exact,
+        "overlay-backed document must not be exact-ready"
+    );
+    assert_eq!(
+        overlay_entry.trigger,
+        Some(SnapshotTriggerDto::DocumentsSet)
+    );
 
     let ready_entry = response
         .entries
@@ -1021,7 +1030,10 @@ async fn http_snapshot_status_orders_tracked_documents_and_distinguishes_shadow_
         .find(|entry| entry.path.as_deref() == Some("src/CommonModules/B/Module.bsl"))
         .expect("ready entry");
     assert_eq!(ready_entry.state, SnapshotReadinessStateDto::Ready);
-    assert!(ready_entry.exact, "hot-set document without overlay should stay exact-ready");
+    assert!(
+        ready_entry.exact,
+        "hot-set document without overlay should stay exact-ready"
+    );
     assert_eq!(ready_entry.trigger, Some(SnapshotTriggerDto::Job));
 }
 

@@ -1,15 +1,15 @@
 use std::sync::atomic::Ordering;
 
 use bsl_shared::api::dtos::{
-    SnapshotPhaseDto, SnapshotReadinessDto, SnapshotReadinessStateDto,
-    SnapshotTaskStateDto, SnapshotTriggerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
+    SnapshotPhaseDto, SnapshotReadinessDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
+    SnapshotTriggerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
 };
 
-use super::*;
 use super::super::{
     BackgroundParseSnapshotApplyTaskControlV2, BackgroundParseSnapshotApplyTaskPhaseV2,
     BackgroundParseSnapshotApplyTaskSourceV2, DidChangeParseSnapshotEvidenceKey,
 };
+use super::*;
 use crate::server::unix_timestamp_ms;
 
 #[derive(Debug, Clone, Copy)]
@@ -56,7 +56,8 @@ fn snapshot_status_eq_ignoring_updated_at(
 impl BslLanguageServer {
     pub(crate) async fn snapshot_status_for_uri_v2(&self, uri: &Url) -> SnapshotReadinessDto {
         let file_id = self.get_or_create_file_id_v2(uri).await;
-        self.upsert_snapshot_status_v2(file_id, Some(uri), false).await
+        self.upsert_snapshot_status_v2(file_id, Some(uri), false)
+            .await
     }
 
     pub(crate) async fn refresh_snapshot_status_v2(&self, file_id: V2FileId) {
@@ -174,12 +175,19 @@ impl BslLanguageServer {
         let ready_version = ready_state
             .as_ref()
             .map(|state| state.parse_snapshot.file_version);
+        let failed_state = self
+            .latest_snapshot_failures_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
+            .filter(|failure| Some(failure.requested_version) == requested_version);
         let ready_matches_requested = match (requested_version, ready_state.as_ref()) {
             (Some(requested_version), Some(ready_state)) => {
                 ready_state.parse_snapshot.file_version == requested_version
-                    && shadow_state
-                        .as_ref()
-                        .map_or(true, |shadow| ready_state.text.as_ref() == shadow.text.as_ref())
+                    && shadow_state.as_ref().map_or(true, |shadow| {
+                        ready_state.text.as_ref() == shadow.text.as_ref()
+                    })
             }
             _ => false,
         };
@@ -189,7 +197,10 @@ impl BslLanguageServer {
         );
         let fallback_reason = if matches!(
             task_observation.as_ref().map(|task| task.state),
-            Some(SnapshotTaskStateDto::InFlightSameRevision | SnapshotTaskStateDto::InFlightOtherRevision)
+            Some(
+                SnapshotTaskStateDto::InFlightSameRevision
+                    | SnapshotTaskStateDto::InFlightOtherRevision
+            )
         ) || ready_is_stale
         {
             requested_version.and_then(|requested_version| {
@@ -205,6 +216,8 @@ impl BslLanguageServer {
                     })
                     .and_then(|entry| entry.fallback_reason.clone())
             })
+        } else if let Some(failed_state) = failed_state.as_ref() {
+            Some(failed_state.reason.as_ref().to_string())
         } else {
             None
         };
@@ -284,6 +297,14 @@ impl BslLanguageServer {
                 ready_state
                     .as_ref()
                     .map(|value| snapshot_trigger_from_source(value.source)),
+            )
+        } else if failed_state.is_some() {
+            (
+                SnapshotReadinessStateDto::Failed,
+                false,
+                SnapshotTaskStateDto::Absent,
+                None,
+                None,
             )
         } else {
             (

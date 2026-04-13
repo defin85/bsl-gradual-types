@@ -162,7 +162,7 @@ pub async fn fetch_mcp_metrics(session_id: Option<&str>) -> Result<MetricsDto, S
 
 /// Получить snapshot readiness из `bsl-agent` через parity API (`/api/mcp/snapshot-status`).
 pub async fn fetch_mcp_snapshot_status(
-    session_id: Option<&str>
+    session_id: Option<&str>,
 ) -> Result<McpSnapshotStatusResponseDto, String> {
     let config = get_config();
     let base_url = config.api_url("mcp/snapshot-status");

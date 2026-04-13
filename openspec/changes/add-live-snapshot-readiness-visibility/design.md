@@ -57,7 +57,7 @@ This keeps UI surfaces truthful without exposing unbounded internals.
 `diagnostics save timeline` and `observability metrics` are retrospective and the wrong transport
 for live UX. The LSP side should instead expose:
 
-- `bsl.getSnapshotStatus` for hydrate/manual fetch
+- `bsl/getSnapshotStatus` for hydrate/manual fetch
 - `bsl/snapshotStatus` for live deltas
 
 The notification path should be coalesced by URI and emit only meaningful state transitions so the
@@ -85,12 +85,22 @@ surprising UI is:
 The status bar answers "ready or not, and why"; observability answers "which revision, which phase,
 which fallback".
 
-### 4. `bsl-agent` uses a read-only parity endpoint plus the same UI vocabulary
+### 4. `bsl-agent` uses a read-only parity endpoint plus the same DTO shape where semantics match
 
 `bsl-agent` has no "active editor", so it needs a session-oriented read-only list of tracked
 documents. The parity API should expose a read-only snapshot-status endpoint under the existing
 ready-session selection rules, and the MCP UI should render those entries next to existing
 sessions/jobs diagnostics.
+
+Unlike LSP, the current `bsl-agent` runtime does not maintain a background ready-snapshot worker
+store or a live task-state registry for tracked documents. For this change, the endpoint therefore
+surfaces only the truthful subset that the session model can currently observe:
+
+- overlay-backed tracked documents surface as `shadow_only`;
+- tracked documents present only in the hot set surface as `ready`.
+
+The endpoint MUST NOT synthesize `building`, `stale`, or `failed` until `bsl-agent` grows an
+authoritative native signal for those states.
 
 For this change, "tracked documents" is locked to the deterministic union of:
 

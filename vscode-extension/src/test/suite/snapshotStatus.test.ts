@@ -155,6 +155,38 @@ suite('Snapshot Status Test Suite', () => {
         }
     });
 
+    test('hydrates failed status for active BSL document', async () => {
+        stubActiveBslEditor('file:///snapshot-status-failed.bsl');
+        sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
+            kind: 'ok',
+            response: {
+                schemaVersion: 1,
+                uri: 'file:///snapshot-status-failed.bsl',
+                requestedVersion: 18,
+                state: 'failed',
+                exact: false,
+                taskState: 'absent',
+                fallbackReason: 'build_snapshot_aborted',
+                updatedAtMs: 450,
+            },
+        });
+
+        const disposable = initializeSnapshotStatus(outputChannelStub, statusBarStub);
+        await flushPromises();
+
+        try {
+            const snapshot = getActiveSnapshotStatusSnapshot();
+            assert.strictEqual(snapshot.kind, 'ok');
+            if (snapshot.kind !== 'ok') {
+                return;
+            }
+            assert.strictEqual(snapshot.status.state, 'failed');
+            assert.match(statusBarStub.text, /failed v18/i);
+        } finally {
+            disposable.dispose();
+        }
+    });
+
     test('unsupported server stays fail-closed', async () => {
         stubActiveBslEditor('file:///snapshot-status-unsupported.bsl');
         sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({

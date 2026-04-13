@@ -8,7 +8,7 @@
 
 ## 2. LSP Runtime Surface
 
-- [x] 2.1 Add custom request `bsl.getSnapshotStatus` for file-scoped snapshot readiness.
+- [x] 2.1 Add custom request `bsl/getSnapshotStatus` for file-scoped snapshot readiness.
 - [x] 2.2 Add custom notification `bsl/snapshotStatus` for coalesced live transitions on the same
       file.
 - [x] 2.3 Populate the contract from live ready-snapshot/task state so exact ready, in-flight,
@@ -22,8 +22,8 @@
 - [x] 3.2 Surface active-document snapshot readiness in a dedicated right-side status bar item
       without reusing the existing left-side global BSL status/progress item.
 - [x] 3.3 Add a snapshot-readiness detail section to the existing observability UI.
-- [x] 3.4 Add extension tests for supported, unsupported, exact-ready, building, and
-      `shadow_only` states, plus stale-notification dropping for the same URI.
+- [x] 3.4 Add extension tests for supported, unsupported, exact-ready, building, `shadow_only`,
+      and `failed` states, plus stale-notification dropping for the same URI.
 
 ## 4. `bsl-agent` Read-only UI
 

@@ -1,5 +1,6 @@
 use super::*;
 use crate::server::ReadyParseSnapshotStateV2;
+use crate::server::SnapshotBuildFailureStateV2;
 use axum::http::{header, Request as AxumRequest};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
@@ -20,9 +21,7 @@ use bsl_backend::system::{
     build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
     IndexSnapshot, IndexSnapshotId, TypeKind,
 };
-use bsl_shared::api::dtos::{
-    SnapshotPhaseDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
-};
+use bsl_shared::api::dtos::{SnapshotPhaseDto, SnapshotReadinessStateDto, SnapshotTaskStateDto};
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;
 use std::collections::BTreeSet;
@@ -34508,29 +34507,21 @@ async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
         .write()
         .await
         .insert(file_id, 7);
-    server
-        .latest_document_shadow_state_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            DocumentShadowStateV2 {
-                version: 7,
-                text: text.clone(),
-            },
-        );
-    server
-        .latest_ready_parse_snapshots_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            ReadyParseSnapshotStateV2 {
-                text: text.clone(),
-                parse_snapshot: parse_snapshot_for_test(file_id, 7, text.as_ref(), vec![], true, None),
-                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
-            },
-        );
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 7,
+            text: text.clone(),
+        },
+    );
+    server.latest_ready_parse_snapshots_v2.write().await.insert(
+        file_id,
+        ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot: parse_snapshot_for_test(file_id, 7, text.as_ref(), vec![], true, None),
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        },
+    );
 
     let status = server
         .handle_get_snapshot_status(crate::types::GetSnapshotStatusRequest {
@@ -34572,17 +34563,13 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
         .write()
         .await
         .insert(file_id, 3);
-    server
-        .latest_document_shadow_state_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            DocumentShadowStateV2 {
-                version: 3,
-                text: text.clone(),
-            },
-        );
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 3,
+            text: text.clone(),
+        },
+    );
     server
         .background_parse_snapshot_apply_tasks_v2
         .lock()
@@ -34600,8 +34587,14 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
 
     let status = server.snapshot_status_for_uri_v2(&uri).await;
     assert_eq!(status.state, SnapshotReadinessStateDto::Building);
-    assert!(!status.exact, "in-flight worker must not claim exact readiness");
-    assert_eq!(status.task_state, SnapshotTaskStateDto::InFlightSameRevision);
+    assert!(
+        !status.exact,
+        "in-flight worker must not claim exact readiness"
+    );
+    assert_eq!(
+        status.task_state,
+        SnapshotTaskStateDto::InFlightSameRevision
+    );
     assert_eq!(status.phase, Some(SnapshotPhaseDto::Parsing));
 
     harness.shutdown().await;
@@ -34620,17 +34613,13 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
         .write()
         .await
         .insert(file_id, 11);
-    server
-        .latest_document_shadow_state_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            DocumentShadowStateV2 {
-                version: 11,
-                text: text.clone(),
-            },
-        );
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 11,
+            text: text.clone(),
+        },
+    );
     server
         .background_parse_snapshot_apply_tasks_v2
         .lock()
@@ -34663,18 +34652,14 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
         .lock()
         .await
         .remove(&file_id);
-    server
-        .latest_ready_parse_snapshots_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            ReadyParseSnapshotStateV2 {
-                text: text.clone(),
-                parse_snapshot: parse_snapshot_for_test(file_id, 11, text.as_ref(), vec![], true, None),
-                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
-            },
-        );
+    server.latest_ready_parse_snapshots_v2.write().await.insert(
+        file_id,
+        ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot: parse_snapshot_for_test(file_id, 11, text.as_ref(), vec![], true, None),
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+        },
+    );
 
     let ready = server.snapshot_status_for_uri_v2(&uri).await;
     assert_eq!(ready.state, SnapshotReadinessStateDto::Ready);
@@ -34698,17 +34683,13 @@ async fn snapshot_status_request_reports_shadow_only_when_only_shadow_state_is_c
         .write()
         .await
         .insert(file_id, 5);
-    server
-        .latest_document_shadow_state_v2
-        .write()
-        .await
-        .insert(
-            file_id,
-            DocumentShadowStateV2 {
-                version: 5,
-                text: Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n"),
-            },
-        );
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 5,
+            text: Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n"),
+        },
+    );
 
     let status = server.snapshot_status_for_uri_v2(&uri).await;
     assert_eq!(status.state, SnapshotReadinessStateDto::ShadowOnly);
@@ -34716,6 +34697,39 @@ async fn snapshot_status_request_reports_shadow_only_when_only_shadow_state_is_c
     assert_eq!(status.task_state, SnapshotTaskStateDto::Absent);
     assert_eq!(status.requested_version, Some(5));
     assert_eq!(status.ready_version, None);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_failed_when_last_build_aborted() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-failed.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 17);
+    server.latest_snapshot_failures_v2.write().await.insert(
+        file_id,
+        SnapshotBuildFailureStateV2 {
+            requested_version: 17,
+            reason: Arc::from("build_snapshot_aborted"),
+        },
+    );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::Failed);
+    assert!(!status.exact);
+    assert_eq!(status.task_state, SnapshotTaskStateDto::Absent);
+    assert_eq!(status.requested_version, Some(17));
+    assert_eq!(
+        status.fallback_reason.as_deref(),
+        Some("build_snapshot_aborted")
+    );
 
     harness.shutdown().await;
 }

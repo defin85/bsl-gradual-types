@@ -390,7 +390,10 @@ impl SessionManager {
             (left.path.as_str(), left.root_id.as_str()).cmp(&(right.path.as_str(), right.root_id.as_str()))
         });
 
-        let updated_at_ms = session.created_at.saturating_mul(1000);
+        let updated_at_ms = session
+            .created_at
+            .saturating_mul(1000)
+            .saturating_add(session.analysis_revision);
         let entries = tracked
             .into_iter()
             .map(|key| {

@@ -18,7 +18,7 @@ pub(crate) mod transport_adapter;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{Mutex, Notify, RwLock};
@@ -311,6 +311,8 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_ready_parse_snapshots_v2:
         Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
+    pub(crate) latest_snapshot_failures_v2:
+        Arc<RwLock<HashMap<V2FileId, SnapshotBuildFailureStateV2>>>,
     pub(crate) latest_snapshot_status_v2: Arc<RwLock<HashMap<V2FileId, SnapshotReadinessDto>>>,
     pub(crate) latest_save_fastlane_syntax_artifacts_v2:
         Arc<RwLock<HashMap<V2FileId, SaveFastlaneSyntaxArtifactsV2>>>,
@@ -415,6 +417,12 @@ pub(crate) struct ReadyParseSnapshotStateV2 {
     pub text: Arc<str>,
     pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SnapshotBuildFailureStateV2 {
+    pub requested_version: i32,
+    pub reason: Arc<str>,
 }
 
 #[derive(Debug, Clone)]

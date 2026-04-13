@@ -14,29 +14,29 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
-use tower_lsp::LanguageServer;
 use tower_lsp::jsonrpc::Result as JsonRpcResult;
 use tower_lsp::lsp_types::*;
+use tower_lsp::LanguageServer;
 use tracing::{debug, error, info, warn};
 
 use bsl_backend::data::loaders::progress::{IndexingPhase, ProgressUpdate};
-use bsl_backend::system::{StartupInputs, startup_v2};
+use bsl_backend::system::{startup_v2, StartupInputs};
 use bsl_shared::api::semantic_dtos::{GetSemanticHtmlRequest, GetSemanticTreeRequest};
 use bsl_shared::utils::hash::hash_content;
 
 use crate::commands::{
-    CacheCommandParams, CacheToggleParams, GetAllTypesRequest, ParseConfigurationParams,
-    QueryTypeParams, SearchTypesRequest, handle_cache_clear, handle_cache_set_enabled,
-    handle_cache_stats, handle_get_all_types, handle_get_type_repository_stats,
-    handle_parse_configuration, handle_query_type, handle_search_types, semantic_html_from_tree,
-    semantic_tree_from_ir,
+    handle_cache_clear, handle_cache_set_enabled, handle_cache_stats, handle_get_all_types,
+    handle_get_type_repository_stats, handle_parse_configuration, handle_query_type,
+    handle_search_types, semantic_html_from_tree, semantic_tree_from_ir, CacheCommandParams,
+    CacheToggleParams, GetAllTypesRequest, ParseConfigurationParams, QueryTypeParams,
+    SearchTypesRequest,
 };
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
-    RenameError, apply_text_edit, build_document_symbols, build_workspace_symbols,
-    format_bsl_range_to_edits, format_bsl_to_edits, handle_code_actions_v2,
-    handle_completion_resolve, handle_goto_definition_v2, handle_hover_v2, handle_inlay_hints_v2,
-    handle_prepare_rename, handle_references, handle_rename, handle_signature_help_v2,
+    apply_text_edit, build_document_symbols, build_workspace_symbols, format_bsl_range_to_edits,
+    format_bsl_to_edits, handle_code_actions_v2, handle_completion_resolve,
+    handle_goto_definition_v2, handle_hover_v2, handle_inlay_hints_v2, handle_prepare_rename,
+    handle_references, handle_rename, handle_signature_help_v2, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};

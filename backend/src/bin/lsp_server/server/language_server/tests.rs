@@ -1,9 +1,9 @@
 use super::{
-    CompletionResponseRoute, LargeChurnTransition, advance_large_churn_state,
-    completion_canary_routing_key, completion_dispatch_enabled_for_mode,
+    advance_large_churn_state, completion_canary_routing_key, completion_dispatch_enabled_for_mode,
     completion_publish_allowed, completion_route_canary_event_driven, completion_routing_plan,
     completion_shadow_internal_trigger_payload, completion_shadow_internal_trigger_value,
     should_defer_heavy_diagnostics_for_large_churn, should_schedule_profile,
+    CompletionResponseRoute, LargeChurnTransition,
 };
 use bsl_runtime::application::{
     CompletionMode, DiagnosticsProfile, DiagnosticsTrigger, ScaleAwareDiagnosticsKnobs,

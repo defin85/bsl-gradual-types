@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
 use futures::future::BoxFuture;
-use futures::{FutureExt, Sink, SinkExt, StreamExt, TryFutureExt, future, pin_mut, stream};
+use futures::{future, pin_mut, stream, FutureExt, Sink, SinkExt, StreamExt, TryFutureExt};
 use tokio::io::{
     AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
 };
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
 use tower::Service;
-use tower_lsp::Loopback;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Id, Request, Response};
+use tower_lsp::Loopback;
 use tracing::{error, warn};
 
 const MESSAGE_QUEUE_SIZE: usize = 100;
@@ -2765,8 +2765,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_keeps_running_when_saturated_unrelated_general_notification_is_dropped()
-     {
+    async fn transport_adapter_keeps_running_when_saturated_unrelated_general_notification_is_dropped(
+    ) {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);
@@ -2991,8 +2991,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn transport_adapter_prioritises_did_change_handoff_before_completion_under_general_backlog()
-     {
+    async fn transport_adapter_prioritises_did_change_handoff_before_completion_under_general_backlog(
+    ) {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
         let (client_read, mut client_write) = tokio::io::split(client_stream);
         let (server_read, server_write) = tokio::io::split(server_stream);

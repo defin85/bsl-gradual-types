@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::{Future, poll_fn};
+use std::future::{poll_fn, Future};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::{Duration, Instant};
 
 use bsl_analysis_v2::FileId as V2FileId;
-use tokio::sync::{Mutex as TokioMutex, Notify, oneshot};
+use tokio::sync::{oneshot, Mutex as TokioMutex, Notify};
 use tokio::task::JoinHandle;
 
 #[derive(Debug, Clone)]

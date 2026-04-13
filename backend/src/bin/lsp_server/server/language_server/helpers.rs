@@ -965,7 +965,7 @@ pub(super) fn normalize_optional_string(value: Option<String>) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use super::{CanonicalRangedDidChangeReplayStep, canonicalize_ranged_did_change_replay_plan};
+    use super::{canonicalize_ranged_did_change_replay_plan, CanonicalRangedDidChangeReplayStep};
     use crate::handlers::apply_text_edit;
     use bsl_line_index::byte_offset_to_utf16;
     use std::path::PathBuf;

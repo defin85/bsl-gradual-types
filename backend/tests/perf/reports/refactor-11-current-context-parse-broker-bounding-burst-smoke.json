@@ -17,9 +17,9 @@
     },
     "current_context_wall_ms_role_broker_follower": {
       "count": 1,
-      "p50": 951.0,
-      "p95": 951.0,
-      "p99": 951.0
+      "p50": 950.0,
+      "p95": 950.0,
+      "p99": 950.0
     },
     "current_context_wall_ms_role_broker_leader": {
       "count": 1,

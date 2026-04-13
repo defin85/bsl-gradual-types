@@ -59,6 +59,26 @@ impl TreeCache {
         }
     }
 
+    /// Сохранить уже разделяемое дерево в кеш без лишнего клонирования tree handle.
+    pub fn set_shared(
+        &self,
+        file_path: PathBuf,
+        tree: Arc<Tree>,
+        source: String,
+        content_hash: u64,
+    ) {
+        if let Ok(mut cache) = self.cache.write() {
+            cache.insert(
+                file_path,
+                CachedTree {
+                    content_hash,
+                    tree,
+                    source,
+                },
+            );
+        }
+    }
+
     /// Обновить закешированное дерево после редактирования
     pub fn update(&self, file_path: &Path, new_tree: Tree, new_source: String, new_hash: u64) {
         if let Ok(mut cache) = self.cache.write() {

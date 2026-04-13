@@ -302,6 +302,36 @@ impl BslLanguageServer {
         );
     }
 
+    async fn prime_parser_tree_cache_from_matching_ready_snapshot_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        path: &str,
+        shadow_state: &super::super::DocumentShadowStateV2,
+    ) {
+        let ready_state = self
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned()
+            .filter(|state| {
+                state.parse_snapshot.file_version == shadow_state.version
+                    && state.text.as_ref() == shadow_state.text.as_ref()
+            });
+        let Some(ready_state) = ready_state else {
+            return;
+        };
+        let Some(parser) = self.coordinator.parser_coordinator() else {
+            return;
+        };
+        parser.prime_tree_cache_for_file(
+            PathBuf::from(path),
+            ready_state.text.as_ref().to_string(),
+            Arc::clone(&ready_state.parse_snapshot.backend_tree),
+            ready_state.parse_snapshot.backend_tree_hash,
+        );
+    }
+
     fn record_parse_snapshot_report_v2(
         &self,
         report: &bsl_runtime::system::parser_coordinator::ParseSnapshotReport,
@@ -1693,6 +1723,12 @@ impl BslLanguageServer {
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
                 ) = if let Some(state) = previous_shadow_state.clone() {
+                    self.prime_parser_tree_cache_from_matching_ready_snapshot_v2(
+                        file_id,
+                        path.as_str(),
+                        &state,
+                    )
+                    .await;
                     (state.text.to_string(), "shadow_state", Some(state.version))
                 } else {
                     (

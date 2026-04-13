@@ -1,5 +1,5 @@
 use super::*;
-use axum::http::{Request as AxumRequest, header};
+use axum::http::{header, Request as AxumRequest};
 use bsl_agent::jobs::JobManager;
 use bsl_agent::server::types::{
     BslDefinitionParams, BslDiagnosticsParams, BslMembersParams, BslReferencesParams,
@@ -11,13 +11,13 @@ use bsl_agent::session::SessionManager;
 use bsl_agent::types::JobStateDto;
 use bsl_analysis_v2::{LineIndex, ParseChangedRange, ParseSnapshot};
 use bsl_backend::perf_gate_evaluator::{
-    PARITY_DRIFT_RATE_MAX_FOR_CUTOVER, PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER, get_report_u64,
-    validate_parity_cutover_evidence,
+    get_report_u64, validate_parity_cutover_evidence, PARITY_DRIFT_RATE_MAX_FOR_CUTOVER,
+    PARITY_PAIRS_TOTAL_MIN_FOR_CUTOVER,
 };
-use bsl_backend::presentation::web::{AppState, create_router};
+use bsl_backend::presentation::web::{create_router, AppState};
 use bsl_backend::system::{
-    EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IndexSnapshotId,
-    TypeKind, build_deps_bundle_v2,
+    build_deps_bundle_v2, EffectiveStartupInputs, IndexItem, IndexItemKind, IndexKind,
+    IndexSnapshot, IndexSnapshotId, TypeKind,
 };
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;
@@ -26,8 +26,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tower::Service;
 use tower::ServiceExt;
-use tower_lsp::LanguageServer;
-use tower_lsp::LspService;
 use tower_lsp::jsonrpc::{Request, Response as JsonRpcResponse};
 use tower_lsp::lsp_types::{
     ClientCapabilities, CodeActionContext, CodeActionOrCommand, CodeActionParams,
@@ -43,6 +41,8 @@ use tower_lsp::lsp_types::{
     TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
     WorkDoneProgressParams, WorkspaceEdit, WorkspaceSymbolParams,
 };
+use tower_lsp::LanguageServer;
+use tower_lsp::LspService;
 use tree_sitter::{Parser as TreeSitterParser, Tree};
 
 fn init_test_tracing() {
@@ -2718,8 +2718,8 @@ async fn p6_did_save_fastlane_uses_ready_parse_snapshot_when_shadow_is_missing()
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_artifacts_before_delayed_apply()
- {
+async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_artifacts_before_delayed_apply(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -4589,8 +4589,8 @@ async fn p7_newer_did_change_cooperatively_supersedes_obsolete_ready_snapshot_wo
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
-async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts()
- {
+async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -7155,8 +7155,8 @@ async fn p6_diagnostics_save_timeline_fastlane_fallback_bypasses_shared_queue_wa
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_before_idle_heavy_terminal()
- {
+async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_before_idle_heavy_terminal(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -7364,8 +7364,8 @@ async fn p6_diagnostics_save_timeline_exposes_inflight_cycle_after_fastlane_befo
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_save_supersedes_followup()
- {
+async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_save_supersedes_followup(
+) {
     let coordinator = Arc::new(SystemCoordinator::new());
     let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -7560,8 +7560,8 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
 }
 
 #[tokio::test]
-async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_sequence_for_correlation()
- {
+async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_sequence_for_correlation(
+) {
     let coordinator = Arc::new(SystemCoordinator::new());
     let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
         Arc::new(std::sync::Mutex::new(None));
@@ -12726,8 +12726,8 @@ async fn p7_legitimate_empty_interactive_results_do_not_emit_fail_closed_reasons
 }
 
 #[tokio::test]
-async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_without_fail_closed_reason()
- {
+async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_without_fail_closed_reason(
+) {
     const SIGNATURE_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
 
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -12835,8 +12835,8 @@ async fn p7_constructor_signature_help_without_canonical_fact_stays_empty_withou
 }
 
 #[tokio::test]
-async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint()
- {
+async fn p7_map_index_access_exact_cross_consumer_acceptance_uses_snapshot_owner_without_manual_hint(
+) {
     let completion_fixture = "Процедура Тест()\n\
     Map = Новый Соответствие;\n\
     Map.Вставить(\"k\", Новый ТаблицаЗначений);\n\
@@ -13033,8 +13033,8 @@ async fn p7_dynamic_map_key_exact_cross_consumer_acceptance_uses_safe_policy_wit
 }
 
 #[tokio::test]
-async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics()
- {
+async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
+) {
     let completion_fixture = "Процедура Тест()\n\
     S = Новый Структура;\n\
     S.Вставить(\"Идентификатор\", \"A-01\");\n\
@@ -13193,8 +13193,8 @@ async fn p7_typed_structure_exact_cross_consumer_acceptance_keeps_same_contract_
 }
 
 #[tokio::test]
-async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics()
- {
+async fn p7_typed_value_table_row_exact_cross_consumer_acceptance_keeps_same_contract_for_completion_hover_type_and_diagnostics(
+) {
     let completion_fixture = "Процедура Тест()\n\
     ТЗ = Новый ТаблицаЗначений;\n\
     ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
@@ -13396,8 +13396,8 @@ async fn p7_form_module_object_completion_uses_default_lsp_owner_hint_path() {
 }
 
 #[tokio::test]
-async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces()
- {
+async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
+) {
     let fixture_v1 = "Процедура Тест()\n\
     S = Новый Структура;\n\
     S.Вставить(\"Идентификатор\", \"A-01\");\n\
@@ -13474,8 +13474,8 @@ async fn p7_typed_structure_revision_switch_does_not_leak_stale_structural_membe
 }
 
 #[tokio::test]
-async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces()
- {
+async fn p7_typed_value_table_row_revision_switch_does_not_leak_stale_structural_members_across_interfaces(
+) {
     let fixture_v1 = "Процедура Тест()\n\
     ТЗ = Новый ТаблицаЗначений;\n\
     ТЗ.Колонки.Добавить(\"Идентификатор\", Новый ОписаниеТипов(\"Строка\"));\n\
@@ -13648,8 +13648,8 @@ async fn p7_hover_and_type_at_position_revision_switch_do_not_report_stale_typed
 }
 
 #[tokio::test]
-async fn p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp()
- {
+async fn p7_definition_revision_switch_does_not_return_stale_previous_revision_location_across_lsp_and_mcp(
+) {
     let fixture_v1 = "Процедура Целевой()\n\
 КонецПроцедуры\n\
 \n\
@@ -17147,8 +17147,8 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_multi_
 }
 
 #[tokio::test]
-async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_bom_crlf_receive_order_did_change()
- {
+async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_bom_crlf_receive_order_did_change(
+) {
     fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
         let start_byte = line
             .find(needle)
@@ -17331,6 +17331,197 @@ async fn p22_get_observability_metrics_exposes_incremental_mode_for_valid_bom_cr
     );
 
     let _ = AFTER_FIRST_TEXT;
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p22_did_change_reseeds_stale_parser_tree_cache_from_matching_ready_snapshot() {
+    fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
+        let start_byte = line
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        Range {
+            start: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, start_byte),
+            ),
+            end: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, end_byte),
+            ),
+        }
+    }
+
+    const V1_TEXT: &str = "Процедура Тест()\n    Сообщить(\"один\");\nКонецПроцедуры\n";
+    const V2_TEXT: &str = "Процедура Тест()\n    Сообщить(\"два\");\nКонецПроцедуры\n";
+    const V2_LINE: &str = "    Сообщить(\"два\");";
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        V1_TEXT,
+        "file:///did_change_parse_snapshot_stale_parser_base_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize same-version ready parse snapshot before stale-base didChange");
+
+    replace_lsp_fixture_and_wait(&mut service, &server, &uri, file_id, 2, V2_TEXT).await;
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 2)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("version 2 must materialize ready parse snapshot before poisoning parser tree cache");
+
+    let parser = server
+        .coordinator
+        .parser_coordinator()
+        .expect("parser coordinator");
+    let file_path = uri.to_file_path().expect("file path");
+    let poisoned_report = parser
+        .parse_incremental_with_report(file_path.clone(), V1_TEXT.to_string(), Vec::new())
+        .expect("poison stale parser tree cache with version 1");
+    assert!(
+        !poisoned_report.incremental,
+        "poisoning the parser tree cache should force a full parse of version 1"
+    );
+
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 3,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: Some(utf16_range_for_line_fragment(V2_LINE, 1, "два")),
+            range_length: None,
+            text: "три".to_string(),
+        }],
+    };
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(serde_json::to_value(did_change).expect("DidChangeTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let evidence = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2221)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(3)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break entry;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("stale parser base didChange evidence must appear in observability metrics response");
+
+    assert_eq!(
+        evidence.get("parseMode").and_then(|value| value.as_str()),
+        Some("incremental")
+    );
+    assert_eq!(
+        evidence
+            .get("baseTextSource")
+            .and_then(|value| value.as_str()),
+        Some("shadow_state")
+    );
+    assert_eq!(
+        evidence
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        Some(2)
+    );
+    assert_eq!(
+        evidence
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        evidence.get("fallbackReason").and_then(|value| value.as_str()),
+        None,
+        "matching ready snapshot must reseed stale parser tree cache instead of falling back to edits_do_not_match_new_content"
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_text = analysis
+        .file_text(file_id)
+        .expect("file_text query")
+        .expect("file text after stale-base didChange");
+    assert_eq!(
+        observed_text.as_ref(),
+        "Процедура Тест()\n    Сообщить(\"три\");\nКонецПроцедуры\n"
+    );
+
     drain_task.abort();
 }
 
@@ -17606,8 +17797,8 @@ async fn p22_get_completion_timeline_exposes_versioned_contract() {
 }
 
 #[test]
-fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields()
- {
+fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricated_post_dispatch_fields(
+) {
     let trace = super::build_pre_dispatch_terminal_completion_trace(
         crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
             request_id: "req-pre-dispatch-cancel".to_string(),
@@ -17654,8 +17845,8 @@ fn pre_dispatch_cancelled_completion_trace_is_server_centric_and_has_no_fabricat
 }
 
 #[test]
-fn pre_dispatch_queue_rejected_completion_trace_is_fail_closed_and_has_no_fabricated_post_dispatch_fields()
- {
+fn pre_dispatch_queue_rejected_completion_trace_is_fail_closed_and_has_no_fabricated_post_dispatch_fields(
+) {
     let trace = super::build_pre_dispatch_terminal_completion_trace(
         crate::server::request_context::PreDispatchCompletionTerminalTraceInput {
             request_id: "req-pre-dispatch-rejected".to_string(),
@@ -23821,8 +24012,8 @@ async fn p33_same_file_completion_supersession_releases_active_turn_during_respo
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration()
- {
+async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -25099,8 +25290,8 @@ async fn p33_document_symbol_request_bootstrap_materializes_ready_outline_after_
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap()
- {
+async fn p33_live_transport_document_symbol_request_bootstrap_materializes_ready_outline_after_did_open_gap(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -26055,8 +26246,8 @@ async fn p33_completion_waiter_registration_bypasses_unrelated_interactive_apply
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap()
- {
+async fn p33_document_symbol_burst_does_not_delay_hover_signature_help_or_definition_under_parse_gap(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -30899,8 +31090,8 @@ async fn p33_get_current_context_inflight_non_equivalent_generation_cancels_obso
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
-async fn p33_get_current_context_superseded_non_equivalent_generation_skips_obsolete_parse_before_start()
- {
+async fn p33_get_current_context_superseded_non_equivalent_generation_skips_obsolete_parse_before_start(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,

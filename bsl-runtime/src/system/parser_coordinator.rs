@@ -518,6 +518,24 @@ impl ParserCoordinator {
         })
     }
 
+    pub fn prime_tree_cache_for_file(
+        &self,
+        file_path: PathBuf,
+        source: String,
+        backend_tree: Arc<tree_sitter::Tree>,
+        content_hash: u64,
+    ) {
+        if self
+            .tree_cache
+            .get(&file_path)
+            .is_some_and(|(_, _, cached_hash)| cached_hash == content_hash)
+        {
+            return;
+        }
+        self.tree_cache
+            .set_shared(file_path, backend_tree, source, content_hash);
+    }
+
     fn begin_parse_snapshot_singleflight(
         &self,
         key: ParseSnapshotSingleflightKey,

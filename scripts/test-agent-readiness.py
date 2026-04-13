@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 import sys
@@ -17,6 +18,7 @@ class AgentReadinessValidationTest(unittest.TestCase):
     LOCAL_ACT_WRAPPER = REPO_ROOT / "scripts" / "run-local-ci-with-act.sh"
     LOCAL_ACT_VSCODE_DOCKERFILE = REPO_ROOT / "scripts" / "act-vscode-runner.Dockerfile"
     VSCODE_TEST_RUNNER = REPO_ROOT / "vscode-extension" / "src" / "test" / "runTest.ts"
+    VSCODE_TEST_WRAPPER = REPO_ROOT / "scripts" / "run-vscode-extension-tests.js"
     DOCUMENT_SYMBOL_WRAPPER = (
         REPO_ROOT / "scripts" / "validate-document-symbol-interactive-isolation.sh"
     )
@@ -200,6 +202,38 @@ class AgentReadinessValidationTest(unittest.TestCase):
             "runTests({ extensionDevelopmentPath, extensionTestsPath, launchArgs })",
         ):
             self.assertIn(required_snippet, content)
+
+    def test_vscode_package_test_script_uses_canonical_wrapper(self) -> None:
+        package_json = json.loads(
+            (self.REPO_ROOT / "vscode-extension" / "package.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            package_json["scripts"]["test"],
+            "node ../scripts/run-vscode-extension-tests.js",
+        )
+
+    def test_vscode_test_wrapper_forces_wsl_and_headless_linux_through_xvfb(self) -> None:
+        content = self.VSCODE_TEST_WRAPPER.read_text(encoding="utf-8")
+        for required_snippet in (
+            "WSL_DISTRO_NAME",
+            "WSL_INTEROP",
+            "/proc/version",
+            "/proc/sys/kernel/osrelease",
+            "!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY",
+            "xvfb-run",
+            "dbus-run-session",
+            "BSL_TEST_ELECTRON_LAUNCH_ARGS",
+            "--disable-gpu",
+            "runTest.js",
+        ):
+            self.assertIn(required_snippet, content)
+
+    def test_verification_doc_describes_wsl_safe_vscode_test_wrapper(self) -> None:
+        content = self.VERIFICATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("run-vscode-extension-tests.js", content)
+        self.assertIn("WSL", content)
 
     def test_lsp_sources_use_explicit_client_index_imports(self) -> None:
         source_files = (

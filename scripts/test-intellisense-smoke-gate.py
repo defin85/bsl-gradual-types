@@ -128,41 +128,18 @@ class IntellisenseSmokeGateContractTest(unittest.TestCase):
             ),
         )
 
-    def test_smoke_script_uses_headless_vscode_wrapper_when_display_is_missing(self) -> None:
+    def test_smoke_script_delegates_vscode_launch_to_canonical_wrapper(self) -> None:
         content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")
 
         self.assertIn(
-            'if [[ -z "${DISPLAY:-}" ]]; then',
+            'node "${ROOT_DIR}/scripts/run-vscode-extension-tests.js"',
             content,
             (
-                "extension smoke slice must detect headless environments before running "
-                "VS Code integration tests"
+                "extension smoke slice must delegate VS Code launch policy to the "
+                "shared wrapper so npm test and smoke use the same WSL/headless path"
             ),
         )
-        self.assertIn(
-            "command -v xvfb-run >/dev/null 2>&1",
-            content,
-            (
-                "extension smoke slice must fail closed when headless VS Code tests "
-                "cannot obtain xvfb-run"
-            ),
-        )
-        self.assertIn(
-            'xvfb-run -a --server-args="-screen 0 1280x960x24"',
-            content,
-            (
-                "extension smoke slice must launch VS Code tests under a virtual X "
-                "server in headless environments"
-            ),
-        )
-        self.assertIn(
-            'export BSL_TEST_ELECTRON_LAUNCH_ARGS=',
-            content,
-            (
-                "extension smoke slice must pass headless-safe Electron launch args "
-                "to the VS Code test runner"
-            ),
-        )
+        self.assertNotIn('node ./out/test/runTest.js', content)
 
     def test_smoke_script_executes_each_exact_selector_individually(self) -> None:
         content = self.SMOKE_SCRIPT.read_text(encoding="utf-8")

@@ -64,7 +64,7 @@ Expected outcome:
 - replica покрывает hosted CI path; self-hosted `conf_big` representative gates живут отдельно в `./.github/workflows/intellisense-real-module-gates.yml`
 - тяжёлые Rust/npm caches, `CARGO_TARGET_DIR`, `vscode-extension/node_modules` и `.vscode-test` уходят в Docker named volumes
 - IntelliSense smoke автоматически использует локальный act runner image с Linux runtime libs и `xvfb` для VS Code
-- extension-host tail сам переключается на `xvfb-run` в headless окружении и не требует ручного `DISPLAY`
+- extension-host tail запускается через `./scripts/run-vscode-extension-tests.js`, который fail-closed уводит VS Code под `xvfb-run` внутри WSL и в Linux headless без `DISPLAY`/`WAYLAND_DISPLAY`
 - логи и uploaded artifacts складываются в repo-local ignored cache directory и
   автоматически подчищаются по retention policy, чтобы локальное хранилище не
   раздувалось

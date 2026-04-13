@@ -9,7 +9,7 @@
 ## Контекст (проверено по репозиторию)
 
 ### Как сейчас запускаются “интеграционные” тесты
-- `npm test` запускает `node ./out/test/runTest.js` (через `@vscode/test-electron`): `vscode-extension/package.json`.
+- `npm test` запускает `node ../scripts/run-vscode-extension-tests.js`, а тот уже ведёт в `out/test/runTest.js` через `@vscode/test-electron`, принудительно уводя WSL/headless Linux под `xvfb-run`: `vscode-extension/package.json`, `scripts/run-vscode-extension-tests.js`.
 - Тестовый VS Code использует директорию `.vscode-test` рядом с расширением (user-data, logs, extensions): `vscode-extension/.vscode-test/`.
 - Тестовая suite поднимается через Mocha и glob по `**/**.test.js`: `vscode-extension/src/test/suite/index.ts`.
 
@@ -133,4 +133,3 @@
 3) T3: DI для LSP клиента и мок в test mode.
 4) T5: вынести ожидания/таймауты в helpers.
 5) T4: добавить отдельные e2e smoke-тесты (с `BSL_TEST_USE_REAL_FIXTURES=1`).
-

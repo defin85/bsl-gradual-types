@@ -327,32 +327,8 @@ run_extension_completion_observability_tests() {
   local grep_pattern="$1"
 
   (
-    cd "${ROOT_DIR}/vscode-extension"
     export BSL_TEST_GREP="${grep_pattern}"
-
-    if [[ -z "${DISPLAY:-}" ]]; then
-      if ! command -v xvfb-run >/dev/null 2>&1; then
-        echo "headless VS Code smoke requires xvfb-run when DISPLAY is unavailable." >&2
-        exit 1
-      fi
-
-      local headless_electron_args="--disable-gpu --disable-dev-shm-usage --disable-software-rasterizer"
-      if [[ -n "${BSL_TEST_ELECTRON_LAUNCH_ARGS:-}" ]]; then
-        export BSL_TEST_ELECTRON_LAUNCH_ARGS="${BSL_TEST_ELECTRON_LAUNCH_ARGS} ${headless_electron_args}"
-      else
-        export BSL_TEST_ELECTRON_LAUNCH_ARGS="${headless_electron_args}"
-      fi
-
-      if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]] && command -v dbus-run-session >/dev/null 2>&1; then
-        dbus-run-session -- xvfb-run -a --server-args="-screen 0 1280x960x24" node ./out/test/runTest.js
-        exit 0
-      fi
-
-      xvfb-run -a --server-args="-screen 0 1280x960x24" node ./out/test/runTest.js
-      exit 0
-    fi
-
-    node ./out/test/runTest.js
+    node "${ROOT_DIR}/scripts/run-vscode-extension-tests.js"
   )
 }
 

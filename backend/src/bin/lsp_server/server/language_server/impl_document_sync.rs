@@ -1,5 +1,6 @@
 use super::super::{DocumentShadowStateV2, ReadyParseSnapshotStateV2};
 use super::*;
+use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -11,6 +12,7 @@ struct BuildParseSnapshotRequest {
     path: Arc<str>,
     text: Arc<str>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+    forced_full_parse_reason: Option<&'static str>,
     blocking_delay_env_key: Option<&'static str>,
     requested_version_state: Option<Arc<std::sync::atomic::AtomicI32>>,
     task_control: Option<Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>>,
@@ -279,6 +281,7 @@ struct BackgroundParseSnapshotApplyArgs {
     path: Arc<str>,
     text: Arc<str>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+    forced_full_parse_reason: Option<&'static str>,
     async_delay_mode: ParseSnapshotAsyncDelayMode,
     blocking_delay_env_key: Option<&'static str>,
     force_reschedule_same_version: bool,
@@ -427,6 +430,7 @@ impl BslLanguageServer {
         let version = request.version;
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
+        let forced_full_parse_reason = request.forced_full_parse_reason;
         let parse_call = if let Some(task_control) = task_control_for_parse.clone() {
             let task_control_for_lane = Arc::clone(&task_control);
             let task_control_for_exec = Some(Arc::clone(&task_control));
@@ -466,19 +470,36 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
-                    let parse_result = if let Some(control) = task_control_for_exec.as_ref() {
-                        parser.parse_incremental_with_report_with_cancellation(
-                            PathBuf::from(path_for_parse.as_ref()),
-                            text_for_parse.to_string(),
-                            parser_edits,
-                            &control.cancel_requested,
-                        )
+                    let parse_result = if let Some(reason) = forced_full_parse_reason {
+                        if let Some(control) = task_control_for_exec.as_ref() {
+                            parser.parse_full_with_report_with_cancellation(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                reason,
+                                &control.cancel_requested,
+                            )
+                        } else {
+                            parser.parse_full_with_report(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                reason,
+                            )
+                        }
                     } else {
-                        parser.parse_incremental_with_report(
-                            PathBuf::from(path_for_parse.as_ref()),
-                            text_for_parse.to_string(),
-                            parser_edits,
-                        )
+                        if let Some(control) = task_control_for_exec.as_ref() {
+                            parser.parse_incremental_with_report_with_cancellation(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                parser_edits,
+                                &control.cancel_requested,
+                            )
+                        } else {
+                            parser.parse_incremental_with_report(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                parser_edits,
+                            )
+                        }
                     };
                     parse_result.map_err(|error| {
                         if task_control_for_exec
@@ -529,19 +550,36 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
-                    let parse_result = if let Some(control) = task_control_for_parse.as_ref() {
-                        parser.parse_incremental_with_report_with_cancellation(
-                            PathBuf::from(path_for_parse.as_ref()),
-                            text_for_parse.to_string(),
-                            parser_edits,
-                            &control.cancel_requested,
-                        )
+                    let parse_result = if let Some(reason) = forced_full_parse_reason {
+                        if let Some(control) = task_control_for_parse.as_ref() {
+                            parser.parse_full_with_report_with_cancellation(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                reason,
+                                &control.cancel_requested,
+                            )
+                        } else {
+                            parser.parse_full_with_report(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                reason,
+                            )
+                        }
                     } else {
-                        parser.parse_incremental_with_report(
-                            PathBuf::from(path_for_parse.as_ref()),
-                            text_for_parse.to_string(),
-                            parser_edits,
-                        )
+                        if let Some(control) = task_control_for_parse.as_ref() {
+                            parser.parse_incremental_with_report_with_cancellation(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                parser_edits,
+                                &control.cancel_requested,
+                            )
+                        } else {
+                            parser.parse_incremental_with_report(
+                                PathBuf::from(path_for_parse.as_ref()),
+                                text_for_parse.to_string(),
+                                parser_edits,
+                            )
+                        }
                     };
                     parse_result.map_err(|error| {
                         if task_control_for_parse
@@ -792,6 +830,7 @@ impl BslLanguageServer {
                     path: args.path.clone(),
                     text: args.text.clone(),
                     parser_edits: args.parser_edits,
+                    forced_full_parse_reason: args.forced_full_parse_reason,
                     blocking_delay_env_key: args.blocking_delay_env_key,
                     requested_version_state: Some(Arc::clone(&requested_version_state)),
                     task_control: Some(Arc::clone(&task_control)),
@@ -1665,6 +1704,7 @@ impl BslLanguageServer {
             path: path.clone(),
             text: text.clone(),
             parser_edits: Vec::new(),
+            forced_full_parse_reason: None,
             async_delay_mode: ParseSnapshotAsyncDelayMode::None,
             blocking_delay_env_key: Some("BSL_TEST_DID_OPEN_BLOCKING_PARSE_DELAY_MS"),
             force_reschedule_same_version: false,
@@ -1742,6 +1782,7 @@ impl BslLanguageServer {
             updated_text,
             path,
             parser_edits,
+            forced_full_parse_reason,
             large_churn_active,
             identical_text_previous_version,
             tail_whitespace_append_previous_version,
@@ -1758,10 +1799,17 @@ impl BslLanguageServer {
             let (
                 updated_text,
                 parser_edits,
+                forced_full_parse_reason,
                 parse_snapshot_base_text_source,
                 parse_snapshot_base_document_version,
             ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-                (full_change.text.clone(), Vec::new(), "not_applicable", None)
+                (
+                    full_change.text.clone(),
+                    Vec::new(),
+                    None,
+                    "not_applicable",
+                    None,
+                )
             } else {
                 if let Some(state) = previous_shadow_state.as_ref() {
                     if version < state.version {
@@ -1779,6 +1827,7 @@ impl BslLanguageServer {
                     base_text,
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
+                    forced_full_parse_reason,
                 ) = if let Some(state) = previous_shadow_state.clone() {
                     self.prime_parser_tree_cache_from_matching_ready_snapshot_v2(
                         file_id,
@@ -1786,7 +1835,24 @@ impl BslLanguageServer {
                         &state,
                     )
                     .await;
-                    (state.text.to_string(), "shadow_state", Some(state.version))
+                    let forced_full_parse_reason = self
+                        .coordinator
+                        .parser_coordinator()
+                        .filter(|parser| {
+                            !parser.tree_cache_matches_source_for_file(
+                                Path::new(path.as_str()),
+                                state.text.as_ref(),
+                            )
+                        })
+                        .map(|_| {
+                            bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason()
+                        });
+                    (
+                        state.text.to_string(),
+                        "shadow_state",
+                        Some(state.version),
+                        forced_full_parse_reason,
+                    )
                 } else {
                     (
                         self.analysis_v2
@@ -1798,6 +1864,7 @@ impl BslLanguageServer {
                             .map(|text| text.to_string())
                             .unwrap_or_default(),
                         "analysis_snapshot",
+                        None,
                         None,
                     )
                 };
@@ -1812,6 +1879,7 @@ impl BslLanguageServer {
                 (
                     current_text,
                     parser_edits,
+                    forced_full_parse_reason,
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
                 )
@@ -1940,6 +2008,7 @@ impl BslLanguageServer {
                 updated_text,
                 path,
                 parser_edits,
+                forced_full_parse_reason,
                 large_churn_active,
                 identical_text_previous_version,
                 tail_whitespace_append_previous_version,
@@ -1996,6 +2065,7 @@ impl BslLanguageServer {
                 path: path.clone(),
                 text: updated_text.clone(),
                 parser_edits,
+                forced_full_parse_reason,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: false,
@@ -2137,6 +2207,7 @@ impl BslLanguageServer {
                 path: Arc::from(path),
                 text,
                 parser_edits: Vec::new(),
+                forced_full_parse_reason: None,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: true,

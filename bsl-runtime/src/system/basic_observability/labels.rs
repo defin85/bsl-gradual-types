@@ -558,6 +558,7 @@ pub(super) fn normalize_parse_snapshot_fallback_reason_label(reason: &str) -> &'
         "incremental_parse_failed" | "incremental_failed:Incremental parsing failed" => {
             "incremental_parse_failed"
         }
+        "stale_parser_base" => "stale_parser_base",
         "no_previous_tree" => "no_previous_tree",
         "no_edits_provided" => "no_edits_provided",
         reason if reason.starts_with("Input edit conversion failed:") => {

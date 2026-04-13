@@ -151,6 +151,7 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_previous_tree",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_no_edits_provided",
     "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_other",
+    "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_stale_parser_base",
     "intellisense_v2_wait_for_file_version_diagnostics_total",
     "intellisense_v2_snapshot_diagnostics_total",
     "intellisense_v2_ir_query_other_total",
@@ -17530,6 +17531,242 @@ async fn p22_did_change_reseeds_stale_parser_tree_cache_from_matching_ready_snap
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p22_did_change_stale_parser_base_reports_explicit_fallback_instead_of_edit_mismatch() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn utf16_range_for_line_fragment(line: &str, line_number: u32, needle: &str) -> Range {
+        let start_byte = line
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        Range {
+            start: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, start_byte),
+            ),
+            end: Position::new(
+                line_number,
+                bsl_line_index::byte_offset_to_utf16(line, end_byte),
+            ),
+        }
+    }
+
+    const V1_TEXT: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_TEXT: &str = "Процедура Тест()\n    Возврат 20;\nКонецПроцедуры\n";
+    const V3_TEXT: &str = "Процедура Тест()\n    Возврат 300;\nКонецПроцедуры\n";
+    const V3_LINE: &str = "    Возврат 300;";
+
+    let _env_lock = lock_test_env().await;
+    let _blocking_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
+
+    let (mut service, drain_task, server, uri, file_id) =
+        open_lsp_fixture_with_snapshot(V1_TEXT, "file:///did_change_stale_parser_base_fixture.bsl")
+            .await;
+
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize version 1 before churn");
+
+    for (version, text) in [(2, V2_TEXT), (3, V3_TEXT)] {
+        let did_change_response = service
+            .ready()
+            .await
+            .unwrap()
+            .call(
+                Request::build("textDocument/didChange")
+                    .params(
+                        serde_json::to_value(DidChangeTextDocumentParams {
+                            text_document: VersionedTextDocumentIdentifier {
+                                uri: uri.clone(),
+                                version,
+                            },
+                            content_changes: vec![TextDocumentContentChangeEvent {
+                                range: None,
+                                range_length: None,
+                                text: text.to_string(),
+                            }],
+                        })
+                        .expect("DidChangeTextDocumentParams"),
+                    )
+                    .finish(),
+            )
+            .await
+            .expect("didChange notification");
+        assert!(did_change_response.is_none(), "didChange is a notification");
+    }
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let shadow = server
+                .latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if shadow.as_ref().is_some_and(|state| state.version == 3) && ready_version == Some(1) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("shadow state must advance to version 3 while ready snapshot still lags at version 1");
+
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 4,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: Some(utf16_range_for_line_fragment(V3_LINE, 1, "300")),
+                            range_length: None,
+                            text: "4000".to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    let evidence = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(2222)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(4)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break entry;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("stale parser base didChange evidence must appear in observability metrics response");
+
+    assert_eq!(
+        evidence.get("parseMode").and_then(|value| value.as_str()),
+        Some("full")
+    );
+    assert_eq!(
+        evidence
+            .get("baseTextSource")
+            .and_then(|value| value.as_str()),
+        Some("shadow_state")
+    );
+    assert_eq!(
+        evidence.get("changeShape").and_then(|value| value.as_str()),
+        Some("ranged")
+    );
+    assert_eq!(
+        evidence
+            .get("contentChangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        evidence
+            .get("baseDocumentVersion")
+            .and_then(|value| value.as_i64()),
+        Some(3)
+    );
+    assert_eq!(
+        evidence
+            .get("changedRangesCount")
+            .and_then(|value| value.as_u64()),
+        Some(0)
+    );
+    assert_eq!(
+        evidence.get("fallbackReason").and_then(|value| value.as_str()),
+        Some("stale_parser_base"),
+        "stale shadow-state parser base must report an explicit fallback instead of pretending the client edit mismatched new content"
+    );
+
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn p22_get_observability_metrics_exposes_semantic_diagnostics_breakdown() {
     const SEMANTIC_FIXTURE: &str = "Процедура Тест()\n    ЛокМассив = Новый Массив;\n    ЛокМассив.НесуществующийМетод();\nКонецПроцедуры\n";
@@ -34680,12 +34917,14 @@ async fn wait_for_snapshot_status_notification(
     tokio::time::timeout(timeout, async {
         loop {
             let message = harness.read_message().await;
-            if message.get("method").and_then(|value| value.as_str())
-                != Some("bsl/snapshotStatus")
+            if message.get("method").and_then(|value| value.as_str()) != Some("bsl/snapshotStatus")
             {
                 continue;
             }
-            let params = message.get("params").cloned().expect("snapshot status params");
+            let params = message
+                .get("params")
+                .cloned()
+                .expect("snapshot status params");
             break serde_json::from_value(params).expect("snapshot status params dto");
         }
     })
@@ -34700,8 +34939,7 @@ async fn assert_no_snapshot_status_notification(
     let maybe_notification = tokio::time::timeout(timeout, async {
         loop {
             let message = harness.read_message().await;
-            if message.get("method").and_then(|value| value.as_str())
-                == Some("bsl/snapshotStatus")
+            if message.get("method").and_then(|value| value.as_str()) == Some("bsl/snapshotStatus")
             {
                 break message;
             }
@@ -34760,7 +34998,8 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
     );
     server.refresh_snapshot_status_v2(file_id).await;
 
-    let building = wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
     assert_eq!(building.state, SnapshotReadinessStateDto::Building);
     assert_eq!(building.phase, Some(SnapshotPhaseDto::Waiting));
 

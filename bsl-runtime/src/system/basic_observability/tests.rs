@@ -137,6 +137,25 @@ fn parse_snapshot_export_uses_only_canonical_fallback_buckets() {
         ),
         "legacy generic incremental_failed bucket must not remain pre-registered in the export"
     );
+
+    observability.record_intellisense_v2_parse_snapshot(
+        "lsp",
+        "full",
+        0,
+        0,
+        Some("stale_parser_base"),
+        Duration::from_millis(7),
+    );
+    let exported = observability.get_metrics().export_metrics();
+    let exported_counters = counters(&exported);
+    assert_eq!(
+        counter_value(
+            exported_counters,
+            "intellisense_v2_parse_snapshot_fallback_total_origin_lsp_reason_stale_parser_base"
+        ),
+        1,
+        "stale-parser-base fallback bucket must be exported explicitly instead of collapsing into other"
+    );
 }
 
 #[test]

@@ -51,6 +51,7 @@ const PARSE_SNAPSHOT_FALLBACK_EDITS_DO_NOT_MATCH_NEW_CONTENT: &str =
     "edits_do_not_match_new_content";
 const PARSE_SNAPSHOT_FALLBACK_INPUT_EDIT_CONVERSION_FAILED: &str = "input_edit_conversion_failed";
 const PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED: &str = "incremental_parse_failed";
+const PARSE_SNAPSHOT_FALLBACK_STALE_PARSER_BASE: &str = "stale_parser_base";
 const PARSE_SNAPSHOT_FALLBACK_OTHER: &str = "other";
 
 #[cfg(test)]
@@ -468,6 +469,153 @@ impl ParserCoordinator {
         );
         self.complete_parse_snapshot_singleflight(&key, &entry, &result);
         result
+    }
+
+    pub fn parse_full_with_report(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        fallback_reason: &'static str,
+    ) -> Result<ParseSnapshotReport, String> {
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
+            }
+        }
+
+        debug!("Forced full parse for file: {:?}", file_path);
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        record_parse_snapshot_full_parse_attempt_for_test();
+        match self.tree_sitter.parse_with_tree(&new_content) {
+            Ok((tree, program)) => {
+                let backend_tree = Arc::new(tree.clone());
+                self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
+                self.tree_cache
+                    .set(file_path, tree, new_content.clone(), new_tree_hash);
+                Ok(ParseSnapshotReport {
+                    parse_result: program,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree,
+                    backend_tree_hash: new_tree_hash,
+                    incremental: false,
+                    fallback_reason: Some(fallback_reason.to_string()),
+                })
+            }
+            Err(error) => {
+                error!(
+                    "TreeSitter parsing failed during forced full parse: {}",
+                    error
+                );
+                Err(format!("Tree-sitter parsing failed: {}", error))
+            }
+        }
+    }
+
+    pub fn parse_full_with_report_with_cancellation(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        fallback_reason: &'static str,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                self.store_ast_memory(new_hash, &result);
+                self.update_symbol_index(&file_path, &result);
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                });
+            }
+        }
+
+        debug!("Forced full parse for file: {:?}", file_path);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        record_parse_snapshot_full_parse_attempt_for_test();
+        match self
+            .tree_sitter
+            .parse_with_tree_cancellation(&new_content, None, cancellation_flag)
+        {
+            Ok((tree, program)) => {
+                let backend_tree = Arc::new(tree.clone());
+                self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
+                self.tree_cache
+                    .set(file_path, tree, new_content.clone(), new_tree_hash);
+                Ok(ParseSnapshotReport {
+                    parse_result: program,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree,
+                    backend_tree_hash: new_tree_hash,
+                    incremental: false,
+                    fallback_reason: Some(fallback_reason.to_string()),
+                })
+            }
+            Err(error) => {
+                if is_parse_cancelled_error(&error) {
+                    Err(error)
+                } else {
+                    error!(
+                        "TreeSitter parsing failed during forced full parse: {}",
+                        error
+                    );
+                    Err(format!("Tree-sitter parsing failed: {}", error))
+                }
+            }
+        }
+    }
+
+    pub fn tree_cache_matches_source_for_file(&self, file_path: &Path, source: &str) -> bool {
+        self.tree_cache.get(&file_path.to_path_buf()).is_some_and(
+            |(_, cached_source, cached_hash)| {
+                cached_hash == hash_content(source) && cached_source == source
+            },
+        )
+    }
+
+    pub fn parse_snapshot_fallback_stale_parser_base_reason() -> &'static str {
+        PARSE_SNAPSHOT_FALLBACK_STALE_PARSER_BASE
     }
 
     pub fn parse_current_context_with_cancellation(

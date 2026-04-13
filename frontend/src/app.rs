@@ -12,6 +12,34 @@ enum BackendMode {
     McpAgent,
 }
 
+fn mcp_snapshot_entry_facts(entry: &SnapshotReadinessDto) -> Vec<String> {
+    let mut facts = vec![format!("exact={}", entry.exact)];
+    if let Some(revision) = entry.analysis_revision {
+        facts.push(format!("analysis_revision={revision}"));
+    }
+    if let Some(revision) = entry.requested_version {
+        facts.push(format!("requested={revision}"));
+    }
+    if let Some(revision) = entry.ready_version {
+        facts.push(format!("ready={revision}"));
+    }
+    facts
+}
+
+fn mcp_snapshot_entry_meta_line(entry: &SnapshotReadinessDto) -> String {
+    let mut parts = vec![format!(
+        "task={} updatedAtMs={}",
+        entry.task_state, entry.updated_at_ms
+    )];
+    if let Some(trigger) = entry.trigger {
+        parts.push(format!("trigger={trigger}"));
+    }
+    if let Some(reason) = entry.fallback_reason.as_ref() {
+        parts.push(format!("fallback={reason}"));
+    }
+    parts.join(" ")
+}
+
 /// Main application component with unified interface
 #[component]
 #[allow(non_snake_case)]
@@ -607,24 +635,23 @@ pub fn App() -> impl IntoView {
                                                                         view! {
                                                                             <div class="space-y-2">
                                                                                 {resp.entries.into_iter().map(|entry| {
-                                                                                    let path = entry.path.unwrap_or_else(|| "<unknown>".to_string());
-                                                                                    let analysis_revision = entry.analysis_revision;
-                                                                                    let requested_version = entry.requested_version;
-                                                                                    let ready_version = entry.ready_version;
+                                                                                    let path = entry
+                                                                                        .path
+                                                                                        .clone()
+                                                                                        .unwrap_or_else(|| "<unknown>".to_string());
+                                                                                    let facts = mcp_snapshot_entry_facts(&entry);
+                                                                                    let meta_line = mcp_snapshot_entry_meta_line(&entry);
                                                                                     view! {
                                                                                         <div class="p-3 rounded border border-bsl-brown-600/15 dark:border-bsl-gray-400/20 text-sm">
                                                                                             <div class="flex flex-wrap items-center gap-2">
                                                                                                 <code class="font-mono text-[11px] select-all">{path}</code>
                                                                                                 <span class="font-semibold">{entry.state.to_string()}</span>
-                                                                                                <span class="opacity-70">{format!("exact={}", entry.exact)}</span>
-                                                                                                {analysis_revision.map(|revision| view! { <span class="opacity-70">{format!("analysis_revision={revision}")}</span> })}
-                                                                                                {requested_version.map(|revision| view! { <span class="opacity-70">{format!("requested={revision}")}</span> })}
-                                                                                                {ready_version.map(|revision| view! { <span class="opacity-70">{format!("ready={revision}")}</span> })}
+                                                                                                {facts.into_iter().map(|fact| {
+                                                                                                    view! { <span class="opacity-70">{fact}</span> }
+                                                                                                }).collect_view()}
                                                                                             </div>
                                                                                             <div class="mt-1 text-xs opacity-70">
-                                                                                                {format!("task={} updatedAtMs={}", entry.task_state, entry.updated_at_ms)}
-                                                                                                {entry.trigger.map(|trigger| format!(" trigger={trigger}")).unwrap_or_default()}
-                                                                                                {entry.fallback_reason.map(|reason| format!(" fallback={reason}")).unwrap_or_default()}
+                                                                                                {meta_line}
                                                                                             </div>
                                                                                         </div>
                                                                                     }
@@ -708,5 +735,90 @@ pub fn App() -> impl IntoView {
                 </div>
             </main>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snapshot_entry(
+        state: SnapshotReadinessStateDto,
+        exact: bool,
+        requested_version: Option<i64>,
+        ready_version: Option<i64>,
+        analysis_revision: Option<u64>,
+        trigger: Option<SnapshotTriggerDto>,
+        fallback_reason: Option<&str>,
+        updated_at_ms: u64,
+    ) -> SnapshotReadinessDto {
+        SnapshotReadinessDto {
+            schema_version: SNAPSHOT_READINESS_SCHEMA_VERSION,
+            uri: None,
+            path: Some("src/CommonModules/Test/Module.bsl".to_string()),
+            session_id: Some("session-1".to_string()),
+            requested_version,
+            ready_version,
+            analysis_revision,
+            state,
+            exact,
+            task_state: SnapshotTaskStateDto::NotApplicable,
+            phase: None,
+            trigger,
+            updated_at_ms,
+            fallback_reason: fallback_reason.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn mcp_snapshot_helpers_distinguish_exact_ready_from_shadow_only() {
+        let ready = snapshot_entry(
+            SnapshotReadinessStateDto::Ready,
+            true,
+            Some(7),
+            Some(7),
+            Some(42),
+            Some(SnapshotTriggerDto::Job),
+            None,
+            100,
+        );
+        let shadow_only = snapshot_entry(
+            SnapshotReadinessStateDto::ShadowOnly,
+            false,
+            Some(8),
+            None,
+            Some(42),
+            Some(SnapshotTriggerDto::DocumentsSet),
+            Some("overlay"),
+            101,
+        );
+
+        assert_eq!(
+            mcp_snapshot_entry_facts(&ready),
+            vec![
+                "exact=true".to_string(),
+                "analysis_revision=42".to_string(),
+                "requested=7".to_string(),
+                "ready=7".to_string(),
+            ]
+        );
+        assert_eq!(
+            mcp_snapshot_entry_meta_line(&ready),
+            "task=not_applicable updatedAtMs=100 trigger=job"
+        );
+
+        assert_eq!(
+            mcp_snapshot_entry_facts(&shadow_only),
+            vec![
+                "exact=false".to_string(),
+                "analysis_revision=42".to_string(),
+                "requested=8".to_string(),
+            ]
+        );
+        assert_eq!(
+            mcp_snapshot_entry_meta_line(&shadow_only),
+            "task=not_applicable updatedAtMs=101 trigger=documents_set fallback=overlay"
+        );
+        assert_ne!(ready.state.to_string(), shadow_only.state.to_string());
     }
 }

@@ -2,8 +2,8 @@ use bsl_agent::http_ui::start_http_ui;
 use bsl_agent::jobs::JobManager;
 use bsl_agent::session::SessionManager;
 use bsl_shared::api::{
-    AnalysisResultDto, McpBackendModeDto, McpJobsResponseDto, McpSessionsResponseDto, McpStatusDto,
-    MetricsDto,
+    AnalysisResultDto, McpBackendModeDto, McpJobsResponseDto, McpSessionsResponseDto,
+    McpSnapshotStatusResponseDto, McpStatusDto, MetricsDto,
 };
 use reqwest::Method;
 use std::net::SocketAddr;
@@ -118,6 +118,7 @@ async fn http_ui_serves_spa_and_readonly_api() {
         "/api/mcp/types",
         "/api/mcp/search?q=Test",
         "/api/mcp/metrics",
+        "/api/mcp/snapshot-status",
     ];
     let methods = [Method::POST, Method::PUT, Method::PATCH, Method::DELETE];
 
@@ -242,12 +243,30 @@ async fn http_ui_parity_endpoints_require_ready_session() {
         .expect("GET /api/mcp/metrics");
     assert_eq!(resp.status().as_u16(), 400);
 
+    let resp = client
+        .get(format!("{}/api/mcp/snapshot-status", handle.ui_url))
+        .send()
+        .await
+        .expect("GET /api/mcp/snapshot-status");
+    assert_eq!(resp.status().as_u16(), 400);
+
+    let resp = client
+        .get(format!(
+            "{}/api/mcp/snapshot-status?sessionId=00000000-0000-0000-0000-000000000000",
+            handle.ui_url
+        ))
+        .send()
+        .await
+        .expect("GET /api/mcp/snapshot-status with sessionId");
+    assert_eq!(resp.status().as_u16(), 400);
+
     // Sanity check: responses are JSON (error object).
     let _error_json: serde_json::Value = resp.json().await.expect("parse error json");
 
-    // Ensure types/search/metrics decode when success (compile-time check of DTOs).
+    // Ensure types/search/metrics/snapshot-status decode when success (compile-time check of DTOs).
     let _ = std::mem::size_of::<AnalysisResultDto>();
     let _ = std::mem::size_of::<MetricsDto>();
+    let _ = std::mem::size_of::<McpSnapshotStatusResponseDto>();
 
     handle.task.abort();
 }

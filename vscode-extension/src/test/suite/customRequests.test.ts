@@ -323,7 +323,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 9,
+                        version: 12,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -371,6 +371,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                 followup_ready_snapshot_task_state: 'in_flight_same_version',
                                 followup_shadow_state_available: false,
                                 followup_wait_reason: 'pending_publish',
+                                followup_blocker_reason: 'post_ready_publish_gate',
                                 followup_runtime_queue_wait_ms: 6,
                                 followup_apply_lag_ms: 21,
                                 followup_wait_for_file_version_ms: 12,
@@ -720,7 +721,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 9);
+        assert.strictEqual(result.response.version, 12);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
@@ -742,6 +743,10 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.response.traces[0].followup_ready_snapshot_task_state, 'in_flight_same_version');
         assert.strictEqual(result.response.traces[0].followup_shadow_state_available, false);
         assert.strictEqual(result.response.traces[0].followup_wait_reason, 'pending_publish');
+        assert.strictEqual(
+            result.response.traces[0].followup_blocker_reason,
+            'post_ready_publish_gate'
+        );
         assert.strictEqual(result.response.traces[0].followup_runtime_queue_wait_ms, 6);
         assert.strictEqual(result.response.traces[0].followup_apply_lag_ms, 21);
     });

@@ -359,7 +359,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -430,7 +430,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -463,6 +463,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_relief_valve_budget_ms: 500,
                         followup_shadow_state_available: false,
                         followup_wait_reason: 'apply_lag',
+                        followup_blocker_reason: 'apply_lag',
                         followup_apply_lag_ms: 1770,
                     },
                 ],
@@ -474,7 +475,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -512,7 +513,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -570,7 +571,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 11,
+                version: 12,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -749,7 +750,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 11);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 12);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -1172,11 +1173,41 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('terminal=in_flight'));
         assert.ok(bundle.summaryMarkdown.includes('followup_publish=pending'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=apply_lag'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_blocker=apply_lag'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_timeout_phase=parse_exec'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_dominant_phase=parse_exec'));
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_relief_valve_outcome=skipped_apply_lag'
+            )
+        );
+    });
+
+    test('v11 diagnostics save timeline should mark blocker attribution as unavailable by design', () => {
+        const timeline = sampleInFlightDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 11;
+        timeline.response.traces[0].followup_blocker_reason = undefined;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose follow-up blocker attribution by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_blocker=unavailable_by_design(version=11)'
             )
         );
     });

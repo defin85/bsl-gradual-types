@@ -6789,6 +6789,291 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
 }
 
 #[tokio::test]
+async fn p26_diagnostics_save_timeline_records_post_ready_publish_gate_separately_from_apply_lag() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p26-post-ready-publish-gate.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(148),
+        diagnostics_generation: 38,
+        save_cycle_sequence: 14,
+        requested_version: 16,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_followup_wait_state(
+        &uri,
+        key,
+        "pending_publish",
+        None,
+        Some(Duration::from_millis(23)),
+        None,
+        None,
+        Some("reused"),
+        Some("ready_artifacts"),
+        Some("snapshot"),
+        Some("snapshot_build"),
+    );
+    server.record_diagnostics_save_timeline_followup_blocker_reason(
+        &uri,
+        key,
+        "post_ready_publish_gate",
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_wait_reason.as_deref(),
+        Some("pending_publish")
+    );
+    assert_eq!(
+        trace.followup_blocker_reason.as_deref(),
+        Some("post_ready_publish_gate")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+    assert_eq!(trace.followup_apply_lag_ms, Some(23));
+}
+
+#[tokio::test]
+async fn p26_diagnostics_save_timeline_relief_valve_does_not_skip_apply_lag_for_late_exact_phase() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p26-relief-apply-lag-late-phase.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(149);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 39,
+        save_cycle_sequence: 15,
+        requested_version: 17,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 17;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server
+        .latest_current_revision_handoff_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, Instant::now() - Duration::from_millis(200));
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control
+        .transition_phase_attribution(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert!(
+        disposition.is_none(),
+        "late exact phase with apply lag should spend bounded relief wait, disposition={disposition:?}"
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_ne!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("skipped_apply_lag")
+    );
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_timed_out"
+        )) > 0,
+        "late exact phase must export engaged_timed_out instead of skipped_apply_lag, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
+async fn p26_diagnostics_save_timeline_keeps_skipped_apply_lag_for_waiting_exact_phase() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p26-relief-apply-lag-waiting-phase.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(150);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 40,
+        save_cycle_sequence: 16,
+        requested_version: 18,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 18;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server
+        .latest_current_revision_handoff_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, Instant::now() - Duration::from_millis(200));
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control
+        .transition_phase_attribution(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert!(
+        disposition.is_none(),
+        "waiting-only exact phase should still skip relief on apply lag, disposition={disposition:?}"
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("skipped_apply_lag")
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_publish() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24-ready-snapshot-relief-archived-trace.bsl").expect("uri");
@@ -7619,6 +7904,339 @@ async fn p8_did_save_followup_reuses_clean_save_fastlane_syntax_artifacts_after_
             .and_then(|value| value.as_u64())
             .is_some_and(|value| value > 0),
         "top-level follow-up trace must surface apply lag fact for operator-facing summary, trace={trace:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p26_did_save_followup_relief_valve_publishes_ready_artifacts_despite_delayed_apply() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const DID_CHANGE_PARSE_DELAY_MS: u64 = 3_600;
+    const APPLY_DELAY_MS: u64 = 4_000;
+    const FIRST_PUBLISH_BUDGET_MS: u64 = 3_500;
+    const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 7_000;
+
+    let _env_lock = lock_test_env().await;
+    let _did_change_parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+        &DID_CHANGE_PARSE_DELAY_MS.to_string(),
+    );
+    let _apply_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS",
+        &APPLY_DELAY_MS.to_string(),
+    );
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let (published_tx, mut published_rx) =
+        tokio::sync::mpsc::unbounded_channel::<PublishDiagnosticsParams>();
+    let drain_task = tokio::spawn(async move {
+        while let Some(req) = socket.next().await {
+            if req.method() != "textDocument/publishDiagnostics" {
+                continue;
+            }
+            let Some(params) = req.params().cloned() else {
+                continue;
+            };
+            let Ok(parsed) = serde_json::from_value::<PublishDiagnosticsParams>(params) else {
+                continue;
+            };
+            let _ = published_tx.send(parsed);
+        }
+    });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///p26_did_save_followup_relief_exact_fixture.bsl").expect("uri");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let task_requested_version = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks.get(&file_id).map(|task| {
+                    task.target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .requested_version
+                })
+            };
+            if task_requested_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must register an in-flight same-version parse snapshot task");
+    while published_rx.try_recv().is_ok() {}
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let first_publish =
+        tokio::time::timeout(Duration::from_millis(FIRST_PUBLISH_BUDGET_MS), async {
+            loop {
+                let params = published_rx
+                    .recv()
+                    .await
+                    .expect("publishDiagnostics channel must stay open");
+                if params.uri == uri && params.version == Some(2) {
+                    break params;
+                }
+            }
+        })
+        .await
+        .expect("didSave must still publish save_fastlane before relief-valve exact wait");
+    assert!(
+        first_publish
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.source.as_deref() == Some("bsl-syntax")),
+        "didSave first publish must remain syntax-only before relief-valve success, diagnostics={:?}",
+        first_publish.diagnostics
+    );
+
+    tokio::time::timeout(Duration::from_millis(FOLLOWUP_PUBLISH_BUDGET_MS), async {
+        loop {
+            let params = published_rx
+                .recv()
+                .await
+                .expect("publishDiagnostics channel must stay open");
+            if params.uri != uri || params.version != Some(2) {
+                continue;
+            }
+            if params
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.source.as_deref() == Some("bsl-analysis-v2"))
+            {
+                break params;
+            }
+        }
+    })
+    .await
+    .expect("relief valve must still let exact ready artifacts publish before delayed apply");
+
+    let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_726, 8).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("diagnostics save timeline traces");
+    let trace = traces
+        .iter()
+        .find(|trace| {
+            trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                && trace
+                    .get("requested_version")
+                    .and_then(|value| value.as_i64())
+                    == Some(2)
+        })
+        .expect("matching diagnostics save timeline trace");
+    let full_publish = trace
+        .get("followup_publish")
+        .and_then(|value| value.as_object())
+        .filter(|publish| {
+            publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+        })
+        .expect("idle_heavy full publish trace");
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_zero_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_relief_valve_outcome")
+            .and_then(|value| value.as_str()),
+        Some("engaged_helped")
+    );
+    assert_eq!(
+        full_publish
+            .get("semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+    assert_eq!(
+        trace
+            .get("followup_semantic_path")
+            .and_then(|value| value.as_str()),
+        Some("ready_artifacts")
+    );
+    assert!(
+        trace
+            .get("followup_wait_reason")
+            .and_then(|value| value.as_str())
+            .is_none(),
+        "published exact follow-up must not leave wait_reason as final blocker, trace={trace:?}"
+    );
+    assert!(
+        trace
+            .get("followup_blocker_reason")
+            .and_then(|value| value.as_str())
+            .is_none(),
+        "published exact follow-up must not leave blocker_reason after publish, trace={trace:?}"
+    );
+    assert!(
+        full_publish
+            .get("wait_for_file_version_ms")
+            .and_then(|value| value.as_u64())
+            .is_none(),
+        "relief-valve exact publish must stay off wait_for_file_version gating, trace={trace:?}"
+    );
+
+    let counters = coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_helped"
+        )) > 0,
+        "relief-valve exact publish must export engaged_helped, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_skipped_apply_lag"
+        )),
+        0,
+        "relief-valve exact publish must no longer regress into skipped_apply_lag on this path, counters={counters:?}"
     );
 
     drain_task.abort();

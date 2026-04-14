@@ -203,6 +203,7 @@ fn finalize_diagnostics_save_timeline_trace_for_terminal_outcome(
         trace.idle_heavy_outcome = Some(terminal_outcome.clone());
     }
     trace.followup_wait_reason = None;
+    trace.followup_blocker_reason = None;
     trace.followup_wait_for_file_version_ms = None;
     trace.followup_snapshot_with_deps_ms = None;
     trace.terminal_outcome = Some(terminal_outcome);
@@ -212,6 +213,7 @@ fn clear_diagnostics_save_timeline_followup_wait_inner(
     trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
 ) {
     trace.followup_wait_reason = None;
+    trace.followup_blocker_reason = None;
     trace.followup_wait_for_file_version_ms = None;
     trace.followup_snapshot_with_deps_ms = None;
 }
@@ -827,6 +829,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
+                followup_blocker_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
@@ -887,6 +890,7 @@ impl BslLanguageServer {
                     followup_ready_snapshot_relief_valve_elapsed_ms: None,
                     followup_shadow_state_available: None,
                     followup_wait_reason: None,
+                    followup_blocker_reason: None,
                     followup_runtime_queue_wait_ms: None,
                     followup_apply_lag_ms: None,
                     followup_wait_for_file_version_ms: None,
@@ -1030,6 +1034,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
+                followup_blocker_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
@@ -1117,6 +1122,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
+                followup_blocker_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
@@ -1185,6 +1191,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
+                followup_blocker_reason: None,
                 followup_runtime_queue_wait_ms: None,
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
@@ -1217,6 +1224,67 @@ impl BslLanguageServer {
             wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
         trace.followup_snapshot_with_deps_ms =
             snapshot_with_deps_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_blocker_reason(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        reason: &'static str,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_shadow_state_available: None,
+                followup_wait_reason: None,
+                followup_blocker_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+        trace.followup_blocker_reason = Some(reason.to_string());
     }
 
     pub(crate) fn diagnostics_save_timeline_fastlane_progress(

@@ -1895,6 +1895,7 @@ mod tests {
             followup_ready_snapshot_relief_valve_elapsed_ms: Some(500),
             followup_shadow_state_available: Some(false),
             followup_wait_reason: None,
+            followup_blocker_reason: None,
             followup_runtime_queue_wait_ms: None,
             followup_apply_lag_ms: None,
             followup_wait_for_file_version_ms: None,

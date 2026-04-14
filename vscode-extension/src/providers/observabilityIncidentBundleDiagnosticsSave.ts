@@ -38,6 +38,8 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_ready_snapshot_phase_attribution_note?: string;
     followup_ready_snapshot_relief_valve_note?: string;
     followup_wait_reason?: string;
+    followup_blocker_reason?: string;
+    followup_blocker_note?: string;
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;
     followup_wait_for_file_version_ms?: number;
@@ -78,6 +80,10 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline.response.version < 11
             ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
             : undefined;
+    const blockerNote =
+        diagnosticsSaveTimeline.response.version < 12
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
     const gaps: string[] = [];
     if (diagnosticsSaveTimeline.response.version < 8) {
         gaps.push(
@@ -97,6 +103,11 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
     if (diagnosticsSaveTimeline.response.version < 11) {
         gaps.push(
             `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot relief-valve attribution by design.`
+        );
+    }
+    if (diagnosticsSaveTimeline.response.version < 12) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose follow-up blocker attribution by design.`
         );
     }
 
@@ -149,6 +160,8 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_ready_snapshot_relief_valve_note:
                 readySnapshotReliefValveNote,
             followup_wait_reason: trace.followup_wait_reason,
+            followup_blocker_reason: trace.followup_blocker_reason,
+            followup_blocker_note: blockerNote,
             followup_runtime_queue_wait_ms: trace.followup_runtime_queue_wait_ms,
             followup_apply_lag_ms: trace.followup_apply_lag_ms,
             followup_wait_for_file_version_ms: trace.followup_wait_for_file_version_ms,
@@ -232,6 +245,8 @@ function formatPublishWithLifecycle(
 function formatFollowupWait(
     syntaxWorkMode: string | undefined,
     reason: string | undefined,
+    blockerReason: string | undefined,
+    blockerNote: string | undefined,
     runtimeQueueWaitMs: number | undefined,
     applyLagMs: number | undefined,
     waitForFileVersionMs: number | undefined,
@@ -239,6 +254,8 @@ function formatFollowupWait(
 ): string | undefined {
     if (
         !reason
+        && !blockerReason
+        && !blockerNote
         && !syntaxWorkMode
         && !isPositiveTimingValue(runtimeQueueWaitMs)
         && !isPositiveTimingValue(applyLagMs)
@@ -254,6 +271,12 @@ function formatFollowupWait(
     }
     if (reason) {
         parts.push(`followup_wait=${reason}`);
+    }
+    if (blockerNote) {
+        parts.push(`followup_blocker=${blockerNote}`);
+    }
+    if (blockerReason) {
+        parts.push(`followup_blocker=${blockerReason}`);
     }
     if (isPositiveTimingValue(runtimeQueueWaitMs)) {
         parts.push(`followup_runtime_queue_wait_ms=${runtimeQueueWaitMs}`);
@@ -462,6 +485,8 @@ export function renderDiagnosticsSaveSummaryLines(
         formatFollowupWait(
             request.followup_syntax_work_mode,
             request.followup_wait_reason,
+            request.followup_blocker_reason,
+            request.followup_blocker_note,
             request.followup_runtime_queue_wait_ms,
             request.followup_apply_lag_ms,
             request.followup_wait_for_file_version_ms,

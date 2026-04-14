@@ -1295,6 +1295,20 @@ impl BslLanguageServer {
         );
     }
 
+    fn record_diagnostics_save_followup_blocker_reason_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        reason: &'static str,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_blocker_reason(uri, cycle_key, reason);
+    }
+
     fn record_diagnostics_save_followup_probe_state_v2(
         &self,
         uri: &Url,
@@ -1773,6 +1787,13 @@ impl BslLanguageServer {
             reply.semantic_parse_source,
             reply.semantic_ir_source,
         );
+        if reply.apply_lag.is_some() {
+            self.record_diagnostics_save_followup_blocker_reason_v2(
+                uri,
+                supersession_key,
+                "post_ready_publish_gate",
+            );
+        }
         if let Some(guard) = followup_lane_guard {
             guard.release();
         }
@@ -2261,15 +2282,21 @@ impl BslLanguageServer {
             Some(ReadySnapshotReliefValveOutcomeV2::SkippedNotExactStillCurrent)
         } else if followup_admission_queue_wait_elapsed.is_some() {
             Some(ReadySnapshotReliefValveOutcomeV2::SkippedRuntimeQueueWait)
-        } else if apply_lag.is_some() {
-            Some(ReadySnapshotReliefValveOutcomeV2::SkippedApplyLag)
         } else {
             match phase_attribution {
                 Some(attribution) if attribution.has_late_exact_timeout_phase() => None,
-                Some(attribution) if attribution.timeout_phase == Some("waiting") => {
-                    Some(ReadySnapshotReliefValveOutcomeV2::SkippedTimeoutPhaseWaiting)
-                }
-                _ => Some(ReadySnapshotReliefValveOutcomeV2::SkippedTimeoutPhaseUnavailable),
+                Some(attribution) if attribution.timeout_phase == Some("waiting") => apply_lag
+                    .is_some()
+                    .then_some(ReadySnapshotReliefValveOutcomeV2::SkippedApplyLag)
+                    .or(Some(
+                        ReadySnapshotReliefValveOutcomeV2::SkippedTimeoutPhaseWaiting,
+                    )),
+                _ => apply_lag
+                    .is_some()
+                    .then_some(ReadySnapshotReliefValveOutcomeV2::SkippedApplyLag)
+                    .or(Some(
+                        ReadySnapshotReliefValveOutcomeV2::SkippedTimeoutPhaseUnavailable,
+                    )),
             }
         };
         if let Some(outcome) = skip_outcome {
@@ -3115,6 +3142,13 @@ impl BslLanguageServer {
             let apply_lag = self
                 .diagnostics_followup_apply_lag_v2(&supersession_key)
                 .await;
+            if wait_reason == "apply_lag" {
+                self.record_diagnostics_save_followup_blocker_reason_v2(
+                    uri,
+                    &supersession_key,
+                    "apply_lag",
+                );
+            }
             self.record_diagnostics_save_followup_wait_state_v2(
                 uri,
                 &supersession_key,

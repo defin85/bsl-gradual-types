@@ -573,6 +573,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_wait_reason: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_blocker_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_runtime_queue_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_apply_lag_ms: Option<u64>,

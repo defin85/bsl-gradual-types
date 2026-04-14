@@ -937,6 +937,7 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_ready_snapshot_relief_valve_elapsed_ms?: number;
     followup_shadow_state_available?: boolean;
     followup_wait_reason?: 'apply_lag' | 'runtime_queue_wait' | 'semantic_work' | 'pending_publish' | 'superseded';
+    followup_blocker_reason?: 'apply_lag' | 'post_ready_publish_gate';
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;
     followup_wait_for_file_version_ms?: number;

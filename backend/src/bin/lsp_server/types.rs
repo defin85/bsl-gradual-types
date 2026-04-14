@@ -135,6 +135,18 @@ pub struct DidChangeParseSnapshotEvidenceTrace {
     pub changed_ranges_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parser_base_root_cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_document_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_ready_document_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matching_ready_snapshot_for_shadow_state: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_snapshot_prime_attempted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tree_cache_matches_shadow_text_after_prime: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -534,6 +546,28 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_ready_snapshot_wait_probe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_task_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_timeout_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_timeout_phase_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_post_parse_pre_materialization_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_ready_install_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_document_symbol_side_work_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_dominant_phase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_dominant_phase_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_relief_valve_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_relief_valve_budget_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_relief_valve_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_shadow_state_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

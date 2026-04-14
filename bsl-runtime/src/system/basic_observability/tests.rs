@@ -3428,6 +3428,18 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
         "did_change",
         Duration::from_millis(77),
     );
+    observability.record_intellisense_v2_ready_parse_snapshot_phase_latency(
+        "lsp",
+        "did_change",
+        "parse_exec",
+        Duration::from_millis(33),
+    );
+    observability.record_intellisense_v2_ready_parse_snapshot_phase_latency(
+        "lsp",
+        "did_change",
+        "document_symbol_side_work",
+        Duration::from_millis(19),
+    );
     observability.record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
         "zero_budget",
         "not_ready",
@@ -3438,8 +3450,17 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
         "timeout",
         Duration::from_millis(3500),
     );
+    observability.record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
+        "relief_valve",
+        "ready",
+        Duration::from_millis(321),
+    );
     observability.record_intellisense_v2_diagnostics_save_followup_wait_state("apply_lag");
     observability.record_intellisense_v2_diagnostics_save_followup_semantic_path("shadow_state");
+    observability.record_intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve(
+        "engaged_helped",
+        Duration::from_millis(321),
+    );
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -3501,6 +3522,21 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
     assert_eq!(
         counter_value(
             counters,
+            "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_change_phase_parse_exec"
+        ),
+        1,
+        "ready parse snapshot phase counter must be exported per source/phase"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_ready_parse_snapshot_phase_ms_origin_lsp_source_did_change_phase_document_symbol_side_work"
+        ) > 0,
+        "document-symbol side-work phase histogram must be exported separately from ready install"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready"
         ),
         1,
@@ -3527,6 +3563,36 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout"
         ) > 0,
         "bounded-wait probe timeout latency histogram must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_relief_valve_outcome_ready"
+        ),
+        1,
+        "relief-valve probe ready counter must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_relief_valve_outcome_ready"
+        ) > 0,
+        "relief-valve probe latency histogram must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_helped"
+        ),
+        1,
+        "relief-valve outcome counter must be exported"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_ms_outcome_engaged_helped"
+        ) > 0,
+        "relief-valve outcome histogram must be exported"
     );
     assert_eq!(
         counter_value(

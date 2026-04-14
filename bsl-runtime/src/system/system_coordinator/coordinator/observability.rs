@@ -157,6 +157,19 @@ impl SystemCoordinator {
             .record_intellisense_v2_ready_parse_snapshot_materialization(origin, source, duration);
     }
 
+    pub fn record_intellisense_v2_ready_parse_snapshot_phase_latency(
+        &self,
+        origin: &str,
+        source: &str,
+        phase: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_ready_parse_snapshot_phase_latency(
+                origin, source, phase, duration,
+            );
+    }
+
     pub fn record_intellisense_v2_ready_parse_snapshot_worker_started(
         &self,
         origin: &str,
@@ -199,6 +212,17 @@ impl SystemCoordinator {
     pub fn record_intellisense_v2_diagnostics_save_followup_wait_state(&self, reason: &str) {
         self.observability
             .record_intellisense_v2_diagnostics_save_followup_wait_state(reason);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve(
+        &self,
+        outcome: &str,
+        duration: std::time::Duration,
+    ) {
+        self.observability
+            .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve(
+                outcome, duration,
+            );
     }
 
     pub fn record_intellisense_v2_completion_head_to_exact_upgrade(

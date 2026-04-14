@@ -1,0 +1,20 @@
+{
+  "change_id": "refactor-23-ready-snapshot-materialization-phase-attribution",
+  "diagnostics_generation": 3,
+  "did_change_blocking_parse_delay_ms": 500,
+  "followup_publish_elapsed_ms": 1605,
+  "followup_ready_snapshot_document_symbol_side_work_ms": 30,
+  "followup_ready_snapshot_dominant_phase": "parse_exec",
+  "followup_ready_snapshot_dominant_phase_ms": 46342,
+  "followup_ready_snapshot_parse_exec_ms": 46342,
+  "followup_ready_snapshot_post_parse_pre_materialization_ms": null,
+  "followup_ready_snapshot_ready_install_ms": 1,
+  "followup_ready_snapshot_timeout_phase": null,
+  "followup_ready_snapshot_wait_probe": null,
+  "followup_ready_snapshot_zero_probe": "ready",
+  "followup_semantic_path": "ready_artifacts",
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "profile": "p50_real_conf_big_ready_snapshot_phase_report_live",
+  "save_cycle_sequence": 1,
+  "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+}

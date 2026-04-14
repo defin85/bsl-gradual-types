@@ -143,6 +143,22 @@ fn remember_diagnostics_save_timeline_terminal_key_inner(
     }
 }
 
+fn diagnostics_save_timeline_trace_mut_inner<'a>(
+    store: &'a mut super::DiagnosticsSaveTimelineStore,
+    uri: &Url,
+    key: super::DiagnosticsSaveTimelineCycleKey,
+) -> Option<&'a mut crate::types::DiagnosticsSaveTimelineTrace> {
+    if let Some(trace) = store.active_cycles.get_mut(&key) {
+        return Some(trace);
+    }
+    store.traces.iter_mut().rev().find(|trace| {
+        trace.uri == uri.as_str()
+            && trace.requested_version == key.requested_version
+            && trace.diagnostics_generation == key.diagnostics_generation
+            && trace.save_cycle_sequence == key.save_cycle_sequence
+    })
+}
+
 fn snapshot_diagnostics_save_timeline_traces_inner(
     store: &super::DiagnosticsSaveTimelineStore,
     limit: usize,
@@ -210,6 +226,61 @@ fn update_followup_timing_max(slot: &mut Option<u64>, candidate: Option<u64>) {
         return;
     };
     *slot = Some(slot.unwrap_or(0).max(candidate));
+}
+
+fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    attribution: diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2,
+) {
+    if trace.followup_ready_snapshot_timeout_phase.is_none() {
+        trace.followup_ready_snapshot_timeout_phase =
+            attribution.timeout_phase.map(|value| value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_timeout_phase_elapsed_ms,
+        attribution.timeout_phase_elapsed_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_ms,
+        attribution.parse_exec_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_post_parse_pre_materialization_ms,
+        attribution.post_parse_pre_materialization_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_ready_install_ms,
+        attribution.ready_install_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_document_symbol_side_work_ms,
+        attribution.document_symbol_side_work_ms,
+    );
+    match (
+        trace.followup_ready_snapshot_dominant_phase_ms,
+        attribution.dominant_phase_ms,
+    ) {
+        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
+        (_, Some(candidate_ms)) => {
+            trace.followup_ready_snapshot_dominant_phase =
+                attribution.dominant_phase.map(|value| value.to_string());
+            trace.followup_ready_snapshot_dominant_phase_ms = Some(candidate_ms);
+        }
+        _ => {}
+    }
+}
+
+fn set_diagnostics_save_timeline_followup_relief_valve_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    outcome: &'static str,
+    budget: Duration,
+    elapsed: Option<Duration>,
+) {
+    trace.followup_ready_snapshot_relief_valve_outcome = Some(outcome.to_string());
+    trace.followup_ready_snapshot_relief_valve_budget_ms =
+        Some(budget.as_millis().min(u64::MAX as u128) as u64);
+    trace.followup_ready_snapshot_relief_valve_elapsed_ms =
+        elapsed.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -743,6 +814,17 @@ impl BslLanguageServer {
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
@@ -792,6 +874,17 @@ impl BslLanguageServer {
                     followup_ready_snapshot_zero_probe: None,
                     followup_ready_snapshot_wait_probe: None,
                     followup_ready_snapshot_task_state: None,
+                    followup_ready_snapshot_timeout_phase: None,
+                    followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                    followup_ready_snapshot_parse_exec_ms: None,
+                    followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                    followup_ready_snapshot_ready_install_ms: None,
+                    followup_ready_snapshot_document_symbol_side_work_ms: None,
+                    followup_ready_snapshot_dominant_phase: None,
+                    followup_ready_snapshot_dominant_phase_ms: None,
+                    followup_ready_snapshot_relief_valve_outcome: None,
+                    followup_ready_snapshot_relief_valve_budget_ms: None,
+                    followup_ready_snapshot_relief_valve_elapsed_ms: None,
                     followup_shadow_state_available: None,
                     followup_wait_reason: None,
                     followup_runtime_queue_wait_ms: None,
@@ -889,6 +982,9 @@ impl BslLanguageServer {
         ready_snapshot_wait_probe: Option<&'static str>,
         ready_snapshot_task_state: Option<&'static str>,
         shadow_state_available: Option<bool>,
+        ready_snapshot_phase_attribution: Option<
+            diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2,
+        >,
     ) {
         let mut store = self
             .diagnostics_save_timeline_store
@@ -921,6 +1017,17 @@ impl BslLanguageServer {
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
@@ -944,6 +1051,80 @@ impl BslLanguageServer {
         if trace.followup_shadow_state_available.is_none() {
             trace.followup_shadow_state_available = shadow_state_available;
         }
+        if let Some(attribution) = ready_snapshot_phase_attribution {
+            merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
+                trace,
+                attribution,
+            );
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_relief_valve(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        outcome: &'static str,
+        budget: Duration,
+        elapsed: Option<Duration>,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) {
+            set_diagnostics_save_timeline_followup_relief_valve_inner(
+                trace, outcome, budget, elapsed,
+            );
+            return;
+        }
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_shadow_state_available: None,
+                followup_wait_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+        set_diagnostics_save_timeline_followup_relief_valve_inner(trace, outcome, budget, elapsed);
     }
 
     pub(crate) fn record_diagnostics_save_timeline_followup_wait_state(
@@ -991,6 +1172,17 @@ impl BslLanguageServer {
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_runtime_queue_wait_ms: None,
@@ -1089,6 +1281,7 @@ impl BslLanguageServer {
         base_document_version: Option<i32>,
         changed_ranges_count: usize,
         fallback_reason: Option<&str>,
+        attribution: &super::DidChangeParseSnapshotAttributionV2,
     ) {
         let mut store = self
             .did_change_parse_snapshot_evidence_store
@@ -1114,6 +1307,30 @@ impl BslLanguageServer {
                 base_document_version,
                 changed_ranges_count,
                 fallback_reason: fallback_reason.map(str::to_string),
+                parser_base_root_cause: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .map(|state| state.root_cause.to_string()),
+                shadow_document_version: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .map(|state| state.shadow_document_version),
+                latest_ready_document_version: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .and_then(|state| state.latest_ready_document_version),
+                matching_ready_snapshot_for_shadow_state: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .map(|state| state.matching_ready_snapshot_for_shadow_state),
+                ready_snapshot_prime_attempted: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .map(|state| state.ready_snapshot_prime_attempted),
+                tree_cache_matches_shadow_text_after_prime: attribution
+                    .stale_parser_base
+                    .as_ref()
+                    .and_then(|state| state.tree_cache_matches_shadow_text_after_prime),
             },
         );
         while store.order.len() > super::DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES {

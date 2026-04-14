@@ -22,8 +22,21 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_ready_snapshot_zero_probe?: string;
     followup_ready_snapshot_wait_probe?: string;
     followup_ready_snapshot_task_state?: string;
+    followup_ready_snapshot_timeout_phase?: string;
+    followup_ready_snapshot_timeout_phase_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_ms?: number;
+    followup_ready_snapshot_post_parse_pre_materialization_ms?: number;
+    followup_ready_snapshot_ready_install_ms?: number;
+    followup_ready_snapshot_document_symbol_side_work_ms?: number;
+    followup_ready_snapshot_dominant_phase?: string;
+    followup_ready_snapshot_dominant_phase_ms?: number;
+    followup_ready_snapshot_relief_valve_outcome?: string;
+    followup_ready_snapshot_relief_valve_budget_ms?: number;
+    followup_ready_snapshot_relief_valve_elapsed_ms?: number;
     followup_shadow_state_available?: boolean;
     followup_ready_snapshot_attribution_note?: string;
+    followup_ready_snapshot_phase_attribution_note?: string;
+    followup_ready_snapshot_relief_valve_note?: string;
     followup_wait_reason?: string;
     followup_runtime_queue_wait_ms?: number;
     followup_apply_lag_ms?: number;
@@ -57,6 +70,14 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline.response.version < 9
             ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
             : undefined;
+    const readySnapshotPhaseAttributionNote =
+        diagnosticsSaveTimeline.response.version < 10
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
+    const readySnapshotReliefValveNote =
+        diagnosticsSaveTimeline.response.version < 11
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
     const gaps: string[] = [];
     if (diagnosticsSaveTimeline.response.version < 8) {
         gaps.push(
@@ -66,6 +87,16 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
     if (diagnosticsSaveTimeline.response.version < 9) {
         gaps.push(
             `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot miss attribution by design.`
+        );
+    }
+    if (diagnosticsSaveTimeline.response.version < 10) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot phase attribution by design.`
+        );
+    }
+    if (diagnosticsSaveTimeline.response.version < 11) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot relief-valve attribution by design.`
         );
     }
 
@@ -90,8 +121,33 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_ready_snapshot_zero_probe: trace.followup_ready_snapshot_zero_probe,
             followup_ready_snapshot_wait_probe: trace.followup_ready_snapshot_wait_probe,
             followup_ready_snapshot_task_state: trace.followup_ready_snapshot_task_state,
+            followup_ready_snapshot_timeout_phase: trace.followup_ready_snapshot_timeout_phase,
+            followup_ready_snapshot_timeout_phase_elapsed_ms:
+                trace.followup_ready_snapshot_timeout_phase_elapsed_ms,
+            followup_ready_snapshot_parse_exec_ms:
+                trace.followup_ready_snapshot_parse_exec_ms,
+            followup_ready_snapshot_post_parse_pre_materialization_ms:
+                trace.followup_ready_snapshot_post_parse_pre_materialization_ms,
+            followup_ready_snapshot_ready_install_ms:
+                trace.followup_ready_snapshot_ready_install_ms,
+            followup_ready_snapshot_document_symbol_side_work_ms:
+                trace.followup_ready_snapshot_document_symbol_side_work_ms,
+            followup_ready_snapshot_dominant_phase:
+                trace.followup_ready_snapshot_dominant_phase,
+            followup_ready_snapshot_dominant_phase_ms:
+                trace.followup_ready_snapshot_dominant_phase_ms,
+            followup_ready_snapshot_relief_valve_outcome:
+                trace.followup_ready_snapshot_relief_valve_outcome,
+            followup_ready_snapshot_relief_valve_budget_ms:
+                trace.followup_ready_snapshot_relief_valve_budget_ms,
+            followup_ready_snapshot_relief_valve_elapsed_ms:
+                trace.followup_ready_snapshot_relief_valve_elapsed_ms,
             followup_shadow_state_available: trace.followup_shadow_state_available,
             followup_ready_snapshot_attribution_note: readySnapshotAttributionNote,
+            followup_ready_snapshot_phase_attribution_note:
+                readySnapshotPhaseAttributionNote,
+            followup_ready_snapshot_relief_valve_note:
+                readySnapshotReliefValveNote,
             followup_wait_reason: trace.followup_wait_reason,
             followup_runtime_queue_wait_ms: trace.followup_runtime_queue_wait_ms,
             followup_apply_lag_ms: trace.followup_apply_lag_ms,
@@ -275,6 +331,93 @@ function formatFollowupReadySnapshotAttribution(
     return parts.join(' | ');
 }
 
+function formatFollowupReadySnapshotPhases(
+    attributionNote: string | undefined,
+    timeoutPhase: string | undefined,
+    timeoutPhaseElapsedMs: number | undefined,
+    parseExecMs: number | undefined,
+    postParsePreMaterializationMs: number | undefined,
+    readyInstallMs: number | undefined,
+    documentSymbolSideWorkMs: number | undefined,
+    dominantPhase: string | undefined,
+    dominantPhaseMs: number | undefined
+): string | undefined {
+    if (attributionNote) {
+        return `followup_ready_snapshot_phase_attribution=${attributionNote}`;
+    }
+    if (
+        !timeoutPhase
+        && !isPositiveTimingValue(timeoutPhaseElapsedMs)
+        && !isPositiveTimingValue(parseExecMs)
+        && !isPositiveTimingValue(postParsePreMaterializationMs)
+        && !isPositiveTimingValue(readyInstallMs)
+        && !isPositiveTimingValue(documentSymbolSideWorkMs)
+        && !dominantPhase
+        && !isPositiveTimingValue(dominantPhaseMs)
+    ) {
+        return undefined;
+    }
+
+    const parts: string[] = [];
+    if (timeoutPhase) {
+        parts.push(`followup_ready_snapshot_timeout_phase=${timeoutPhase}`);
+    }
+    if (isPositiveTimingValue(timeoutPhaseElapsedMs)) {
+        parts.push(
+            `followup_ready_snapshot_timeout_phase_elapsed_ms=${timeoutPhaseElapsedMs}`
+        );
+    }
+    if (isPositiveTimingValue(parseExecMs)) {
+        parts.push(`followup_ready_snapshot_parse_exec_ms=${parseExecMs}`);
+    }
+    if (isPositiveTimingValue(postParsePreMaterializationMs)) {
+        parts.push(
+            `followup_ready_snapshot_post_parse_pre_materialization_ms=${postParsePreMaterializationMs}`
+        );
+    }
+    if (isPositiveTimingValue(readyInstallMs)) {
+        parts.push(`followup_ready_snapshot_ready_install_ms=${readyInstallMs}`);
+    }
+    if (isPositiveTimingValue(documentSymbolSideWorkMs)) {
+        parts.push(
+            `followup_ready_snapshot_document_symbol_side_work_ms=${documentSymbolSideWorkMs}`
+        );
+    }
+    if (dominantPhase) {
+        parts.push(`followup_ready_snapshot_dominant_phase=${dominantPhase}`);
+    }
+    if (isPositiveTimingValue(dominantPhaseMs)) {
+        parts.push(`followup_ready_snapshot_dominant_phase_ms=${dominantPhaseMs}`);
+    }
+    return parts.join(' | ');
+}
+
+function formatFollowupReadySnapshotReliefValve(
+    note: string | undefined,
+    outcome: string | undefined,
+    budgetMs: number | undefined,
+    elapsedMs: number | undefined
+): string | undefined {
+    if (note) {
+        return `followup_ready_snapshot_relief_valve=${note}`;
+    }
+    if (!outcome && !isPositiveTimingValue(budgetMs) && !isPositiveTimingValue(elapsedMs)) {
+        return undefined;
+    }
+
+    const parts: string[] = [];
+    if (outcome) {
+        parts.push(`followup_ready_snapshot_relief_valve_outcome=${outcome}`);
+    }
+    if (isPositiveTimingValue(budgetMs)) {
+        parts.push(`followup_ready_snapshot_relief_valve_budget_ms=${budgetMs}`);
+    }
+    if (isPositiveTimingValue(elapsedMs)) {
+        parts.push(`followup_ready_snapshot_relief_valve_elapsed_ms=${elapsedMs}`);
+    }
+    return parts.join(' | ');
+}
+
 export function renderDiagnosticsSaveSummaryLines(
     section: ObservabilityIncidentDiagnosticsSaveSection
 ): string[] {
@@ -298,6 +441,23 @@ export function renderDiagnosticsSaveSummaryLines(
             request.followup_ready_snapshot_wait_probe,
             request.followup_ready_snapshot_task_state,
             request.followup_shadow_state_available
+        ),
+        formatFollowupReadySnapshotPhases(
+            request.followup_ready_snapshot_phase_attribution_note,
+            request.followup_ready_snapshot_timeout_phase,
+            request.followup_ready_snapshot_timeout_phase_elapsed_ms,
+            request.followup_ready_snapshot_parse_exec_ms,
+            request.followup_ready_snapshot_post_parse_pre_materialization_ms,
+            request.followup_ready_snapshot_ready_install_ms,
+            request.followup_ready_snapshot_document_symbol_side_work_ms,
+            request.followup_ready_snapshot_dominant_phase,
+            request.followup_ready_snapshot_dominant_phase_ms
+        ),
+        formatFollowupReadySnapshotReliefValve(
+            request.followup_ready_snapshot_relief_valve_note,
+            request.followup_ready_snapshot_relief_valve_outcome,
+            request.followup_ready_snapshot_relief_valve_budget_ms,
+            request.followup_ready_snapshot_relief_valve_elapsed_ms
         ),
         formatFollowupWait(
             request.followup_syntax_work_mode,

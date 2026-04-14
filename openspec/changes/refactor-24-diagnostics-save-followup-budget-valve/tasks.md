@@ -1,23 +1,23 @@
 ## 1. Temporary valve contract
 
-- [ ] 1.1 Add a strictly bounded temporary relief window for `didSave` heavy follow-up only when
+- [x] 1.1 Add a strictly bounded temporary relief window for `didSave` heavy follow-up only when
       runtime can prove it is waiting on an exact still-current producer.
-- [ ] 1.2 Gate the valve off for queue/apply-lag cases, coalesced-away producers, and other
+- [x] 1.2 Gate the valve off for queue/apply-lag cases, coalesced-away producers, and other
       non-exact fallback paths.
-- [ ] 1.3 Export explicit observability for valve engaged / skipped / ineffective outcomes.
+- [x] 1.3 Export explicit observability for valve engaged / skipped / ineffective outcomes.
 
 ## 2. Regressions and evidence
 
-- [ ] 2.1 Add backend regressions proving the valve helps only the exact-path late-materialization
+- [x] 2.1 Add backend regressions proving the valve helps only the exact-path late-materialization
       case and does not mask queue/apply-lag or retargeted-away cases.
-- [ ] 2.2 Capture repo-local evidence comparing base-budget vs temporary-valve outcomes on the same
+- [x] 2.2 Capture repo-local evidence comparing base-budget vs temporary-valve outcomes on the same
       real save cycle profile.
-- [ ] 2.3 Document a sunset condition for removing or disabling the valve once the root cause is
+- [x] 2.3 Document a sunset condition for removing or disabling the valve once the root cause is
       fixed.
 
 ## 3. Validation
 
-- [ ] 3.1 Run targeted backend tests for valve gating, timeout attribution, and bundle export.
+- [x] 3.1 Run targeted backend tests for valve gating, timeout attribution, and bundle export.
 - [x] 3.2 Run `openspec validate refactor-24-diagnostics-save-followup-budget-valve --strict --no-interactive`.
 
 ## 4. OpenSpec / Beads Sync

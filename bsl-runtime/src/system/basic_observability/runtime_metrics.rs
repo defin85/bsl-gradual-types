@@ -21,10 +21,21 @@ fn normalize_ready_parse_snapshot_worker_termination_reason_label(reason: &str) 
     }
 }
 
+fn normalize_ready_parse_snapshot_phase_label(phase: &str) -> &'static str {
+    match phase {
+        "parse_exec" => "parse_exec",
+        "post_parse_pre_materialization" => "post_parse_pre_materialization",
+        "ready_install" => "ready_install",
+        "document_symbol_side_work" => "document_symbol_side_work",
+        _ => "other",
+    }
+}
+
 fn normalize_diagnostics_save_followup_probe_slot_label(slot: &str) -> &'static str {
     match slot {
         "zero_budget" => "zero_budget",
         "bounded_wait" => "bounded_wait",
+        "relief_valve" => "relief_valve",
         _ => "other",
     }
 }
@@ -57,6 +68,23 @@ fn normalize_diagnostics_save_followup_wait_reason_label(reason: &str) -> &'stat
         "runtime_queue_wait" => "runtime_queue_wait",
         "semantic_work" => "semantic_work",
         "apply_lag" => "apply_lag",
+        _ => "other",
+    }
+}
+
+fn normalize_diagnostics_save_followup_relief_valve_outcome_label(outcome: &str) -> &'static str {
+    match outcome {
+        "engaged_helped" => "engaged_helped",
+        "engaged_timed_out" => "engaged_timed_out",
+        "engaged_version_mismatch" => "engaged_version_mismatch",
+        "engaged_generation_mismatch" => "engaged_generation_mismatch",
+        "engaged_cancelled" => "engaged_cancelled",
+        "engaged_superseded" => "engaged_superseded",
+        "skipped_not_exact_still_current" => "skipped_not_exact_still_current",
+        "skipped_runtime_queue_wait" => "skipped_runtime_queue_wait",
+        "skipped_apply_lag" => "skipped_apply_lag",
+        "skipped_timeout_phase_unavailable" => "skipped_timeout_phase_unavailable",
+        "skipped_timeout_phase_waiting" => "skipped_timeout_phase_waiting",
         _ => "other",
     }
 }
@@ -120,6 +148,27 @@ impl BasicObservability {
         );
         let histogram_key = format!(
             "intellisense_v2_ready_parse_snapshot_materialization_ms_origin_{origin}_source_{source}"
+        );
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_ready_parse_snapshot_phase_latency(
+        &self,
+        origin: &str,
+        source: &str,
+        phase: &str,
+        duration: Duration,
+    ) {
+        let origin = normalize_observability_origin_label(origin);
+        let source = normalize_ready_parse_snapshot_source_label(source);
+        let phase = normalize_ready_parse_snapshot_phase_label(phase);
+        let counter_key = format!(
+            "intellisense_v2_ready_parse_snapshot_phase_total_origin_{origin}_source_{source}_phase_{phase}"
+        );
+        let histogram_key = format!(
+            "intellisense_v2_ready_parse_snapshot_phase_ms_origin_{origin}_source_{source}_phase_{phase}"
         );
         self.metrics.increment(&counter_key);
         self.metrics
@@ -190,6 +239,23 @@ impl BasicObservability {
         let key =
             format!("intellisense_v2_diagnostics_save_followup_wait_state_total_reason_{reason}");
         self.metrics.increment(&key);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve(
+        &self,
+        outcome: &str,
+        duration: Duration,
+    ) {
+        let outcome = normalize_diagnostics_save_followup_relief_valve_outcome_label(outcome);
+        let counter_key = format!(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_{outcome}"
+        );
+        let histogram_key = format!(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_ms_outcome_{outcome}"
+        );
+        self.metrics.increment(&counter_key);
+        self.metrics
+            .observe_histogram(&histogram_key, duration.as_millis() as f64);
     }
 
     pub fn record_intellisense_v2_completion_exact_type_index_wait_outcome(&self, reason: &str) {

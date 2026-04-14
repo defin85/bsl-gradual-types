@@ -1,9 +1,9 @@
 use super::super::{
-    DidChangeParseSnapshotAttributionV2, DocumentShadowStateV2, ParseSnapshotAsyncDelayMode,
-    ReadyParseSnapshotStateV2,
+    DidChangeParseSnapshotAttributionV2, DidChangeStaleParserBaseAttributionV2,
+    DocumentShadowStateV2, ParseSnapshotAsyncDelayMode, ReadyParseSnapshotStateV2,
 };
 use super::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -210,6 +210,57 @@ fn parse_snapshot_apply_debounce_duration() -> Duration {
     Duration::from_millis(25)
 }
 
+#[derive(Debug, Clone)]
+struct ShadowStateParserBaseInspectionV2 {
+    forced_full_parse_reason: Option<&'static str>,
+    stale_parser_base: Option<DidChangeStaleParserBaseAttributionV2>,
+}
+
+fn classify_stale_parser_base_root_cause(
+    shadow_document_version: i32,
+    latest_ready_document_version: Option<i32>,
+    matching_ready_snapshot_for_shadow_state: bool,
+    ready_snapshot_prime_attempted: bool,
+    tree_cache_matches_shadow_text_after_prime: Option<bool>,
+) -> &'static str {
+    if matching_ready_snapshot_for_shadow_state {
+        if ready_snapshot_prime_attempted
+            && matches!(tree_cache_matches_shadow_text_after_prime, Some(false))
+        {
+            "tree_cache_mismatch_after_prime"
+        } else {
+            "other_internal_reason"
+        }
+    } else if latest_ready_document_version
+        .is_some_and(|ready_version| ready_version < shadow_document_version)
+    {
+        "ready_snapshot_lags_shadow_state"
+    } else {
+        "no_matching_ready_snapshot_for_shadow_state"
+    }
+}
+
+#[cfg(test)]
+fn maybe_poison_tree_cache_after_prime_for_test(
+    parser: &bsl_runtime::system::parser_coordinator::ParserCoordinator,
+    path: &str,
+    shadow_text: &str,
+) {
+    if std::env::var_os("BSL_TEST_DID_CHANGE_POISON_TREE_CACHE_AFTER_PRIME").is_none() {
+        return;
+    }
+    let poisoned_text = format!("{shadow_text}\n// stale parser base post-prime poison\n");
+    let _ = parser.parse_incremental_with_report(PathBuf::from(path), poisoned_text, Vec::new());
+}
+
+#[cfg(not(test))]
+fn maybe_poison_tree_cache_after_prime_for_test(
+    _parser: &bsl_runtime::system::parser_coordinator::ParserCoordinator,
+    _path: &str,
+    _shadow_text: &str,
+) {
+}
+
 fn parse_snapshot_text_hash(text: &str) -> [u8; 32] {
     *blake3::hash(text.as_bytes()).as_bytes()
 }
@@ -260,6 +311,36 @@ fn background_parse_snapshot_apply_source_label(
         super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen => "did_open",
         super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => "did_change",
         super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => "did_save",
+    }
+}
+
+fn record_ready_parse_snapshot_phase_metrics(
+    coordinator: &Arc<bsl_runtime::system::SystemCoordinator>,
+    origin: &'static str,
+    source: &'static str,
+    phase_attribution: &super::super::ReadyParseSnapshotPhaseAttributionV2,
+) {
+    for (phase, duration_ms) in [
+        ("parse_exec", phase_attribution.parse_exec_ms),
+        (
+            "post_parse_pre_materialization",
+            phase_attribution.post_parse_pre_materialization_ms,
+        ),
+        ("ready_install", phase_attribution.ready_install_ms),
+        (
+            "document_symbol_side_work",
+            phase_attribution.document_symbol_side_work_ms,
+        ),
+    ] {
+        let Some(duration_ms) = duration_ms else {
+            continue;
+        };
+        coordinator.record_intellisense_v2_ready_parse_snapshot_phase_latency(
+            origin,
+            source,
+            phase,
+            Duration::from_millis(duration_ms),
+        );
     }
 }
 
@@ -345,9 +426,27 @@ impl BslLanguageServer {
                 text,
                 parse_snapshot: parse_snapshot.clone(),
                 source,
+                phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
             },
         );
         self.refresh_snapshot_status_v2(file_id).await;
+    }
+
+    async fn update_ready_parse_snapshot_phase_attribution_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        expected_text: &Arc<str>,
+        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
+        phase_attribution: &super::super::ReadyParseSnapshotPhaseAttributionV2,
+    ) {
+        let mut ready_states = self.latest_ready_parse_snapshots_v2.write().await;
+        let Some(state) = ready_states.get_mut(&file_id) else {
+            return;
+        };
+        if state.source != source || state.text.as_ref() != expected_text.as_ref() {
+            return;
+        }
+        state.phase_attribution = phase_attribution.clone();
     }
 
     async fn record_snapshot_build_failure_v2(
@@ -393,6 +492,77 @@ impl BslLanguageServer {
             Arc::clone(&ready_state.parse_snapshot.backend_tree),
             ready_state.parse_snapshot.backend_tree_hash,
         );
+    }
+
+    async fn inspect_shadow_state_parser_base_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        path: &str,
+        shadow_state: &super::super::DocumentShadowStateV2,
+    ) -> ShadowStateParserBaseInspectionV2 {
+        let latest_ready_state = self
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .cloned();
+        let latest_ready_document_version = latest_ready_state
+            .as_ref()
+            .map(|state| state.parse_snapshot.file_version);
+        let matching_ready_snapshot_for_shadow_state =
+            latest_ready_state.as_ref().is_some_and(|state| {
+                state.parse_snapshot.file_version == shadow_state.version
+                    && state.text.as_ref() == shadow_state.text.as_ref()
+            });
+        let Some(parser) = self.coordinator.parser_coordinator() else {
+            return ShadowStateParserBaseInspectionV2 {
+                forced_full_parse_reason: None,
+                stale_parser_base: None,
+            };
+        };
+        let mut ready_snapshot_prime_attempted = false;
+        if matching_ready_snapshot_for_shadow_state {
+            ready_snapshot_prime_attempted = true;
+            self.prime_parser_tree_cache_from_matching_ready_snapshot_v2(
+                file_id,
+                path,
+                shadow_state,
+            )
+            .await;
+            maybe_poison_tree_cache_after_prime_for_test(&parser, path, shadow_state.text.as_ref());
+        }
+        let tree_cache_matches_shadow_text_after_prime =
+            parser.tree_cache_matches_source_for_file(Path::new(path), shadow_state.text.as_ref());
+        if tree_cache_matches_shadow_text_after_prime {
+            return ShadowStateParserBaseInspectionV2 {
+                forced_full_parse_reason: None,
+                stale_parser_base: None,
+            };
+        }
+        let stale_parser_base = DidChangeStaleParserBaseAttributionV2 {
+            root_cause: classify_stale_parser_base_root_cause(
+                shadow_state.version,
+                latest_ready_document_version,
+                matching_ready_snapshot_for_shadow_state,
+                ready_snapshot_prime_attempted,
+                Some(tree_cache_matches_shadow_text_after_prime),
+            ),
+            shadow_document_version: shadow_state.version,
+            latest_ready_document_version,
+            matching_ready_snapshot_for_shadow_state,
+            ready_snapshot_prime_attempted,
+            tree_cache_matches_shadow_text_after_prime: if ready_snapshot_prime_attempted {
+                Some(tree_cache_matches_shadow_text_after_prime)
+            } else {
+                None
+            },
+        };
+        ShadowStateParserBaseInspectionV2 {
+            forced_full_parse_reason: Some(
+                bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+            ),
+            stale_parser_base: Some(stale_parser_base),
+        }
     }
 
     fn record_parse_snapshot_report_v2(
@@ -678,6 +848,7 @@ impl BslLanguageServer {
                 attribution.base_document_version,
                 report.changed_ranges.len(),
                 report.fallback_reason.as_deref(),
+                attribution,
             );
         }
         BuildParseSnapshotOutcomeV2::Ready(parse_snapshot_from_report(file_id, version, report))
@@ -873,9 +1044,13 @@ impl BslLanguageServer {
                 origin_label,
                 source_label,
             );
+            task_control.reset_phase_attribution();
             task_control.phase.store(
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
                 Ordering::SeqCst,
+            );
+            task_control.transition_phase_attribution(
+                super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting,
             );
             self.refresh_snapshot_status_v2(file_id).await;
             let debounce = parse_snapshot_apply_debounce_duration();
@@ -948,6 +1123,9 @@ impl BslLanguageServer {
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
                 Ordering::SeqCst,
             );
+            task_control.transition_phase_attribution(
+                super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+            );
             self.refresh_snapshot_status_v2(file_id).await;
             let parse_snapshot = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
@@ -1014,6 +1192,9 @@ impl BslLanguageServer {
                     break;
                 }
             };
+            task_control.transition_phase_attribution(
+                super::super::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
+            );
             if matches!(
                 target.async_delay_mode,
                 ParseSnapshotAsyncDelayMode::DidChangeTestOnly
@@ -1046,12 +1227,23 @@ impl BslLanguageServer {
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Materializing as u8,
                 Ordering::SeqCst,
             );
+            task_control.transition_phase_attribution(
+                super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
+            );
             self.refresh_snapshot_status_v2(file_id).await;
             self.record_ready_parse_snapshot_v2(
                 file_id,
                 target.text.clone(),
                 &parse_snapshot,
                 target.source,
+            )
+            .await;
+            let ready_phase_snapshot = task_control.finish_phase_attribution();
+            self.update_ready_parse_snapshot_phase_attribution_v2(
+                file_id,
+                &target.text,
+                target.source,
+                &ready_phase_snapshot.completed,
             )
             .await;
             lifecycle_guard.mark_materialized();
@@ -1064,6 +1256,15 @@ impl BslLanguageServer {
                     source_label,
                     lifecycle_guard.started.elapsed(),
                 );
+            record_ready_parse_snapshot_phase_metrics(
+                &self.coordinator,
+                origin_label,
+                source_label,
+                &ready_phase_snapshot.completed,
+            );
+            task_control.transition_phase_attribution(
+                super::super::ReadyParseSnapshotAttributionPhaseV2::DocumentSymbolSideWork,
+            );
             let text_for_symbols = target.text.clone();
             let parse_result_for_symbols = Arc::clone(&parse_snapshot.parse_result);
             match bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
@@ -1104,6 +1305,25 @@ impl BslLanguageServer {
                         "documentSymbol ready-cache task failed after parse snapshot"
                     );
                 }
+            }
+            let symbol_phase_snapshot = task_control.finish_phase_attribution();
+            self.update_ready_parse_snapshot_phase_attribution_v2(
+                file_id,
+                &target.text,
+                target.source,
+                &symbol_phase_snapshot.completed,
+            )
+            .await;
+            if let Some(document_symbol_side_work_ms) =
+                symbol_phase_snapshot.completed.document_symbol_side_work_ms
+            {
+                self.coordinator
+                    .record_intellisense_v2_ready_parse_snapshot_phase_latency(
+                        origin_label,
+                        source_label,
+                        "document_symbol_side_work",
+                        Duration::from_millis(document_symbol_side_work_ms),
+                    );
             }
 
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
@@ -1967,6 +2187,7 @@ impl BslLanguageServer {
             previous_analysis_for_identical_text_reuse,
             parse_snapshot_base_text_source,
             parse_snapshot_base_document_version,
+            parse_snapshot_stale_parser_base,
         ) = {
             let _sync_guard = self.text_sync_v2.lock().await;
             let previous_shadow_state = {
@@ -1980,12 +2201,14 @@ impl BslLanguageServer {
                 forced_full_parse_reason,
                 parse_snapshot_base_text_source,
                 parse_snapshot_base_document_version,
+                parse_snapshot_stale_parser_base,
             ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
                 (
                     full_change.text.clone(),
                     Vec::new(),
                     None,
                     "not_applicable",
+                    None,
                     None,
                 )
             } else {
@@ -2006,30 +2229,17 @@ impl BslLanguageServer {
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
                     forced_full_parse_reason,
+                    parse_snapshot_stale_parser_base,
                 ) = if let Some(state) = previous_shadow_state.clone() {
-                    self.prime_parser_tree_cache_from_matching_ready_snapshot_v2(
-                        file_id,
-                        path.as_str(),
-                        &state,
-                    )
-                    .await;
-                    let forced_full_parse_reason = self
-                        .coordinator
-                        .parser_coordinator()
-                        .filter(|parser| {
-                            !parser.tree_cache_matches_source_for_file(
-                                Path::new(path.as_str()),
-                                state.text.as_ref(),
-                            )
-                        })
-                        .map(|_| {
-                            bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason()
-                        });
+                    let shadow_state_parser_base = self
+                        .inspect_shadow_state_parser_base_v2(file_id, path.as_str(), &state)
+                        .await;
                     (
                         state.text.to_string(),
                         "shadow_state",
                         Some(state.version),
-                        forced_full_parse_reason,
+                        shadow_state_parser_base.forced_full_parse_reason,
+                        shadow_state_parser_base.stale_parser_base,
                     )
                 } else {
                     (
@@ -2042,6 +2252,7 @@ impl BslLanguageServer {
                             .map(|text| text.to_string())
                             .unwrap_or_default(),
                         "analysis_snapshot",
+                        None,
                         None,
                         None,
                     )
@@ -2060,6 +2271,7 @@ impl BslLanguageServer {
                     forced_full_parse_reason,
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
+                    parse_snapshot_stale_parser_base,
                 )
             };
             let identical_text_previous_version =
@@ -2193,6 +2405,7 @@ impl BslLanguageServer {
                 previous_analysis_for_identical_text_reuse,
                 parse_snapshot_base_text_source,
                 parse_snapshot_base_document_version,
+                parse_snapshot_stale_parser_base,
             )
         };
 
@@ -2255,6 +2468,7 @@ impl BslLanguageServer {
                     content_changes_count: parse_snapshot_content_changes_count,
                     replay_order: parse_snapshot_replay_order,
                     base_document_version: parse_snapshot_base_document_version,
+                    stale_parser_base: parse_snapshot_stale_parser_base,
                 }),
             })
             .await;

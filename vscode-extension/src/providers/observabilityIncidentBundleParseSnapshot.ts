@@ -14,6 +14,12 @@ export interface ObservabilityIncidentDidChangeParseSnapshotSummary {
     base_document_version?: number;
     changed_ranges_count: number;
     fallback_reason?: string;
+    parser_base_root_cause?: string;
+    shadow_document_version?: number;
+    latest_ready_document_version?: number;
+    matching_ready_snapshot_for_shadow_state?: boolean;
+    ready_snapshot_prime_attempted?: boolean;
+    tree_cache_matches_shadow_text_after_prime?: boolean;
     correlated_diagnostics_save_trace_ids: string[];
 }
 
@@ -61,6 +67,14 @@ export function buildObservabilityIncidentDidChangeParseSnapshotSection(
             base_document_version: entry.baseDocumentVersion,
             changed_ranges_count: entry.changedRangesCount,
             fallback_reason: entry.fallbackReason,
+            parser_base_root_cause: entry.parserBaseRootCause,
+            shadow_document_version: entry.shadowDocumentVersion,
+            latest_ready_document_version: entry.latestReadyDocumentVersion,
+            matching_ready_snapshot_for_shadow_state:
+                entry.matchingReadySnapshotForShadowState,
+            ready_snapshot_prime_attempted: entry.readySnapshotPrimeAttempted,
+            tree_cache_matches_shadow_text_after_prime:
+                entry.treeCacheMatchesShadowTextAfterPrime,
             correlated_diagnostics_save_trace_ids: diagnosticsSaveRequests
                 .filter(
                     (trace) =>
@@ -101,6 +115,30 @@ export function renderDidChangeParseSnapshotSummaryLines(
         }
         if (entry.fallback_reason) {
             parts.push(`fallback_reason=${entry.fallback_reason}`);
+        }
+        if (entry.parser_base_root_cause) {
+            parts.push(`parser_base_root_cause=${entry.parser_base_root_cause}`);
+        }
+        if (typeof entry.shadow_document_version === 'number') {
+            parts.push(`shadow_document_version=${entry.shadow_document_version}`);
+        }
+        if (typeof entry.latest_ready_document_version === 'number') {
+            parts.push(`latest_ready_document_version=${entry.latest_ready_document_version}`);
+        }
+        if (typeof entry.matching_ready_snapshot_for_shadow_state === 'boolean') {
+            parts.push(
+                `matching_ready_snapshot_for_shadow_state=${entry.matching_ready_snapshot_for_shadow_state}`
+            );
+        }
+        if (typeof entry.ready_snapshot_prime_attempted === 'boolean') {
+            parts.push(
+                `ready_snapshot_prime_attempted=${entry.ready_snapshot_prime_attempted}`
+            );
+        }
+        if (typeof entry.tree_cache_matches_shadow_text_after_prime === 'boolean') {
+            parts.push(
+                `tree_cache_matches_shadow_text_after_prime=${entry.tree_cache_matches_shadow_text_after_prime}`
+            );
         }
         if (entry.correlated_diagnostics_save_trace_ids.length > 0) {
             parts.push(

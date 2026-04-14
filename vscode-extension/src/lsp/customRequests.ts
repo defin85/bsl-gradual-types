@@ -588,6 +588,12 @@ export interface DidChangeParseSnapshotEvidenceTrace {
     baseDocumentVersion?: number;
     changedRangesCount: number;
     fallbackReason?: string;
+    parserBaseRootCause?: string;
+    shadowDocumentVersion?: number;
+    latestReadyDocumentVersion?: number;
+    matchingReadySnapshotForShadowState?: boolean;
+    readySnapshotPrimeAttempted?: boolean;
+    treeCacheMatchesShadowTextAfterPrime?: boolean;
 }
 
 export interface DidChangeParseSnapshotEvidenceResponse {
@@ -898,6 +904,37 @@ export interface DiagnosticsSaveTimelineTrace {
         | 'in_flight_same_version'
         | 'in_flight_other_version'
         | 'ready_same_version';
+    followup_ready_snapshot_timeout_phase?:
+        | 'waiting'
+        | 'parse_exec'
+        | 'post_parse_pre_materialization'
+        | 'ready_install'
+        | 'document_symbol_side_work';
+    followup_ready_snapshot_timeout_phase_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_ms?: number;
+    followup_ready_snapshot_post_parse_pre_materialization_ms?: number;
+    followup_ready_snapshot_ready_install_ms?: number;
+    followup_ready_snapshot_document_symbol_side_work_ms?: number;
+    followup_ready_snapshot_dominant_phase?:
+        | 'parse_exec'
+        | 'post_parse_pre_materialization'
+        | 'ready_install'
+        | 'document_symbol_side_work';
+    followup_ready_snapshot_dominant_phase_ms?: number;
+    followup_ready_snapshot_relief_valve_outcome?:
+        | 'engaged_helped'
+        | 'engaged_timed_out'
+        | 'engaged_version_mismatch'
+        | 'engaged_generation_mismatch'
+        | 'engaged_cancelled'
+        | 'engaged_superseded'
+        | 'skipped_not_exact_still_current'
+        | 'skipped_runtime_queue_wait'
+        | 'skipped_apply_lag'
+        | 'skipped_timeout_phase_unavailable'
+        | 'skipped_timeout_phase_waiting';
+    followup_ready_snapshot_relief_valve_budget_ms?: number;
+    followup_ready_snapshot_relief_valve_elapsed_ms?: number;
     followup_shadow_state_available?: boolean;
     followup_wait_reason?: 'apply_lag' | 'runtime_queue_wait' | 'semantic_work' | 'pending_publish' | 'superseded';
     followup_runtime_queue_wait_ms?: number;

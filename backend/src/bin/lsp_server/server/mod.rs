@@ -112,9 +112,9 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 9;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 11;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 2;
+pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 3;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
 
 #[derive(Debug, Clone, Copy)]
@@ -412,11 +412,150 @@ pub(crate) struct DiagnosticsSaveTimelineProfileResult {
     pub publish: Option<crate::types::DiagnosticsSaveTimelinePublishTrace>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadyParseSnapshotAttributionPhaseV2 {
+    Waiting = 1,
+    ParseExec = 2,
+    PostParsePreMaterialization = 3,
+    ReadyInstall = 4,
+    DocumentSymbolSideWork = 5,
+}
+
+impl ReadyParseSnapshotAttributionPhaseV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Waiting => "waiting",
+            Self::ParseExec => "parse_exec",
+            Self::PostParsePreMaterialization => "post_parse_pre_materialization",
+            Self::ReadyInstall => "ready_install",
+            Self::DocumentSymbolSideWork => "document_symbol_side_work",
+        }
+    }
+
+    fn tracks_latency(self) -> bool {
+        !matches!(self, Self::Waiting)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReadyParseSnapshotPhaseAttributionV2 {
+    pub parse_exec_ms: Option<u64>,
+    pub post_parse_pre_materialization_ms: Option<u64>,
+    pub ready_install_ms: Option<u64>,
+    pub document_symbol_side_work_ms: Option<u64>,
+}
+
+impl ReadyParseSnapshotPhaseAttributionV2 {
+    pub(crate) fn dominant_phase(self: &Self) -> Option<(&'static str, u64)> {
+        [
+            ("parse_exec", self.parse_exec_ms),
+            (
+                "post_parse_pre_materialization",
+                self.post_parse_pre_materialization_ms,
+            ),
+            ("ready_install", self.ready_install_ms),
+            (
+                "document_symbol_side_work",
+                self.document_symbol_side_work_ms,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(phase, duration_ms)| duration_ms.map(|value| (phase, value)))
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+    pub current_phase: Option<ReadyParseSnapshotAttributionPhaseV2>,
+    pub current_phase_elapsed_ms: Option<u64>,
+    pub completed: ReadyParseSnapshotPhaseAttributionV2,
+}
+
+impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+    pub(crate) fn dominant_phase(self: &Self) -> Option<(&'static str, u64)> {
+        let completed = self.completed.dominant_phase();
+        let current = self
+            .current_phase
+            .zip(self.current_phase_elapsed_ms)
+            .filter(|(phase, _)| phase.tracks_latency())
+            .map(|(phase, duration_ms)| (phase.as_str(), duration_ms));
+        match (completed, current) {
+            (Some(left), Some(right)) => Some(if left.1 >= right.1 { left } else { right }),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ReadyParseSnapshotPhaseAttributionStateV2 {
+    current_phase: Option<ReadyParseSnapshotAttributionPhaseV2>,
+    current_phase_started_at: Option<Instant>,
+    completed: ReadyParseSnapshotPhaseAttributionV2,
+}
+
+impl ReadyParseSnapshotPhaseAttributionStateV2 {
+    fn reset(&mut self) {
+        self.current_phase = None;
+        self.current_phase_started_at = None;
+        self.completed = ReadyParseSnapshotPhaseAttributionV2::default();
+    }
+
+    fn transition_to(&mut self, phase: ReadyParseSnapshotAttributionPhaseV2, now: Instant) {
+        self.finish_current(now);
+        self.current_phase = Some(phase);
+        self.current_phase_started_at = Some(now);
+    }
+
+    fn finish_current(&mut self, now: Instant) {
+        let Some(phase) = self.current_phase.take() else {
+            self.current_phase_started_at = None;
+            return;
+        };
+        let elapsed_ms = self
+            .current_phase_started_at
+            .take()
+            .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
+        match phase {
+            ReadyParseSnapshotAttributionPhaseV2::Waiting => {}
+            ReadyParseSnapshotAttributionPhaseV2::ParseExec => {
+                self.completed.parse_exec_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization => {
+                self.completed.post_parse_pre_materialization_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotAttributionPhaseV2::ReadyInstall => {
+                self.completed.ready_install_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotAttributionPhaseV2::DocumentSymbolSideWork => {
+                self.completed.document_symbol_side_work_ms = elapsed_ms;
+            }
+        }
+    }
+
+    fn snapshot(&self, now: Instant) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+        ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+            current_phase: self.current_phase,
+            current_phase_elapsed_ms: self
+                .current_phase_started_at
+                .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
+            completed: self.completed.clone(),
+        }
+    }
+}
+
+fn duration_to_u64_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ReadyParseSnapshotStateV2 {
     pub text: Arc<str>,
     pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+    pub phase_attribution: ReadyParseSnapshotPhaseAttributionV2,
 }
 
 #[derive(Debug, Clone)]
@@ -576,6 +715,16 @@ pub(crate) enum ParseSnapshotAsyncDelayMode {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct DidChangeStaleParserBaseAttributionV2 {
+    pub root_cause: &'static str,
+    pub shadow_document_version: i32,
+    pub latest_ready_document_version: Option<i32>,
+    pub matching_ready_snapshot_for_shadow_state: bool,
+    pub ready_snapshot_prime_attempted: bool,
+    pub tree_cache_matches_shadow_text_after_prime: Option<bool>,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct DidChangeParseSnapshotAttributionV2 {
     pub uri: Url,
     pub base_text_source: &'static str,
@@ -583,6 +732,7 @@ pub(crate) struct DidChangeParseSnapshotAttributionV2 {
     pub content_changes_count: usize,
     pub replay_order: &'static str,
     pub base_document_version: Option<i32>,
+    pub stale_parser_base: Option<DidChangeStaleParserBaseAttributionV2>,
 }
 
 #[derive(Debug, Clone)]
@@ -625,21 +775,56 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub promotion_requested: AtomicBool,
     pub materialized: AtomicBool,
     pub phase: AtomicU8,
+    phase_attribution: StdMutex<ReadyParseSnapshotPhaseAttributionStateV2>,
     pub control_notify: Notify,
     pub materialized_notify: Notify,
 }
 
 impl BackgroundParseSnapshotApplyTaskControlV2 {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             cancel_requested: AtomicBool::new(false),
             retarget_requested: AtomicBool::new(false),
             promotion_requested: AtomicBool::new(false),
             materialized: AtomicBool::new(false),
             phase: AtomicU8::new(0),
+            phase_attribution: StdMutex::new(ReadyParseSnapshotPhaseAttributionStateV2::default()),
             control_notify: Notify::new(),
             materialized_notify: Notify::new(),
         }
+    }
+
+    pub(crate) fn reset_phase_attribution(&self) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .reset();
+    }
+
+    pub(crate) fn transition_phase_attribution(&self, phase: ReadyParseSnapshotAttributionPhaseV2) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .transition_to(phase, Instant::now());
+    }
+
+    pub(crate) fn finish_phase_attribution(&self) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+        let mut guard = self
+            .phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        guard.finish_current(now);
+        guard.snapshot(now)
+    }
+
+    pub(crate) fn phase_attribution_snapshot(
+        &self,
+    ) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot(Instant::now())
     }
 }
 

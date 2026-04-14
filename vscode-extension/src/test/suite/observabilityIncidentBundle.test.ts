@@ -299,7 +299,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                     },
                 },
                 didChangeParseSnapshotEvidence: {
-                    version: 2,
+                    version: 3,
                     entries: [
                         {
                             evidenceId: 'did-change-parse-snapshot-1',
@@ -326,7 +326,12 @@ suite('Observability Incident Bundle Test Suite', () => {
                             replayOrder: 'receive_order',
                             baseDocumentVersion: 8,
                             changedRangesCount: 0,
-                            fallbackReason: 'input_edit_conversion_failed',
+                            fallbackReason: 'stale_parser_base',
+                            parserBaseRootCause: 'ready_snapshot_lags_shadow_state',
+                            shadowDocumentVersion: 8,
+                            latestReadyDocumentVersion: 6,
+                            matchingReadySnapshotForShadowState: false,
+                            readySnapshotPrimeAttempted: false,
                         },
                     ],
                 },
@@ -354,7 +359,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -399,6 +404,15 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_semantic_ir_source: 'snapshot_build',
                         followup_ready_snapshot_zero_probe: 'ready',
                         followup_ready_snapshot_task_state: 'ready_same_version',
+                        followup_ready_snapshot_parse_exec_ms: 46,
+                        followup_ready_snapshot_post_parse_pre_materialization_ms: 11,
+                        followup_ready_snapshot_ready_install_ms: 5,
+                        followup_ready_snapshot_document_symbol_side_work_ms: 8,
+                        followup_ready_snapshot_dominant_phase: 'parse_exec',
+                        followup_ready_snapshot_dominant_phase_ms: 46,
+                        followup_ready_snapshot_relief_valve_outcome: 'engaged_helped',
+                        followup_ready_snapshot_relief_valve_budget_ms: 500,
+                        followup_ready_snapshot_relief_valve_elapsed_ms: 121,
                         followup_shadow_state_available: true,
                         followup_wait_reason: 'pending_publish',
                         followup_runtime_queue_wait_ms: 11,
@@ -416,7 +430,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -440,6 +454,13 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_zero_probe: 'not_ready',
                         followup_ready_snapshot_wait_probe: 'timeout',
                         followup_ready_snapshot_task_state: 'in_flight_same_version',
+                        followup_ready_snapshot_timeout_phase: 'parse_exec',
+                        followup_ready_snapshot_timeout_phase_elapsed_ms: 3501,
+                        followup_ready_snapshot_parse_exec_ms: 3501,
+                        followup_ready_snapshot_dominant_phase: 'parse_exec',
+                        followup_ready_snapshot_dominant_phase_ms: 3501,
+                        followup_ready_snapshot_relief_valve_outcome: 'skipped_apply_lag',
+                        followup_ready_snapshot_relief_valve_budget_ms: 500,
                         followup_shadow_state_available: false,
                         followup_wait_reason: 'apply_lag',
                         followup_apply_lag_ms: 1770,
@@ -453,7 +474,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -476,6 +497,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_semantic_path: 'generic_pipeline',
                         followup_ready_snapshot_zero_probe: 'not_ready',
                         followup_ready_snapshot_task_state: 'in_flight_other_version',
+                        followup_ready_snapshot_relief_valve_outcome:
+                            'skipped_not_exact_still_current',
+                        followup_ready_snapshot_relief_valve_budget_ms: 500,
                         followup_shadow_state_available: false,
                         followup_wait_reason: 'runtime_queue_wait',
                     },
@@ -488,7 +512,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -528,6 +552,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_semantic_ir_source: 'salsa',
                         followup_ready_snapshot_zero_probe: 'not_ready',
                         followup_ready_snapshot_task_state: 'absent',
+                        followup_ready_snapshot_parse_exec_ms: 14,
+                        followup_ready_snapshot_dominant_phase: 'parse_exec',
+                        followup_ready_snapshot_dominant_phase_ms: 14,
                         followup_shadow_state_available: true,
                         followup_wait_reason: 'semantic_work',
                         followup_runtime_queue_wait_ms: 0,
@@ -543,7 +570,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 9,
+                version: 11,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -571,6 +598,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         idle_heavy_outcome: 'disabled_by_config',
                         followup_ready_snapshot_zero_probe: 'not_ready',
                         followup_ready_snapshot_task_state: 'absent',
+                        followup_ready_snapshot_parse_exec_ms: 12,
+                        followup_ready_snapshot_dominant_phase: 'parse_exec',
+                        followup_ready_snapshot_dominant_phase_ms: 12,
                         followup_shadow_state_available: false,
                         followup_wait_reason: 'runtime_queue_wait',
                         followup_runtime_queue_wait_ms: 17,
@@ -623,7 +653,50 @@ suite('Observability Incident Bundle Test Suite', () => {
         timeline.response.traces[0].followup_ready_snapshot_zero_probe = undefined;
         timeline.response.traces[0].followup_ready_snapshot_wait_probe = undefined;
         timeline.response.traces[0].followup_ready_snapshot_task_state = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_phase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_phase_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_post_parse_pre_materialization_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_ready_install_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_document_symbol_side_work_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_dominant_phase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_dominant_phase_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_outcome = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_budget_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_elapsed_ms = undefined;
         timeline.response.traces[0].followup_shadow_state_available = undefined;
+        return timeline;
+    }
+
+    function sampleV9DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 9;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_phase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_phase_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_post_parse_pre_materialization_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_ready_install_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_document_symbol_side_work_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_dominant_phase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_dominant_phase_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_outcome = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_budget_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_elapsed_ms = undefined;
+        return timeline;
+    }
+
+    function sampleV10DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 10;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_outcome = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_budget_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_relief_valve_elapsed_ms = undefined;
         return timeline;
     }
 
@@ -676,7 +749,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 9);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 11);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -700,9 +773,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         ]);
         assert.deepStrictEqual(
             bundle.incidentReport.diagnostics_save_metrics.ready_snapshot_worker_in_flight_estimate,
-            [
-                { source: 'did_change', count: 1 },
-            ]
+            []
         );
         assert.strictEqual(bundle.incidentReport.diagnostics_save_metrics.materialization[0].source, 'did_change');
         assert.strictEqual(bundle.incidentReport.diagnostics_save_metrics.materialization[0].p95_ms, 612);
@@ -923,9 +994,8 @@ suite('Observability Incident Bundle Test Suite', () => {
             )
         );
         assert.ok(
-            bundle.summaryMarkdown.includes(
-                'ready_snapshot_worker_in_flight_estimate | did_change=1'
-            )
+            !bundle.summaryMarkdown.includes('ready_snapshot_worker_in_flight_estimate'),
+            'happy-path sample should not invent an in-flight worker estimate when started = materialized + terminated'
         );
         assert.ok(
             bundle.summaryMarkdown.includes(
@@ -945,6 +1015,15 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('replay_order=receive_order'));
         assert.ok(bundle.summaryMarkdown.includes('base_document_version=8'));
         assert.ok(bundle.summaryMarkdown.includes('fallback_reason=edits_do_not_match_new_content'));
+        assert.ok(
+            bundle.summaryMarkdown.includes('parser_base_root_cause=ready_snapshot_lags_shadow_state')
+        );
+        assert.ok(bundle.summaryMarkdown.includes('shadow_document_version=8'));
+        assert.ok(bundle.summaryMarkdown.includes('latest_ready_document_version=6'));
+        assert.ok(
+            bundle.summaryMarkdown.includes('matching_ready_snapshot_for_shadow_state=false')
+        );
+        assert.ok(bundle.summaryMarkdown.includes('ready_snapshot_prime_attempted=false'));
         assert.ok(bundle.summaryMarkdown.includes('correlated_diagnostics_save_traces=diagnostics-save-trace-1'));
         assert.ok(bundle.summaryMarkdown.includes('first_publish=save_fastlane:syntax_only:published@84ms'));
         assert.ok(bundle.summaryMarkdown.includes('runtime_queue_wait_ms=6'));
@@ -956,6 +1035,11 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('followup_semantic_ir_source=snapshot_build'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_zero_probe=ready'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_task_state=ready_same_version'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_relief_valve_outcome=engaged_helped'
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('followup_shadow_state_available=true'));
         assert.ok(bundle.summaryMarkdown.includes('apply_lag_ms=23'));
         assert.ok(bundle.summaryMarkdown.includes('followup_syntax_work_mode=recomputed'));
@@ -1088,6 +1172,13 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('terminal=in_flight'));
         assert.ok(bundle.summaryMarkdown.includes('followup_publish=pending'));
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=apply_lag'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_timeout_phase=parse_exec'));
+        assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_dominant_phase=parse_exec'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_relief_valve_outcome=skipped_apply_lag'
+            )
+        );
     });
 
     test('diagnostics save summary should render runtime_queue_wait for active queued followup', () => {
@@ -1221,6 +1312,51 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(
             bundle.summaryMarkdown.includes('followup_ready_snapshot_miss_attribution=unavailable_by_design(version=8)')
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_ready_snapshot_phase_attribution=unavailable_by_design(version=8)')
+        );
+    });
+
+    test('v9 diagnostics save timeline should mark phase attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV9DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose ready-snapshot phase attribution by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes('followup_ready_snapshot_phase_attribution=unavailable_by_design(version=9)')
+        );
+    });
+
+    test('v10 diagnostics save timeline should mark relief valve attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV10DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose ready-snapshot relief-valve attribution by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_relief_valve=unavailable_by_design(version=10)'
+            )
         );
     });
 

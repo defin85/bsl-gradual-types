@@ -246,6 +246,117 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
         &mut trace.followup_ready_snapshot_parse_exec_ms,
         attribution.parse_exec_ms,
     );
+    if trace
+        .followup_ready_snapshot_parse_exec_timeout_subphase
+        .is_none()
+    {
+        trace.followup_ready_snapshot_parse_exec_timeout_subphase = attribution
+            .parse_exec_timeout_subphase
+            .map(|value| value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms,
+        attribution.parse_exec_timeout_subphase_elapsed_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_parse_build_ms,
+        attribution.parse_exec_core_parse_build_ms,
+    );
+    if trace
+        .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint
+        .is_none()
+    {
+        trace.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint = attribution
+            .parse_exec_core_build_timeout_checkpoint
+            .map(|value| value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms,
+        attribution.parse_exec_core_build_timeout_checkpoint_elapsed_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms,
+        attribution.parse_exec_core_build_parser_tree_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+    );
+    if trace
+        .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint
+        .is_none()
+    {
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint =
+            attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint
+                .map(|value| value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms,
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms,
+        attribution.parse_exec_core_build_tree_cache_install_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms,
+        attribution.parse_exec_optional_cache_enrichment_ms,
+    );
+    match (
+        trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms,
+        attribution.parse_exec_core_build_dominant_checkpoint_ms,
+    ) {
+        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
+        (_, Some(candidate_ms)) => {
+            trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = attribution
+                .parse_exec_core_build_dominant_checkpoint
+                .map(|value| value.to_string());
+            trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms =
+                Some(candidate_ms);
+        }
+        _ => {}
+    }
+    match (
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
+    ) {
+        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
+        (_, Some(candidate_ms)) => {
+            trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+                    .map(|value| value.to_string());
+            trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms =
+                Some(candidate_ms);
+        }
+        _ => {}
+    }
+    match (
+        trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms,
+        attribution.parse_exec_dominant_subphase_ms,
+    ) {
+        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
+        (_, Some(candidate_ms)) => {
+            trace.followup_ready_snapshot_parse_exec_dominant_subphase = attribution
+                .parse_exec_dominant_subphase
+                .map(|value| value.to_string());
+            trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms = Some(candidate_ms);
+        }
+        _ => {}
+    }
     update_followup_timing_max(
         &mut trace.followup_ready_snapshot_post_parse_pre_materialization_ms,
         attribution.post_parse_pre_materialization_ms,
@@ -819,6 +930,32 @@ impl BslLanguageServer {
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                 followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                 followup_ready_snapshot_ready_install_ms: None,
                 followup_ready_snapshot_document_symbol_side_work_ms: None,
@@ -880,6 +1017,33 @@ impl BslLanguageServer {
                     followup_ready_snapshot_timeout_phase: None,
                     followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                     followup_ready_snapshot_parse_exec_ms: None,
+                    followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                    followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                    followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                    followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                    followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                    followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                    followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                    followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                    followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                    followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                     followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                     followup_ready_snapshot_ready_install_ms: None,
                     followup_ready_snapshot_document_symbol_side_work_ms: None,
@@ -1024,6 +1188,32 @@ impl BslLanguageServer {
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                 followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                 followup_ready_snapshot_ready_install_ms: None,
                 followup_ready_snapshot_document_symbol_side_work_ms: None,
@@ -1112,6 +1302,32 @@ impl BslLanguageServer {
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                 followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                 followup_ready_snapshot_ready_install_ms: None,
                 followup_ready_snapshot_document_symbol_side_work_ms: None,
@@ -1181,6 +1397,32 @@ impl BslLanguageServer {
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                 followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                 followup_ready_snapshot_ready_install_ms: None,
                 followup_ready_snapshot_document_symbol_side_work_ms: None,
@@ -1266,6 +1508,32 @@ impl BslLanguageServer {
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
                 followup_ready_snapshot_post_parse_pre_materialization_ms: None,
                 followup_ready_snapshot_ready_install_ms: None,
                 followup_ready_snapshot_document_symbol_side_work_ms: None,

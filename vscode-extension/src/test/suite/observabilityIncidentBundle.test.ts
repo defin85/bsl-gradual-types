@@ -359,7 +359,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -405,6 +405,18 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_zero_probe: 'ready',
                         followup_ready_snapshot_task_state: 'ready_same_version',
                         followup_ready_snapshot_parse_exec_ms: 46,
+                        followup_ready_snapshot_parse_exec_core_parse_build_ms: 46,
+                        followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: 31,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms: 9,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: 3,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms: 6,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint: 'syntax_error_collection',
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms: 6,
+                        followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: 6,
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: 'parser_tree_build',
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: 31,
+                        followup_ready_snapshot_parse_exec_dominant_subphase: 'core_parse_build',
+                        followup_ready_snapshot_parse_exec_dominant_subphase_ms: 46,
                         followup_ready_snapshot_post_parse_pre_materialization_ms: 11,
                         followup_ready_snapshot_ready_install_ms: 5,
                         followup_ready_snapshot_document_symbol_side_work_ms: 8,
@@ -430,7 +442,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -457,6 +469,16 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_timeout_phase: 'parse_exec',
                         followup_ready_snapshot_timeout_phase_elapsed_ms: 3501,
                         followup_ready_snapshot_parse_exec_ms: 3501,
+                        followup_ready_snapshot_parse_exec_timeout_subphase: 'core_parse_build',
+                        followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: 3501,
+                        followup_ready_snapshot_parse_exec_core_parse_build_ms: 3501,
+                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: 'parser_tree_build',
+                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: 3501,
+                        followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: 3501,
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: 'parser_tree_build',
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: 3501,
+                        followup_ready_snapshot_parse_exec_dominant_subphase: 'core_parse_build',
+                        followup_ready_snapshot_parse_exec_dominant_subphase_ms: 3501,
                         followup_ready_snapshot_dominant_phase: 'parse_exec',
                         followup_ready_snapshot_dominant_phase_ms: 3501,
                         followup_ready_snapshot_relief_valve_outcome: 'skipped_apply_lag',
@@ -475,7 +497,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -513,7 +535,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -571,7 +593,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 12,
+                version: 15,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -701,6 +723,52 @@ suite('Observability Incident Bundle Test Suite', () => {
         return timeline;
     }
 
+    function sampleV12DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleInFlightDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 12;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_timeout_subphase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_parse_build_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_dominant_subphase = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_dominant_subphase_ms = undefined;
+        return timeline;
+    }
+
+    function sampleV13DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleInFlightDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 13;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms = undefined;
+        return timeline;
+    }
+
+    function sampleV14DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 14;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms = undefined;
+        return timeline;
+    }
+
     test('happy path bundle should contain request-centric incident report and all raw attachments', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
@@ -750,7 +818,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 12);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 15);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -807,6 +875,21 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0].followup_publish?.profile,
             'idle_heavy'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            3
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+            6
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint,
+            'syntax_error_collection'
         );
         assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('exact_deadline@artifact_poll'));
         assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('server_before_method_entry_dominant'));
@@ -1175,6 +1258,26 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('followup_wait=apply_lag'));
         assert.ok(bundle.summaryMarkdown.includes('followup_blocker=apply_lag'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_timeout_phase=parse_exec'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_timeout_subphase=core_parse_build'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint=parser_tree_build'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_dominant_subphase=core_parse_build'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint=parser_tree_build'
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_dominant_phase=parse_exec'));
         assert.ok(
             bundle.summaryMarkdown.includes(
@@ -1387,6 +1490,74 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_relief_valve=unavailable_by_design(version=10)'
+            )
+        );
+    });
+
+    test('v12 diagnostics save timeline should mark parse-exec subphase attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV12DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose parse-exec subphase attribution by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_subphase_attribution=unavailable_by_design(version=12)'
+            )
+        );
+    });
+
+    test('v13 diagnostics save timeline should mark core-build checkpoint attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV13DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose core-build checkpoint attribution by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_core_build_checkpoint_attribution=unavailable_by_design(version=13)'
+            )
+        );
+    });
+
+    test('v14 diagnostics save timeline should mark exact ready-snapshot assembly checkpoint attribution as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV14DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes(
+                    'does not expose exact ready-snapshot assembly checkpoint attribution by design'
+                )
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_exact_ready_snapshot_assembly_checkpoint_attribution=unavailable_by_design(version=14)'
             )
         );
     });

@@ -31,8 +31,15 @@ enum BuildParseSnapshotAbortReasonV2 {
     BuildSnapshotAborted,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct DeferredParseSnapshotWorkV2 {
+    optional_cache_enrichment: bool,
+    tree_cache_install: bool,
+    syntax_error_assembly: bool,
+}
+
 enum BuildParseSnapshotOutcomeV2 {
-    Ready(bsl_analysis_v2::ParseSnapshot),
+    Ready(bsl_analysis_v2::ParseSnapshot, DeferredParseSnapshotWorkV2),
     Aborted(BuildParseSnapshotAbortReasonV2),
 }
 
@@ -457,6 +464,7 @@ impl BslLanguageServer {
         text: Arc<str>,
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
         source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
+        syntax_errors_complete: bool,
     ) {
         self.latest_snapshot_failures_v2
             .write()
@@ -468,6 +476,7 @@ impl BslLanguageServer {
                 text,
                 parse_snapshot: parse_snapshot.clone(),
                 source,
+                syntax_errors_complete,
                 phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
             },
         );
@@ -504,6 +513,120 @@ impl BslLanguageServer {
                 reason: Arc::from(reason),
             },
         );
+    }
+
+    async fn update_ready_parse_snapshot_after_deferred_syntax_error_assembly_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        expected_text: &Arc<str>,
+        parse_result: Arc<bsl_runtime::parsing::ParseResult>,
+    ) {
+        let mut ready_states = self.latest_ready_parse_snapshots_v2.write().await;
+        let Some(state) = ready_states.get_mut(&file_id) else {
+            return;
+        };
+        if state.parse_snapshot.file_version != requested_version
+            || state.text.as_ref() != expected_text.as_ref()
+        {
+            return;
+        }
+        state.parse_snapshot.parse_result = parse_result;
+        state.syntax_errors_complete = true;
+    }
+
+    fn spawn_deferred_parse_snapshot_post_publish_enrichment_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        path: Arc<str>,
+        text: Arc<str>,
+        parse_snapshot: bsl_analysis_v2::ParseSnapshot,
+        complete_syntax_error_assembly: bool,
+        complete_cache_enrichment: bool,
+    ) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            let update_symbol_index = server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(requested_version);
+            let Some(parser) = server.coordinator.parser_coordinator() else {
+                return;
+            };
+            let path_buf = PathBuf::from(path.as_ref());
+            let text_for_enrichment = text;
+            let text_for_blocking = Arc::clone(&text_for_enrichment);
+            let parse_result_for_enrichment = Arc::clone(&parse_snapshot.parse_result);
+            let backend_tree_for_enrichment = Arc::clone(&parse_snapshot.backend_tree);
+            let enriched_result =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    Some(server.coordinator.as_ref()),
+                    move || {
+                        let parse_result = if complete_syntax_error_assembly {
+                            parser.complete_deferred_parse_snapshot_syntax_error_assembly(
+                                backend_tree_for_enrichment.as_ref(),
+                                text_for_blocking.as_ref(),
+                                parse_result_for_enrichment.as_ref(),
+                            )
+                        } else {
+                            parse_result_for_enrichment.as_ref().clone()
+                        };
+                        if complete_cache_enrichment {
+                            parser.complete_deferred_parse_snapshot_cache_enrichment(
+                                path_buf.as_path(),
+                                text_for_blocking.as_ref(),
+                                &parse_result,
+                                update_symbol_index,
+                            );
+                        }
+                        parse_result
+                    },
+                )
+                .await
+                .ok();
+            let Some(enriched_result) = enriched_result else {
+                return;
+            };
+            if complete_syntax_error_assembly {
+                server
+                    .update_ready_parse_snapshot_after_deferred_syntax_error_assembly_v2(
+                        file_id,
+                        requested_version,
+                        &text_for_enrichment,
+                        Arc::new(enriched_result),
+                    )
+                    .await;
+            }
+        });
+    }
+
+    fn spawn_deferred_parse_snapshot_tree_cache_install_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        path: Arc<str>,
+        text: Arc<str>,
+    ) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            let shadow_state = super::super::DocumentShadowStateV2 {
+                version: requested_version,
+                text,
+            };
+            server
+                .prime_parser_tree_cache_from_matching_ready_snapshot_v2(
+                    file_id,
+                    path.as_ref(),
+                    &shadow_state,
+                )
+                .await;
+        });
     }
 
     async fn prime_parser_tree_cache_from_matching_ready_snapshot_v2(
@@ -726,6 +849,66 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
+                    let progress_control = task_control_for_exec
+                        .as_ref()
+                        .expect("task control for parse progress");
+                    let parse_exec_progress = |subphase: bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase| {
+                        let mapped = match subphase {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase::CoreParseBuild => {
+                                super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild
+                            }
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase::OptionalCacheEnrichment => {
+                                super::super::ReadyParseSnapshotParseExecSubphaseV2::OptionalCacheEnrichment
+                            }
+                        };
+                        progress_control.transition_parse_exec_subphase_attribution(mapped);
+                    };
+                    let core_build_progress = |checkpoint: bsl_runtime::system::parser_coordinator::ParseSnapshotCoreBuildCheckpoint| {
+                        let mapped = match checkpoint {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotCoreBuildCheckpoint::ParserTreeBuild => {
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserTreeBuild
+                            }
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotCoreBuildCheckpoint::ExactReadySnapshotAssembly => {
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly
+                            }
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotCoreBuildCheckpoint::TreeCacheInstall => {
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::TreeCacheInstall
+                            }
+                        };
+                        progress_control.transition_core_build_checkpoint_attribution(mapped);
+                    };
+                    let assembly_progress = |checkpoint: bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint| {
+                        let mapped = match checkpoint {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::ProgramConversion => {
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion
+                            }
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::SyntaxErrorCollection => {
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::SyntaxErrorCollection
+                            }
+                        };
+                        progress_control.transition_assembly_checkpoint_attribution(mapped);
+                    };
+                    let parse_options =
+                        bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions {
+                            save_critical_initial: matches!(
+                                request.admission_lane,
+                                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+                            ),
+                            save_critical_requested: Some(&progress_control.promotion_requested),
+                            progress_callback: Some(&parse_exec_progress),
+                            core_build_progress_callback: Some(&core_build_progress),
+                            assembly_progress_callback: Some(&assembly_progress),
+                        };
+                    let recovery_parse_options =
+                        bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions {
+                            // Recovery only primes the tree cache for the shadow-state base. It
+                            // should not pay optional cache enrichment on the critical path.
+                            save_critical_initial: true,
+                            save_critical_requested: Some(&progress_control.promotion_requested),
+                            progress_callback: Some(&parse_exec_progress),
+                            core_build_progress_callback: Some(&core_build_progress),
+                            assembly_progress_callback: Some(&assembly_progress),
+                        };
                     let mut effective_forced_full_parse_reason = forced_full_parse_reason;
                     if effective_forced_full_parse_reason
                         == Some(
@@ -740,7 +923,7 @@ impl BslLanguageServer {
                             ) {
                                 true
                             } else {
-                                match parser.parse_full_with_report_with_cancellation(
+                                match parser.parse_full_with_report_with_cancellation_and_options(
                                     recovery_path.clone(),
                                     recovery_text.to_string(),
                                     bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
@@ -748,6 +931,7 @@ impl BslLanguageServer {
                                         .as_ref()
                                         .expect("task control for parser-base recovery")
                                         .cancel_requested,
+                                    recovery_parse_options,
                                 ) {
                                     Ok(_) => {
                                         maybe_poison_tree_cache_after_recovery_for_test(
@@ -786,35 +970,21 @@ impl BslLanguageServer {
                         }
                     }
                     let parse_result = if let Some(reason) = effective_forced_full_parse_reason {
-                        if let Some(control) = task_control_for_exec.as_ref() {
-                            parser.parse_full_with_report_with_cancellation(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                reason,
-                                &control.cancel_requested,
-                            )
-                        } else {
-                            parser.parse_full_with_report(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                reason,
-                            )
-                        }
+                        parser.parse_full_with_report_with_cancellation_and_options(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            reason,
+                            &progress_control.cancel_requested,
+                            parse_options,
+                        )
                     } else {
-                        if let Some(control) = task_control_for_exec.as_ref() {
-                            parser.parse_incremental_with_report_with_cancellation(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                parser_edits,
-                                &control.cancel_requested,
-                            )
-                        } else {
-                            parser.parse_incremental_with_report(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                parser_edits,
-                            )
-                        }
+                        parser.parse_incremental_with_report_with_cancellation_and_options(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                            &progress_control.cancel_requested,
+                            parse_options,
+                        )
                     };
                     parse_result.map_err(|error| {
                         if task_control_for_exec
@@ -921,35 +1091,17 @@ impl BslLanguageServer {
                         }
                     }
                     let parse_result = if let Some(reason) = effective_forced_full_parse_reason {
-                        if let Some(control) = task_control_for_parse.as_ref() {
-                            parser.parse_full_with_report_with_cancellation(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                reason,
-                                &control.cancel_requested,
-                            )
-                        } else {
-                            parser.parse_full_with_report(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                reason,
-                            )
-                        }
+                        parser.parse_full_with_report(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            reason,
+                        )
                     } else {
-                        if let Some(control) = task_control_for_parse.as_ref() {
-                            parser.parse_incremental_with_report_with_cancellation(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                parser_edits,
-                                &control.cancel_requested,
-                            )
-                        } else {
-                            parser.parse_incremental_with_report(
-                                PathBuf::from(path_for_parse.as_ref()),
-                                text_for_parse.to_string(),
-                                parser_edits,
-                            )
-                        }
+                        parser.parse_incremental_with_report(
+                            PathBuf::from(path_for_parse.as_ref()),
+                            text_for_parse.to_string(),
+                            parser_edits,
+                        )
                     };
                     parse_result.map_err(|error| {
                         if task_control_for_parse
@@ -989,6 +1141,13 @@ impl BslLanguageServer {
             }
         };
         self.record_parse_snapshot_report_v2(&report, parse_started.elapsed());
+        let deferred_work = DeferredParseSnapshotWorkV2 {
+            optional_cache_enrichment: report
+                .parse_exec_subphases
+                .deferred_optional_cache_enrichment,
+            tree_cache_install: report.parse_exec_subphases.deferred_tree_cache_install,
+            syntax_error_assembly: report.parse_exec_subphases.deferred_syntax_error_assembly,
+        };
         let mut effective_did_change_attribution = did_change_attribution;
         if report.fallback_reason.as_deref()
             != Some(
@@ -1017,7 +1176,10 @@ impl BslLanguageServer {
                 attribution,
             );
         }
-        BuildParseSnapshotOutcomeV2::Ready(parse_snapshot_from_report(file_id, version, report))
+        BuildParseSnapshotOutcomeV2::Ready(
+            parse_snapshot_from_report(file_id, version, report),
+            deferred_work,
+        )
     }
 
     pub(crate) async fn matching_background_parse_snapshot_task_control_v2(
@@ -1293,7 +1455,7 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
             );
             self.refresh_snapshot_status_v2(file_id).await;
-            let parse_snapshot = match self
+            let (parse_snapshot, deferred_work) = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
                     file_id,
                     version: target.requested_version,
@@ -1321,7 +1483,9 @@ impl BslLanguageServer {
                 })
                 .await
             {
-                BuildParseSnapshotOutcomeV2::Ready(parse_snapshot) => parse_snapshot,
+                BuildParseSnapshotOutcomeV2::Ready(parse_snapshot, deferred_work) => {
+                    (parse_snapshot, deferred_work)
+                }
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::RetargetedDuringParse,
                 ) => {
@@ -1420,6 +1584,7 @@ impl BslLanguageServer {
                 target.text.clone(),
                 &parse_snapshot,
                 target.source,
+                !deferred_work.syntax_error_assembly,
             )
             .await;
             let ready_phase_snapshot = task_control.finish_phase_attribution();
@@ -1434,6 +1599,25 @@ impl BslLanguageServer {
             task_control.materialized.store(true, Ordering::SeqCst);
             task_control.materialized_notify.notify_waiters();
             task_control.control_notify.notify_waiters();
+            if deferred_work.tree_cache_install {
+                self.spawn_deferred_parse_snapshot_tree_cache_install_v2(
+                    file_id,
+                    target.requested_version,
+                    Arc::clone(&target.path),
+                    Arc::clone(&target.text),
+                );
+            }
+            if deferred_work.syntax_error_assembly || deferred_work.optional_cache_enrichment {
+                self.spawn_deferred_parse_snapshot_post_publish_enrichment_v2(
+                    file_id,
+                    target.requested_version,
+                    Arc::clone(&target.path),
+                    Arc::clone(&target.text),
+                    parse_snapshot.clone(),
+                    deferred_work.syntax_error_assembly,
+                    deferred_work.optional_cache_enrichment,
+                );
+            }
             self.coordinator
                 .record_intellisense_v2_ready_parse_snapshot_materialization(
                     origin_label,
@@ -2199,6 +2383,7 @@ impl BslLanguageServer {
                     text.clone(),
                     &parse_snapshot,
                     super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                    true,
                 )
                 .await;
             let analysis = server.analysis_v2.snapshot().await;

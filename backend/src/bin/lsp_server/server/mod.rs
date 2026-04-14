@@ -112,7 +112,7 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 12;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 15;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 3;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
@@ -437,9 +437,63 @@ impl ReadyParseSnapshotAttributionPhaseV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadyParseSnapshotParseExecSubphaseV2 {
+    CoreParseBuild = 1,
+    OptionalCacheEnrichment = 2,
+}
+
+impl ReadyParseSnapshotParseExecSubphaseV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::CoreParseBuild => "core_parse_build",
+            Self::OptionalCacheEnrichment => "optional_cache_enrichment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadyParseSnapshotCoreBuildCheckpointV2 {
+    ParserTreeBuild = 1,
+    ExactReadySnapshotAssembly = 2,
+    TreeCacheInstall = 3,
+}
+
+impl ReadyParseSnapshotCoreBuildCheckpointV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ParserTreeBuild => "parser_tree_build",
+            Self::ExactReadySnapshotAssembly => "exact_ready_snapshot_assembly",
+            Self::TreeCacheInstall => "tree_cache_install",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReadyParseSnapshotAssemblyCheckpointV2 {
+    ProgramConversion = 1,
+    SyntaxErrorCollection = 2,
+}
+
+impl ReadyParseSnapshotAssemblyCheckpointV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ProgramConversion => "program_conversion",
+            Self::SyntaxErrorCollection => "syntax_error_collection",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReadyParseSnapshotPhaseAttributionV2 {
     pub parse_exec_ms: Option<u64>,
+    pub parse_exec_core_parse_build_ms: Option<u64>,
+    pub parse_exec_core_build_parser_tree_build_ms: Option<u64>,
+    pub parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
+    pub parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Option<u64>,
+    pub parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms: Option<u64>,
+    pub parse_exec_core_build_tree_cache_install_ms: Option<u64>,
+    pub parse_exec_optional_cache_enrichment_ms: Option<u64>,
     pub post_parse_pre_materialization_ms: Option<u64>,
     pub ready_install_ms: Option<u64>,
     pub document_symbol_side_work_ms: Option<u64>,
@@ -463,12 +517,67 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
         .filter_map(|(phase, duration_ms)| duration_ms.map(|value| (phase, value)))
         .max_by_key(|(_, duration_ms)| *duration_ms)
     }
+
+    pub(crate) fn dominant_parse_exec_subphase(self: &Self) -> Option<(&'static str, u64)> {
+        [
+            ("core_parse_build", self.parse_exec_core_parse_build_ms),
+            (
+                "optional_cache_enrichment",
+                self.parse_exec_optional_cache_enrichment_ms,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(subphase, duration_ms)| duration_ms.map(|value| (subphase, value)))
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
+
+    pub(crate) fn dominant_core_build_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+        [
+            (
+                "parser_tree_build",
+                self.parse_exec_core_build_parser_tree_build_ms,
+            ),
+            (
+                "exact_ready_snapshot_assembly",
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+            ),
+            (
+                "tree_cache_install",
+                self.parse_exec_core_build_tree_cache_install_ms,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(checkpoint, duration_ms)| duration_ms.map(|value| (checkpoint, value)))
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
+
+    pub(crate) fn dominant_assembly_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+        [
+            (
+                "program_conversion",
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            ),
+            (
+                "syntax_error_collection",
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(checkpoint, duration_ms)| duration_ms.map(|value| (checkpoint, value)))
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
     pub current_phase: Option<ReadyParseSnapshotAttributionPhaseV2>,
     pub current_phase_elapsed_ms: Option<u64>,
+    pub current_parse_exec_subphase: Option<ReadyParseSnapshotParseExecSubphaseV2>,
+    pub current_parse_exec_subphase_elapsed_ms: Option<u64>,
+    pub current_core_build_checkpoint: Option<ReadyParseSnapshotCoreBuildCheckpointV2>,
+    pub current_core_build_checkpoint_elapsed_ms: Option<u64>,
+    pub current_assembly_checkpoint: Option<ReadyParseSnapshotAssemblyCheckpointV2>,
+    pub current_assembly_checkpoint_elapsed_ms: Option<u64>,
     pub completed: ReadyParseSnapshotPhaseAttributionV2,
 }
 
@@ -487,12 +596,89 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
             (None, None) => None,
         }
     }
+
+    pub(crate) fn dominant_parse_exec_subphase(self: &Self) -> Option<(&'static str, u64)> {
+        let completed = self.completed.dominant_parse_exec_subphase();
+        let current = matches!(
+            self.current_phase,
+            Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec)
+        )
+        .then(|| {
+            self.current_parse_exec_subphase
+                .zip(self.current_parse_exec_subphase_elapsed_ms)
+                .map(|(subphase, duration_ms)| (subphase.as_str(), duration_ms))
+        })
+        .flatten();
+        match (completed, current) {
+            (Some(left), Some(right)) => Some(if left.1 >= right.1 { left } else { right }),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
+    }
+
+    pub(crate) fn dominant_core_build_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+        let completed = self.completed.dominant_core_build_checkpoint();
+        let current = matches!(
+            (self.current_phase, self.current_parse_exec_subphase,),
+            (
+                Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+            )
+        )
+        .then(|| {
+            self.current_core_build_checkpoint
+                .zip(self.current_core_build_checkpoint_elapsed_ms)
+                .map(|(checkpoint, duration_ms)| (checkpoint.as_str(), duration_ms))
+        })
+        .flatten();
+        match (completed, current) {
+            (Some(left), Some(right)) => Some(if left.1 >= right.1 { left } else { right }),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
+    }
+
+    pub(crate) fn dominant_assembly_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+        let completed = self.completed.dominant_assembly_checkpoint();
+        let current = matches!(
+            (
+                self.current_phase,
+                self.current_parse_exec_subphase,
+                self.current_core_build_checkpoint,
+            ),
+            (
+                Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+                Some(ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly),
+            )
+        )
+        .then(|| {
+            self.current_assembly_checkpoint
+                .zip(self.current_assembly_checkpoint_elapsed_ms)
+                .map(|(checkpoint, duration_ms)| (checkpoint.as_str(), duration_ms))
+        })
+        .flatten();
+        match (completed, current) {
+            (Some(left), Some(right)) => Some(if left.1 >= right.1 { left } else { right }),
+            (Some(left), None) => Some(left),
+            (None, Some(right)) => Some(right),
+            (None, None) => None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
 struct ReadyParseSnapshotPhaseAttributionStateV2 {
     current_phase: Option<ReadyParseSnapshotAttributionPhaseV2>,
     current_phase_started_at: Option<Instant>,
+    current_parse_exec_subphase: Option<ReadyParseSnapshotParseExecSubphaseV2>,
+    current_parse_exec_subphase_started_at: Option<Instant>,
+    current_core_build_checkpoint: Option<ReadyParseSnapshotCoreBuildCheckpointV2>,
+    current_core_build_checkpoint_started_at: Option<Instant>,
+    current_assembly_checkpoint: Option<ReadyParseSnapshotAssemblyCheckpointV2>,
+    current_assembly_checkpoint_started_at: Option<Instant>,
     completed: ReadyParseSnapshotPhaseAttributionV2,
 }
 
@@ -500,6 +686,12 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
     fn reset(&mut self) {
         self.current_phase = None;
         self.current_phase_started_at = None;
+        self.current_parse_exec_subphase = None;
+        self.current_parse_exec_subphase_started_at = None;
+        self.current_core_build_checkpoint = None;
+        self.current_core_build_checkpoint_started_at = None;
+        self.current_assembly_checkpoint = None;
+        self.current_assembly_checkpoint_started_at = None;
         self.completed = ReadyParseSnapshotPhaseAttributionV2::default();
     }
 
@@ -507,6 +699,80 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
         self.finish_current(now);
         self.current_phase = Some(phase);
         self.current_phase_started_at = Some(now);
+        if phase != ReadyParseSnapshotAttributionPhaseV2::ParseExec {
+            self.current_parse_exec_subphase = None;
+            self.current_parse_exec_subphase_started_at = None;
+            self.current_core_build_checkpoint = None;
+            self.current_core_build_checkpoint_started_at = None;
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+        }
+    }
+
+    fn transition_parse_exec_subphase_to(
+        &mut self,
+        subphase: ReadyParseSnapshotParseExecSubphaseV2,
+        now: Instant,
+    ) {
+        if self.current_phase != Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec) {
+            return;
+        }
+        self.finish_current_parse_exec_subphase(now);
+        self.current_parse_exec_subphase = Some(subphase);
+        self.current_parse_exec_subphase_started_at = Some(now);
+        if subphase != ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild {
+            self.current_core_build_checkpoint = None;
+            self.current_core_build_checkpoint_started_at = None;
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+        }
+    }
+
+    fn transition_core_build_checkpoint_to(
+        &mut self,
+        checkpoint: ReadyParseSnapshotCoreBuildCheckpointV2,
+        now: Instant,
+    ) {
+        if !matches!(
+            (self.current_phase, self.current_parse_exec_subphase,),
+            (
+                Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+            )
+        ) {
+            return;
+        }
+        self.finish_current_core_build_checkpoint(now);
+        self.current_core_build_checkpoint = Some(checkpoint);
+        self.current_core_build_checkpoint_started_at = Some(now);
+        if checkpoint != ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly {
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+        }
+    }
+
+    fn transition_assembly_checkpoint_to(
+        &mut self,
+        checkpoint: ReadyParseSnapshotAssemblyCheckpointV2,
+        now: Instant,
+    ) {
+        if !matches!(
+            (
+                self.current_phase,
+                self.current_parse_exec_subphase,
+                self.current_core_build_checkpoint,
+            ),
+            (
+                Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+                Some(ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly),
+            )
+        ) {
+            return;
+        }
+        self.finish_current_assembly_checkpoint(now);
+        self.current_assembly_checkpoint = Some(checkpoint);
+        self.current_assembly_checkpoint_started_at = Some(now);
     }
 
     fn finish_current(&mut self, now: Instant) {
@@ -514,6 +780,9 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
             self.current_phase_started_at = None;
             return;
         };
+        if phase == ReadyParseSnapshotAttributionPhaseV2::ParseExec {
+            self.finish_current_parse_exec_subphase(now);
+        }
         let elapsed_ms = self
             .current_phase_started_at
             .take()
@@ -533,6 +802,89 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
                 self.completed.document_symbol_side_work_ms = elapsed_ms;
             }
         }
+        if phase != ReadyParseSnapshotAttributionPhaseV2::ParseExec {
+            self.current_parse_exec_subphase = None;
+            self.current_parse_exec_subphase_started_at = None;
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+        }
+    }
+
+    fn finish_current_parse_exec_subphase(&mut self, now: Instant) {
+        let Some(subphase) = self.current_parse_exec_subphase.take() else {
+            self.current_parse_exec_subphase_started_at = None;
+            return;
+        };
+        if subphase == ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild {
+            self.finish_current_core_build_checkpoint(now);
+        }
+        let elapsed_ms = self
+            .current_parse_exec_subphase_started_at
+            .take()
+            .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
+        match subphase {
+            ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild => {
+                self.completed.parse_exec_core_parse_build_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotParseExecSubphaseV2::OptionalCacheEnrichment => {
+                self.completed.parse_exec_optional_cache_enrichment_ms = elapsed_ms;
+            }
+        }
+    }
+
+    fn finish_current_core_build_checkpoint(&mut self, now: Instant) {
+        let Some(checkpoint) = self.current_core_build_checkpoint.take() else {
+            self.current_core_build_checkpoint_started_at = None;
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+            return;
+        };
+        if checkpoint == ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly {
+            self.finish_current_assembly_checkpoint(now);
+        }
+        let elapsed_ms = self
+            .current_core_build_checkpoint_started_at
+            .take()
+            .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
+        match checkpoint {
+            ReadyParseSnapshotCoreBuildCheckpointV2::ParserTreeBuild => {
+                self.completed.parse_exec_core_build_parser_tree_build_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly => {
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotCoreBuildCheckpointV2::TreeCacheInstall => {
+                self.completed.parse_exec_core_build_tree_cache_install_ms = elapsed_ms;
+            }
+        }
+        if checkpoint != ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly {
+            self.current_assembly_checkpoint = None;
+            self.current_assembly_checkpoint_started_at = None;
+        }
+    }
+
+    fn finish_current_assembly_checkpoint(&mut self, now: Instant) {
+        let Some(checkpoint) = self.current_assembly_checkpoint.take() else {
+            self.current_assembly_checkpoint_started_at = None;
+            return;
+        };
+        let elapsed_ms = self
+            .current_assembly_checkpoint_started_at
+            .take()
+            .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
+        match checkpoint {
+            ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion => {
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms =
+                    elapsed_ms;
+            }
+            ReadyParseSnapshotAssemblyCheckpointV2::SyntaxErrorCollection => {
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms =
+                    elapsed_ms;
+            }
+        }
     }
 
     fn snapshot(&self, now: Instant) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {
@@ -540,6 +892,18 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
             current_phase: self.current_phase,
             current_phase_elapsed_ms: self
                 .current_phase_started_at
+                .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
+            current_parse_exec_subphase: self.current_parse_exec_subphase,
+            current_parse_exec_subphase_elapsed_ms: self
+                .current_parse_exec_subphase_started_at
+                .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
+            current_core_build_checkpoint: self.current_core_build_checkpoint,
+            current_core_build_checkpoint_elapsed_ms: self
+                .current_core_build_checkpoint_started_at
+                .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
+            current_assembly_checkpoint: self.current_assembly_checkpoint,
+            current_assembly_checkpoint_elapsed_ms: self
+                .current_assembly_checkpoint_started_at
                 .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
             completed: self.completed.clone(),
         }
@@ -555,6 +919,7 @@ pub(crate) struct ReadyParseSnapshotStateV2 {
     pub text: Arc<str>,
     pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+    pub syntax_errors_complete: bool,
     pub phase_attribution: ReadyParseSnapshotPhaseAttributionV2,
 }
 
@@ -807,6 +1172,36 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .transition_to(phase, Instant::now());
+    }
+
+    pub(crate) fn transition_parse_exec_subphase_attribution(
+        &self,
+        subphase: ReadyParseSnapshotParseExecSubphaseV2,
+    ) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .transition_parse_exec_subphase_to(subphase, Instant::now());
+    }
+
+    pub(crate) fn transition_core_build_checkpoint_attribution(
+        &self,
+        checkpoint: ReadyParseSnapshotCoreBuildCheckpointV2,
+    ) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .transition_core_build_checkpoint_to(checkpoint, Instant::now());
+    }
+
+    pub(crate) fn transition_assembly_checkpoint_attribution(
+        &self,
+        checkpoint: ReadyParseSnapshotAssemblyCheckpointV2,
+    ) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .transition_assembly_checkpoint_to(checkpoint, Instant::now());
     }
 
     pub(crate) fn finish_phase_attribution(&self) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {

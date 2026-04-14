@@ -38,6 +38,25 @@ This change intentionally follows:
 This change targets what remains after both: exact same-version `parse_exec` duration on the
 save-critical path.
 
+## Epic
+
+This change is tracked by Beads epic `bsl-gradual-types-d3t6`
+(`OpenSpec refactor-27: exact parse_exec bounding`).
+
+Execution children for this step:
+
+- `bsl-gradual-types-d3t6.1` - save-critical exact `parse_exec`
+- `bsl-gradual-types-d3t6.2` - bounded in-parse checkpoints and attribution
+- `bsl-gradual-types-d3t6.3` - regressions and `conf_big` live evidence
+- `bsl-gradual-types-d3t6.4` - targeted validation and strict OpenSpec validation
+
+Dependency graph:
+
+- `bsl-gradual-types-d3t6.1` starts first;
+- `bsl-gradual-types-d3t6.2` depends on `.1`;
+- `bsl-gradual-types-d3t6.3` depends on `.1` and `.2`;
+- `bsl-gradual-types-d3t6.4` depends on `.3`.
+
 ## Impact
 
 - Affected specs:

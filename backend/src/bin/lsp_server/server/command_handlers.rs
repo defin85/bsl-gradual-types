@@ -1885,6 +1885,39 @@ mod tests {
             followup_ready_snapshot_timeout_phase: Some("parse_exec".to_string()),
             followup_ready_snapshot_timeout_phase_elapsed_ms: Some(3500),
             followup_ready_snapshot_parse_exec_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_timeout_subphase: Some(
+                "core_parse_build".to_string(),
+            ),
+            followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_core_parse_build_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: Some(
+                "parser_tree_build".to_string(),
+            ),
+            followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+            followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+            followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: Some(
+                "parser_tree_build".to_string(),
+            ),
+            followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: Some(3500),
+            followup_ready_snapshot_parse_exec_dominant_subphase: Some(
+                "core_parse_build".to_string(),
+            ),
+            followup_ready_snapshot_parse_exec_dominant_subphase_ms: Some(3500),
             followup_ready_snapshot_post_parse_pre_materialization_ms: None,
             followup_ready_snapshot_ready_install_ms: None,
             followup_ready_snapshot_document_symbol_side_work_ms: None,

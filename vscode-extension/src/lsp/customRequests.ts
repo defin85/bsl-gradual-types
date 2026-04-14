@@ -912,6 +912,39 @@ export interface DiagnosticsSaveTimelineTrace {
         | 'document_symbol_side_work';
     followup_ready_snapshot_timeout_phase_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_ms?: number;
+    followup_ready_snapshot_parse_exec_timeout_subphase?:
+        | 'core_parse_build'
+        | 'optional_cache_enrichment';
+    followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_core_parse_build_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint?:
+        | 'parser_tree_build'
+        | 'exact_ready_snapshot_assembly'
+        | 'tree_cache_install';
+    followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint?:
+        | 'program_conversion'
+        | 'syntax_error_collection';
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint?:
+        | 'program_conversion'
+        | 'syntax_error_collection';
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms?: number;
+    followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint?:
+        | 'parser_tree_build'
+        | 'exact_ready_snapshot_assembly'
+        | 'tree_cache_install';
+    followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms?: number;
+    followup_ready_snapshot_parse_exec_dominant_subphase?:
+        | 'core_parse_build'
+        | 'optional_cache_enrichment';
+    followup_ready_snapshot_parse_exec_dominant_subphase_ms?: number;
     followup_ready_snapshot_post_parse_pre_materialization_ms?: number;
     followup_ready_snapshot_ready_install_ms?: number;
     followup_ready_snapshot_document_symbol_side_work_ms?: number;

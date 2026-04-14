@@ -553,6 +553,50 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_timeout_subphase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_parse_build_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+        Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+        Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_dominant_subphase: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_dominant_subphase_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_post_parse_pre_materialization_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_ready_install_ms: Option<u64>,

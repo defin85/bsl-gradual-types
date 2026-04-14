@@ -323,7 +323,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 12,
+                        version: 15,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -721,7 +721,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 12);
+        assert.strictEqual(result.response.version, 15);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);

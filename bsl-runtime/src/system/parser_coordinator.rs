@@ -99,6 +99,31 @@ fn maybe_inject_parse_snapshot_parse_progress_delay_for_test() {
     }
 }
 
+fn maybe_inject_parse_snapshot_optional_cache_enrichment_delay_for_test() -> Option<u64> {
+    std::env::var("BSL_TEST_PARSE_SNAPSHOT_OPTIONAL_CACHE_ENRICHMENT_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn maybe_inject_parse_snapshot_tree_cache_install_delay_for_test() -> Option<u64> {
+    std::env::var("BSL_TEST_PARSE_SNAPSHOT_TREE_CACHE_INSTALL_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn maybe_inject_parse_snapshot_syntax_error_assembly_delay_for_test() -> Option<u64> {
+    std::env::var("BSL_TEST_PARSE_SNAPSHOT_SYNTAX_ERROR_ASSEMBLY_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn duration_to_u64_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
 fn canonical_parse_snapshot_fallback_reason(error: &str) -> &'static str {
     if error == "No edits provided for incremental parsing" {
         return PARSE_SNAPSHOT_FALLBACK_NO_EDITS_PROVIDED;
@@ -182,6 +207,104 @@ pub struct ParseSnapshotReport {
     pub backend_tree_hash: u64,
     pub incremental: bool,
     pub fallback_reason: Option<String>,
+    pub parse_exec_subphases: ParseSnapshotExecSubphaseAttribution,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotExecSubphase {
+    CoreParseBuild,
+    OptionalCacheEnrichment,
+}
+
+impl ParseSnapshotExecSubphase {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CoreParseBuild => "core_parse_build",
+            Self::OptionalCacheEnrichment => "optional_cache_enrichment",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotCoreBuildCheckpoint {
+    ParserTreeBuild,
+    ExactReadySnapshotAssembly,
+    TreeCacheInstall,
+}
+
+impl ParseSnapshotCoreBuildCheckpoint {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ParserTreeBuild => "parser_tree_build",
+            Self::ExactReadySnapshotAssembly => "exact_ready_snapshot_assembly",
+            Self::TreeCacheInstall => "tree_cache_install",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotAssemblyCheckpoint {
+    ProgramConversion,
+    SyntaxErrorCollection,
+}
+
+impl ParseSnapshotAssemblyCheckpoint {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ProgramConversion => "program_conversion",
+            Self::SyntaxErrorCollection => "syntax_error_collection",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ParseSnapshotExecSubphaseAttribution {
+    pub core_parse_build_ms: Option<u64>,
+    pub optional_cache_enrichment_ms: Option<u64>,
+    pub deferred_optional_cache_enrichment: bool,
+    pub deferred_tree_cache_install: bool,
+    pub deferred_syntax_error_assembly: bool,
+}
+
+impl ParseSnapshotExecSubphaseAttribution {
+    pub fn dominant_subphase(&self) -> Option<(&'static str, u64)> {
+        [
+            ("core_parse_build", self.core_parse_build_ms),
+            (
+                "optional_cache_enrichment",
+                self.optional_cache_enrichment_ms,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(subphase, duration_ms)| duration_ms.map(|value| (subphase, value)))
+        .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct ParseSnapshotExecutionOptions<'a> {
+    pub save_critical_initial: bool,
+    pub save_critical_requested: Option<&'a AtomicBool>,
+    pub progress_callback: Option<&'a (dyn Fn(ParseSnapshotExecSubphase) + Send + Sync)>,
+    pub core_build_progress_callback:
+        Option<&'a (dyn Fn(ParseSnapshotCoreBuildCheckpoint) + Send + Sync)>,
+    pub assembly_progress_callback:
+        Option<&'a (dyn Fn(ParseSnapshotAssemblyCheckpoint) + Send + Sync)>,
+}
+
+enum ParseSnapshotTreeCacheInstallOp {
+    Set {
+        file_path: PathBuf,
+        tree: tree_sitter::Tree,
+        source: String,
+        content_hash: u64,
+    },
+    Update {
+        file_path: PathBuf,
+        tree: tree_sitter::Tree,
+        source: String,
+        content_hash: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -387,6 +510,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
         }
@@ -443,6 +567,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
         }
@@ -471,6 +596,92 @@ impl ParserCoordinator {
         result
     }
 
+    pub fn parse_incremental_with_report_with_cancellation_and_options(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                Self::notify_parse_snapshot_exec_subphase(
+                    &options,
+                    ParseSnapshotExecSubphase::CoreParseBuild,
+                );
+                let core_started = std::time::Instant::now();
+                let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+                debug!("Content unchanged, using cached tree");
+                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                let mut parse_exec_subphases = ParseSnapshotExecSubphaseAttribution {
+                    core_parse_build_ms: Some(duration_to_u64_ms(core_started.elapsed())),
+                    ..Default::default()
+                };
+                match self.run_optional_cache_enrichment_with_cancellation(
+                    &file_path,
+                    new_hash,
+                    &new_content,
+                    &result,
+                    cancellation_flag,
+                    options,
+                )? {
+                    Some(elapsed_ms) => {
+                        parse_exec_subphases.optional_cache_enrichment_ms = Some(elapsed_ms);
+                    }
+                    None => {
+                        parse_exec_subphases.deferred_optional_cache_enrichment = true;
+                    }
+                }
+                return Ok(ParseSnapshotReport {
+                    parse_result: result,
+                    line_index,
+                    changed_ranges: Vec::new(),
+                    backend_tree: old_tree.clone(),
+                    backend_tree_hash: new_tree_hash,
+                    incremental: true,
+                    fallback_reason: None,
+                    parse_exec_subphases,
+                });
+            }
+        }
+
+        let key = ParseSnapshotSingleflightKey {
+            file_path: file_path.clone(),
+            content_hash: new_hash,
+        };
+        let (entry, is_leader) = self.begin_parse_snapshot_singleflight(key.clone());
+        if !is_leader {
+            return Self::wait_parse_snapshot_singleflight_with_cancellation(
+                entry.as_ref(),
+                cancellation_flag,
+            );
+        }
+
+        let result = self
+            .parse_incremental_with_report_singleflight_leader_with_cancellation_and_options(
+                file_path,
+                new_content,
+                edits,
+                new_hash,
+                new_tree_hash,
+                cancellation_flag,
+                options,
+            );
+        self.complete_parse_snapshot_singleflight(&key, &entry, &result);
+        result
+    }
+
     pub fn parse_full_with_report(
         &self,
         file_path: PathBuf,
@@ -495,6 +706,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
         }
@@ -516,6 +728,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
                     fallback_reason: Some(fallback_reason.to_string()),
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 })
             }
             Err(error) => {
@@ -560,6 +773,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
         }
@@ -590,7 +804,195 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
                     fallback_reason: Some(fallback_reason.to_string()),
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 })
+            }
+            Err(error) => {
+                if is_parse_cancelled_error(&error) {
+                    Err(error)
+                } else {
+                    error!(
+                        "TreeSitter parsing failed during forced full parse: {}",
+                        error
+                    );
+                    Err(format!("Tree-sitter parsing failed: {}", error))
+                }
+            }
+        }
+    }
+
+    fn finalize_parse_snapshot_report_with_options(
+        &self,
+        file_path: &PathBuf,
+        new_content: &str,
+        new_hash: [u8; 32],
+        new_tree_hash: u64,
+        line_index: Arc<bsl_line_index::LineIndex>,
+        tree: tree_sitter::Tree,
+        parse_result: ParseResult,
+        changed_ranges: Vec<ParseChangedRange>,
+        incremental: bool,
+        fallback_reason: Option<String>,
+        core_started: std::time::Instant,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+        tree_cache_install_op: Option<ParseSnapshotTreeCacheInstallOp>,
+        deferred_syntax_error_assembly: bool,
+    ) -> Result<ParseSnapshotReport, String> {
+        let backend_tree = Arc::new(tree.clone());
+        let mut parse_exec_subphases = ParseSnapshotExecSubphaseAttribution {
+            ..Default::default()
+        };
+        parse_exec_subphases.deferred_syntax_error_assembly = deferred_syntax_error_assembly;
+        if let Some(install_op) = tree_cache_install_op {
+            match self.run_tree_cache_install_with_cancellation(
+                install_op,
+                cancellation_flag,
+                options,
+            )? {
+                Some(_) => {}
+                None => {
+                    parse_exec_subphases.deferred_tree_cache_install = true;
+                }
+            }
+        }
+        parse_exec_subphases.core_parse_build_ms = Some(duration_to_u64_ms(core_started.elapsed()));
+        match self.run_optional_cache_enrichment_with_cancellation(
+            file_path.as_path(),
+            new_hash,
+            new_content,
+            &parse_result,
+            cancellation_flag,
+            options,
+        )? {
+            Some(elapsed_ms) => {
+                parse_exec_subphases.optional_cache_enrichment_ms = Some(elapsed_ms);
+            }
+            None => {
+                parse_exec_subphases.deferred_optional_cache_enrichment = true;
+            }
+        }
+        Ok(ParseSnapshotReport {
+            parse_result,
+            line_index,
+            changed_ranges,
+            backend_tree,
+            backend_tree_hash: new_tree_hash,
+            incremental,
+            fallback_reason,
+            parse_exec_subphases,
+        })
+    }
+
+    pub fn parse_full_with_report_with_cancellation_and_options(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        fallback_reason: &'static str,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let new_hash = ast_cache_key(&new_content);
+        let new_tree_hash = hash_content(&new_content);
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, _old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                Self::notify_parse_snapshot_exec_subphase(
+                    &options,
+                    ParseSnapshotExecSubphase::CoreParseBuild,
+                );
+                let core_started = std::time::Instant::now();
+                Self::notify_parse_snapshot_core_build_checkpoint(
+                    &options,
+                    ParseSnapshotCoreBuildCheckpoint::ExactReadySnapshotAssembly,
+                );
+                debug!("Content unchanged, using cached tree");
+                let (result, deferred_syntax_error_assembly) = self
+                    .run_exact_ready_snapshot_assembly_with_cancellation(
+                        &old_tree,
+                        &new_content,
+                        cancellation_flag,
+                        options,
+                    )?;
+                return self.finalize_parse_snapshot_report_with_options(
+                    &file_path,
+                    &new_content,
+                    new_hash,
+                    new_tree_hash,
+                    line_index,
+                    old_tree.as_ref().clone(),
+                    result,
+                    Vec::new(),
+                    true,
+                    None,
+                    core_started,
+                    cancellation_flag,
+                    options,
+                    None,
+                    deferred_syntax_error_assembly,
+                );
+            }
+        }
+
+        debug!("Forced full parse for file: {:?}", file_path);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        record_parse_snapshot_full_parse_attempt_for_test();
+        Self::notify_parse_snapshot_exec_subphase(
+            &options,
+            ParseSnapshotExecSubphase::CoreParseBuild,
+        );
+        let core_started = std::time::Instant::now();
+        Self::notify_parse_snapshot_core_build_checkpoint(
+            &options,
+            ParseSnapshotCoreBuildCheckpoint::ParserTreeBuild,
+        );
+        match self.tree_sitter.parse_tree_only_with_cancellation(
+            &new_content,
+            None,
+            cancellation_flag,
+        ) {
+            Ok(tree) => {
+                let (program, deferred_syntax_error_assembly) = self
+                    .run_exact_ready_snapshot_assembly_with_cancellation(
+                        &tree,
+                        &new_content,
+                        cancellation_flag,
+                        options,
+                    )?;
+                let tree_for_cache = tree.clone();
+                self.finalize_parse_snapshot_report_with_options(
+                    &file_path,
+                    &new_content,
+                    new_hash,
+                    new_tree_hash,
+                    line_index,
+                    tree,
+                    program,
+                    Vec::new(),
+                    false,
+                    Some(fallback_reason.to_string()),
+                    core_started,
+                    cancellation_flag,
+                    options,
+                    Some(ParseSnapshotTreeCacheInstallOp::Set {
+                        file_path: file_path.clone(),
+                        tree: tree_for_cache,
+                        source: new_content.clone(),
+                        content_hash: new_tree_hash,
+                    }),
+                    deferred_syntax_error_assembly,
+                )
             }
             Err(error) => {
                 if is_parse_cancelled_error(&error) {
@@ -794,6 +1196,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
 
@@ -827,6 +1230,7 @@ impl ParserCoordinator {
                         backend_tree_hash: new_tree_hash,
                         incremental: true,
                         fallback_reason: None,
+                        parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                     });
                 }
                 Err(e) => {
@@ -862,6 +1266,8 @@ impl ParserCoordinator {
                                 backend_tree_hash: new_tree_hash,
                                 incremental: false,
                                 fallback_reason,
+                                parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(
+                                ),
                             })
                         }
                         Err(parse_err) => {
@@ -890,6 +1296,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
                     fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 })
             }
             Err(e) => {
@@ -931,6 +1338,7 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: true,
                     fallback_reason: None,
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 });
             }
 
@@ -965,6 +1373,7 @@ impl ParserCoordinator {
                         backend_tree_hash: new_tree_hash,
                         incremental: true,
                         fallback_reason: None,
+                        parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                     });
                 }
                 Err(error) if is_parse_cancelled_error(&error) => {
@@ -1013,6 +1422,8 @@ impl ParserCoordinator {
                                 backend_tree_hash: new_tree_hash,
                                 incremental: false,
                                 fallback_reason,
+                                parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(
+                                ),
                             })
                         }
                         Err(parse_error) => {
@@ -1054,7 +1465,270 @@ impl ParserCoordinator {
                     backend_tree_hash: new_tree_hash,
                     incremental: false,
                     fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
+                    parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
                 })
+            }
+            Err(error) => {
+                if is_parse_cancelled_error(&error) {
+                    Err(error)
+                } else {
+                    error!("TreeSitter parsing failed: {}", error);
+                    Err(format!("Tree-sitter parsing failed: {}", error))
+                }
+            }
+        }
+    }
+
+    fn parse_incremental_with_report_singleflight_leader_with_cancellation_and_options(
+        &self,
+        file_path: PathBuf,
+        new_content: String,
+        edits: Vec<TextEdit>,
+        new_hash: [u8; 32],
+        new_tree_hash: u64,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<ParseSnapshotReport, String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
+
+        if let Some((old_tree, old_source, old_hash)) = self.tree_cache.get(&file_path) {
+            if old_hash == new_tree_hash {
+                Self::notify_parse_snapshot_exec_subphase(
+                    &options,
+                    ParseSnapshotExecSubphase::CoreParseBuild,
+                );
+                let core_started = std::time::Instant::now();
+                debug!("Content unchanged, using cached tree");
+                let (result, deferred_syntax_error_assembly) = self
+                    .run_exact_ready_snapshot_assembly_with_cancellation(
+                        &old_tree,
+                        &new_content,
+                        cancellation_flag,
+                        options,
+                    )?;
+                return self.finalize_parse_snapshot_report_with_options(
+                    &file_path,
+                    &new_content,
+                    new_hash,
+                    new_tree_hash,
+                    line_index,
+                    old_tree.as_ref().clone(),
+                    result,
+                    Vec::new(),
+                    true,
+                    None,
+                    core_started,
+                    cancellation_flag,
+                    options,
+                    None,
+                    deferred_syntax_error_assembly,
+                );
+            }
+
+            debug!("Applying {} edits incrementally", edits.len());
+            Self::notify_parse_snapshot_exec_subphase(
+                &options,
+                ParseSnapshotExecSubphase::CoreParseBuild,
+            );
+            let core_started = std::time::Instant::now();
+            Self::notify_parse_snapshot_core_build_checkpoint(
+                &options,
+                ParseSnapshotCoreBuildCheckpoint::ParserTreeBuild,
+            );
+            let fallback_reason = match self
+                .tree_sitter
+                .parse_incremental_tree_only_with_cancellation(
+                    &new_content,
+                    Some(&old_tree),
+                    edits,
+                    &old_source,
+                    cancellation_flag,
+                ) {
+                Ok((new_tree, changed_ranges)) => {
+                    if let Some(forced_error) = maybe_force_incremental_adapter_error_for_test() {
+                        warn!(
+                            "Incremental tree-to-AST conversion failed: {}, falling back to full parse",
+                            forced_error
+                        );
+                        Some(PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED.to_string())
+                    } else {
+                        match self.run_exact_ready_snapshot_assembly_with_cancellation(
+                            &new_tree,
+                            &new_content,
+                            cancellation_flag,
+                            options,
+                        ) {
+                            Ok((program, deferred_syntax_error_assembly)) => {
+                                return self.finalize_parse_snapshot_report_with_options(
+                                    &file_path,
+                                    &new_content,
+                                    new_hash,
+                                    new_tree_hash,
+                                    line_index,
+                                    new_tree.clone(),
+                                    program,
+                                    changed_ranges,
+                                    true,
+                                    None,
+                                    core_started,
+                                    cancellation_flag,
+                                    options,
+                                    Some(ParseSnapshotTreeCacheInstallOp::Update {
+                                        file_path: file_path.clone(),
+                                        tree: new_tree,
+                                        source: new_content.clone(),
+                                        content_hash: new_tree_hash,
+                                    }),
+                                    deferred_syntax_error_assembly,
+                                );
+                            }
+                            Err(_error) if cancellation_flag.load(Ordering::SeqCst) => {
+                                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                            }
+                            Err(error) => {
+                                warn!(
+                                    "Incremental tree-to-AST conversion failed: {}, falling back to full parse",
+                                    error
+                                );
+                                Some(PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED.to_string())
+                            }
+                        }
+                    }
+                }
+                Err(error) if is_parse_cancelled_error(&error) => {
+                    return Err(error);
+                }
+                Err(error) => {
+                    warn!(
+                        "Incremental parsing failed: {}, falling back to full parse",
+                        error
+                    );
+                    Some(canonical_parse_snapshot_fallback_reason(&error).to_string())
+                }
+            };
+
+            debug!("Full parse for file (fallback): {:?}", file_path);
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+            maybe_inject_parse_snapshot_full_parse_delay_for_test();
+            if cancellation_flag.load(Ordering::SeqCst) {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+            record_parse_snapshot_full_parse_attempt_for_test();
+            Self::notify_parse_snapshot_exec_subphase(
+                &options,
+                ParseSnapshotExecSubphase::CoreParseBuild,
+            );
+            let fallback_core_started = std::time::Instant::now();
+            Self::notify_parse_snapshot_core_build_checkpoint(
+                &options,
+                ParseSnapshotCoreBuildCheckpoint::ParserTreeBuild,
+            );
+            return match self.tree_sitter.parse_tree_only_with_cancellation(
+                &new_content,
+                None,
+                cancellation_flag,
+            ) {
+                Ok(tree) => {
+                    let (program, deferred_syntax_error_assembly) = self
+                        .run_exact_ready_snapshot_assembly_with_cancellation(
+                            &tree,
+                            &new_content,
+                            cancellation_flag,
+                            options,
+                        )?;
+                    self.finalize_parse_snapshot_report_with_options(
+                        &file_path,
+                        &new_content,
+                        new_hash,
+                        new_tree_hash,
+                        line_index,
+                        tree.clone(),
+                        program,
+                        Vec::new(),
+                        false,
+                        fallback_reason,
+                        fallback_core_started,
+                        cancellation_flag,
+                        options,
+                        Some(ParseSnapshotTreeCacheInstallOp::Set {
+                            file_path: file_path.clone(),
+                            tree,
+                            source: new_content.clone(),
+                            content_hash: new_tree_hash,
+                        }),
+                        deferred_syntax_error_assembly,
+                    )
+                }
+                Err(parse_error) => {
+                    if is_parse_cancelled_error(&parse_error) {
+                        Err(parse_error)
+                    } else {
+                        error!("TreeSitter parsing failed after fallback: {}", parse_error);
+                        Err(format!("Tree-sitter parsing failed: {}", parse_error))
+                    }
+                }
+            };
+        }
+
+        debug!("Full parse for file: {:?}", file_path);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        maybe_inject_parse_snapshot_full_parse_delay_for_test();
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        record_parse_snapshot_full_parse_attempt_for_test();
+        Self::notify_parse_snapshot_exec_subphase(
+            &options,
+            ParseSnapshotExecSubphase::CoreParseBuild,
+        );
+        let core_started = std::time::Instant::now();
+        Self::notify_parse_snapshot_core_build_checkpoint(
+            &options,
+            ParseSnapshotCoreBuildCheckpoint::ParserTreeBuild,
+        );
+        match self.tree_sitter.parse_tree_only_with_cancellation(
+            &new_content,
+            None,
+            cancellation_flag,
+        ) {
+            Ok(tree) => {
+                let (program, deferred_syntax_error_assembly) = self
+                    .run_exact_ready_snapshot_assembly_with_cancellation(
+                        &tree,
+                        &new_content,
+                        cancellation_flag,
+                        options,
+                    )?;
+                self.finalize_parse_snapshot_report_with_options(
+                    &file_path,
+                    &new_content,
+                    new_hash,
+                    new_tree_hash,
+                    line_index,
+                    tree.clone(),
+                    program,
+                    Vec::new(),
+                    false,
+                    Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
+                    core_started,
+                    cancellation_flag,
+                    options,
+                    Some(ParseSnapshotTreeCacheInstallOp::Set {
+                        file_path: file_path.clone(),
+                        tree,
+                        source: new_content.clone(),
+                        content_hash: new_tree_hash,
+                    }),
+                    deferred_syntax_error_assembly,
+                )
             }
             Err(error) => {
                 if is_parse_cancelled_error(&error) {
@@ -1132,6 +1806,258 @@ impl ParserCoordinator {
                 let path_str = path.to_string_lossy();
                 let _ = self.store_ast_in_disk(&path_str, content, result);
             }
+        }
+    }
+
+    fn notify_parse_snapshot_exec_subphase(
+        options: &ParseSnapshotExecutionOptions<'_>,
+        subphase: ParseSnapshotExecSubphase,
+    ) {
+        if let Some(callback) = options.progress_callback {
+            callback(subphase);
+        }
+    }
+
+    fn notify_parse_snapshot_core_build_checkpoint(
+        options: &ParseSnapshotExecutionOptions<'_>,
+        checkpoint: ParseSnapshotCoreBuildCheckpoint,
+    ) {
+        if let Some(callback) = options.core_build_progress_callback {
+            callback(checkpoint);
+        }
+    }
+
+    fn notify_parse_snapshot_assembly_checkpoint(
+        options: &ParseSnapshotExecutionOptions<'_>,
+        checkpoint: ParseSnapshotAssemblyCheckpoint,
+    ) {
+        if let Some(callback) = options.assembly_progress_callback {
+            callback(checkpoint);
+        }
+    }
+
+    fn save_critical_requested(options: ParseSnapshotExecutionOptions<'_>) -> bool {
+        options.save_critical_initial
+            || options
+                .save_critical_requested
+                .is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+
+    fn run_exact_ready_snapshot_assembly_with_cancellation(
+        &self,
+        tree: &tree_sitter::Tree,
+        content: &str,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<(ParseResult, bool), String> {
+        Self::notify_parse_snapshot_core_build_checkpoint(
+            &options,
+            ParseSnapshotCoreBuildCheckpoint::ExactReadySnapshotAssembly,
+        );
+        Self::notify_parse_snapshot_assembly_checkpoint(
+            &options,
+            ParseSnapshotAssemblyCheckpoint::ProgramConversion,
+        );
+        let parse_result = TreeSitterAdapter::convert_tree_fast(tree, content)?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok((parse_result, true));
+        }
+
+        Self::notify_parse_snapshot_assembly_checkpoint(
+            &options,
+            ParseSnapshotAssemblyCheckpoint::SyntaxErrorCollection,
+        );
+        if let Some(delay_ms) = maybe_inject_parse_snapshot_syntax_error_assembly_delay_for_test() {
+            let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
+            while std::time::Instant::now() < deadline {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                if Self::save_critical_requested(options) {
+                    return Ok((parse_result, true));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok((parse_result, true));
+        }
+
+        let syntax_errors = TreeSitterAdapter::collect_syntax_errors_only(tree, content);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if syntax_errors.is_empty() {
+            Ok((parse_result, false))
+        } else {
+            Ok((
+                ParseResult::with_errors(parse_result.program, syntax_errors),
+                false,
+            ))
+        }
+    }
+
+    fn run_optional_cache_enrichment_with_cancellation(
+        &self,
+        file_path: &Path,
+        content_hash: [u8; 32],
+        content: &str,
+        result: &ParseResult,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<Option<u64>, String> {
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        Self::notify_parse_snapshot_exec_subphase(
+            &options,
+            ParseSnapshotExecSubphase::OptionalCacheEnrichment,
+        );
+        let optional_started = std::time::Instant::now();
+        if let Some(delay_ms) =
+            maybe_inject_parse_snapshot_optional_cache_enrichment_delay_for_test()
+        {
+            let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
+            while std::time::Instant::now() < deadline {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                if Self::save_critical_requested(options) {
+                    return Ok(None);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        self.store_ast_memory(content_hash, result);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        self.update_symbol_index(file_path, result);
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        if file_path.exists() {
+            let path_str = file_path.to_string_lossy();
+            let _ = self.store_ast_in_disk(&path_str, content, result);
+        }
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        Ok(Some(duration_to_u64_ms(optional_started.elapsed())))
+    }
+
+    fn run_tree_cache_install_with_cancellation(
+        &self,
+        install_op: ParseSnapshotTreeCacheInstallOp,
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> Result<Option<u64>, String> {
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        Self::notify_parse_snapshot_core_build_checkpoint(
+            &options,
+            ParseSnapshotCoreBuildCheckpoint::TreeCacheInstall,
+        );
+        let tree_cache_started = std::time::Instant::now();
+        if let Some(delay_ms) = maybe_inject_parse_snapshot_tree_cache_install_delay_for_test() {
+            let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
+            while std::time::Instant::now() < deadline {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                if Self::save_critical_requested(options) {
+                    return Ok(None);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        if Self::save_critical_requested(options) {
+            return Ok(None);
+        }
+
+        match install_op {
+            ParseSnapshotTreeCacheInstallOp::Set {
+                file_path,
+                tree,
+                source,
+                content_hash,
+            } => {
+                self.tree_cache.set(file_path, tree, source, content_hash);
+            }
+            ParseSnapshotTreeCacheInstallOp::Update {
+                file_path,
+                tree,
+                source,
+                content_hash,
+            } => {
+                self.tree_cache
+                    .update(file_path.as_path(), tree, source, content_hash);
+            }
+        }
+
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        Ok(Some(duration_to_u64_ms(tree_cache_started.elapsed())))
+    }
+
+    pub fn complete_deferred_parse_snapshot_cache_enrichment(
+        &self,
+        file_path: &Path,
+        content: &str,
+        result: &ParseResult,
+        update_symbol_index: bool,
+    ) {
+        let content_hash = ast_cache_key(content);
+        self.store_ast_memory(content_hash, result);
+        if update_symbol_index {
+            self.update_symbol_index(file_path, result);
+        }
+        if file_path.exists() {
+            let path_str = file_path.to_string_lossy();
+            let _ = self.store_ast_in_disk(&path_str, content, result);
+        }
+    }
+
+    pub fn complete_deferred_parse_snapshot_syntax_error_assembly(
+        &self,
+        tree: &tree_sitter::Tree,
+        content: &str,
+        result: &ParseResult,
+    ) -> ParseResult {
+        let syntax_errors = TreeSitterAdapter::collect_syntax_errors_only(tree, content);
+        if syntax_errors.is_empty() {
+            ParseResult::success(result.program.clone())
+        } else {
+            ParseResult::with_errors(result.program.clone(), syntax_errors)
         }
     }
 
@@ -1330,6 +2256,20 @@ impl TreeSitterParser {
         old_tree: Option<&tree_sitter::Tree>,
         cancellation_flag: &AtomicBool,
     ) -> Result<(tree_sitter::Tree, ParseResult), String> {
+        let tree = self.parse_tree_only_with_cancellation(content, old_tree, cancellation_flag)?;
+        let result = TreeSitterAdapter::convert_tree(&tree, content)?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        Ok((tree, result))
+    }
+
+    fn parse_tree_only_with_cancellation(
+        &self,
+        content: &str,
+        old_tree: Option<&tree_sitter::Tree>,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<tree_sitter::Tree, String> {
         let mut parser = self
             .parser
             .lock()
@@ -1358,12 +2298,7 @@ impl TreeSitterParser {
         if cancellation_flag.load(Ordering::SeqCst) {
             return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
         }
-
-        let result = TreeSitterAdapter::convert_tree(&tree, content)?;
-        if cancellation_flag.load(Ordering::SeqCst) {
-            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-        }
-        Ok((tree, result))
+        Ok(tree)
     }
 
     /// Инкрементальный парсинг с использованием старого дерева (Milestone 2.7 Task 3)
@@ -1455,6 +2390,43 @@ impl TreeSitterParser {
         old_source: &str,
         cancellation_flag: &AtomicBool,
     ) -> Result<(tree_sitter::Tree, ParseResult, Vec<ParseChangedRange>), String> {
+        let (new_tree, changed_ranges) = self.parse_incremental_tree_only_with_cancellation(
+            new_content,
+            old_tree,
+            edits,
+            old_source,
+            cancellation_flag,
+        )?;
+        if let Some(forced_error) = maybe_force_incremental_adapter_error_for_test() {
+            warn!(
+                "Incremental tree-to-AST conversion failed: {}",
+                forced_error
+            );
+            return Err("Incremental parsing failed".to_string());
+        }
+
+        let program = TreeSitterAdapter::convert_tree(&new_tree, new_content).map_err(|error| {
+            if cancellation_flag.load(Ordering::SeqCst) {
+                PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
+            } else {
+                warn!("Incremental tree-to-AST conversion failed: {}", error);
+                "Incremental parsing failed".to_string()
+            }
+        })?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        Ok((new_tree, program, changed_ranges))
+    }
+
+    fn parse_incremental_tree_only_with_cancellation(
+        &self,
+        new_content: &str,
+        old_tree: Option<&tree_sitter::Tree>,
+        edits: Vec<TextEdit>,
+        old_source: &str,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<(tree_sitter::Tree, Vec<ParseChangedRange>), String> {
         if cancellation_flag.load(Ordering::SeqCst) {
             return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
         }
@@ -1528,27 +2500,7 @@ impl TreeSitterParser {
                 return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
             }
 
-            if let Some(forced_error) = maybe_force_incremental_adapter_error_for_test() {
-                warn!(
-                    "Incremental tree-to-AST conversion failed: {}",
-                    forced_error
-                );
-                return Err("Incremental parsing failed".to_string());
-            }
-
-            let program =
-                TreeSitterAdapter::convert_tree(&new_tree, new_content).map_err(|error| {
-                    if cancellation_flag.load(Ordering::SeqCst) {
-                        PARSE_COORDINATOR_CANCELLED_ERROR.to_string()
-                    } else {
-                        warn!("Incremental tree-to-AST conversion failed: {}", error);
-                        "Incremental parsing failed".to_string()
-                    }
-                })?;
-            if cancellation_flag.load(Ordering::SeqCst) {
-                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-            }
-            Ok((new_tree, program, changed_ranges))
+            Ok((new_tree, changed_ranges))
         } else {
             let bytes = new_content.as_bytes();
             let len = bytes.len();
@@ -1572,12 +2524,7 @@ impl TreeSitterParser {
             if cancellation_flag.load(Ordering::SeqCst) {
                 return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
             }
-
-            let program = TreeSitterAdapter::convert_tree(&tree, new_content)?;
-            if cancellation_flag.load(Ordering::SeqCst) {
-                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-            }
-            Ok((tree, program, Vec::new()))
+            Ok((tree, Vec::new()))
         }
     }
 

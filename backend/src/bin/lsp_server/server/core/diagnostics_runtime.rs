@@ -138,6 +138,31 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) timeout_phase: Option<&'static str>,
     pub(crate) timeout_phase_elapsed_ms: Option<u64>,
     pub(crate) parse_exec_ms: Option<u64>,
+    pub(crate) parse_exec_timeout_subphase: Option<&'static str>,
+    pub(crate) parse_exec_timeout_subphase_elapsed_ms: Option<u64>,
+    pub(crate) parse_exec_core_parse_build_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_timeout_checkpoint: Option<&'static str>,
+    pub(crate) parse_exec_core_build_timeout_checkpoint_elapsed_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_parser_tree_build_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+        Option<&'static str>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+        Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+        Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+        Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+        Option<&'static str>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+        Option<u64>,
+    pub(crate) parse_exec_core_build_tree_cache_install_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_dominant_checkpoint: Option<&'static str>,
+    pub(crate) parse_exec_core_build_dominant_checkpoint_ms: Option<u64>,
+    pub(crate) parse_exec_optional_cache_enrichment_ms: Option<u64>,
+    pub(crate) parse_exec_dominant_subphase: Option<&'static str>,
+    pub(crate) parse_exec_dominant_subphase_ms: Option<u64>,
     pub(crate) post_parse_pre_materialization_ms: Option<u64>,
     pub(crate) ready_install_ms: Option<u64>,
     pub(crate) document_symbol_side_work_ms: Option<u64>,
@@ -150,7 +175,35 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
         attribution: &super::super::ReadyParseSnapshotPhaseAttributionV2,
     ) -> Option<Self> {
         let (dominant_phase, dominant_phase_ms) = attribution.dominant_phase().unwrap_or(("", 0));
+        let (dominant_parse_exec_subphase, dominant_parse_exec_subphase_ms) = attribution
+            .dominant_parse_exec_subphase()
+            .unwrap_or(("", 0));
+        let (dominant_core_build_checkpoint, dominant_core_build_checkpoint_ms) = attribution
+            .dominant_core_build_checkpoint()
+            .unwrap_or(("", 0));
+        let (dominant_assembly_checkpoint, dominant_assembly_checkpoint_ms) = attribution
+            .dominant_assembly_checkpoint()
+            .unwrap_or(("", 0));
         let has_any = attribution.parse_exec_ms.is_some()
+            || attribution.parse_exec_core_parse_build_ms.is_some()
+            || attribution
+                .parse_exec_core_build_parser_tree_build_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_tree_cache_install_ms
+                .is_some()
+            || attribution
+                .parse_exec_optional_cache_enrichment_ms
+                .is_some()
             || attribution.post_parse_pre_materialization_ms.is_some()
             || attribution.ready_install_ms.is_some()
             || attribution.document_symbol_side_work_ms.is_some();
@@ -158,6 +211,38 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             timeout_phase: None,
             timeout_phase_elapsed_ms: None,
             parse_exec_ms: attribution.parse_exec_ms,
+            parse_exec_timeout_subphase: None,
+            parse_exec_timeout_subphase_elapsed_ms: None,
+            parse_exec_core_parse_build_ms: attribution.parse_exec_core_parse_build_ms,
+            parse_exec_core_build_timeout_checkpoint: None,
+            parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+            parse_exec_core_build_parser_tree_build_ms: attribution
+                .parse_exec_core_build_parser_tree_build_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_ms: attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint: None,
+            parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms: None,
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                (dominant_assembly_checkpoint_ms > 0).then_some(dominant_assembly_checkpoint),
+            parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                (dominant_assembly_checkpoint_ms > 0).then_some(dominant_assembly_checkpoint_ms),
+            parse_exec_core_build_tree_cache_install_ms: attribution
+                .parse_exec_core_build_tree_cache_install_ms,
+            parse_exec_core_build_dominant_checkpoint: (dominant_core_build_checkpoint_ms > 0)
+                .then_some(dominant_core_build_checkpoint),
+            parse_exec_core_build_dominant_checkpoint_ms: (dominant_core_build_checkpoint_ms > 0)
+                .then_some(dominant_core_build_checkpoint_ms),
+            parse_exec_optional_cache_enrichment_ms: attribution
+                .parse_exec_optional_cache_enrichment_ms,
+            parse_exec_dominant_subphase: (dominant_parse_exec_subphase_ms > 0)
+                .then_some(dominant_parse_exec_subphase),
+            parse_exec_dominant_subphase_ms: (dominant_parse_exec_subphase_ms > 0)
+                .then_some(dominant_parse_exec_subphase_ms),
             post_parse_pre_materialization_ms: attribution.post_parse_pre_materialization_ms,
             ready_install_ms: attribution.ready_install_ms,
             document_symbol_side_work_ms: attribution.document_symbol_side_work_ms,
@@ -172,6 +257,31 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
     ) -> Option<Self> {
         let has_any = snapshot.current_phase.is_some()
             || snapshot.completed.parse_exec_ms.is_some()
+            || snapshot.completed.parse_exec_core_parse_build_ms.is_some()
+            || snapshot
+                .completed
+                .parse_exec_core_build_parser_tree_build_ms
+                .is_some()
+            || snapshot
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_ms
+                .is_some()
+            || snapshot
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                .is_some()
+            || snapshot
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
+                .is_some()
+            || snapshot
+                .completed
+                .parse_exec_core_build_tree_cache_install_ms
+                .is_some()
+            || snapshot
+                .completed
+                .parse_exec_optional_cache_enrichment_ms
+                .is_some()
             || snapshot
                 .completed
                 .post_parse_pre_materialization_ms
@@ -182,6 +292,28 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             return None;
         }
         let dominant = snapshot.dominant_phase();
+        let dominant_parse_exec_subphase = snapshot.dominant_parse_exec_subphase();
+        let dominant_core_build_checkpoint = snapshot.dominant_core_build_checkpoint();
+        let dominant_assembly_checkpoint = snapshot.dominant_assembly_checkpoint();
+        let core_build_checkpoint_active = matches!(
+            (snapshot.current_phase, snapshot.current_parse_exec_subphase,),
+            (
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+            )
+        );
+        let exact_ready_snapshot_assembly_active = matches!(
+            (
+                snapshot.current_phase,
+                snapshot.current_parse_exec_subphase,
+                snapshot.current_core_build_checkpoint,
+            ),
+            (
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec),
+                Some(super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild),
+                Some(super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly),
+            )
+        );
         Some(Self {
             timeout_phase: include_timeout_phase
                 .then(|| snapshot.current_phase.map(|phase| phase.as_str()))
@@ -197,6 +329,147 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .then_some(snapshot.current_phase_elapsed_ms)
                 .flatten()
             }),
+            parse_exec_timeout_subphase: (include_timeout_phase
+                && matches!(
+                    snapshot.current_phase,
+                    Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec)
+                ))
+            .then(|| snapshot.current_parse_exec_subphase.map(|subphase| subphase.as_str()))
+            .flatten(),
+            parse_exec_timeout_subphase_elapsed_ms: (include_timeout_phase
+                && matches!(
+                    snapshot.current_phase,
+                    Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec)
+                ))
+            .then_some(snapshot.current_parse_exec_subphase_elapsed_ms)
+            .flatten(),
+            parse_exec_core_parse_build_ms: snapshot
+                .completed
+                .parse_exec_core_parse_build_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_parse_exec_subphase,
+                        Some(
+                            super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild
+                        )
+                    )
+                    .then_some(snapshot.current_parse_exec_subphase_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_timeout_checkpoint: (include_timeout_phase
+                && core_build_checkpoint_active)
+                .then(|| {
+                    snapshot
+                        .current_core_build_checkpoint
+                        .map(|checkpoint| checkpoint.as_str())
+                })
+                .flatten(),
+            parse_exec_core_build_timeout_checkpoint_elapsed_ms: (include_timeout_phase
+                && core_build_checkpoint_active)
+                .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                .flatten(),
+            parse_exec_core_build_parser_tree_build_ms: snapshot
+                .completed
+                .parse_exec_core_build_parser_tree_build_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_core_build_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserTreeBuild
+                        )
+                    )
+                    .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_exact_ready_snapshot_assembly_ms: snapshot
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_core_build_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly
+                        )
+                    )
+                    .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                (include_timeout_phase && exact_ready_snapshot_assembly_active)
+                    .then(|| {
+                        snapshot
+                            .current_assembly_checkpoint
+                            .map(|checkpoint| checkpoint.as_str())
+                    })
+                    .flatten(),
+            parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                (include_timeout_phase && exact_ready_snapshot_assembly_active)
+                    .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
+                    .flatten(),
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: snapshot
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_assembly_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion
+                        )
+                    )
+                    .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                snapshot
+                    .completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
+                    .or_else(|| {
+                        matches!(
+                            snapshot.current_assembly_checkpoint,
+                            Some(
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::SyntaxErrorCollection
+                            )
+                        )
+                        .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
+                        .flatten()
+                    }),
+            parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                dominant_assembly_checkpoint.map(|(checkpoint, _)| checkpoint),
+            parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                dominant_assembly_checkpoint.map(|(_, duration_ms)| duration_ms),
+            parse_exec_core_build_tree_cache_install_ms: snapshot
+                .completed
+                .parse_exec_core_build_tree_cache_install_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_core_build_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotCoreBuildCheckpointV2::TreeCacheInstall
+                        )
+                    )
+                    .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_dominant_checkpoint: dominant_core_build_checkpoint
+                .map(|(checkpoint, _)| checkpoint),
+            parse_exec_core_build_dominant_checkpoint_ms: dominant_core_build_checkpoint
+                .map(|(_, duration_ms)| duration_ms),
+            parse_exec_optional_cache_enrichment_ms: snapshot
+                .completed
+                .parse_exec_optional_cache_enrichment_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_parse_exec_subphase,
+                        Some(
+                            super::super::ReadyParseSnapshotParseExecSubphaseV2::OptionalCacheEnrichment
+                        )
+                    )
+                    .then_some(snapshot.current_parse_exec_subphase_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_dominant_subphase: dominant_parse_exec_subphase.map(|(phase, _)| phase),
+            parse_exec_dominant_subphase_ms: dominant_parse_exec_subphase
+                .map(|(_, duration_ms)| duration_ms),
             post_parse_pre_materialization_ms: snapshot
                 .completed
                 .post_parse_pre_materialization_ms
@@ -962,6 +1235,9 @@ impl BslLanguageServer {
             .await
             .get(&file_id)
             .cloned()?;
+        if !ready_state.syntax_errors_complete {
+            return None;
+        }
         let parse_snapshot = ready_state.parse_snapshot;
         if parse_snapshot.file_version != requested_version {
             return None;
@@ -1954,7 +2230,13 @@ impl BslLanguageServer {
         let ready_text = ready_state.text.clone();
         let parse_snapshot = ready_state.parse_snapshot.clone();
         let ready_line_index = parse_snapshot.line_index.clone();
-        let ready_syntax_errors = parse_snapshot.parse_result.syntax_errors.clone();
+        let ready_syntax_errors = if ready_state.syntax_errors_complete {
+            Arc::new(parse_snapshot.parse_result.syntax_errors.clone())
+        } else {
+            self.save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
+                .await
+                .unwrap_or_else(|| Arc::new(parse_snapshot.parse_result.syntax_errors.clone()))
+        };
         let deps_id = support_bundle.deps_id.clone();
         let deps = support_bundle.deps.clone();
         let settings_id = context.settings.settings_id.clone();
@@ -2043,7 +2325,7 @@ impl BslLanguageServer {
 
                     let mut diagnostics = Vec::new();
                     diagnostics.extend(syntax_errors_to_diagnostics(
-                        &ready_syntax_errors,
+                        ready_syntax_errors.as_ref(),
                         &uri_for_blocking,
                         file_text.as_ref(),
                         line_index.as_ref(),

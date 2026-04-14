@@ -569,6 +569,38 @@ pub(crate) enum BackgroundParseSnapshotApplyTaskSourceV2 {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ParseSnapshotAsyncDelayMode {
+    None,
+    DidChangeTestOnly,
+    DidSaveTestOnly,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DidChangeParseSnapshotAttributionV2 {
+    pub uri: Url,
+    pub base_text_source: &'static str,
+    pub change_shape: &'static str,
+    pub content_changes_count: usize,
+    pub replay_order: &'static str,
+    pub base_document_version: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BackgroundParseSnapshotApplyTargetV2 {
+    pub requested_version: i32,
+    pub text_hash: [u8; 32],
+    pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+    pub path: Arc<str>,
+    pub text: Arc<str>,
+    pub parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+    pub forced_full_parse_reason: Option<&'static str>,
+    pub async_delay_mode: ParseSnapshotAsyncDelayMode,
+    pub blocking_delay_env_key: Option<&'static str>,
+    pub did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
+    pub epoch: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BackgroundParseSnapshotApplyTaskPhaseV2 {
     Waiting = 1,
     Parsing = 2,
@@ -589,6 +621,7 @@ impl BackgroundParseSnapshotApplyTaskPhaseV2 {
 #[derive(Debug)]
 pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub cancel_requested: AtomicBool,
+    pub retarget_requested: AtomicBool,
     pub promotion_requested: AtomicBool,
     pub materialized: AtomicBool,
     pub phase: AtomicU8,
@@ -600,6 +633,7 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
     fn new() -> Self {
         Self {
             cancel_requested: AtomicBool::new(false),
+            retarget_requested: AtomicBool::new(false),
             promotion_requested: AtomicBool::new(false),
             materialized: AtomicBool::new(false),
             phase: AtomicU8::new(0),
@@ -610,9 +644,8 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
 }
 
 pub(crate) struct BackgroundParseSnapshotApplyTaskV2 {
-    pub requested_version: Arc<AtomicI32>,
-    pub text_hash: [u8; 32],
-    pub source: BackgroundParseSnapshotApplyTaskSourceV2,
+    pub target_epoch: Arc<AtomicU64>,
+    pub target: Arc<StdMutex<BackgroundParseSnapshotApplyTargetV2>>,
     pub control: Arc<BackgroundParseSnapshotApplyTaskControlV2>,
     pub handle: JoinHandle<()>,
 }

@@ -918,6 +918,7 @@ impl BslLanguageServer {
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
         wait_budget: Duration,
+        expected_text_hash: Option<[u8; 32]>,
     ) -> ReadyParseSnapshotProbeResultV2 {
         let wait_started = Instant::now();
         loop {
@@ -977,10 +978,40 @@ impl BslLanguageServer {
                     _ = &mut materialized => {}
                     _ = &mut control => {}
                 }
+            } else if self
+                .background_parse_snapshot_task_retargeted_away_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                    expected_text_hash,
+                )
+                .await
+            {
+                return ReadyParseSnapshotProbeResultV2 {
+                    outcome: ReadyParseSnapshotProbeOutcomeV2::VersionMismatch,
+                    state: None,
+                };
             } else {
                 tokio::time::sleep(poll_sleep).await;
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn wait_for_ready_parse_snapshot_probe_outcome_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        wait_budget: Duration,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> ReadyParseSnapshotProbeOutcomeV2 {
+        self.wait_for_ready_parse_snapshot_probe_v2(
+            supersession_key,
+            cancel_token,
+            wait_budget,
+            expected_text_hash,
+        )
+        .await
+        .outcome
     }
 
     async fn diagnostics_save_followup_branch_context_v2(
@@ -1009,25 +1040,26 @@ impl BslLanguageServer {
         } else {
             let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
             match tasks.get(&supersession_key.file_id) {
-                Some(task)
-                    if task.requested_version.load(Ordering::Relaxed)
-                        == supersession_key.requested_version
-                        && shadow_text_hash
-                            .map_or(true, |text_hash| task.text_hash == text_hash)
-                        && task.source
-                            != super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave =>
-                {
-                    // refactor-17 only reorders for already-known exact-task evidence.
-                    // The didSave refresh task seeded by the current save cycle does not qualify.
-                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                Some(task) => {
+                    let target = task
+                        .target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    if target.requested_version == supersession_key.requested_version
+                        && shadow_text_hash.map_or(true, |text_hash| target.text_hash == text_hash)
+                        && target.source
+                            != super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                    {
+                        // refactor-17 only reorders for already-known exact-task evidence.
+                        // The didSave refresh task seeded by the current save cycle does not qualify.
+                        ReadySnapshotTaskStateV2::InFlightSameVersion
+                    } else if target.requested_version == supersession_key.requested_version {
+                        ReadySnapshotTaskStateV2::Absent
+                    } else {
+                        ReadySnapshotTaskStateV2::InFlightOtherVersion
+                    }
                 }
-                Some(task)
-                    if task.requested_version.load(Ordering::Relaxed)
-                        == supersession_key.requested_version =>
-                {
-                    ReadySnapshotTaskStateV2::Absent
-                }
-                Some(_) => ReadySnapshotTaskStateV2::InFlightOtherVersion,
                 None => ReadySnapshotTaskStateV2::Absent,
             }
         };
@@ -1577,7 +1609,17 @@ impl BslLanguageServer {
 
         let probe_started = Instant::now();
         let probe = self
-            .wait_for_ready_parse_snapshot_probe_v2(supersession_key, cancel_token, wait_budget)
+            .wait_for_ready_parse_snapshot_probe_v2(
+                supersession_key,
+                cancel_token,
+                wait_budget,
+                self.latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&supersession_key.file_id)
+                    .filter(|state| state.version == supersession_key.requested_version)
+                    .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes()),
+            )
             .await;
         self.coordinator
             .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(

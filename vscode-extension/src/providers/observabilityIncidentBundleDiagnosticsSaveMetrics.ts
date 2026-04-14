@@ -82,6 +82,8 @@ const WORKER_SOURCE_ORDER = ['did_change', 'did_save', 'did_open', 'other'];
 const WORKER_TERMINATION_REASON_ORDER = [
     'aborted',
     'superseded',
+    'retargeted_before_parse',
+    'retargeted_before_materialization',
     'latest_version_mismatch',
     'build_snapshot_aborted',
     'other',

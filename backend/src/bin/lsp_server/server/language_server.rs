@@ -74,6 +74,11 @@ pub(crate) fn did_save_inline_parse_delay_active_for_test() -> bool {
 }
 
 #[cfg(test)]
+pub(crate) fn did_change_pre_materialization_delay_active_for_test() -> bool {
+    impl_document_sync::did_change_pre_materialization_delay_active_for_test()
+}
+
+#[cfg(test)]
 pub(crate) fn reset_completion_checkpoint_hits_for_test() {
     impl_completion::reset_completion_checkpoint_hits_for_test()
 }

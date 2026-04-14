@@ -177,9 +177,14 @@ impl BslLanguageServer {
         let task_observation = {
             let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
             tasks.get(&file_id).map(|task| {
+                let target = task
+                    .target
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
                 let same_revision = requested_version.is_some_and(|requested_version| {
-                    task.requested_version.load(Ordering::Relaxed) == requested_version
-                        && current_text_hash.is_some_and(|text_hash| task.text_hash == text_hash)
+                    target.requested_version == requested_version
+                        && current_text_hash.is_some_and(|text_hash| target.text_hash == text_hash)
                 });
                 SnapshotTaskObservationV2 {
                     state: if same_revision {
@@ -188,7 +193,7 @@ impl BslLanguageServer {
                         SnapshotTaskStateDto::InFlightOtherRevision
                     },
                     phase: snapshot_phase_from_control(task.control.as_ref()),
-                    trigger: Some(snapshot_trigger_from_source(task.source)),
+                    trigger: Some(snapshot_trigger_from_source(target.source)),
                 }
             })
         };

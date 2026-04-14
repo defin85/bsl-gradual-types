@@ -3423,6 +3423,13 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
             "retargeted_before_parse",
             Duration::from_millis(800),
         );
+    observability
+        .record_intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization(
+            "lsp",
+            "did_change",
+            "retargeted_during_parse",
+            Duration::from_millis(810),
+        );
     observability.record_intellisense_v2_ready_parse_snapshot_materialization(
         "lsp",
         "did_change",
@@ -3503,6 +3510,21 @@ fn did_save_followup_ready_snapshot_metrics_are_exported() {
             "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_retargeted_before_parse"
         ) > 0,
         "retargeted-before-parse termination latency histogram must be exported"
+    );
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_during_parse"
+        ),
+        1,
+        "retargeted-during-parse termination counter must be exported as a low-cardinality reason"
+    );
+    assert!(
+        histogram_count(
+            histograms,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_retargeted_during_parse"
+        ) > 0,
+        "retargeted-during-parse termination latency histogram must be exported"
     );
     assert_eq!(
         counter_value(

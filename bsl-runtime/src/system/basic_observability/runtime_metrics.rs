@@ -14,6 +14,7 @@ fn normalize_ready_parse_snapshot_worker_termination_reason_label(reason: &str) 
         "aborted" => "aborted",
         "superseded" => "superseded",
         "retargeted_before_parse" => "retargeted_before_parse",
+        "retargeted_during_parse" => "retargeted_during_parse",
         "retargeted_before_materialization" => "retargeted_before_materialization",
         "latest_version_mismatch" => "latest_version_mismatch",
         "build_snapshot_aborted" => "build_snapshot_aborted",

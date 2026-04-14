@@ -14,6 +14,7 @@ struct BuildParseSnapshotRequest {
     version: i32,
     path: Arc<str>,
     text: Arc<str>,
+    parser_base_recovery_text: Option<Arc<str>>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     forced_full_parse_reason: Option<&'static str>,
     blocking_delay_env_key: Option<&'static str>,
@@ -26,6 +27,7 @@ struct BuildParseSnapshotRequest {
 
 enum BuildParseSnapshotAbortReasonV2 {
     Superseded,
+    RetargetedDuringParse,
     BuildSnapshotAborted,
 }
 
@@ -253,8 +255,29 @@ fn maybe_poison_tree_cache_after_prime_for_test(
     let _ = parser.parse_incremental_with_report(PathBuf::from(path), poisoned_text, Vec::new());
 }
 
+#[cfg(test)]
+fn maybe_poison_tree_cache_after_recovery_for_test(
+    parser: &bsl_runtime::system::parser_coordinator::ParserCoordinator,
+    path: &str,
+    shadow_text: &str,
+) {
+    if std::env::var_os("BSL_TEST_DID_CHANGE_POISON_TREE_CACHE_AFTER_RECOVERY").is_none() {
+        return;
+    }
+    let poisoned_text = format!("{shadow_text}\n// stale parser base post-recovery poison\n");
+    let _ = parser.parse_incremental_with_report(PathBuf::from(path), poisoned_text, Vec::new());
+}
+
 #[cfg(not(test))]
 fn maybe_poison_tree_cache_after_prime_for_test(
+    _parser: &bsl_runtime::system::parser_coordinator::ParserCoordinator,
+    _path: &str,
+    _shadow_text: &str,
+) {
+}
+
+#[cfg(not(test))]
+fn maybe_poison_tree_cache_after_recovery_for_test(
     _parser: &bsl_runtime::system::parser_coordinator::ParserCoordinator,
     _path: &str,
     _shadow_text: &str,
@@ -276,6 +299,7 @@ fn background_parse_snapshot_apply_target_from_args(
         source: args.source,
         path: args.path.clone(),
         text: args.text.clone(),
+        parser_base_recovery_text: args.parser_base_recovery_text.clone(),
         parser_edits: args.parser_edits.clone(),
         forced_full_parse_reason: args.forced_full_parse_reason,
         async_delay_mode: args.async_delay_mode,
@@ -399,6 +423,7 @@ struct BackgroundParseSnapshotApplyArgs {
     requested_version: i32,
     path: Arc<str>,
     text: Arc<str>,
+    parser_base_recovery_text: Option<Arc<str>>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     forced_full_parse_reason: Option<&'static str>,
     async_delay_mode: ParseSnapshotAsyncDelayMode,
@@ -409,6 +434,23 @@ struct BackgroundParseSnapshotApplyArgs {
 }
 
 impl BslLanguageServer {
+    fn classify_parse_snapshot_cancellation_abort_reason_v2(
+        requested_target_epoch_state: Option<&Arc<std::sync::atomic::AtomicU64>>,
+        requested_target_epoch: Option<u64>,
+        task_control: Option<&Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>>,
+    ) -> BuildParseSnapshotAbortReasonV2 {
+        let retargeted = requested_target_epoch_state
+            .zip(requested_target_epoch)
+            .is_some_and(|(state, epoch)| state.load(Ordering::Relaxed) != epoch)
+            || task_control
+                .is_some_and(|control| control.retarget_requested.load(Ordering::SeqCst));
+        if retargeted {
+            BuildParseSnapshotAbortReasonV2::RetargetedDuringParse
+        } else {
+            BuildParseSnapshotAbortReasonV2::Superseded
+        }
+    }
+
     async fn record_ready_parse_snapshot_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -630,6 +672,7 @@ impl BslLanguageServer {
         let coordinator = self.coordinator.clone();
         let path_for_parse = request.path.clone();
         let text_for_parse = request.text.clone();
+        let parser_base_recovery_text_for_parse = request.parser_base_recovery_text.clone();
         let parse_started = Instant::now();
         let blocking_delay_env_key_for_parse = request.blocking_delay_env_key;
         let requested_target_epoch_state_for_parse = request.requested_target_epoch_state;
@@ -683,7 +726,66 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
-                    let parse_result = if let Some(reason) = forced_full_parse_reason {
+                    let mut effective_forced_full_parse_reason = forced_full_parse_reason;
+                    if effective_forced_full_parse_reason
+                        == Some(
+                            bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+                        )
+                    {
+                        if let Some(recovery_text) = parser_base_recovery_text_for_parse.as_ref() {
+                            let recovery_path = PathBuf::from(path_for_parse.as_ref());
+                            let recovery_matched = if parser.tree_cache_matches_source_for_file(
+                                recovery_path.as_path(),
+                                recovery_text.as_ref(),
+                            ) {
+                                true
+                            } else {
+                                match parser.parse_full_with_report_with_cancellation(
+                                    recovery_path.clone(),
+                                    recovery_text.to_string(),
+                                    bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+                                    &task_control_for_exec
+                                        .as_ref()
+                                        .expect("task control for parser-base recovery")
+                                        .cancel_requested,
+                                ) {
+                                    Ok(_) => {
+                                        maybe_poison_tree_cache_after_recovery_for_test(
+                                            &parser,
+                                            path_for_parse.as_ref(),
+                                            recovery_text.as_ref(),
+                                        );
+                                        parser.tree_cache_matches_source_for_file(
+                                            recovery_path.as_path(),
+                                            recovery_text.as_ref(),
+                                        )
+                                    }
+                                    Err(error)
+                                        if bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error) =>
+                                    {
+                                        return Err(Self::classify_parse_snapshot_cancellation_abort_reason_v2(
+                                            requested_target_epoch_state_for_parse.as_ref(),
+                                            requested_target_epoch_for_parse,
+                                            task_control_for_exec.as_ref(),
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        warn!(
+                                            file_id = file_id.0,
+                                            file_version = version,
+                                            error = %error,
+                                            "failed to recover lagging parser base from shadow state"
+                                        );
+                                        false
+                                    }
+                                }
+                            };
+                            if recovery_matched {
+                                effective_forced_full_parse_reason = None;
+                            }
+                        }
+                    }
+                    let parse_result = if let Some(reason) = effective_forced_full_parse_reason {
                         if let Some(control) = task_control_for_exec.as_ref() {
                             parser.parse_full_with_report_with_cancellation(
                                 PathBuf::from(path_for_parse.as_ref()),
@@ -723,7 +825,11 @@ impl BslLanguageServer {
                                     && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
                             })
                         {
-                            BuildParseSnapshotAbortReasonV2::Superseded
+                            Self::classify_parse_snapshot_cancellation_abort_reason_v2(
+                                requested_target_epoch_state_for_parse.as_ref(),
+                                requested_target_epoch_for_parse,
+                                task_control_for_exec.as_ref(),
+                            )
                         } else {
                             warn!(
                                 file_id = file_id.0,
@@ -768,7 +874,53 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
-                    let parse_result = if let Some(reason) = forced_full_parse_reason {
+                    let mut effective_forced_full_parse_reason = forced_full_parse_reason;
+                    if effective_forced_full_parse_reason
+                        == Some(
+                            bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+                        )
+                    {
+                        if let Some(recovery_text) = parser_base_recovery_text_for_parse.as_ref() {
+                            let recovery_path = PathBuf::from(path_for_parse.as_ref());
+                            let recovery_matched = if parser.tree_cache_matches_source_for_file(
+                                recovery_path.as_path(),
+                                recovery_text.as_ref(),
+                            ) {
+                                true
+                            } else {
+                                match parser.parse_full_with_report(
+                                    recovery_path.clone(),
+                                    recovery_text.to_string(),
+                                    bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+                                ) {
+                                    Ok(_) => {
+                                        maybe_poison_tree_cache_after_recovery_for_test(
+                                            &parser,
+                                            path_for_parse.as_ref(),
+                                            recovery_text.as_ref(),
+                                        );
+                                        parser.tree_cache_matches_source_for_file(
+                                            recovery_path.as_path(),
+                                            recovery_text.as_ref(),
+                                        )
+                                    }
+                                    Err(error) => {
+                                        warn!(
+                                            file_id = file_id.0,
+                                            file_version = version,
+                                            error = %error,
+                                            "failed to recover lagging parser base from shadow state"
+                                        );
+                                        false
+                                    }
+                                }
+                            };
+                            if recovery_matched {
+                                effective_forced_full_parse_reason = None;
+                            }
+                        }
+                    }
+                    let parse_result = if let Some(reason) = effective_forced_full_parse_reason {
                         if let Some(control) = task_control_for_parse.as_ref() {
                             parser.parse_full_with_report_with_cancellation(
                                 PathBuf::from(path_for_parse.as_ref()),
@@ -808,7 +960,11 @@ impl BslLanguageServer {
                                     && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
                             })
                         {
-                            BuildParseSnapshotAbortReasonV2::Superseded
+                            Self::classify_parse_snapshot_cancellation_abort_reason_v2(
+                                requested_target_epoch_state_for_parse.as_ref(),
+                                requested_target_epoch_for_parse,
+                                task_control_for_parse.as_ref(),
+                            )
                         } else {
                             warn!(
                                 file_id = file_id.0,
@@ -833,7 +989,17 @@ impl BslLanguageServer {
             }
         };
         self.record_parse_snapshot_report_v2(&report, parse_started.elapsed());
-        if let Some(attribution) = did_change_attribution.as_ref() {
+        let mut effective_did_change_attribution = did_change_attribution;
+        if report.fallback_reason.as_deref()
+            != Some(
+                bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+            )
+        {
+            if let Some(attribution) = effective_did_change_attribution.as_mut() {
+                attribution.stale_parser_base = None;
+            }
+        }
+        if let Some(attribution) = effective_did_change_attribution.as_ref() {
             self.record_did_change_parse_snapshot_evidence(
                 &attribution.uri,
                 super::super::DidChangeParseSnapshotEvidenceKey {
@@ -1133,6 +1299,7 @@ impl BslLanguageServer {
                     version: target.requested_version,
                     path: target.path.clone(),
                     text: target.text.clone(),
+                    parser_base_recovery_text: target.parser_base_recovery_text.clone(),
                     parser_edits: target.parser_edits.clone(),
                     forced_full_parse_reason: target.forced_full_parse_reason,
                     blocking_delay_env_key: target.blocking_delay_env_key,
@@ -1155,6 +1322,23 @@ impl BslLanguageServer {
                 .await
             {
                 BuildParseSnapshotOutcomeV2::Ready(parse_snapshot) => parse_snapshot,
+                BuildParseSnapshotOutcomeV2::Aborted(
+                    BuildParseSnapshotAbortReasonV2::RetargetedDuringParse,
+                ) => {
+                    lifecycle_guard.set_terminal_reason("retargeted_during_parse");
+                    task_control.control_notify.notify_waiters();
+                    if target_epoch_state.load(Ordering::SeqCst) != target.epoch
+                        && self
+                            .background_parse_snapshot_apply_task_is_current_v2(
+                                file_id,
+                                &target_epoch_state,
+                            )
+                            .await
+                    {
+                        continue;
+                    }
+                    break;
+                }
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::Superseded,
                 ) => {
@@ -2101,6 +2285,7 @@ impl BslLanguageServer {
             requested_version: version,
             path: path.clone(),
             text: text.clone(),
+            parser_base_recovery_text: None,
             parser_edits: Vec::new(),
             forced_full_parse_reason: None,
             async_delay_mode: ParseSnapshotAsyncDelayMode::None,
@@ -2188,6 +2373,7 @@ impl BslLanguageServer {
             parse_snapshot_base_text_source,
             parse_snapshot_base_document_version,
             parse_snapshot_stale_parser_base,
+            parser_base_recovery_text,
         ) = {
             let _sync_guard = self.text_sync_v2.lock().await;
             let previous_shadow_state = {
@@ -2202,12 +2388,14 @@ impl BslLanguageServer {
                 parse_snapshot_base_text_source,
                 parse_snapshot_base_document_version,
                 parse_snapshot_stale_parser_base,
+                parser_base_recovery_text,
             ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
                 (
                     full_change.text.clone(),
                     Vec::new(),
                     None,
                     "not_applicable",
+                    None,
                     None,
                     None,
                 )
@@ -2230,16 +2418,23 @@ impl BslLanguageServer {
                     parse_snapshot_base_document_version,
                     forced_full_parse_reason,
                     parse_snapshot_stale_parser_base,
+                    parser_base_recovery_text,
                 ) = if let Some(state) = previous_shadow_state.clone() {
                     let shadow_state_parser_base = self
                         .inspect_shadow_state_parser_base_v2(file_id, path.as_str(), &state)
                         .await;
+                    let parser_base_recovery_text = shadow_state_parser_base
+                        .stale_parser_base
+                        .as_ref()
+                        .filter(|stale| stale.root_cause == "ready_snapshot_lags_shadow_state")
+                        .map(|_| state.text.clone());
                     (
                         state.text.to_string(),
                         "shadow_state",
                         Some(state.version),
                         shadow_state_parser_base.forced_full_parse_reason,
                         shadow_state_parser_base.stale_parser_base,
+                        parser_base_recovery_text,
                     )
                 } else {
                     (
@@ -2252,6 +2447,7 @@ impl BslLanguageServer {
                             .map(|text| text.to_string())
                             .unwrap_or_default(),
                         "analysis_snapshot",
+                        None,
                         None,
                         None,
                         None,
@@ -2272,6 +2468,7 @@ impl BslLanguageServer {
                     parse_snapshot_base_text_source,
                     parse_snapshot_base_document_version,
                     parse_snapshot_stale_parser_base,
+                    parser_base_recovery_text,
                 )
             };
             let identical_text_previous_version =
@@ -2406,6 +2603,7 @@ impl BslLanguageServer {
                 parse_snapshot_base_text_source,
                 parse_snapshot_base_document_version,
                 parse_snapshot_stale_parser_base,
+                parser_base_recovery_text,
             )
         };
 
@@ -2455,6 +2653,7 @@ impl BslLanguageServer {
                 requested_version: version,
                 path: path.clone(),
                 text: updated_text.clone(),
+                parser_base_recovery_text,
                 parser_edits,
                 forced_full_parse_reason,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
@@ -2598,6 +2797,7 @@ impl BslLanguageServer {
                 requested_version: version,
                 path: Arc::from(path),
                 text,
+                parser_base_recovery_text: None,
                 parser_edits: Vec::new(),
                 forced_full_parse_reason: None,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,

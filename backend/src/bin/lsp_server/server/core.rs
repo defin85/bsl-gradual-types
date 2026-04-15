@@ -223,6 +223,16 @@ fn duration_to_nonzero_ms(duration: Option<Duration>) -> Option<u64> {
     (millis > 0).then_some(millis)
 }
 
+fn diagnostics_save_coherence_debug_enabled() -> bool {
+    std::env::var_os("BSL_DEBUG_DIAGNOSTICS_SAVE_COHERENCE").is_some()
+}
+
+fn emit_diagnostics_save_coherence_debug(message: String) {
+    if diagnostics_save_coherence_debug_enabled() {
+        eprintln!("{message}");
+    }
+}
+
 fn update_followup_timing_max(slot: &mut Option<u64>, candidate: Option<u64>) {
     let Some(candidate) = candidate.filter(|value| *value > 0) else {
         return;
@@ -1217,6 +1227,31 @@ impl BslLanguageServer {
                 trace,
                 attribution,
             );
+            if diagnostics_save_coherence_debug_enabled() {
+                let stored_program_conversion = trace
+                    .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms;
+                let stored_program_lowering = trace
+                    .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms;
+                emit_diagnostics_save_coherence_debug(format!(
+                    "[diag-save-coherence][timeline] trace_id={} requested_version={} save_cycle_sequence={} incoming_program_conversion_ms={:?} incoming_program_lowering_ms={:?} incoming_packaging_ms={:?} incoming_timeout_checkpoint={:?} stored_program_conversion_ms={:?} stored_program_lowering_ms={:?} stored_packaging_ms={:?} stored_timeout_checkpoint={:?} incoherent={}",
+                    trace.trace_id,
+                    trace.requested_version,
+                    trace.save_cycle_sequence,
+                    attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+                    attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+                    attribution
+                        .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+                    attribution
+                        .parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint,
+                    stored_program_conversion,
+                    stored_program_lowering,
+                    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+                    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint,
+                    stored_program_conversion
+                        .zip(stored_program_lowering)
+                        .is_some_and(|(program_conversion, program_lowering)| program_conversion < program_lowering),
+                ));
+            }
         }
     }
 

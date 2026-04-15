@@ -138,6 +138,10 @@ export class BslAnalyzerConfig {
         return this.getConfig().get<boolean>('observabilityCompactMode', false);
     }
 
+    static get debugDiagnosticsSaveCoherence(): boolean {
+        return this.getConfig().get<boolean>('debugDiagnosticsSaveCoherence', false);
+    }
+
     // Настройки бинарников
     static get useBundledBinaries(): boolean {
         return this.getConfig().get<boolean>('useBundledBinaries', true);
@@ -201,6 +205,7 @@ export class BslAnalyzerConfig {
             observabilityAutoRefresh: this.observabilityAutoRefresh,
             observabilityRefreshMs: this.observabilityRefreshMs,
             observabilityCompactMode: this.observabilityCompactMode,
+            debugDiagnosticsSaveCoherence: this.debugDiagnosticsSaveCoherence,
             binaryPath: this.binaryPath,
             configurationPath: this.configurationPath,
             enableRealTimeAnalysis: this.enableRealTimeAnalysis,

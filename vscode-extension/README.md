@@ -70,9 +70,18 @@
   "bslAnalyzer.enableMetrics": true,
   "bslAnalyzer.maxFileSize": 1048576,
   "bslAnalyzer.serverMode": "stdio",
-  "bslAnalyzer.trace.server": "off"
+  "bslAnalyzer.trace.server": "off",
+  "bslAnalyzer.debugDiagnosticsSaveCoherence": false
 }
 ```
+
+Для локальной backend-диагностики incoherence в `diagnostics-save timeline` можно временно включить:
+
+```json
+"bslAnalyzer.debugDiagnosticsSaveCoherence": true
+```
+
+Настройка действует только для `stdio`-режима и применяется после `BSL Analyzer: Restart Server`.
 
 ## 🚀 Быстрый старт
 

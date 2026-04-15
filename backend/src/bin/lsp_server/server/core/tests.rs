@@ -51743,3 +51743,488 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
     });
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }
+
+#[test]
+#[ignore = "debug-only local repro harness for multi-save-cycle diagnostics-save coherence"]
+fn debug_real_conf_big_two_save_cycle_exact_program_lowering_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("debug two-save-cycle tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+            reload_runtime_config: bool,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                Self::set_with_reload(key, value, false)
+            }
+
+            fn set_with_reload(
+                key: &'static str,
+                value: &str,
+                reload_runtime_config: bool,
+            ) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                if reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+                Self {
+                    key,
+                    previous,
+                    reload_runtime_config,
+                }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+                if self.reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+            }
+        }
+
+        const PROFILE_NAME: &str = "debug_real_conf_big_two_save_cycle_exact_program_lowering_live";
+        const APPLY_DELAY_MS: u64 = 4_000;
+        const DID_CHANGE_BLOCKING_PARSE_DELAY_MS: u64 = 1_500;
+        const TIMELINE_OBSERVE_BUDGET_MS: u64 = 30_000;
+        const FIRST_SAVE_VERSION: i32 = 7;
+        const SECOND_SAVE_VERSION: i32 = 11;
+
+        let _env_lock = lock_test_env().await;
+        let _apply_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS",
+            &APPLY_DELAY_MS.to_string(),
+        );
+        let _debounce_guard =
+            EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+        let mut blocking_delay_guard = Some(EnvVarGuard::set(
+            "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+            &DID_CHANGE_BLOCKING_PARSE_DELAY_MS.to_string(),
+        ));
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-31-diagnostics-save-exact-program-lowering-bounding".to_string()
+        });
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for debug report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(
+            &server,
+            &workspace_setup,
+            "debug_real_conf_big_two_save_cycle_setup",
+        )
+        .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri for debug");
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
+                },
+            )
+            .await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must register version 1 for debug");
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let ready = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned();
+                if ready
+                    .as_ref()
+                    .is_some_and(|state| state.parse_snapshot.file_version == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("didOpen must materialize same-version ready parse snapshot for debug");
+
+        let cycle1_semantic =
+            "\nПроцедура Refactor31LiveCycle1()\n    Сообщить(НеобъявленнаяПеременная);\nКонецПроцедуры\n";
+        let cycle2_semantic =
+            "\nПроцедура Refactor31LiveCycle2()\n    Сообщить(СовсемНеобъявленнаяПеременная);\nКонецПроцедуры\n";
+
+        let mut current_text = module_text.clone();
+        for version in 2..FIRST_SAVE_VERSION {
+            current_text.push_str(&format!("\n// debug cycle1 churn v{version}\n"));
+            live_transport_ranged_did_change(
+                &mut harness,
+                &uri,
+                version,
+                vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: current_text.clone(),
+                }],
+            )
+            .await;
+        }
+        current_text = format!(
+            "{module_text}{cycle1_semantic}\n// debug cycle1 save v{FIRST_SAVE_VERSION}\n"
+        );
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            FIRST_SAVE_VERSION,
+            vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: current_text.clone(),
+            }],
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let shadow_version = server
+                    .latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.version);
+                let ready_version = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.parse_snapshot.file_version);
+                if shadow_version == Some(FIRST_SAVE_VERSION) && ready_version == Some(1) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cycle1 churn must advance shadow state to first save version while ready snapshot still lags at v1");
+
+        live_transport_save_document(&mut harness, &uri).await;
+
+        let cycle1_timeline_deadline =
+            Instant::now() + Duration::from_millis(TIMELINE_OBSERVE_BUDGET_MS);
+        let trace_cycle_1 = loop {
+            let timeline =
+                live_transport_get_diagnostics_save_timeline(&mut harness, 53_100_903, 16).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces for cycle1");
+            let matching_trace = traces
+                .iter()
+                .filter(|trace| {
+                    trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                        && trace
+                            .get("requested_version")
+                            .and_then(|value| value.as_i64())
+                            == Some(FIRST_SAVE_VERSION as i64)
+                })
+                .max_by_key(|trace| {
+                    trace
+                        .get("save_cycle_sequence")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                })
+                .cloned();
+            let Some(trace) = matching_trace else {
+                if Instant::now() >= cycle1_timeline_deadline {
+                    panic!(
+                        "debug harness must expose diagnostics save trace for requested_version={FIRST_SAVE_VERSION}"
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            let followup_publish = trace
+                .get("followup_publish")
+                .and_then(|value| value.as_object());
+            if followup_publish.is_some()
+                || trace.get("followup_semantic_path").and_then(|value| value.as_str()).is_some()
+            {
+                break trace;
+            }
+            if Instant::now() >= cycle1_timeline_deadline {
+                panic!(
+                    "debug harness must observe cycle1 follow-up publish or semantic-path decision, last_trace={trace:?}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+
+        drop(blocking_delay_guard.take());
+        tokio::time::timeout(Duration::from_secs(120), async {
+            loop {
+                let ready_version = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.parse_snapshot.file_version);
+                if ready_version == Some(FIRST_SAVE_VERSION) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("debug harness must let ready snapshot recover to first save version before cycle2");
+
+        let _cycle2_blocking_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+            &DID_CHANGE_BLOCKING_PARSE_DELAY_MS.to_string(),
+        );
+
+        for version in (FIRST_SAVE_VERSION + 1)..SECOND_SAVE_VERSION {
+            current_text.push_str(&format!("\n// debug cycle2 churn v{version}\n"));
+            live_transport_ranged_did_change(
+                &mut harness,
+                &uri,
+                version,
+                vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: current_text.clone(),
+                }],
+            )
+            .await;
+        }
+        current_text =
+            format!(
+                "{module_text}{cycle1_semantic}{cycle2_semantic}\n// debug cycle2 save v{SECOND_SAVE_VERSION}\n"
+            );
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            SECOND_SAVE_VERSION,
+            vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: current_text.clone(),
+            }],
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let shadow_version = server
+                    .latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.version);
+                let ready_version = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.parse_snapshot.file_version);
+                if shadow_version == Some(SECOND_SAVE_VERSION)
+                    && ready_version == Some(FIRST_SAVE_VERSION)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("cycle2 churn must advance shadow state to second save version while ready snapshot still lags at first save version");
+
+        live_transport_save_document(&mut harness, &uri).await;
+
+        let cycle2_timeline_deadline =
+            Instant::now() + Duration::from_millis(TIMELINE_OBSERVE_BUDGET_MS);
+        let trace_cycle_2 = loop {
+            let timeline =
+                live_transport_get_diagnostics_save_timeline(&mut harness, 53_100_904, 16).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces for cycle2");
+            let matching_trace = traces
+                .iter()
+                .filter(|trace| {
+                    trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                        && trace
+                            .get("requested_version")
+                            .and_then(|value| value.as_i64())
+                            == Some(SECOND_SAVE_VERSION as i64)
+                })
+                .max_by_key(|trace| {
+                    trace
+                        .get("save_cycle_sequence")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                })
+                .cloned();
+            let Some(trace) = matching_trace else {
+                if Instant::now() >= cycle2_timeline_deadline {
+                    panic!(
+                        "debug harness must expose diagnostics save trace for requested_version={SECOND_SAVE_VERSION}"
+                    );
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            let followup_publish = trace
+                .get("followup_publish")
+                .and_then(|value| value.as_object());
+            if followup_publish.is_some()
+                || trace.get("followup_semantic_path").and_then(|value| value.as_str()).is_some()
+            {
+                break trace;
+            }
+            if Instant::now() >= cycle2_timeline_deadline {
+                panic!(
+                    "debug harness must observe cycle2 follow-up publish or semantic-path decision, last_trace={trace:?}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+
+        let cycle1_program_conversion_ms = trace_cycle_1
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms")
+            .and_then(|value| value.as_u64());
+        let cycle1_program_lowering_ms = trace_cycle_1
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms")
+            .and_then(|value| value.as_u64());
+        let cycle2_program_conversion_ms = trace_cycle_2
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms")
+            .and_then(|value| value.as_u64());
+        let cycle2_program_lowering_ms = trace_cycle_2
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms")
+            .and_then(|value| value.as_u64());
+
+        let report = serde_json::json!({
+            "profile": PROFILE_NAME,
+            "change_id": change_id,
+            "module_path": module_path.display().to_string(),
+            "uri": uri.to_string(),
+            "apply_delay_ms": APPLY_DELAY_MS,
+            "did_change_blocking_parse_delay_ms": DID_CHANGE_BLOCKING_PARSE_DELAY_MS,
+            "cycle_1": {
+                "requested_version": FIRST_SAVE_VERSION,
+                "trace": trace_cycle_1,
+                "program_conversion_coherent_with_program_lowering": cycle1_program_conversion_ms
+                    .zip(cycle1_program_lowering_ms)
+                    .map(|(conversion, lowering)| conversion >= lowering),
+            },
+            "cycle_2": {
+                "requested_version": SECOND_SAVE_VERSION,
+                "trace": trace_cycle_2,
+                "program_conversion_coherent_with_program_lowering": cycle2_program_conversion_ms
+                    .zip(cycle2_program_lowering_ms)
+                    .map(|(conversion, lowering)| conversion >= lowering),
+            },
+        });
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("backend crate must live under the workspace root");
+        let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_TWO_SAVE_CYCLE_COHERENCE_REPORT")
+            .map(std::path::PathBuf::from)
+            .map(|path| {
+                if path.is_relative() {
+                    workspace_root.join(path)
+                } else {
+                    path
+                }
+            })
+            .unwrap_or_else(|_| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests")
+                    .join("perf")
+                    .join("reports")
+                    .join("debug-real-conf-big-two-save-cycle-exact-program-lowering-live.json")
+            });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for debug two-save-cycle report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("serialize debug two-save-cycle report"),
+        )
+        .expect("write debug two-save-cycle report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}

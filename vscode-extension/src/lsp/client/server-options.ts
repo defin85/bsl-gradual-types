@@ -25,6 +25,11 @@ export function buildServerOptions(
         newEnv.RUST_BACKTRACE = 'full';
         newEnv.BSL_INTELLISENSE_V2_SLOW_CLIENT_LOG_MS = String(BslAnalyzerConfig.slowClientLogMs);
         newEnv.BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS = String(BslAnalyzerConfig.diagnosticsDebounceMs);
+        if (BslAnalyzerConfig.debugDiagnosticsSaveCoherence) {
+            newEnv.BSL_DEBUG_DIAGNOSTICS_SAVE_COHERENCE = '1';
+        } else {
+            delete newEnv.BSL_DEBUG_DIAGNOSTICS_SAVE_COHERENCE;
+        }
 
         const run: Executable = {
             command: serverPath,
@@ -38,6 +43,9 @@ export function buildServerOptions(
         outputChannel.appendLine(
             `STDIO mode: BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS=${newEnv.BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS}`
         );
+        if (newEnv.BSL_DEBUG_DIAGNOSTICS_SAVE_COHERENCE === '1') {
+            outputChannel.appendLine('STDIO mode: BSL_DEBUG_DIAGNOSTICS_SAVE_COHERENCE=1');
+        }
 
         return {
             run,

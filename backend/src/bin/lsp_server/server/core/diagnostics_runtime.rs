@@ -328,7 +328,7 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 Some(super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly),
             )
         );
-        Some(Self {
+        let attribution = Self {
             timeout_phase: include_timeout_phase
                 .then(|| snapshot.current_phase.map(|phase| phase.as_str()))
                 .flatten(),
@@ -536,7 +536,47 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 }),
             dominant_phase: dominant.map(|(phase, _)| phase),
             dominant_phase_ms: dominant.map(|(_, duration_ms)| duration_ms),
-        })
+        };
+        if diagnostics_save_coherence_debug_enabled() {
+            emit_diagnostics_save_coherence_debug(format!(
+                "[diag-save-coherence][snapshot] current_phase={:?} current_parse_exec_subphase={:?} current_core_build_checkpoint={:?} current_assembly_checkpoint={:?} current_assembly_checkpoint_elapsed_ms={:?} current_program_conversion_ms={:?} completed_program_conversion_ms={:?} completed_program_lowering_ms={:?} completed_packaging_ms={:?} attribution_program_conversion_ms={:?} attribution_program_lowering_ms={:?} attribution_packaging_ms={:?} attribution_timeout_checkpoint={:?} incoherent={}",
+                snapshot.current_phase.map(|phase| phase.as_str()),
+                snapshot
+                    .current_parse_exec_subphase
+                    .map(|subphase| subphase.as_str()),
+                snapshot
+                    .current_core_build_checkpoint
+                    .map(|checkpoint| checkpoint.as_str()),
+                snapshot
+                    .current_assembly_checkpoint
+                    .map(|checkpoint| checkpoint.as_str()),
+                snapshot.current_assembly_checkpoint_elapsed_ms,
+                snapshot.current_program_conversion_ms(),
+                snapshot
+                    .completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+                snapshot
+                    .completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+                snapshot
+                    .completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+                attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+                attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint,
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                    .zip(
+                        attribution
+                            .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+                    )
+                    .is_some_and(|(program_conversion, program_lowering)| program_conversion < program_lowering),
+            ));
+        }
+        Some(attribution)
     }
 
     fn has_late_exact_timeout_phase(self) -> bool {

@@ -277,6 +277,13 @@ impl ParseSnapshotAssemblyCheckpoint {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotExactReadyControl {
+    Continue,
+    SaveCritical,
+    Cancel,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct ParseSnapshotExecSubphaseAttribution {
     pub core_parse_build_ms: Option<u64>,
@@ -305,6 +312,8 @@ impl ParseSnapshotExecSubphaseAttribution {
 pub struct ParseSnapshotExecutionOptions<'a> {
     pub save_critical_initial: bool,
     pub save_critical_requested: Option<&'a AtomicBool>,
+    pub exact_ready_snapshot_control_callback:
+        Option<&'a (dyn Fn() -> ParseSnapshotExactReadyControl + Send + Sync)>,
     pub progress_callback: Option<&'a (dyn Fn(ParseSnapshotExecSubphase) + Send + Sync)>,
     pub core_build_progress_callback:
         Option<&'a (dyn Fn(ParseSnapshotCoreBuildCheckpoint) + Send + Sync)>,
@@ -1863,6 +1872,33 @@ impl ParserCoordinator {
                 .is_some_and(|flag| flag.load(Ordering::SeqCst))
     }
 
+    fn exact_ready_snapshot_control(
+        cancellation_flag: &AtomicBool,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> ParseSnapshotExactReadyControl {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return ParseSnapshotExactReadyControl::Cancel;
+        }
+
+        if let Some(callback) = options.exact_ready_snapshot_control_callback {
+            match callback() {
+                ParseSnapshotExactReadyControl::Cancel => {
+                    return ParseSnapshotExactReadyControl::Cancel;
+                }
+                ParseSnapshotExactReadyControl::SaveCritical => {
+                    return ParseSnapshotExactReadyControl::SaveCritical;
+                }
+                ParseSnapshotExactReadyControl::Continue => {}
+            }
+        }
+
+        if Self::save_critical_requested(options) {
+            ParseSnapshotExactReadyControl::SaveCritical
+        } else {
+            ParseSnapshotExactReadyControl::Continue
+        }
+    }
+
     fn run_exact_ready_snapshot_assembly_with_cancellation(
         &self,
         tree: &tree_sitter::Tree,
@@ -1878,20 +1914,32 @@ impl ParserCoordinator {
             &options,
             ParseSnapshotAssemblyCheckpoint::ProgramLowering,
         );
-        let parse_result = TreeSitterAdapter::convert_tree_fast_with_observer(
-            tree,
-            content,
-            |_, _| {
+        let mut save_critical_during_lowering = options.save_critical_initial;
+        let parse_result =
+            TreeSitterAdapter::convert_tree_fast_with_observer(tree, content, |_, _| {
                 maybe_inject_parse_snapshot_program_conversion_progress_delay_for_test();
-                if cancellation_flag.load(Ordering::SeqCst) {
-                    Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string())
-                } else {
-                    Ok(())
+                match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+                    ParseSnapshotExactReadyControl::Continue => Ok(()),
+                    ParseSnapshotExactReadyControl::SaveCritical => {
+                        save_critical_during_lowering = true;
+                        Ok(())
+                    }
+                    ParseSnapshotExactReadyControl::Cancel => {
+                        Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string())
+                    }
                 }
-            },
-        )?;
-        if cancellation_flag.load(Ordering::SeqCst) {
-            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            })?;
+        match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+            ParseSnapshotExactReadyControl::Continue => {}
+            ParseSnapshotExactReadyControl::SaveCritical => {
+                save_critical_during_lowering = true;
+            }
+            ParseSnapshotExactReadyControl::Cancel => {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
+        }
+        if save_critical_during_lowering {
+            return Ok((parse_result, true));
         }
         Self::notify_parse_snapshot_assembly_checkpoint(
             &options,
@@ -1902,20 +1950,26 @@ impl ParserCoordinator {
         {
             let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
             while std::time::Instant::now() < deadline {
-                if cancellation_flag.load(Ordering::SeqCst) {
-                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-                }
-                if Self::save_critical_requested(options) {
-                    return Ok((parse_result, true));
+                match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+                    ParseSnapshotExactReadyControl::Continue => {}
+                    ParseSnapshotExactReadyControl::SaveCritical => {
+                        return Ok((parse_result, true));
+                    }
+                    ParseSnapshotExactReadyControl::Cancel => {
+                        return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        if cancellation_flag.load(Ordering::SeqCst) {
-            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-        }
-        if Self::save_critical_requested(options) {
-            return Ok((parse_result, true));
+        match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+            ParseSnapshotExactReadyControl::Continue => {}
+            ParseSnapshotExactReadyControl::SaveCritical => {
+                return Ok((parse_result, true));
+            }
+            ParseSnapshotExactReadyControl::Cancel => {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
         }
 
         Self::notify_parse_snapshot_assembly_checkpoint(
@@ -1925,25 +1979,37 @@ impl ParserCoordinator {
         if let Some(delay_ms) = maybe_inject_parse_snapshot_syntax_error_assembly_delay_for_test() {
             let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
             while std::time::Instant::now() < deadline {
-                if cancellation_flag.load(Ordering::SeqCst) {
-                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-                }
-                if Self::save_critical_requested(options) {
-                    return Ok((parse_result, true));
+                match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+                    ParseSnapshotExactReadyControl::Continue => {}
+                    ParseSnapshotExactReadyControl::SaveCritical => {
+                        return Ok((parse_result, true));
+                    }
+                    ParseSnapshotExactReadyControl::Cancel => {
+                        return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                    }
                 }
                 std::thread::sleep(Duration::from_millis(10));
             }
         }
-        if cancellation_flag.load(Ordering::SeqCst) {
-            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
-        }
-        if Self::save_critical_requested(options) {
-            return Ok((parse_result, true));
+        match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+            ParseSnapshotExactReadyControl::Continue => {}
+            ParseSnapshotExactReadyControl::SaveCritical => {
+                return Ok((parse_result, true));
+            }
+            ParseSnapshotExactReadyControl::Cancel => {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
         }
 
         let syntax_errors = TreeSitterAdapter::collect_syntax_errors_only(tree, content);
-        if cancellation_flag.load(Ordering::SeqCst) {
-            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+            ParseSnapshotExactReadyControl::Continue => {}
+            ParseSnapshotExactReadyControl::SaveCritical => {
+                return Ok((parse_result, true));
+            }
+            ParseSnapshotExactReadyControl::Cancel => {
+                return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+            }
         }
         if syntax_errors.is_empty() {
             Ok((parse_result, false))

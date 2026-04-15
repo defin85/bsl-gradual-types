@@ -1432,16 +1432,38 @@ Completion и diagnostics MUST использовать один и тот же 
 - **AND** система не создает независимые несовместимые parse состояния для одного `file_id/version`
 
 ### Requirement: didChange path использует incremental parse с fail-safe full fallback (MUST)
-На `didChange` система MUST пытаться обновлять parse state инкрементально через старое дерево и edit chain.
 
-Если incremental path не может быть применен корректно, система MUST детерминированно переходить на full parse для той же версии и фиксировать причину fallback в observability.
+На `didChange` система MUST пытаться обновлять parse state инкрементально через старое дерево и
+edit chain.
 
-#### Scenario: Incremental update fallback не ломает корректность
-- **GIVEN** edit chain для `didChange` не может быть применена к текущему дереву
-- **WHEN** система обновляет parse state
-- **THEN** выполняется full parse fallback для актуальной версии
-- **AND** итоговый snapshot остается version-consistent
-- **AND** причина fallback доступна в observability
+Если incremental path не может быть применен корректно, система MUST детерминированно переходить
+на full parse для той же exact target revision и фиксировать причину fallback в observability.
+
+Для same-file burst revisions система MUST оставаться latest-wins:
+
+- obsolete intermediate same-file revisions MAY быть coalesced до parse/materialization;
+- система MUST NOT materialize ready snapshot для obsolete intermediate revision, если уже известен
+  newer exact same-file target;
+- система MUST NOT ухудшать exactness: materialized ready snapshot по-прежнему обязан совпадать с
+  latest exact target revision/text hash.
+
+#### Scenario: same-file burst coalesces obsolete revisions before parse starts
+
+- **GIVEN** для одного `file_id` приходят `didChange` revisions `V`, `V+1`, `V+2` в пределах одного
+  burst
+- **AND** older ready-snapshot work ещё не начал blocking parse для `V`
+- **WHEN** runtime prepares background ready-snapshot production
+- **THEN** older target revisions MAY быть coalesced away before parse starts
+- **AND** blocking parse starts only for the latest exact target revision available at that moment
+- **AND** obsolete intermediate revisions do not materialize ready snapshots
+
+#### Scenario: newer exact target suppresses stale materialization after older parse finished
+
+- **GIVEN** background ready-snapshot production already parsed exact revision `V`
+- **AND** before materialization/install the same file receives newer revision `V+1`
+- **WHEN** the producer re-checks latest exact target before publishing ready artifacts
+- **THEN** the producer skips stale materialization for `V`
+- **AND** retargets to `V+1` instead of publishing obsolete exact artifacts
 
 ### Requirement: Changed-ranges используются для ограниченного downstream recompute (MUST)
 Система MUST передавать changed-range информацию в downstream стадии и ограничивать пересчет затронутыми диапазонами, когда это не нарушает корректность.
@@ -3103,6 +3125,12 @@ CPU-heavy auxiliary LSP work, не являющаяся primary semantic body т
 - documentSymbol ready-cache materialization и same-version outline refresh, инициированные document-sync path;
 - parse/context derivation для auxiliary request path `bsl.getCurrentContext`, когда для ответа нужен полный parse текущего текста файла.
 
+Для `bsl.getCurrentContext` same-file same-revision/text bursts MUST дополнительно:
+- broker-иться до входа в blocking CPU boundary;
+- допускать не более одного leader parse/context derivation на эквивалентный key;
+- не заставлять follower requests получать independent blocking CPU permits только ради ожидания leader parse;
+- завершаться через shared async wait или bounded empty outcome при supersession/budget exhaustion.
+
 Auxiliary jobs MAY оставаться bounded, cancellable и coalesced, но MUST NOT вызывать seconds-scale `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` или `response_output_handoff_send_wait_ms` regressions для same-file interactive completion, если primary completion path уже hot/ready.
 
 #### Scenario: Background outline materialization не выполняет symbol building inline на async runtime
@@ -3117,6 +3145,13 @@ Auxiliary jobs MAY оставаться bounded, cancellable и coalesced, но 
 - **WHEN** сервер обслуживает оба запроса
 - **THEN** current-context auxiliary CPU work не выполняется inline на async transport/runtime loop
 - **AND** completion trace не получает seconds-scale ingress или output-handoff delay только из-за `bsl.getCurrentContext`
+
+#### Scenario: Current-context burst делит один leader parse вместо нескольких blocking holders
+- **GIVEN** несколько same-file `bsl.getCurrentContext` requests попадают на один и тот же current document text без ready snapshot
+- **WHEN** первый request начинает parse/context derivation
+- **THEN** сервер допускает только один leader parse для этого key
+- **AND** follower requests не получают отдельные blocking CPU permits только ради ожидания leader parse
+- **AND** parse fan-out остаётся bounded одним leader parse
 
 ### Requirement: Representative mixed-load guard budgets truthful ingress and handoff seams (MUST)
 Representative mixed-load regression coverage для completion MUST budget-ить truthful latency seams, которые остаются user-visible после probe/egress split, а не только legacy pre-dispatch ingress split.
@@ -3139,6 +3174,8 @@ Guard MUST как минимум:
 
 Для этого requirement readiness regression считается отдельным failure mode:
 - bounded wait на `wait_for_file_version` не должен исчерпываться только потому, что newest same-file readiness все еще стоит позади save-triggered auxiliary backlog;
+- readiness waiter registration MUST становиться observable без seconds-scale residence в generic background writer/runtime FIFO до самого факта passive waiting;
+- passive readiness waiting MUST NOT требовать дополнительных blocking CPU permits только ради наблюдения за requested revision;
 - healthy `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms` MUST NOT использоваться как оправдание для `prepare_timeout@wait_for_file_version`;
 - cold semantic/query-body latency после успешного readiness рассматривается отдельно и не считается объяснением readiness timeout.
 
@@ -3149,11 +3186,12 @@ Guard MUST как минимум:
 - **THEN** readiness fast lane не деградирует в `prepare_timeout@wait_for_file_version` только из-за этого same-file auxiliary backlog
 - **AND** completion либо получает current-revision first response, либо завершается по другой truthful причине, не связанной с post-handoff `wait_for_file_version` starvation
 
-#### Scenario: Healthy truthful seams не маскируют readiness timeout
-- **GIVEN** representative completion sample показывает `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms` внутри интерактивного бюджета
-- **WHEN** тот же sample все равно завершает prepare как `prepare_timeout@wait_for_file_version`
-- **THEN** outcome считается current-revision readiness regression
-- **AND** не считается допустимым bounded fail-closed поведением
+#### Scenario: Waiter registration не сидит за unrelated apply backlog перед passive wait
+- **GIVEN** writer/runtime уже обрабатывает unrelated apply backlog для того же или другого файла
+- **AND** интерактивный completion request должен дождаться requested revision `V`
+- **WHEN** request переходит к readiness observation
+- **THEN** request становится passive waiter без seconds-scale residency в generic background FIFO до регистрации wait
+- **AND** дальнейшая latency truthfully атрибутируется либо actual apply lag, либо другой readiness cause, а не raw registration backlog
 
 ### Requirement: Representative post-edit/save churn gate separates readiness regressions from cold query-body cost (MUST)
 Representative real-module acceptance для current-revision completion MUST иметь отдельный post-edit/save churn profile, который проверяет readiness fast lane независимо от latency дальнейшего semantic/query-body execution.
@@ -3300,8 +3338,11 @@ server MUST использовать их для bounded supersession/coalescing
 
 - MUST NOT позволять obsolete older generations неограниченно накапливать independent expensive parse/context derivation;
 - MUST supersede older generation до expensive parse/context derivation или коалесцировать её с эквивалентным newer work;
+- MUST prefer exact ready parse snapshot текущей revision, когда он уже доступен;
+- MUST NOT запускать independent parse followers для того же same-file same-revision/text key, если leader parse уже существует;
 - MUST NOT делать obsolete response источником current context для newer generation;
-- MAY по-прежнему возвращать bounded auxiliary response для superseded request, если это не нарушает newest-generation-wins semantics на client side.
+- MAY по-прежнему возвращать bounded auxiliary response для superseded request, если это не нарушает newest-generation-wins semantics на client side;
+- MAY завершать superseded или over-budget follower пустым response, пока leader продолжает прогрев reusable parse artifact.
 
 #### Scenario: Cursor burst supersede-ит obsolete current-context work до expensive parse
 
@@ -3312,51 +3353,59 @@ server MUST использовать их для bounded supersession/coalescing
 - **AND** auxiliary path остаётся bounded по obsolete work
 - **AND** newer generation остаётся единственным current candidate для client-visible context surface
 
+#### Scenario: Same-revision burst коалесцируется за одним leader parse
+- **GIVEN** extension отправляет несколько current-context requests для одной и той же revision/text до появления ready snapshot
+- **WHEN** backend уже запустил leader parse для самого нового запроса
+- **THEN** остальные эквивалентные запросы не запускают independent expensive parse/context derivation
+- **AND** либо ждут shared result bounded образом, либо получают empty response при supersession/budget exhaustion
+- **AND** newest-generation-wins semantics остаётся сохранённой
+
 ### Requirement: didSave diagnostics публикует request-centric save refresh timeline (MUST)
-Система MUST публиковать bounded authoritative trace для каждого diagnostics refresh, инициированного `textDocument/didSave`.
+Система MUST публиковать bounded authoritative trace для каждого diagnostics refresh, инициированного
+`textDocument/didSave`.
 
 Этот trace MUST:
 
 - быть server-authored;
 - быть request-centric, а не derived из cumulative metrics;
-- содержать `uri`, `requested_version`, `save_cycle_sequence`, `diagnostics_generation`, `trigger=did_save`;
-- фиксировать bounded stage/runtime facts, достаточные для разбора first publish и heavy follow-up;
+- содержать `uri`, `requested_version`, `save_cycle_sequence`, `diagnostics_generation`,
+  `trigger=did_save`;
+- фиксировать bounded stage/runtime facts, достаточные для разбора first publish и heavy
+  follow-up;
 - не содержать raw document text, snippets или high-cardinality payload.
 
 Дополнительно trace MUST:
 
 - не создавать второй trace identity для уже terminal `(requested_version, save_cycle_sequence)`;
-- не заставлять operator-facing cycle ordering выводиться из `diagnostics_generation`, если у двух save-cycle совпадает `requested_version`;
-- публиковать `blocking_queue_wait_ms` только как factual wait перед shared blocking gate, а не как synthetic surrogate для direct save-fastlane bypass path;
+- не заставлять operator-facing cycle ordering выводиться из `diagnostics_generation`, если у двух
+  save-cycle совпадает `requested_version`;
+- публиковать `blocking_queue_wait_ms` только как factual wait перед shared blocking gate, а не как
+  synthetic surrogate для direct save-fastlane bypass path;
 - различать `save_fastlane` first publish и heavy follow-up stall;
-- не оставлять active heavy follow-up в состоянии просто `pending`, если сервер уже знает, что primary blocker это `apply_lag` / `wait_for_file_version`.
+- не оставлять active heavy follow-up в состоянии просто `pending`, если сервер уже знает, что
+  primary blocker это `apply_lag` / `wait_for_file_version`;
+- публиковать canonical low-cardinality outcome для zero-budget `ready_artifacts` probe;
+- публиковать canonical low-cardinality outcome для bounded-wait `ready_artifacts` probe, если
+  такой probe был выполнен;
+- публиковать branch-selection context, достаточный чтобы оператор видел:
+  - был ли `shadow_state` доступен в момент выбора ветки;
+  - существовала ли same-version ready-snapshot task и в каком canonical task state она была;
+- публиковать эти новые поля через additive versioned contract, где older payload versions
+  деградируют явно как `unavailable_by_design`, а не silently.
 
-#### Scenario: didSave refresh экспортируется с dedicated save-cycle identity
-- **GIVEN** пользователь сохраняет документ
-- **WHEN** diagnostics runtime запускает refresh для `didSave`
-- **THEN** система создаёт request-centric trace этого refresh
-- **AND** trace содержит monotonic `save_cycle_sequence`
-- **AND** trace можно получить через dedicated diagnostics save timeline surface
-- **AND** trace не требует реконструкции из aggregate metrics
-
-#### Scenario: operator-facing ordering двух save-cycle не зависит от diagnostics_generation
-- **GIVEN** документ получает два `didSave` при одном и том же `requested_version`
+#### Scenario: zero-budget ready-snapshot miss explains why shadow-state won
+- **GIVEN** `didSave` cycle already completed `save_fastlane`
+- **AND** exact same-version ready parse snapshot не был выбран для `idle_heavy`
 - **WHEN** оператор читает diagnostics save timeline
-- **THEN** система показывает distinct `save_cycle_sequence` для каждого cycle
-- **AND** trace остаётся truthful даже если `diagnostics_generation` не годится как save ordering key
+- **THEN** timeline показывает explicit outcome zero-budget ready-snapshot probe
+- **AND** timeline показывает, был ли доступен `shadow_state`
+- **AND** timeline показывает canonical ready-snapshot task state вместо неявного `None`
 
-#### Scenario: timeline объясняет stalled heavy follow-up request-centric причиной
-- **GIVEN** `didSave` cycle уже дал `save_fastlane` first publish
-- **AND** richer heavy follow-up ещё не published
-- **WHEN** оператор читает diagnostics save timeline
-- **THEN** trace показывает request-centric follow-up wait reason
-- **AND** оператор может отличить apply-lag от semantic-work pending
-
-#### Scenario: fastlane fallback публикует blocking queue wait отдельно от syntax query
-- **GIVEN** `save_fastlane` first publish идёт через bounded blocking fallback path
-- **WHEN** trace экспортируется в diagnostics save timeline
-- **THEN** queue wait перед parse фиксируется отдельно от `syntax_diagnostics_query_ms`
-- **AND** оператор может отличить queue wait от actual syntax query work
+#### Scenario: older timeline payload degrades explicitly
+- **GIVEN** consumer читает diagnostics save timeline payload более старой contract version
+- **WHEN** в этой версии ещё нет ready-snapshot miss attribution fields
+- **THEN** consumer маркирует их как `unavailable_by_design`
+- **AND** оператор не принимает отсутствие поля за отсутствие события
 
 ### Requirement: save_fastlane и idle_heavy группируются в один didSave refresh cycle (MUST)
 Если один `didSave` запускает сначала `save_fastlane`, а затем `idle_heavy`, система MUST экспортировать их как
@@ -3396,14 +3445,757 @@ Trace MUST:
 - **THEN** first publish не тратит seconds-scale latency только на shared queue wait
 - **AND** trace не маскирует bypass synthetic `blocking_queue_wait_ms`
 
-### Requirement: didSave heavy follow-up избегает apply-lag как primary gate (MUST)
-После successful same-version `save_fastlane` first publish система MUST стремиться к richer heavy follow-up того же `save_cycle_sequence` без unbounded зависимости от writer/apply lag как primary gate, если same-version ready artifacts уже доступны.
+### Requirement: LSP publishes authoritative file-scoped snapshot readiness status (MUST)
+
+LSP MUST provide an authoritative live snapshot-readiness contract for open documents through:
+
+- custom request `bsl/getSnapshotStatus`
+- custom notification `bsl/snapshotStatus`
+
+The contract MUST stay file-scoped and MUST NOT be reconstructed from diagnostics save timeline,
+completion timeline, or cumulative observability metrics.
+
+The request/notification payload MUST use bounded low-cardinality fields including:
+
+- `schemaVersion`
+- `uri`
+- `requestedVersion`
+- `readyVersion`
+- `state` with bounded vocabulary `idle | building | ready | stale | shadow_only | failed`
+- `exact`
+- `taskState`
+- optional coarse `phase`
+- optional `trigger`
+- `updatedAtMs`
+- optional bounded `fallbackReason`
+
+The payload state vocabulary MUST use these meanings consistently:
+
+- `idle`: no exact-ready, no degraded current answer, and no matching rebuild currently surfaced;
+- `building`: a matching rebuild is in flight and exact readiness is not available yet;
+- `ready`: exact-ready artifacts exist for the requested revision;
+- `stale`: a ready artifact exists but is older than the requested revision;
+- `shadow_only`: the current answer is based on `shadow_state` rather than exact ready artifacts;
+- `failed`: the last attempted rebuild ended in an explicit error and the server cannot truthfully
+  claim `ready` or `shadow_only`.
+
+Notification updates MUST be coalesced per URI and MUST NOT emit unbounded micro-step noise for
+every internal transition. Request fetch remains the hydrate/manual-read path.
+
+For the same URI, `updatedAtMs` MUST be monotonic and clients MUST ignore an older update once they
+have already observed a newer one.
+
+#### Scenario: Same-version worker in flight reports building state
+- **GIVEN** a matching same-version ready-snapshot worker is still in flight for an open document
+- **WHEN** the client requests `bsl/getSnapshotStatus` for that document
+- **THEN** the server returns `state=building`
+- **AND** the payload stays truthful about the in-flight task state instead of claiming ready
+
+#### Scenario: Exact ready snapshot reports exact-ready state
+- **GIVEN** the requested document revision already has a matching ready snapshot
+- **WHEN** the server serves snapshot readiness for that document
+- **THEN** the payload reports `state=ready`
+- **AND** `exact=true`
+- **AND** `readyVersion` matches `requestedVersion`
+
+#### Scenario: `shadow_only` fallback remains distinct from ready
+- **GIVEN** the server can answer the current document only from `shadow_state` rather than exact
+  ready snapshot artifacts
+- **WHEN** snapshot readiness is reported
+- **THEN** the payload reports `state=shadow_only`
+- **AND** the payload does not claim exact readiness
+
+#### Scenario: Live transition publishes coalesced notification
+- **GIVEN** a document transitions from `building` to exact `ready`
+- **WHEN** the server emits snapshot-readiness live updates
+- **THEN** the client can observe the state change through `bsl/snapshotStatus`
+- **AND** the server does not require timeline polling to surface that transition
+
+#### Scenario: Older notification for the same URI is safely ignored by the client
+- **GIVEN** the server has already emitted a newer snapshot-status update for a URI
+- **WHEN** an older update for that same URI is delivered later
+- **THEN** the client can distinguish it via `updatedAtMs`
+- **AND** the older update does not overwrite the newer state
+
+### Requirement: Warm non-member completion reuses immutable deps-scoped candidate catalogs (MUST)
+
+Warm non-member completion MUST reuse immutable deps-scoped candidate catalogs for candidate families whose semantic content depends on deps/settings snapshot rather than on the current cursor-local revision state.
+
+Для таких immutable families система MUST:
+
+- prebuild or reuse a deps/settings-scoped catalog (or semantically equivalent immutable snapshot artifact);
+- avoid rebuilding the full family on every warm non-member request under the same deps/settings snapshot;
+- apply prefix-aware filtering before full `Candidate` materialization when a usable request prefix is already known;
+- preserve existing source-priority and ranking semantics for the surviving candidates.
+
+При этом система MUST keep revision/context-sensitive sources separate:
+
+- local symbols;
+- contextual implicit symbols;
+- module routines and other cursor-local sources.
+
+#### Scenario: Warm non-member completion не rebuild-ит immutable deps-wide catalogs на каждый request
+- **GIVEN** deps/settings snapshot не менялся между двумя warm non-member completion requests
+- **AND** request path уже имеет current-revision state для файла
+- **WHEN** IDE запрашивает non-member completion повторно
+- **THEN** immutable deps-scoped families переиспользуются из snapshot-scoped catalog вместо полного rebuild
+- **AND** warm collect latency не доминируется повторной materialization тех же global functions / repository types / metadata items
+
+#### Scenario: Prefix-aware filtering materialize-ит только нужный subset immutable catalog
+- **GIVEN** non-member completion request содержит usable prefix
+- **AND** immutable deps-scoped catalog уже готов для текущего deps/settings snapshot
+- **WHEN** handler формирует collect-stage candidates
+- **THEN** сервер сначала фильтрует immutable catalog по prefix
+- **AND** materialize-ит полные `Candidate` только для surviving subset
+- **AND** итоговый candidate set остаётся эквивалентен текущему correctness contract
+
+### Requirement: Background ready-snapshot workers are cooperatively superseded and exact-task promotable (MUST)
+
+Background ready-snapshot workers for `didOpen`/`didChange`/`didSave` MUST behave as controllable
+tasks instead of abort-only fire-and-forget jobs.
+
+For obsolete or superseded workers, the system MUST:
+
+- signal cooperative cancellation through shared task state that is observable before and during
+  debounce / parse-build execution;
+- MUST NOT rely solely on outer async task abort once blocking parse work has already started;
+- stop obsolete identical or older-version workers before they continue consuming parser or
+  blocking capacity after a newer requested revision has superseded them.
+
+For exact same-version waiters, the system MAY promote an existing worker, but MUST:
+
+- support promotion of an exact same-version worker into `did_save_followup` priority for the
+  materialization stage;
+- MUST NOT duplicate parse work for identical `(file_id, requested_version, text_hash)`;
+- MUST NOT move snapshot-backed `SetFileWithSnapshot` install onto the interactive writer queue
+  merely to win the wait.
+
+#### Scenario: Newer didChange supersedes obsolete exact worker before it keeps burning parse capacity
+
+- **GIVEN** a ready-snapshot worker is already running for revision `V`
+- **AND** a newer requested revision `V+1` supersedes that file before the older worker finishes
+- **WHEN** the system updates worker control state for the file
+- **THEN** the older worker observes cooperative cancellation before continuing obsolete parse/build
+  work
+- **AND** the system does not rely only on outer-task abort to stop already-started blocking parse
+  execution
+
+#### Scenario: didSave promotes existing exact worker instead of spawning duplicate parse work
+
+- **GIVEN** `didSave` heavy follow-up needs exact same-version artifacts for revision `V`
+- **AND** an exact same-version worker for matching `(file_id, requested_version, text_hash)` is
+  already in flight
+- **WHEN** the server requests higher priority for that exact worker
+- **THEN** the existing worker becomes the promoted producer for that revision
+- **AND** the server does not start a second same-version parse worker just because `didSave`
+  joined the wait
+
+### Requirement: bsl.getCurrentContext reuses exact same-version snapshot workers before independent parse (MUST)
+
+Backend MUST prefer bounded reuse of an exact same-version ready-snapshot worker before launching
+an independent `parser_coordinator` parse for `bsl.getCurrentContext`, when a same-file request
+already has a matching in-flight worker for the same text/version.
+
+The backend MUST:
+
+- consume ready exact snapshot state immediately if it is already materialized;
+- otherwise wait only a short bounded reuse budget for the exact worker's materialization before
+  starting independent parse work;
+- preserve latest-generation-wins supersession/cancellation semantics for current-context
+  generations;
+- fall back to the existing broker/leader parse path if no matching exact task exists, the task no
+  longer matches the text/version, or the reuse budget expires.
+
+#### Scenario: currentContext reuses same-file exact worker instead of racing parser_coordinator
+
+- **GIVEN** `didChange` already started an exact same-version ready-snapshot worker for file `F`
+  and revision `V`
+- **AND** `bsl.getCurrentContext` arrives for the same file text/revision before that worker
+  materializes
+- **WHEN** the backend decides whether to parse current context independently
+- **THEN** it first reuses or briefly awaits the exact worker's materialization
+- **AND** only falls back to independent `parser_coordinator` parse if the reuse budget expires or
+  the worker stops matching the request
+- **AND** newest-generation current-context semantics remain authoritative for the client
+
+### Requirement: Incident bundles distinguish coalesced producer churn from exact timeout (MUST)
+
+Incident-bundle observability MUST expose low-cardinality lifecycle evidence for same-file
+ready-snapshot production so operators can distinguish:
+
+- work that was coalesced away before parse;
+- work that parsed but was skipped before materialization because a newer target already existed;
+- exact same-version producer wait that still timed out and forced `shadow_state` fallback.
+
+This evidence MUST remain bounded and MUST NOT require raw logs to explain whether same-file churn
+came from unnecessary worker starts or from a legitimate exact target that still lost to budget.
+
+#### Scenario: Bundle shows coalesced churn instead of masking it as generic superseded work
+
+- **GIVEN** a same-file burst produces several obsolete intermediate revisions before the newest
+  exact target materializes
+- **WHEN** an operator exports an observability incident bundle
+- **THEN** the bundle distinguishes coalesced/retargeted producer outcomes from exact timeout
+  outcomes
+- **AND** the operator can tell whether `didSave` waited on the right exact producer or whether the
+  older revisions were already coalesced away
+
+### Requirement: Ranged `didChange` fallback `stale_parser_base` объясняет, почему reuse-база была недоступна (MUST)
+
+Система MUST дополнительно экспортировать low-cardinality root-cause attribution, если ranged
+`didChange` вынужден перейти на full parse с `fallback_reason=stale_parser_base`, чтобы было
+понятно, почему дешёвый incremental parser-base reuse не был доступен.
+
+Этот attribution MUST различать как минимум:
+
+- отсутствовал matching ready snapshot для текущего shadow revision;
+- latest ready snapshot отставал от shadow revision;
+- priming от matching ready snapshot был выполнен, но tree cache всё равно не совпал с shadow
+  text;
+- иные bounded внутренние причины.
+
+Система MUST экспортировать bounded base-state поля, достаточные для интерпретации miss-класса,
+включая текущий shadow revision и latest ready revision, когда они доступны.
+
+Система MUST NOT использовать для этого raw text, free-form debug strings или другую
+high-cardinality payload информацию.
+
+#### Scenario: Bundle показывает, что shadow revision ушёл вперёд latest ready base
+
+- **GIVEN** same-file churn продвинул `shadow_state` до revision `V+k`
+- **AND** latest ready parse snapshot остаётся на revision `V`
+- **WHEN** ranged `didChange` для revision `V+k+1` падает в `stale_parser_base`
+- **THEN** observability payload явно показывает bounded miss class, соответствующий lag между
+  ready base и shadow revision
+- **AND** оператору не нужно открывать raw logs, чтобы понять, что matching ready base для shadow
+  revision ещё не существовал
+
+#### Scenario: Bundle показывает mismatch даже после attempted prime
+
+- **GIVEN** для shadow revision существует matching ready snapshot
+- **AND** runtime attempted prime parser tree cache from that ready snapshot
+- **WHEN** subsequent ranged `didChange` всё равно падает в `stale_parser_base`
+- **THEN** observability payload показывает miss class для tree-cache mismatch after prime
+- **AND** top-level fallback reason остаётся `stale_parser_base`
+
+### Requirement: Exact ready-snapshot producer экспортирует phase-level latency attribution (MUST)
+
+Система MUST экспортировать bounded phase-level latency attribution для exact ready-snapshot
+producer на пути от начала blocking parse до момента, когда ready snapshot уже установлен и
+queryable для exact target revision.
+
+Этот attribution MUST различать как минимум:
+
+- `parse_exec`;
+- `post_parse_pre_materialization`;
+- `ready_install`.
+
+Работа после ready install, включая documentSymbol / outline side-work, MUST экспортироваться
+отдельно и MUST NOT искусственно увеличивать exact readiness phase.
+
+#### Scenario: Bundle показывает, что timeout произошёл во время parse phase
+
+- **GIVEN** `didSave` bounded wait ждёт exact still-current ready-snapshot producer
+- **AND** budget истекает до materialization
+- **WHEN** оператор экспортирует incident bundle
+- **THEN** bundle показывает producer phase at timeout
+- **AND** если exact worker ещё находился в blocking parse, dominant phase указывает на
+  `parse_exec`
+
+#### Scenario: Symbol side-work не маскируется под exact readiness
+
+- **GIVEN** ready snapshot уже установлен для exact target revision
+- **AND** после этого ещё выполняется documentSymbol / outline side-work
+- **WHEN** observability payload summarises ready-snapshot lifecycle
+- **THEN** exact readiness phase заканчивается на ready install
+- **AND** symbol/outline side-work показывается как отдельная non-readiness phase
+
+### Requirement: Временный `didSave` exact-wait relief valve является evidence-gated и self-attributing (MUST)
+
+Система MUST ограничивать любое временное дополнительное bounded wait window поверх базового
+`didSave` ready-snapshot wait budget только случаями, где runtime может доказать, что:
+
+- ожидание идёт на exact still-current producer для matching
+  `(file_id, requested_version, text_hash)`;
+- producer не был retargeted/coalesced away;
+- наблюдаемый blocker не объясняется runtime queue wait или apply lag;
+- exact-path phase attribution показывает late exact readiness, а не generic fallback path.
+
+Если это доказательство отсутствует, система MUST сохранить текущее базовое bounded wait behavior
+и MUST перейти к существующему truthful fallback без дополнительного wait window.
+
+Использование временного relief valve MUST оставаться строго bounded, MUST быть явно отражено в
+observability / incident bundle export и MUST различать как минимум:
+
+- valve engaged and helped;
+- valve skipped because proof was absent;
+- valve engaged but still timed out.
+
+#### Scenario: Late exact producer успевает в дополнительное временное окно
+
+- **GIVEN** базовый `didSave` bounded wait исчерпан
+- **AND** runtime всё ещё видит тот же exact still-current producer
+- **AND** phase attribution показывает late exact readiness без queue/apply-lag признаков
+- **WHEN** включён временный relief valve
+- **THEN** runtime MAY ждать только в пределах дополнительного bounded relief window
+- **AND** если producer materializes внутри этого окна, publish идёт через `ready_artifacts`
+- **AND** bundle явно показывает, что relief valve был задействован
+
+#### Scenario: Queue/apply-lag или coalesced-away producer не получают relief window
+
+- **GIVEN** базовый `didSave` bounded wait исчерпан
+- **AND** runtime видит apply lag, runtime queue wait или producer уже retargeted/coalesced away
+- **WHEN** heavy follow-up выбирает дальнейший путь
+- **THEN** runtime MUST NOT включать дополнительное relief wait window
+- **AND** использует существующий truthful fallback / attribution path
+
+### Requirement: Ranged `didChange` MUST attempt bounded parser-base recovery before treating `ready_snapshot_lags_shadow_state` as full-parse fate
+
+Система MUST сначала попытаться выполнить bounded parser-base recovery / prime path для текущего
+exact document state, если ranged `didChange` попадает в `fallback_reason=stale_parser_base` и
+bounded root-cause attribution указывает на `ready_snapshot_lags_shadow_state`.
+
+Этот recovery path MUST:
+
+- оставаться version- and text-bound для exact target revision;
+- не использовать raw debug-only state как substitute для matching parser base;
+- сохранять существующий truthful fallback, если matching parser base всё ещё не может быть
+  доказан.
+
+Система MUST NOT считать `ready_snapshot_lags_shadow_state` достаточной причиной для немедленного
+безусловного full parse, если bounded recovery path ещё не был исчерпан.
+
+#### Scenario: Lagging ready snapshot восстанавливает exact parser base без немедленного full parse
+
+- **GIVEN** ranged `didChange` для revision `V+1` видит `shadow_state` на той же revision
+- **AND** bounded miss attribution для старого reuse path равен `ready_snapshot_lags_shadow_state`
+- **WHEN** runtime запускает bounded parser-base recovery для exact target revision
+- **THEN** runtime сначала пытается восстановить/prime matching parser base для этой revision
+- **AND** если recovery succeeds, exact ready-snapshot build продолжается без forced full parse из
+  этого miss класса
+
+#### Scenario: Recovery failure сохраняет truthful fallback
+
+- **GIVEN** ranged `didChange` попал в miss class `ready_snapshot_lags_shadow_state`
+- **AND** bounded parser-base recovery не смог доказать matching parser base
+- **WHEN** runtime завершает выбор parse path
+- **THEN** система MAY перейти к существующему truthful full fallback
+- **AND** observability сохраняет bounded attribution того, что recovery был исчерпан, а exact
+  parser base так и не был доказан
+
+### Requirement: Same-file exact ready-snapshot work MUST bound obsolete parse-exec waste
+
+Система MUST иметь bounded cancellation/retarget observation inside the expensive parse/build path,
+если same-file churn retargets/coalesces exact ready-snapshot producer на более новую revision,
+чтобы obsolete worker мог завершиться во время `parse_exec`, а не только после почти полного
+завершения parse cost.
+
+Этот behavior MUST:
+
+- сохранять exact same-version guarantees для surviving worker;
+- различать lifecycle/metrics причины как минимум между abort `during_parse_exec` и loss
+  `before_materialization`;
+- не обвинять `ready_install` или `documentSymbol` phases в obsolete work, которое фактически было
+  потрачено внутри parse execution.
+
+#### Scenario: Более новая same-file revision останавливает obsolete worker во время parse execution
+
+- **GIVEN** exact ready-snapshot worker уже выполняет дорогой parse/build path для revision `V`
+- **AND** тот же файл получает более новую revision `V+1`, retargeting producer на новый target
+- **WHEN** obsolete worker достигает следующего bounded cancellation/retarget checkpoint inside
+  `parse_exec`
+- **THEN** obsolete worker завершается без materializing revision `V`
+- **AND** lifecycle attribution / metrics показывают bounded parse-exec abort, а не поздний
+  post-parse loss
+
+#### Scenario: Отсутствие retarget не ломает normal exact materialization
+
+- **GIVEN** exact ready-snapshot worker выполняет parse/build path для current revision
+- **AND** новых same-file revisions не приходит до конца build path
+- **WHEN** parse/build successfully finishes
+- **THEN** ready snapshot materializes как и раньше
+- **AND** новые cancellation checkpoints не меняют exact success semantics
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `parse_exec` on the save-critical path
+
+The system MUST treat production of publishable exact ready artifacts as the save-critical goal
+inside `parse_exec` whenever `didSave` heavy follow-up waits for an exact still-current
+same-version ready-snapshot producer. The runtime MUST keep that exact path focused on
+materializing current ready artifacts before optional in-parse work.
+
+This behavior MUST:
+
+- allow non-essential in-parse work to be deferred, skipped, or made cancellable until after exact
+  ready artifacts are materialized;
+- preserve exact same-version semantics for the produced ready snapshot;
+- preserve supersession behavior when a newer same-file revision or save cycle overtakes the
+  current target.
+
+#### Scenario: Save-critical exact producer materializes ready artifacts before deferred enrichment
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the producer is inside `parse_exec`
+- **WHEN** runtime promotes that producer onto the save-critical path
+- **THEN** the producer prioritizes work required to materialize exact ready artifacts
+- **AND** optional in-parse enrichment that is not required for the publishable ready snapshot does
+  not block the first exact follow-up publish
+
+#### Scenario: Newer same-file target still supersedes the save-critical producer
+
+- **GIVEN** an exact same-version producer is already on the save-critical path
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded in-parse checkpoint
+- **THEN** the producer MAY terminate or retarget truthfully instead of publishing stale output
+- **AND** the system does not relax exactness rules for the superseded target
+
+### Requirement: Exact `parse_exec` timeouts MUST expose bounded in-parse subphase attribution
+
+The system MUST export a bounded in-parse subphase attribution whenever exact same-version
+ready-snapshot work still misses the `didSave` follow-up window while inside `parse_exec`. This
+attribution MUST identify which part of exact `parse_exec` dominated the miss. Operator-facing
+observability MUST no longer stop at an opaque phase label when the remaining blocker is entirely
+inside exact `parse_exec`.
+
+This attribution MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- distinguish save-critical parse/build work from deferrable or optional in-parse work;
+- preserve the higher-level truthful distinction between parse timeout, publish/apply blocker, and
+  fallback-to-`shadow_state`.
+
+#### Scenario: Exact timeout reports a specific in-parse residual
+
+- **GIVEN** `didSave` follow-up times out while the exact same-version producer is still inside
+  `parse_exec`
+- **WHEN** diagnostics save timeline and incident bundle are exported
+- **THEN** the exported evidence names the dominant bounded in-parse subphase
+- **AND** operator-facing output does not collapse the residual back into a single opaque
+  `parse_exec` label
+
+#### Scenario: Successful exact publish does not leave stale timeout attribution behind
+
+- **GIVEN** the exact same-version producer finishes in time and `didSave` follow-up publishes
+  through `ready_artifacts`
+- **WHEN** diagnostics save timeline is finalized
+- **THEN** timeout-oriented in-parse attribution is absent or cleared
+- **AND** the successful cycle does not report a stale parse timeout residual
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `core_parse_build` on the save-critical path
+
+The system MUST treat production of publishable exact ready artifacts as the save-critical goal
+inside exact same-version `core_parse_build` whenever `didSave` heavy follow-up is waiting on a
+still-current producer. The runtime MUST keep that exact path focused on the minimum core-build
+work required to materialize current ready artifacts before first exact publish.
+
+This behavior MUST:
+
+- allow secondary core-build work that is not required for the first exact ready snapshot to be
+  deferred, skipped, or cancelled until after publish;
+- preserve exact same-version semantics for the produced ready snapshot;
+- preserve supersession behavior when a newer same-file revision or newer save cycle overtakes the
+  current target.
+
+#### Scenario: Save-critical exact producer materializes ready artifacts before secondary core-build work
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the producer is inside `core_parse_build`
+- **WHEN** runtime promotes that producer onto the save-critical path
+- **THEN** the producer prioritizes the core-build work required for publishable exact ready
+  artifacts
+- **AND** secondary core-build work that is not required for first publish does not block the first
+  exact follow-up publish
+
+#### Scenario: Newer same-file target still supersedes the save-critical core-build producer
+
+- **GIVEN** an exact same-version producer is already on the save-critical core-build path
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded core-build checkpoint
+- **THEN** the producer MAY terminate or retarget truthfully instead of publishing stale output
+- **AND** the system does not relax exactness rules for the superseded target
+
+### Requirement: Exact `core_parse_build` timeouts MUST expose bounded core-build checkpoint attribution
+
+The system MUST export a bounded core-build checkpoint attribution whenever exact same-version
+ready-snapshot work still misses the `didSave` follow-up window while the dominant residual remains
+inside `core_parse_build`. Operator-facing observability MUST no longer stop at a monolithic
+`core_parse_build` bucket once that bucket becomes the dominant residual after `refactor-27`.
+
+This attribution MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- distinguish parser/tree work from later exact-ready artifact assembly or other bounded
+  core-build slices used by the final implementation;
+- preserve the higher-level truthful distinction between parse timeout, publish/apply blocker, and
+  fallback-to-`shadow_state`.
+
+#### Scenario: Exact timeout reports a specific core-build residual
+
+- **GIVEN** `didSave` follow-up times out while the exact same-version producer is still inside
+  `core_parse_build`
+- **WHEN** diagnostics save timeline and incident bundle are exported
+- **THEN** the exported evidence names the dominant bounded core-build checkpoint
+- **AND** operator-facing output does not collapse the residual back into a single monolithic
+  `core_parse_build` bucket
+
+#### Scenario: Successful exact publish does not leave stale core-build timeout attribution behind
+
+- **GIVEN** the exact same-version producer finishes in time and `didSave` follow-up publishes
+  through `ready_artifacts`
+- **WHEN** diagnostics save timeline is finalized
+- **THEN** timeout-oriented core-build checkpoint attribution is absent or cleared
+- **AND** the successful cycle does not report a stale exact core-build timeout residual
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `ready_snapshot_assembly` on the save-critical path
+
+The system MUST treat production of publishable exact ready artifacts as the save-critical goal
+inside exact same-version `ready_snapshot_assembly` whenever `didSave` heavy follow-up is waiting
+on a still-current producer. The runtime MUST keep that exact path focused on the minimum assembly
+work required to materialize current ready artifacts before first exact publish.
+
+This behavior MUST:
+
+- allow secondary assembly work that is not required for the first exact ready snapshot to be
+  deferred, skipped, or cancelled until after publish;
+- preserve exact same-version semantics for the produced ready snapshot;
+- preserve supersession behavior when a newer same-file revision or newer save cycle overtakes the
+  current target.
+
+#### Scenario: Save-critical exact producer materializes ready artifacts before secondary assembly work
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the producer is inside `ready_snapshot_assembly`
+- **WHEN** runtime promotes that producer onto the save-critical path
+- **THEN** the producer prioritizes the assembly work required for publishable exact ready
+  artifacts
+- **AND** secondary assembly work that is not required for first publish does not block the first
+  exact follow-up publish
+
+#### Scenario: Newer same-file target still supersedes the save-critical assembly producer
+
+- **GIVEN** an exact same-version producer is already on the save-critical assembly path
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded assembly checkpoint
+- **THEN** the producer MAY terminate or retarget truthfully instead of publishing stale output
+- **AND** the system does not relax exactness rules for the superseded target
+
+### Requirement: Exact `ready_snapshot_assembly` timeouts MUST expose bounded assembly checkpoint attribution
+
+The system MUST export a bounded assembly checkpoint attribution whenever exact same-version
+ready-snapshot work still misses the `didSave` follow-up window while the dominant residual remains
+inside `ready_snapshot_assembly`. Operator-facing observability MUST no longer stop at a monolithic
+`exact_ready_snapshot_assembly` bucket once that bucket becomes the dominant residual after
+`refactor-28`.
+
+This attribution MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- distinguish conversion / packaging slices used by the final implementation;
+- preserve the higher-level truthful distinction between parse timeout, publish/apply blocker, and
+  fallback-to-`shadow_state`.
+
+#### Scenario: Exact timeout reports a specific assembly residual
+
+- **GIVEN** `didSave` follow-up times out while the exact same-version producer is still inside
+  `ready_snapshot_assembly`
+- **WHEN** diagnostics save timeline and incident bundle are exported
+- **THEN** the exported evidence names the dominant bounded assembly checkpoint
+- **AND** operator-facing output does not collapse the residual back into a single monolithic
+  `exact_ready_snapshot_assembly` bucket
+
+#### Scenario: Successful exact publish does not leave stale assembly timeout attribution behind
+
+- **GIVEN** the exact same-version producer finishes in time and `didSave` follow-up publishes
+  through `ready_artifacts`
+- **WHEN** diagnostics save timeline is finalized
+- **THEN** timeout-oriented assembly checkpoint attribution is absent or cleared
+- **AND** the successful cycle does not report a stale exact assembly timeout residual
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `program_conversion` on the save-critical path
+
+The system MUST treat production of publishable exact ready artifacts as the save-critical goal
+inside exact same-version `program_conversion` whenever `didSave` heavy follow-up is waiting on a
+still-current producer. The runtime MUST keep that exact path focused on the minimum conversion
+work required to materialize current ready artifacts before first exact publish.
+
+This behavior MUST:
+
+- allow secondary conversion or packaging work that is not required for the first exact ready
+  snapshot to be deferred, skipped, or cancelled until after publish;
+- preserve exact same-version semantics for the produced ready snapshot;
+- preserve supersession behavior when a newer same-file revision or newer save cycle overtakes the
+  current target.
+
+#### Scenario: Save-critical exact producer materializes ready artifacts before secondary conversion work
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the producer is inside `program_conversion`
+- **WHEN** runtime promotes that producer onto the save-critical path
+- **THEN** the producer prioritizes the conversion work required for publishable exact ready
+  artifacts
+- **AND** secondary conversion or packaging work that is not required for first publish does not
+  block the first exact follow-up publish
+
+#### Scenario: Newer same-file target still supersedes the save-critical conversion producer
+
+- **GIVEN** an exact same-version producer is already on the save-critical conversion path
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded conversion checkpoint
+- **THEN** the producer MAY terminate or retarget truthfully instead of publishing stale output
+- **AND** the system does not relax exactness rules for the superseded target
+
+### Requirement: Exact `program_conversion` timeouts MUST expose bounded conversion checkpoint attribution
+
+The system MUST export a bounded conversion checkpoint attribution whenever exact same-version
+ready-snapshot work still misses the `didSave` follow-up window while the dominant residual remains
+inside `program_conversion`. Operator-facing observability MUST no longer stop at a monolithic
+`program_conversion` bucket once that bucket becomes the dominant residual after `refactor-29`.
+
+This attribution MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- distinguish conversion / lowering slices from later packaging or ownership-handoff slices used by
+  the final implementation;
+- preserve the higher-level truthful distinction between parse timeout, publish/apply blocker, and
+  fallback-to-`shadow_state`.
+
+#### Scenario: Exact timeout reports a specific conversion residual
+
+- **GIVEN** `didSave` follow-up times out while the exact same-version producer is still inside
+  `program_conversion`
+- **WHEN** diagnostics save timeline and incident bundle are exported
+- **THEN** the exported evidence names the dominant bounded conversion checkpoint
+- **AND** operator-facing output does not collapse the residual back into a single monolithic
+  `program_conversion` bucket
+
+#### Scenario: Successful exact publish does not leave stale conversion timeout attribution behind
+
+- **GIVEN** the exact same-version producer finishes in time and `didSave` follow-up publishes
+  through `ready_artifacts`
+- **WHEN** diagnostics save timeline is finalized
+- **THEN** timeout-oriented conversion checkpoint attribution is absent or cleared
+- **AND** the successful cycle does not report a stale exact conversion timeout residual
+
+### Requirement: Same-file current-revision apply visibility stays ahead of auxiliary parse churn (MUST)
+Система MUST обеспечивать, что после того как `didOpen`, `didChange` или `didSave` уже
+зарегистрировал same-file handoff для requested revision `V`, наблюдаемое продвижение
+`applied_version >= V` для same-file waiters не задерживается по умолчанию из-за same-file
+auxiliary parse work, которая не является самим canonical current-revision handoff.
+
+Этот contract MUST покрывать как минимум:
+- interactive current-revision waiters, которые опираются на `wait_for_file_version` или
+  semantically equivalent applied-state readiness;
+- `didSave` diagnostics heavy follow-up после bounded first publish;
+- same-file auxiliary parse/snapshot/context work вроде parse snapshot build, same-version refresh,
+  `bsl.getCurrentContext`, `documentSymbol` maintenance, `type_index_precompute` или
+  semantically equivalent paths.
+
+Система MAY сохранять bounded writer/runtime architecture, но MUST NOT оставлять newest same-file
+waiters в состоянии seconds-scale `apply_lag` / `wait_for_file_version` только потому, что впереди
+продолжается auxiliary same-file parse churn.
+
+Если stall все же происходит, operator-facing evidence MUST позволять отличить writer/apply backlog
+от downstream semantic/query cost.
+
+#### Scenario: didSave follow-up не ждёт latest applied visibility только из-за same-file auxiliary parse churn
+- **GIVEN** same-file handoff для revision `V` уже зарегистрирован
+- **AND** `didSave` уже сделал bounded first publish и heavy follow-up ждёт applied visibility для той же revision
+- **AND** same-file auxiliary parse work все еще активна для того же файла
+- **WHEN** backend продвигает applied-state visibility
+- **THEN** heavy follow-up не получает primary delay только из-за этой same-file auxiliary parse work
+- **AND** any remaining stall атрибутируется другой bounded причине
+
+#### Scenario: Current-revision completion readiness не остаётся stale из-за same-file auxiliary parse work
+- **GIVEN** same-file handoff для revision `V` уже зарегистрирован
+- **AND** same-file auxiliary parse work для той же revision все еще выполняется
+- **WHEN** IDE запрашивает completion для revision `V`
+- **THEN** readiness wait не остается stale только потому, что same-file auxiliary parse work ещё не завершилась
+- **AND** completion не деградирует в `wait_for_file_version` stall по этой причине как default outcome
+
+### Requirement: Large-module same-version auxiliary parse consumers reuse canonical parse truth (MUST)
+Для representative large modules same-version auxiliary parse consumers MUST reuse или coalesce
+canonical parse truth, keyed by `(file_id, file_version, text_hash)` или semantically equivalent
+identity, вместо того чтобы платить repeated independent cold/full parse по идентичному тексту как
+default behavior.
+
+Этот contract MUST покрывать как минимум:
+- `build_parse_snapshot_v2` или semantically equivalent version-bound parse snapshot builders;
+- same-version save-triggered refresh paths;
+- `bsl.getCurrentContext`, когда он читает тот же latest shadow text.
+
+Система MAY выполнить один cold/full parse, если отсутствует previous tree или incremental basis,
+но после того как same-version parse truth уже available или in-flight:
+- later same-version auxiliary consumers MUST reuse it or coalesce behind it;
+- `bsl.getCurrentContext` MUST NOT по умолчанию запускать еще один independent full parse того же текста;
+- operator-facing evidence MUST сохранять truthful parse mode/fallback distinction вместо маскировки
+  repeated full parse как generic background slowdown.
+
+#### Scenario: Current-context переиспользует in-flight same-version parse truth
+- **GIVEN** для большого модуля уже идет same-version parse build для revision `V` и text identity `H`
+- **AND** `bsl.getCurrentContext` приходит для того же файла и идентичного latest shadow text
+- **WHEN** backend обслуживает оба path
+- **THEN** current-context reuse-ит existing same-version parse truth или coalesce-ится behind it
+- **AND** не запускает independent full parse identical text как default outcome
+
+#### Scenario: Full-text update не превращает каждый same-version auxiliary consumer в новый cold parse
+- **GIVEN** large-module `didChange` для revision `V` изначально упал в full parse path из-за отсутствия incremental basis
+- **WHEN** later same-version save refresh или другой auxiliary parse consumer читает тот же text identity
+- **THEN** later consumer reuse-ит или coalesce-ит existing same-version parse truth
+- **AND** identical text не оплачивается repeated independent full parse по умолчанию
+
+### Requirement: Representative conf_big mixed-load gate separates cold parse regressions from apply backlog (MUST)
+Representative real-module acceptance для `conf_big`-class degradation MUST включать same-file
+mixed-load profile, который одновременно упражняет:
+- `didChange`;
+- `didSave`;
+- auxiliary parse-only load (`bsl.getCurrentContext` или semantically equivalent path);
+- waiter на current-revision visibility (`completion` и/или didSave heavy follow-up).
+
+Этот gate MUST:
+- собирать authoritative fields, которые различают parse cold start и apply visibility backlog, как
+  минимум parse mode/fallback reason, parse build latency, и applied-state wait fields
+  (`apply_changes_queue_wait_ms`, `wait_for_file_version`, `apply_lag`, или semantically equivalent);
+- fail-ить, если regression проявляется либо как repeated identical same-version full parse by
+  default, либо как seconds-scale applied-version lag при healthy truthful transport seams;
+- report-ить parse-cold-start cost и writer/apply backlog как separate failure classes, а не
+  схлопывать их в один generic runtime wait bucket.
+
+#### Scenario: Representative gate различает repeated full parse и applied-version backlog
+- **GIVEN** representative same-file mixed-load profile на `conf_big`-class fixture
+- **WHEN** один sample regression-ит repeated same-version full parse, а другой regression-ит through applied-version lag
+- **THEN** gate завершается ошибкой
+- **AND** evidence явно различает parse-cold-start failure class и writer/apply backlog failure class
+
+### Requirement: didSave heavy follow-up избегает apply-lag и generic background backlog как primary gate (MUST)
+После successful same-version `save_fastlane` first publish система MUST стремиться к richer heavy follow-up того же `save_cycle_sequence` без unbounded зависимости ни от writer/apply lag, ни от generic background runtime backlog как primary gate.
 
 Система MAY использовать writer-owned applied state, когда он уже готов, но MUST:
 
-- предпочитать same-version ready artifacts поверх blind `wait_for_file_version`;
+- использовать одну explicit didSave-follow-up lane/policy для writer-owned applied state, same-version fast paths и canonical fallback, а не выводить isolation только из generic diagnostics operation;
+- оформлять эту lane как first-class named admission contract (например, `AdmissionLane::DidSaveFollowup` или семантически эквивалентный type-level contract) с canonical additive telemetry/raw-label value `did_save_followup`, отдельный от бинарного `CpuWorkClass` и от `SemanticOperation::Diagnostics`;
+- трактовать didSave-follow-up lane identity как first-class admission contract, отдельный от `SemanticOperation::Diagnostics`, и протаскивать его end-to-end через writer/runtime preparation и blocking CPU admission;
+- иметь ровно одного owner outer admission arbiter над applied-state / shadow-state / ready-artifacts / fallback branch fan-out; branch-specific code и facade/runtime helpers MUST потреблять выданный opaque lane admission contract вместо собственного branch-local queueing policy;
+- не считать change выполненным, если lane identity лишь помечает work, который по-прежнему входит в те же generic `Background` writer FIFO / CPU permit wait paths без отдельного outer admission boundary до scarce resources;
+- сохранять бинарную taxonomy `CpuWorkClass` (`Interactive` / `Background`) и реализовывать didSave-follow-up lane как orthogonal admission concern поверх existing non-interactive/background CPU accounting, а не как третье значение work class;
+- реализовывать outer admission boundary как explicit latest-wins arbiter/queue перед scarce writer/runtime resources и удерживать один end-to-end follow-up slot от outer admission через writer/runtime preparation, blocking CPU execution и final pre-publish supersession/quota/disposition decision, освобождая scarce slot до outbound publish/output wait, вместо split writer-vs-CPU quotas или raw CPU-only permit semantics;
+- применять эту bounded non-interactive follow-up policy к writer-owned applied-state path, если exact same-version applied state уже известен;
+- не позволять writer-owned applied-state path обходить новый lane contract через direct snapshot/query helpers вне lane-aware prepare/admission hooks;
+- предпочитать same-version ready artifacts поверх blind `wait_for_file_version`, когда это возможно;
+- использовать bounded non-interactive follow-up policy, отличную от generic background lane, для same-version fast paths;
+- распространять ту же bounded follow-up policy на didSave fallback path через writer/runtime queue, когда fast-path artifacts недоступны;
+- требовать explicit lane/supersession admission envelope до входа в scarce writer/runtime resources, а не полагаться только на generic routing из `SemanticOperation::Diagnostics`;
+- вырезать didSave-follow-up lane из existing bounded runtime/CPU budget, а не добавлять net-new total process-wide parallelism;
+- трактовать operator-visible follow-up lane quota как global process-wide count end-to-end heavy-follow-up slots, охватывающих outer admission boundary, writer/runtime preparation и blocking CPU execution одного follow-up, и MUST NOT раскалывать этот contract на separately configurable writer-vs-CPU quotas или per-file multiplicative capacity;
+- при queued contention хранить не более одного queued candidate на файл и ротировать admission fairly между distinct files, чтобы same-file save storm не создавал raw FIFO blocker для другого файла;
+- при effective follow-up lane quota `0` не переводить heavy follow-up молча в generic background lane, а отключать новые `didSave + idle_heavy` admissions без влияния на `save_fastlane`;
+- при effective follow-up lane quota `0` re-check-ить effective value на admission boundary до захвата scarce writer/runtime resources для queued-but-not-started work и завершать heavy branch canonical non-cancellation outcome `disabled_by_config`, а не silent absence и не generic cancellation surrogate;
+- применять runtime quota changes на outer admission boundary для future admissions; already admitted work MAY finish under already acquired slot и MUST NOT быть retroactively reclassified как `disabled_by_config` mid-flight;
+- не повышать heavy follow-up до interactive-class semantics;
 - не публиковать older-version diagnostics;
-- сохранять supersession semantics для newer save cycles.
+- отсекать stale queued follow-up work до захвата scarce follow-up-lane capacity и повторно проверять supersession перед publish, чтобы older same-file save cycle не становился default blocker для newer cycle;
+- сохранять latest-wins / supersession semantics для newer save cycles;
+- экспортировать dedicated follow-up-lane telemetry additively через bounded first-class canonical `lane` surface, либо semantically equivalent dedicated runtime-lane family, где stable value `did_save_followup` видна отдельно и queue/exec/saturation signals MUST NOT схлопываться в `interactive/background` или legacy `work_class` как единственную видимую форму;
+- представлять `disabled_by_config` canonically не только в save trace, но и в terminal diagnostics outcome/disposition reporting через общий outcome/disposition contract как dedicated non-cancellation disposition/outcome, а не как trace-only string;
+- оставлять residual blocker explicit в request-centric trace, если contention всё же происходит.
 
 #### Scenario: delayed apply не держит heavy follow-up hostage при наличии ready save artifacts
 - **GIVEN** `didSave` already materialized same-version ready artifacts
@@ -3411,3 +4203,95 @@ Trace MUST:
 - **WHEN** heavy follow-up пытается построить richer diagnostics
 - **THEN** система не использует unbounded apply-lag как primary gating step
 - **AND** либо публикует richer follow-up, либо truthful trace attribution показывает residual blocker
+
+#### Scenario: writer-owned applied state still uses the isolated follow-up lane
+- **GIVEN** writer уже зарегистрировал exact same-version applied state для saved revision
+- **AND** richer didSave follow-up всё ещё требует `snapshot_with_deps` и semantic work
+- **WHEN** сервер запускает post-fastlane `idle_heavy` follow-up через applied-state branch
+- **THEN** эта ветка использует ту же explicit didSave-follow-up lane policy
+- **AND** не обходит lane-aware prepare/admission hooks через direct snapshot/query execution
+- **AND** не наследует generic background runtime queue backlog как default primary gate
+
+#### Scenario: one shared outer arbiter owns admission before branch fan-out
+- **GIVEN** applied-state, shadow-state, ready-artifacts и fallback follow-up branches all remain reachable
+- **WHEN** сервер принимает решение о запуске post-fastlane `idle_heavy` follow-up
+- **THEN** outer admission, supersession re-check и slot issuance выполняются ровно один раз до branch fan-out
+- **AND** branch-specific code consumes shared lane admission facts instead of implementing an independent queue policy
+
+#### Scenario: unrelated background backlog does not dominate post-fastlane follow-up
+- **GIVEN** `didSave` уже дал bounded same-version `save_fastlane` first publish
+- **AND** generic background runtime lane насыщена unrelated auxiliary/background work
+- **WHEN** сервер запускает richer `idle_heavy` follow-up для того же `save_cycle_sequence`
+- **THEN** heavy follow-up не наследует generic background backlog как default admission gate
+- **AND** request-centric trace не показывает seconds-scale wait только из-за shared background lane
+
+#### Scenario: fallback path stays isolated from generic background writer/runtime backlog
+- **GIVEN** same-version fast-path artifacts для saved revision недоступны
+- **AND** didSave follow-up вынужден идти через canonical fallback path с `wait_for_file_version` / `snapshot_with_deps`
+- **WHEN** generic background writer/runtime queue насыщена другой background work
+- **THEN** didSave follow-up fallback не наследует эту очередь как default primary gate
+- **AND** более новый same-file save cycle не застревает за stale follow-up fallback work
+
+#### Scenario: zero lane quota disables new heavy follow-up without silent generic-background fallback
+- **GIVEN** effective didSave follow-up lane quota equals `0`
+- **WHEN** same-version `save_fastlane` first publish уже завершён и сервер рассматривает новый `idle_heavy` didSave follow-up
+- **THEN** сервер не reroute-ит follow-up молча в generic background lane
+- **AND** `save_fastlane` semantics для этого save cycle остаются неизменными
+- **AND** save trace завершает heavy branch explicit non-cancellation outcome `disabled_by_config`
+
+#### Scenario: queued follow-up re-checks zero quota before scarce-lane admission
+- **GIVEN** older same-file `didSave` cycle already queued heavy follow-up before the operator changed the dedicated lane quota
+- **AND** effective didSave follow-up lane quota becomes `0` before that queued work acquires scarce lane capacity
+- **WHEN** admission is re-evaluated at the lane boundary
+- **THEN** queued-but-not-started follow-up does not run on stale pre-disable assumptions
+- **AND** the heavy branch finishes canonical non-cancellation outcome `disabled_by_config`
+
+#### Scenario: already admitted follow-up is not retroactively disabled by later quota change
+- **GIVEN** same-file `didSave` heavy follow-up already crossed the dedicated outer admission boundary and owns an end-to-end follow-up slot
+- **AND** the operator lowers the lane quota after that admission, including the case `quota=0`
+- **WHEN** the already admitted heavy branch continues toward terminal disposition
+- **THEN** it is not reclassified mid-flight as `disabled_by_config`
+- **AND** the updated quota governs only subsequent outer-admission decisions
+
+#### Scenario: stale queued follow-up yields to a newer save cycle before monopolizing the isolated lane
+- **GIVEN** older same-file `didSave` cycle уже поставил heavy follow-up в dedicated lane
+- **AND** более новый same-file `didSave` cycle supersedes older cycle before older follow-up acquires or meaningfully consumes lane capacity
+- **WHEN** scheduler/admission policy re-evaluates queued older follow-up
+- **THEN** obsolete work is shed before becoming the default blocker for the newer cycle
+- **AND** newer cycle keeps latest-wins semantics for both first publish and heavy follow-up
+
+#### Scenario: global single-slot quota does not let one file build a raw FIFO wall for another file
+- **GIVEN** effective didSave follow-up lane quota equals `1`
+- **AND** file A produces repeated same-file `didSave` cycles while file B also has queued heavy follow-up
+- **WHEN** the outer arbiter chooses the next queued admission
+- **THEN** the queue retains only the latest queued candidate per file
+- **AND** file B is not stranded behind an unbounded FIFO of superseded file-A entries
+- **AND** total admitted heavy follow-up work still does not exceed the global quota
+
+#### Scenario: one admitted follow-up owns one scarce slot until the pre-publish disposition decision
+- **GIVEN** `didSave` heavy follow-up crossed the dedicated outer admission boundary
+- **WHEN** that follow-up performs writer/runtime preparation, blocking semantic execution и затем проходит final pre-publish supersession/quota/disposition decision
+- **THEN** the same bounded follow-up slot remains owned through that decision
+- **AND** outbound publish/output wait, if any, does not continue monopolizing the scarce didSave-follow-up slot
+- **AND** the implementation does not reinterpret the same work through separate writer-vs-CPU lane quotas
+
+#### Scenario: dedicated follow-up-lane telemetry stays separately attributable
+- **GIVEN** didSave heavy follow-up uses the isolated lane under contention or execution
+- **WHEN** runtime metrics and request-centric traces are exported
+- **THEN** queue/exec/saturation facts for that lane stay separately attributable
+- **AND** operators do not need to infer the lane only from generic `interactive/background` buckets
+- **AND** any compatibility projection into legacy buckets or binary `CpuWorkClass` / `work_class` views does not replace the dedicated lane representation
+- **AND** canonical additive telemetry exposes stable lane identity `did_save_followup` through a bounded lane surface or semantically equivalent dedicated runtime-lane family
+
+#### Scenario: nominal background retagging without outer gate is rejected
+- **GIVEN** implementation adds a didSave-follow-up marker but still routes queued work through the same generic `Background` scarce admission points
+- **WHEN** older queued follow-up or `quota=0` must be re-evaluated before scarce capacity is consumed
+- **THEN** such implementation does not satisfy the requirement
+- **AND** the dedicated lane contract is considered unmet until an explicit outer admission boundary exists
+
+#### Scenario: residual contention stays explicit after follow-up isolation
+- **GIVEN** heavy didSave follow-up всё же сталкивается с residual contention
+- **WHEN** diagnostics save trace экспортирует terminal или in-flight состояние
+- **THEN** trace сохраняет explicit request-centric blocker facts
+- **AND** не подменяет remaining delay на guessed generic `pending`
+

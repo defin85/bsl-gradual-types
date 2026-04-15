@@ -837,3 +837,76 @@ MCP MUST NOT использовать discovery/search index как latency/perf
 - **THEN** observability использует shared bounded reason code для fail-closed результата
 - **AND** reason code не маскирует отсутствие canonical semantic path как acceptably stale response
 
+### Requirement: `bsl-agent` parity API exposes read-only snapshot readiness for tracked documents
+
+`bsl-agent` SHALL provide read-only HTTP endpoint `GET /api/mcp/snapshot-status` for snapshot
+readiness of session-tracked documents.
+
+The endpoint SHALL:
+
+- follow the existing ready-session selection rules used by parity API;
+- remain strictly read-only;
+- define tracked documents as the deterministic union of session overlays and session hot-set
+  entries;
+- use the same DTO shape and bounded state vocabulary as LSP snapshot readiness wherever the
+  semantics match;
+- truthfully expose the subset of states currently observable from agent session state;
+- MUST NOT synthesize `building`, `stale`, or `failed` without an authoritative agent-native
+  signal for those states;
+- return enough information to distinguish exact ready from `shadow_only` for tracked documents.
+
+Each entry SHALL include at least:
+
+- document `path`
+- session or analysis revision context
+- `state`
+- `exact`
+- optional coarse `phase`
+- `updatedAtMs`
+- optional bounded `fallbackReason`
+
+The response SHALL be deterministic for the same session state, including stable path ordering.
+
+#### Scenario: Ready session reports overlay-backed tracked document as `shadow_only`
+- **GIVEN** a ready MCP session tracks a document through an active overlay
+- **WHEN** UI calls `GET /api/mcp/snapshot-status`
+- **THEN** the endpoint returns an entry with `state=shadow_only`
+- **AND** the response does not claim the tracked document is exact-ready
+
+#### Scenario: Ready session reports hot-set tracked document without overlay as exact-ready
+- **GIVEN** a ready MCP session tracks a document only through the hot set
+- **WHEN** UI calls `GET /api/mcp/snapshot-status`
+- **THEN** the endpoint returns an entry with `state=ready`
+- **AND** the response marks that tracked document as exact-ready
+
+#### Scenario: No ready session keeps parity rule fail-closed
+- **GIVEN** there is no ready session and the request omits `sessionId`
+- **WHEN** UI calls `GET /api/mcp/snapshot-status`
+- **THEN** the server returns `INVALID_PARAMS` / HTTP 400
+- **AND** the response stays consistent with existing ready-session parity rules
+
+#### Scenario: Ready session with no tracked documents returns an empty list
+- **GIVEN** there is exactly one ready session
+- **AND** that session currently has no overlays and no hot-set documents
+- **WHEN** UI calls `GET /api/mcp/snapshot-status`
+- **THEN** the server returns `200` with an empty entries list
+- **AND** the response does not invent synthetic document rows
+
+### Requirement: MCP UI shows snapshot readiness as read-only diagnostics
+
+The unified SPA in MCP mode SHALL render snapshot readiness for tracked documents alongside
+existing sessions/jobs diagnostics.
+
+The MCP UI MUST:
+
+- read snapshot readiness only from `/api/mcp/snapshot-status`;
+- keep the surface strictly read-only;
+- distinguish exact ready from `shadow_only`;
+- avoid mutating controls such as rebuild or cancel actions.
+
+#### Scenario: MCP UI renders exact-ready and degraded states distinctly
+- **GIVEN** MCP UI receives snapshot-status entries for tracked documents
+- **WHEN** one document is exact-ready and another is `shadow_only`
+- **THEN** the UI renders distinct labels for those states
+- **AND** operators can tell that the degraded document is not exact-ready
+

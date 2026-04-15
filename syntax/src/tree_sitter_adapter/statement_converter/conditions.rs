@@ -15,6 +15,8 @@ pub(crate) fn convert_if_statement_cached(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
+    progress: &mut super::LoweringProgressState,
+    observer: &mut super::LoweringObserver<'_>,
 ) -> Result<Statement, String> {
     let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
@@ -39,15 +41,19 @@ pub(crate) fn convert_if_statement_cached(
                 }
             }
             "else_clause" => {
-                let else_statements = convert_clause_body_cached(&child, source, line_index)?;
+                let else_statements =
+                    convert_clause_body_cached(&child, source, line_index, progress, observer)?;
                 else_body = Some(else_statements);
             }
             "elseif_clause" => {
-                let elseif_statements = convert_clause_body_cached(&child, source, line_index)?;
+                let elseif_statements =
+                    convert_clause_body_cached(&child, source, line_index, progress, observer)?;
                 else_body = Some(elseif_statements);
             }
             kind if in_then && (kind.ends_with("_statement") || kind.ends_with("_definition")) => {
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
+                if let Some(stmt) = super::dispatch_statement_cached_internal(
+                    &child, source, line_index, progress, observer,
+                )? {
                     then_body.push(stmt);
                 }
             }
@@ -70,6 +76,8 @@ pub(crate) fn convert_clause_body_cached(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
+    progress: &mut super::LoweringProgressState,
+    observer: &mut super::LoweringObserver<'_>,
 ) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
@@ -79,7 +87,9 @@ pub(crate) fn convert_clause_body_cached(
             continue;
         }
 
-        if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
+        if let Some(stmt) = super::dispatch_statement_cached_internal(
+            &child, source, line_index, progress, observer,
+        )? {
             statements.push(stmt);
         }
     }

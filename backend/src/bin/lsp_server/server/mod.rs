@@ -615,9 +615,10 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
                     .unwrap_or(0)
                     .saturating_add(self.current_assembly_checkpoint_elapsed_ms.unwrap_or(0)),
             ),
-            _ => self
-                .completed
-                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            _ => {
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+            }
         }
     }
 

@@ -41,6 +41,101 @@ use tree_sitter::Node;
 
 use super::span::{node_to_span_cached, LineIndex};
 
+type LoweringObserver<'a> = dyn FnMut(usize, usize) -> Result<(), String> + 'a;
+
+const LOWERING_PROGRESS_BATCH_UNITS: usize = 64;
+
+pub(crate) struct LoweringProgressState {
+    enabled: bool,
+    processed_units: usize,
+    total_units: usize,
+    last_emitted_units: usize,
+}
+
+impl LoweringProgressState {
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            processed_units: 0,
+            total_units: 0,
+            last_emitted_units: 0,
+        }
+    }
+
+    fn with_total_hint(total_hint: usize) -> Self {
+        Self {
+            enabled: true,
+            processed_units: 0,
+            total_units: total_hint.max(1),
+            last_emitted_units: 0,
+        }
+    }
+
+    fn observe_unit(&mut self, observer: &mut LoweringObserver<'_>) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+
+        self.processed_units = self.processed_units.saturating_add(1);
+        self.total_units = self.total_units.max(self.processed_units);
+
+        if self.processed_units == 1
+            || self.processed_units.saturating_sub(self.last_emitted_units)
+                >= LOWERING_PROGRESS_BATCH_UNITS
+        {
+            self.emit(observer)?;
+        }
+
+        Ok(())
+    }
+
+    fn finish(&mut self, observer: &mut LoweringObserver<'_>) -> Result<(), String> {
+        if !self.enabled || self.processed_units == 0 {
+            return Ok(());
+        }
+
+        self.total_units = self.total_units.max(self.processed_units);
+        if self.last_emitted_units != self.processed_units {
+            self.emit(observer)?;
+        }
+
+        Ok(())
+    }
+
+    fn emit(&mut self, observer: &mut LoweringObserver<'_>) -> Result<(), String> {
+        observer(self.processed_units, self.total_units)?;
+        self.last_emitted_units = self.processed_units;
+        Ok(())
+    }
+}
+
+fn is_lowering_progress_unit(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_definition"
+            | "procedure_definition"
+            | "var_definition"
+            | "var_statement"
+            | "if_statement"
+            | "for_statement"
+            | "for_each_statement"
+            | "while_statement"
+            | "try_statement"
+            | "rise_error_statement"
+            | "assignment_statement"
+            | "return_statement"
+            | "call_statement"
+            | "break_statement"
+            | "continue_statement"
+            | "goto_statement"
+            | "label_statement"
+            | "execute_statement"
+            | "add_handler_statement"
+            | "remove_handler_statement"
+            | "await_statement"
+    )
+}
+
 // ============================================================
 // Entry Points (public API)
 // ============================================================
@@ -51,16 +146,9 @@ pub fn convert_source_file_cached(
     source: &str,
     line_index: &LineIndex,
 ) -> Result<Vec<Statement>, String> {
-    let mut statements = Vec::new();
-    let mut cursor = node.walk();
-
-    for child in node.children(&mut cursor) {
-        if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {
-            statements.push(stmt);
-        }
-    }
-
-    Ok(statements)
+    let mut progress = LoweringProgressState::disabled();
+    let mut observer = |_, _| Ok(());
+    convert_source_file_cached_internal(node, source, line_index, &mut progress, &mut observer)
 }
 
 /// Конвертировать source_file с progress/cancellation observer.
@@ -70,21 +158,29 @@ pub fn convert_source_file_cached_with_observer(
     line_index: &LineIndex,
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
+    convert_source_file_cached_internal(node, source, line_index, &mut progress, &mut observer)
+}
+
+fn convert_source_file_cached_internal(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    progress: &mut LoweringProgressState,
+    observer: &mut LoweringObserver<'_>,
+) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
-    let total = node.child_count();
-    let mut processed = 0usize;
 
     for child in node.children(&mut cursor) {
-        processed = processed.saturating_add(1);
-        if processed == 1 || processed.is_multiple_of(256) || processed == total {
-            observer(processed, total)?;
-        }
-        if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {
+        if let Some(stmt) =
+            dispatch_statement_cached_internal(&child, source, line_index, progress, observer)?
+        {
             statements.push(stmt);
         }
     }
 
+    progress.finish(observer)?;
     Ok(statements)
 }
 
@@ -97,7 +193,9 @@ pub fn convert_statement_cached(
     source: &str,
     line_index: &LineIndex,
 ) -> Result<Option<Statement>, String> {
-    dispatch_statement_cached(node, source, line_index)
+    let mut progress = LoweringProgressState::disabled();
+    let mut observer = |_, _| Ok(());
+    dispatch_statement_cached_internal(node, source, line_index, &mut progress, &mut observer)
 }
 
 // ============================================================
@@ -108,39 +206,58 @@ pub fn convert_statement_cached(
 ///
 /// Используется всеми подмодулями для рекурсивной обработки вложенных statements.
 /// Это решает проблему циклических зависимостей между модулями.
+#[allow(dead_code)]
 pub(crate) fn dispatch_statement_cached(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
 ) -> Result<Option<Statement>, String> {
+    let mut progress = LoweringProgressState::disabled();
+    let mut observer = |_, _| Ok(());
+    dispatch_statement_cached_internal(node, source, line_index, &mut progress, &mut observer)
+}
+
+pub(crate) fn dispatch_statement_cached_internal(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    progress: &mut LoweringProgressState,
+    observer: &mut LoweringObserver<'_>,
+) -> Result<Option<Statement>, String> {
+    if is_lowering_progress_unit(node.kind()) {
+        progress.observe_unit(observer)?;
+    }
+
     match node.kind() {
         // Declarations
-        "function_definition" | "procedure_definition" => Ok(Some(
-            declarations::convert_function_definition_cached(node, source, line_index)?,
-        )),
+        "function_definition" | "procedure_definition" => {
+            Ok(Some(declarations::convert_function_definition_cached(
+                node, source, line_index, progress, observer,
+            )?))
+        }
         "var_definition" | "var_statement" => Ok(Some(
             declarations::convert_var_definition_cached(node, source, line_index)?,
         )),
 
         // Conditions
         "if_statement" => Ok(Some(conditions::convert_if_statement_cached(
-            node, source, line_index,
+            node, source, line_index, progress, observer,
         )?)),
 
         // Loops
         "for_statement" => Ok(Some(loops::convert_for_statement_cached(
-            node, source, line_index,
+            node, source, line_index, progress, observer,
         )?)),
         "for_each_statement" => Ok(Some(loops::convert_for_each_statement_cached(
-            node, source, line_index,
+            node, source, line_index, progress, observer,
         )?)),
         "while_statement" => Ok(Some(loops::convert_while_statement_cached(
-            node, source, line_index,
+            node, source, line_index, progress, observer,
         )?)),
 
         // Exceptions
         "try_statement" => Ok(Some(exceptions::convert_try_statement_cached(
-            node, source, line_index,
+            node, source, line_index, progress, observer,
         )?)),
         "rise_error_statement" => Ok(Some(exceptions::convert_raise_error_statement_cached(
             node, source, line_index,

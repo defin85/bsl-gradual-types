@@ -270,7 +270,9 @@ mod symbol_index_tests {
 #[cfg(test)]
 mod parse_snapshot_tests {
     use super::*;
+    use std::sync::mpsc;
     use std::sync::{Arc, Barrier, Mutex, OnceLock};
+    use std::time::Duration;
 
     fn lock_parse_snapshot_test_env() -> std::sync::MutexGuard<'static, ()> {
         static TEST_ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -605,6 +607,197 @@ mod parse_snapshot_tests {
             get_parse_snapshot_full_parse_attempts_for_test(),
             1,
             "concurrent identical parse reports must pay a single full parse"
+        );
+    }
+
+    fn build_large_callable_fixture() -> String {
+        let mut source = String::from("Процедура Тест()\n");
+        for index in 0..96 {
+            source.push_str(&format!("    Значение{} = {};\n", index, index));
+        }
+        source.push_str("КонецПроцедуры");
+        source
+    }
+
+    #[test]
+    fn save_critical_requested_during_program_lowering_returns_before_packaging_checkpoint() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _conversion_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+            "15",
+        );
+
+        let parser = Arc::new(ParserCoordinator::with_fallback());
+        let file_path = PathBuf::from("snapshot-save-critical-during-lowering.bsl");
+        let text = build_large_callable_fixture();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), text.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let cancellation_flag = Arc::new(AtomicBool::new(false));
+        let save_critical_requested = Arc::new(AtomicBool::new(false));
+        let checkpoints = Arc::new(Mutex::new(Vec::new()));
+        let (entered_program_lowering_tx, entered_program_lowering_rx) = mpsc::channel();
+
+        let parse_thread = {
+            let parser = Arc::clone(&parser);
+            let checkpoints = Arc::clone(&checkpoints);
+            let cancellation_flag = Arc::clone(&cancellation_flag);
+            let save_critical_requested = Arc::clone(&save_critical_requested);
+            let file_path = file_path.clone();
+            let text = text.clone();
+            std::thread::spawn(move || {
+                let assembly_progress = |checkpoint: ParseSnapshotAssemblyCheckpoint| {
+                    checkpoints
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(checkpoint);
+                    if checkpoint == ParseSnapshotAssemblyCheckpoint::ProgramLowering {
+                        let _ = entered_program_lowering_tx.send(());
+                    }
+                };
+                let options = ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: Some(save_critical_requested.as_ref()),
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: Some(&assembly_progress),
+                };
+                parser.parse_full_with_report_with_cancellation_and_options(
+                    file_path,
+                    text,
+                    PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE,
+                    cancellation_flag.as_ref(),
+                    options,
+                )
+            })
+        };
+
+        entered_program_lowering_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("exact ready snapshot assembly must enter program lowering");
+        std::thread::sleep(Duration::from_millis(50));
+        save_critical_requested.store(true, Ordering::SeqCst);
+
+        let report = parse_thread
+            .join()
+            .expect("parse thread join")
+            .expect("save-critical parse report");
+
+        assert!(
+            report.parse_exec_subphases.deferred_syntax_error_assembly,
+            "save-critical promotion inside program lowering must defer syntax-error assembly"
+        );
+
+        let checkpoints = checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::ProgramLowering),
+            "expected lowering checkpoint trace, got: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging),
+            "save-critical promotion during lowering must return before packaging checkpoint: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::SyntaxErrorCollection),
+            "save-critical promotion during lowering must return before syntax-error collection: {checkpoints:?}"
+        );
+    }
+
+    #[test]
+    fn exact_ready_control_callback_can_cancel_during_program_lowering() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _conversion_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+            "15",
+        );
+
+        let parser = Arc::new(ParserCoordinator::with_fallback());
+        let file_path = PathBuf::from("snapshot-cancel-during-lowering.bsl");
+        let text = build_large_callable_fixture();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), text.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let cancellation_flag = Arc::new(AtomicBool::new(false));
+        let cancel_on_checkpoint = Arc::new(AtomicBool::new(false));
+        let checkpoints = Arc::new(Mutex::new(Vec::new()));
+        let (entered_program_lowering_tx, entered_program_lowering_rx) = mpsc::channel();
+
+        let parse_thread = {
+            let parser = Arc::clone(&parser);
+            let checkpoints = Arc::clone(&checkpoints);
+            let cancellation_flag = Arc::clone(&cancellation_flag);
+            let cancel_on_checkpoint = Arc::clone(&cancel_on_checkpoint);
+            let file_path = file_path.clone();
+            let text = text.clone();
+            std::thread::spawn(move || {
+                let assembly_progress = |checkpoint: ParseSnapshotAssemblyCheckpoint| {
+                    checkpoints
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(checkpoint);
+                    if checkpoint == ParseSnapshotAssemblyCheckpoint::ProgramLowering {
+                        let _ = entered_program_lowering_tx.send(());
+                    }
+                };
+                let control = || {
+                    if cancel_on_checkpoint.load(Ordering::SeqCst) {
+                        ParseSnapshotExactReadyControl::Cancel
+                    } else {
+                        ParseSnapshotExactReadyControl::Continue
+                    }
+                };
+                let options = ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    exact_ready_snapshot_control_callback: Some(&control),
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: Some(&assembly_progress),
+                };
+                parser.parse_full_with_report_with_cancellation_and_options(
+                    file_path,
+                    text,
+                    PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE,
+                    cancellation_flag.as_ref(),
+                    options,
+                )
+            })
+        };
+
+        entered_program_lowering_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("exact ready snapshot assembly must enter program lowering");
+        std::thread::sleep(Duration::from_millis(50));
+        cancel_on_checkpoint.store(true, Ordering::SeqCst);
+
+        let error = parse_thread
+            .join()
+            .expect("parse thread join")
+            .expect_err("control callback must cancel bounded lowering parse");
+        assert!(
+            is_parse_cancelled_error(&error),
+            "bounded lowering control cancel must surface as parse cancellation, got: {error}"
+        );
+
+        let checkpoints = checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::ProgramLowering),
+            "expected lowering checkpoint trace, got: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging),
+            "cancellation during lowering must not advance into packaging: {checkpoints:?}"
         );
     }
 }

@@ -1,3 +1,7 @@
+## RENAMED Requirements
+- FROM: `### Requirement: didSave heavy follow-up избегает apply-lag как primary gate (MUST)`
+- TO: `### Requirement: didSave heavy follow-up избегает apply-lag и generic background backlog как primary gate (MUST)`
+
 ## MODIFIED Requirements
 
 ### Requirement: didSave heavy follow-up избегает apply-lag и generic background backlog как primary gate (MUST)

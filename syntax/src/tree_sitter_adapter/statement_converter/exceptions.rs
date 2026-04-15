@@ -14,6 +14,8 @@ pub(crate) fn convert_try_statement_cached(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
+    progress: &mut super::LoweringProgressState,
+    observer: &mut super::LoweringObserver<'_>,
 ) -> Result<Statement, String> {
     let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
@@ -29,7 +31,9 @@ pub(crate) fn convert_try_statement_cached(
                 in_except = true;
             }
             _ => {
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
+                if let Some(stmt) = super::dispatch_statement_cached_internal(
+                    &child, source, line_index, progress, observer,
+                )? {
                     if in_except {
                         except_body.push(stmt);
                     } else {

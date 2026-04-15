@@ -17,6 +17,8 @@ pub(crate) fn convert_function_definition_cached(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
+    progress: &mut super::LoweringProgressState,
+    observer: &mut super::LoweringObserver<'_>,
 ) -> Result<Statement, String> {
     let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
@@ -47,7 +49,9 @@ pub(crate) fn convert_function_definition_cached(
             }
             _ => {
                 // Собираем тело функции через dispatcher
-                if let Some(stmt) = super::dispatch_statement_cached(&child, source, line_index)? {
+                if let Some(stmt) = super::dispatch_statement_cached_internal(
+                    &child, source, line_index, progress, observer,
+                )? {
                     body.push(stmt);
                 }
             }

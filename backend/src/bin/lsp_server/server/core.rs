@@ -230,6 +230,57 @@ fn update_followup_timing_max(slot: &mut Option<u64>, candidate: Option<u64>) {
     *slot = Some(slot.unwrap_or(0).max(candidate));
 }
 
+fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    attribution: diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2,
+) {
+    trace.followup_ready_snapshot_parse_exec_ms = attribution.parse_exec_ms;
+    trace.followup_ready_snapshot_parse_exec_core_parse_build_ms =
+        attribution.parse_exec_core_parse_build_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms =
+        attribution.parse_exec_core_build_parser_tree_build_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms =
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms =
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms =
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms =
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms =
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
+        attribution
+            .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+            .map(|value| value.to_string());
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms =
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms =
+        attribution.parse_exec_core_build_tree_cache_install_ms;
+    trace.followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms =
+        attribution.parse_exec_optional_cache_enrichment_ms;
+    trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = attribution
+        .parse_exec_core_build_dominant_checkpoint
+        .map(|value| value.to_string());
+    trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms =
+        attribution.parse_exec_core_build_dominant_checkpoint_ms;
+    trace.followup_ready_snapshot_parse_exec_dominant_subphase = attribution
+        .parse_exec_dominant_subphase
+        .map(|value| value.to_string());
+    trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms =
+        attribution.parse_exec_dominant_subphase_ms;
+    trace.followup_ready_snapshot_post_parse_pre_materialization_ms =
+        attribution.post_parse_pre_materialization_ms;
+    trace.followup_ready_snapshot_ready_install_ms = attribution.ready_install_ms;
+    trace.followup_ready_snapshot_document_symbol_side_work_ms =
+        attribution.document_symbol_side_work_ms;
+    trace.followup_ready_snapshot_dominant_phase =
+        attribution.dominant_phase.map(|value| value.to_string());
+    trace.followup_ready_snapshot_dominant_phase_ms = attribution.dominant_phase_ms;
+}
+
 fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
     trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
     attribution: diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2,
@@ -241,10 +292,6 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
     update_followup_timing_max(
         &mut trace.followup_ready_snapshot_timeout_phase_elapsed_ms,
         attribution.timeout_phase_elapsed_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_ms,
-        attribution.parse_exec_ms,
     );
     if trace
         .followup_ready_snapshot_parse_exec_timeout_subphase
@@ -258,10 +305,6 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
         &mut trace.followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms,
         attribution.parse_exec_timeout_subphase_elapsed_ms,
     );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_parse_build_ms,
-        attribution.parse_exec_core_parse_build_ms,
-    );
     if trace
         .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint
         .is_none()
@@ -273,14 +316,6 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
     update_followup_timing_max(
         &mut trace.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms,
         attribution.parse_exec_core_build_timeout_checkpoint_elapsed_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms,
-        attribution.parse_exec_core_build_parser_tree_build_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms,
-        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_ms,
     );
     if trace
         .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint
@@ -296,101 +331,10 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
         attribution
             .parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms,
     );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+    overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inner(
+        trace,
+        attribution,
     );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms,
-        attribution.parse_exec_core_build_tree_cache_install_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms,
-        attribution.parse_exec_optional_cache_enrichment_ms,
-    );
-    match (
-        trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms,
-        attribution.parse_exec_core_build_dominant_checkpoint_ms,
-    ) {
-        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
-        (_, Some(candidate_ms)) => {
-            trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = attribution
-                .parse_exec_core_build_dominant_checkpoint
-                .map(|value| value.to_string());
-            trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms =
-                Some(candidate_ms);
-        }
-        _ => {}
-    }
-    match (
-        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
-    ) {
-        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
-        (_, Some(candidate_ms)) => {
-            trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
-                attribution
-                    .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
-                    .map(|value| value.to_string());
-            trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms =
-                Some(candidate_ms);
-        }
-        _ => {}
-    }
-    match (
-        trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms,
-        attribution.parse_exec_dominant_subphase_ms,
-    ) {
-        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
-        (_, Some(candidate_ms)) => {
-            trace.followup_ready_snapshot_parse_exec_dominant_subphase = attribution
-                .parse_exec_dominant_subphase
-                .map(|value| value.to_string());
-            trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms = Some(candidate_ms);
-        }
-        _ => {}
-    }
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_post_parse_pre_materialization_ms,
-        attribution.post_parse_pre_materialization_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_ready_install_ms,
-        attribution.ready_install_ms,
-    );
-    update_followup_timing_max(
-        &mut trace.followup_ready_snapshot_document_symbol_side_work_ms,
-        attribution.document_symbol_side_work_ms,
-    );
-    match (
-        trace.followup_ready_snapshot_dominant_phase_ms,
-        attribution.dominant_phase_ms,
-    ) {
-        (Some(existing_ms), Some(candidate_ms)) if existing_ms >= candidate_ms => {}
-        (_, Some(candidate_ms)) => {
-            trace.followup_ready_snapshot_dominant_phase =
-                attribution.dominant_phase.map(|value| value.to_string());
-            trace.followup_ready_snapshot_dominant_phase_ms = Some(candidate_ms);
-        }
-        _ => {}
-    }
 }
 
 fn set_diagnostics_save_timeline_followup_relief_valve_inner(

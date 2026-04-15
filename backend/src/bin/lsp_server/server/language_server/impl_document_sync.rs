@@ -891,6 +891,24 @@ impl BslLanguageServer {
                         };
                         progress_control.transition_assembly_checkpoint_attribution(mapped);
                     };
+                    let exact_ready_snapshot_control = || {
+                        if requested_target_epoch_state_for_parse
+                            .as_ref()
+                            .zip(requested_target_epoch_for_parse)
+                            .is_some_and(|(state, epoch)| state.load(Ordering::Relaxed) != epoch)
+                            || progress_control.cancel_requested.load(Ordering::SeqCst)
+                            || progress_control.retarget_requested.load(Ordering::SeqCst)
+                        {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotExactReadyControl::Cancel
+                        } else if progress_control
+                            .promotion_requested
+                            .load(Ordering::SeqCst)
+                        {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotExactReadyControl::SaveCritical
+                        } else {
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotExactReadyControl::Continue
+                        }
+                    };
                     let parse_options =
                         bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions {
                             save_critical_initial: matches!(
@@ -898,6 +916,9 @@ impl BslLanguageServer {
                                 Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
                             ),
                             save_critical_requested: Some(&progress_control.promotion_requested),
+                            exact_ready_snapshot_control_callback: Some(
+                                &exact_ready_snapshot_control,
+                            ),
                             progress_callback: Some(&parse_exec_progress),
                             core_build_progress_callback: Some(&core_build_progress),
                             assembly_progress_callback: Some(&assembly_progress),
@@ -908,6 +929,9 @@ impl BslLanguageServer {
                             // should not pay optional cache enrichment on the critical path.
                             save_critical_initial: true,
                             save_critical_requested: Some(&progress_control.promotion_requested),
+                            exact_ready_snapshot_control_callback: Some(
+                                &exact_ready_snapshot_control,
+                            ),
                             progress_callback: Some(&parse_exec_progress),
                             core_build_progress_callback: Some(&core_build_progress),
                             assembly_progress_callback: Some(&assembly_progress),
@@ -990,13 +1014,19 @@ impl BslLanguageServer {
                         )
                     };
                     parse_result.map_err(|error| {
-                        if task_control_for_exec
-                            .as_ref()
-                            .is_some_and(|control| {
-                                (control.cancel_requested.load(Ordering::SeqCst)
-                                    || control.retarget_requested.load(Ordering::SeqCst))
-                                    && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
-                            })
+                        let cancelled_by_current_target_control =
+                            requested_target_epoch_state_for_parse
+                                .as_ref()
+                                .zip(requested_target_epoch_for_parse)
+                                .is_some_and(|(state, epoch)| {
+                                    state.load(Ordering::Relaxed) != epoch
+                                })
+                                || task_control_for_exec.as_ref().is_some_and(|control| {
+                                    control.cancel_requested.load(Ordering::SeqCst)
+                                        || control.retarget_requested.load(Ordering::SeqCst)
+                                });
+                        if cancelled_by_current_target_control
+                            && bsl_runtime::system::parser_coordinator::is_parse_cancelled_error(&error)
                         {
                             Self::classify_parse_snapshot_cancellation_abort_reason_v2(
                                 requested_target_epoch_state_for_parse.as_ref(),

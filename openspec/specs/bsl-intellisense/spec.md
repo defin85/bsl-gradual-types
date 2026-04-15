@@ -812,30 +812,22 @@ control.
 - **AND** status-bar/tooltip остаётся согласован с newest known generation
 
 ### Requirement: Incident bundle экспортирует diagnostics save timeline как отдельный authoritative source (MUST)
-VS Code extension MUST экспортировать request-centric diagnostics save timeline как отдельный source внутри
-observability incident bundle, если connected server поддерживает этот контракт.
+When the backend supports diagnostics save timeline export, the extension MUST surface that timeline
+as an authoritative server-authored source in observability incident bundles.
 
-Этот source MUST:
+The surfaced timeline MUST:
 
-- быть отдельным от completion timeline;
-- содержать raw attachment `raw/diagnostics_save_timeline.json`;
-- отображаться в `incident.json` и `summary.md` как `authoritative_server_trace`;
-- не реконструироваться из cumulative `observability_metrics`;
-- сохранять `save_cycle_sequence` рядом с `requested_version` и `diagnostics_generation`, если сервер его публикует.
+- preserve `save_fastlane` vs `idle_heavy` save-cycle attribution;
+- stay explicit about unsupported / unavailable server capability;
+- remain request-centric for a single `didSave` cycle;
+- surface whether `idle_heavy` syntax work was reused from same-version artifacts or recomputed,
+  when the backend provides that distinction.
 
-#### Scenario: Bundle содержит отдельный diagnostics save timeline source
-- **GIVEN** connected server поддерживает diagnostics save timeline request
-- **WHEN** пользователь экспортирует observability incident bundle
-- **THEN** bundle содержит `raw/diagnostics_save_timeline.json`
-- **AND** `incident.json` и `summary.md` показывают diagnostics save timeline как отдельный authoritative source
-- **AND** completion timeline и diagnostics save timeline не смешиваются в один raw attachment
-
-#### Scenario: Bundle fail-closed деградирует без diagnostics save timeline
-- **GIVEN** connected server не поддерживает diagnostics save timeline request
-- **WHEN** пользователь экспортирует observability incident bundle
-- **THEN** bundle всё равно создаётся
-- **AND** `incident.json` и `summary.md` явно помечают diagnostics save timeline как `unsupported` или `unavailable`
-- **AND** extension не пытается восстановить diagnostics save trace из metrics snapshot
+#### Scenario: bundle keeps diagnostics save follow-up projection truthful
+- **GIVEN** the backend returns diagnostics save timeline traces
+- **WHEN** the extension exports an incident bundle
+- **THEN** the bundle summary keeps `save_fastlane` and `idle_heavy` attribution explicit
+- **AND** syntax reuse vs recompute is shown when provided by the server
 
 ### Requirement: Incident bundle summary показывает didSave refresh как request-centric diagnostics cycle (MUST)
 `summary.md` и `incident.json` MUST переносить diagnostics save timeline в человекочитаемом request-centric виде.
@@ -853,34 +845,62 @@ Human-readable projection MUST:
 - рендерить operator-facing save ordering через `save_cycle_sequence`, а не через `diagnostics_generation`, если два save-cycle делят один `requested_version`;
 - явно различать active `in_flight` cycles и terminal cycles;
 - не рендерить pending profile facts для active cycle как `unknown`, если lifecycle уже известен;
-- объяснять active heavy follow-up через explicit request-centric wait reason, если сервер его уже знает.
+- объяснять active heavy follow-up через explicit request-centric wait reason, если сервер его уже знает;
+- сохранять canonical terminal non-cancellation outcome `disabled_by_config`, когда backend его публикует для `idle_heavy`, и MUST NOT схлопывать его в `pending`, `unknown` или cancellation surrogate.
 
-#### Scenario: Summary показывает first publish и follow-up без guesswork
-- **GIVEN** diagnostics save timeline trace содержит `save_fastlane` first publish и `idle_heavy` follow-up
-- **WHEN** extension формирует `summary.md`
-- **THEN** summary показывает оба bounded факта внутри одного save refresh cycle
-- **AND** оператор может отличить first freshness boundary от final richer publish
+#### Scenario: Summary preserves disabled_by_config as an explicit terminal outcome
+- **GIVEN** diagnostics save timeline trace already published `idle_heavy_outcome=disabled_by_config`
+- **AND** cycle remains terminal from the server perspective
+- **WHEN** extension формирует `summary.md` и `incident.json`
+- **THEN** human-readable diagnostics save section показывает `disabled_by_config` как explicit terminal non-cancellation outcome
+- **AND** не рендерит этот cycle как `pending`, `unknown` или generic cancellation
 
-#### Scenario: Summary не заменяет request trace cumulative histogram-ом
-- **GIVEN** bundle содержит и diagnostics save timeline, и cumulative observability metrics
-- **WHEN** extension формирует `incident.json` и `summary.md`
-- **THEN** request summary использует authoritative diagnostics save trace для request-level фактов
-- **AND** cumulative metrics остаются только snapshot supplement
+### Requirement: VS Code extension показывает active-document snapshot readiness truthfully (MUST)
 
-#### Scenario: Summary помечает active save cycle как in_flight
-- **GIVEN** bundle содержит active diagnostics save cycle без terminal outcome
-- **WHEN** extension рендерит human-readable summary
-- **THEN** cycle помечается как `in_flight`
-- **AND** pending profile outcome рендерится как `pending`, а не `unknown`
+VS Code extension MUST показывать live snapshot readiness для активного BSL документа через
+server-driven snapshot-status contract.
 
-#### Scenario: Summary различает два save-cycle одного requested_version
-- **GIVEN** в bundle есть два `didSave` traces для одного `requested_version`
-- **WHEN** summary строит diagnostics save section
-- **THEN** он показывает distinct `save_cycle_sequence`
-- **AND** не требует читать save ordering через `diagnostics_generation`
+The extension MUST:
 
-#### Scenario: Summary показывает причину stalled heavy follow-up
-- **GIVEN** `didSave` cycle уже имеет first publish, но heavy follow-up ещё не завершён
-- **WHEN** summary строит diagnostics save section
-- **THEN** он показывает explicit follow-up wait reason
-- **AND** не оставляет operator workflow на одном только `pending`
+- показывать краткий state в dedicated правом `Status Bar` item для активного BSL editor;
+- не переиспользовать существующий левый global BSL status/progress item для file-scoped snapshot
+  readiness;
+- показывать detail view inside existing observability UI как минимум с requested/ready revision,
+  state, `exact`, task state, coarse phase, and fallback reason when available;
+- использовать authoritative snapshot-status request/notification как source of truth;
+- питать и status bar, и observability detail из одного extension-side snapshot-status cache/store,
+  а не из независимых polling loops;
+- не реконструировать readiness из diagnostics save timeline, completion timeline, Output logs, или
+  aggregate observability metrics;
+- явно различать `building`, exact `ready`, `stale`, `shadow_only`, and `failed`.
+
+#### Scenario: Active document exact snapshot ещё строится
+- **GIVEN** connected server reports snapshot status `state=building` for the active BSL document
+- **WHEN** пользователь держит этот editor активным
+- **THEN** extension показывает в статус-баре building state для текущей revision
+- **AND** extension не маркирует документ как exact-ready
+
+#### Scenario: Active document exact snapshot готов
+- **GIVEN** connected server reports `state=ready` and `exact=true` for the active BSL document
+- **WHEN** extension обновляет live snapshot readiness UI
+- **THEN** status bar and observability detail show the document as exact-ready
+- **AND** detail view exposes the ready revision that matches the requested revision
+
+#### Scenario: `shadow_only` fallback не маскируется под ready
+- **GIVEN** connected server reports `state=shadow_only` for the active BSL document
+- **WHEN** extension renders snapshot readiness
+- **THEN** extension показывает degraded snapshot state explicitly
+- **AND** extension does not collapse that state into generic ready wording
+
+#### Scenario: Unsupported server деградирует fail-closed
+- **GIVEN** connected server does not support the snapshot-status contract
+- **WHEN** extension initializes snapshot readiness UI
+- **THEN** extension keeps the feature explicitly unavailable or hidden
+- **AND** extension does not guess readiness from other observability surfaces
+
+#### Scenario: Older snapshot notification does not overwrite newer state
+- **GIVEN** extension has already cached a newer snapshot-status update for the same URI
+- **WHEN** an older update for that URI arrives later
+- **THEN** extension ignores the stale update
+- **AND** the active-document UI keeps showing the newer state
+

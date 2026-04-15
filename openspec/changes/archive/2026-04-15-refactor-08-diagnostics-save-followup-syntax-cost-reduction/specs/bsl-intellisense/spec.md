@@ -1,5 +1,5 @@
 ## MODIFIED Requirements
-### Requirement: Diagnostics Save Timeline Availability
+### Requirement: Incident bundle экспортирует diagnostics save timeline как отдельный authoritative source (MUST)
 When the backend supports diagnostics save timeline export, the extension MUST surface that timeline
 as an authoritative server-authored source in observability incident bundles.
 

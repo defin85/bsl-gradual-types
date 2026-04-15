@@ -151,10 +151,8 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
         Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
         Option<u64>,
-    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms:
-        Option<u64>,
-    pub(crate)
-        parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
         Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
         Option<u64>,

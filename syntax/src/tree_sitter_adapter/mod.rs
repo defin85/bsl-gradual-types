@@ -192,7 +192,7 @@ impl TreeSitterAdapter {
         Ok(ParseResult::success(program))
     }
 
-    /// Быстрый путь для индексации с прогрессом по children root-узла.
+    /// Быстрый путь для индексации с прогрессом по реальным lowering units.
     pub fn convert_tree_fast_with_progress(
         tree: &Tree,
         source: &str,

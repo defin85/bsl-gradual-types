@@ -278,6 +278,38 @@ fn parse_strict_line_cap_keeps_parser_error_over_heuristics_on_same_line() {
 }
 
 #[test]
+fn fast_observer_progress_enters_large_callable_body() {
+    let mut source = String::from("Процедура Тест()\n");
+    for index in 0..70 {
+        source.push_str(&format!("    Значение{} = {};\n", index, index));
+    }
+    source.push_str("КонецПроцедуры");
+
+    let tree = parse_tree(&source).unwrap();
+    let mut events = Vec::new();
+
+    TreeSitterAdapter::convert_tree_fast_with_observer(&tree, &source, |processed, total| {
+        events.push((processed, total));
+        Ok(())
+    })
+    .unwrap();
+
+    assert!(
+        events.len() >= 2,
+        "expected checkpoints inside callable body, got: {:?}",
+        events
+    );
+
+    let final_event = events.last().copied().expect("final progress event");
+    assert_eq!(final_event.0, final_event.1);
+    assert!(
+        final_event.0 > 1,
+        "expected nested body units to extend progress beyond top-level declaration: {:?}",
+        events
+    );
+}
+
+#[test]
 fn parse_general_for_rule_points_to_first_garbage_token_and_says_expected_loop() {
     let source = "Для i = 10 По 0 abc def Цикл\nКонецЦикла";
     let result = parse(source, &ParseOptions::default()).unwrap();

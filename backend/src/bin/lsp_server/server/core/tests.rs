@@ -7231,8 +7231,8 @@ async fn p29_diagnostics_save_timeline_reports_exact_ready_snapshot_assembly_che
 async fn p30_diagnostics_save_timeline_reports_publishable_artifact_packaging_checkpoint_for_exact_worker(
 ) {
     let server = create_diagnostics_save_timeline_test_server();
-    let uri = Url::parse("file:///p30-ready-snapshot-timeout-packaging-checkpoint.bsl")
-        .expect("uri");
+    let uri =
+        Url::parse("file:///p30-ready-snapshot-timeout-packaging-checkpoint.bsl").expect("uri");
     let key = crate::server::DiagnosticsSaveTimelineCycleKey {
         file_id: bsl_analysis_v2::FileId(246),
         diagnostics_generation: 46,
@@ -7312,6 +7312,116 @@ async fn p30_diagnostics_save_timeline_reports_publishable_artifact_packaging_ch
             .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
             .as_deref(),
         Some("publishable_artifact_packaging")
+    );
+}
+
+#[tokio::test]
+async fn p31_diagnostics_save_timeline_repeated_probe_snapshots_keep_exact_ready_snapshot_view_coherent(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p31-ready-snapshot-repeated-probes-coherent.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(247),
+        diagnostics_generation: 47,
+        save_cycle_sequence: 23,
+        requested_version: 25,
+    };
+    let timeout_control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let ready_control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+
+    timeout_control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    timeout_control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    timeout_control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    timeout_control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    timeout_control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging,
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let timeout_attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &timeout_control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("timeout attribution");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("not_ready"),
+        Some("timeout"),
+        Some("in_flight_same_version"),
+        Some(true),
+        Some(timeout_attribution),
+    );
+
+    ready_control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    ready_control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    ready_control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    ready_control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    tokio::time::sleep(Duration::from_millis(8)).await;
+    let ready_attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &ready_control.phase_attribution_snapshot(),
+            false,
+        )
+        .expect("ready attribution");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("ready"),
+        Some("ready"),
+        Some("ready_same_version"),
+        Some(true),
+        Some(ready_attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint
+            .as_deref(),
+        Some("publishable_artifact_packaging")
+    );
+    assert!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+            .is_some_and(|value| value > 0)
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+        "latest coherent attribution view must replace stale aggregate/slice maxima"
+    );
+    assert!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
+            .is_none(),
+        "stale packaging slice from an older probe must not leak into the final trace"
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+            .as_deref(),
+        Some("program_lowering")
     );
 }
 
@@ -10496,8 +10606,7 @@ async fn p30_did_save_followup_promotes_exact_program_conversion_past_publishabl
     }
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    Сообщить(1);\nКонецПроцедуры\n";
-    const V2_FIXTURE: &str =
-        "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
     const PACKAGING_DELAY_MS: u64 = 10_000;
     const FIRST_PUBLISH_BUDGET_MS: u64 = 3_500;
     const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 5_000;
@@ -10669,8 +10778,9 @@ async fn p30_did_save_followup_promotes_exact_program_conversion_past_publishabl
         .expect("didSave notification");
     assert!(did_save_response.is_none(), "didSave is a notification");
 
-    let first_publish =
-        tokio::time::timeout(Duration::from_millis(FIRST_PUBLISH_BUDGET_MS), async {
+    let first_publish = tokio::time::timeout(
+        Duration::from_millis(FIRST_PUBLISH_BUDGET_MS),
+        async {
             loop {
                 let params = published_rx
                     .recv()
@@ -10680,9 +10790,12 @@ async fn p30_did_save_followup_promotes_exact_program_conversion_past_publishabl
                     break params;
                 }
             }
-        })
-        .await
-        .expect("didSave must publish save_fastlane before save-critical exact program conversion finishes");
+        },
+    )
+    .await
+    .expect(
+        "didSave must publish save_fastlane before save-critical exact program conversion finishes",
+    );
     assert!(
         first_publish
             .diagnostics
@@ -10838,8 +10951,7 @@ async fn p30_parsed_did_change_revision_is_retargeted_during_program_lowering_wh
     }
 
     let _env_lock = lock_test_env().await;
-    let _debounce_guard =
-        EnvVarGuard::set("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0");
+    let _debounce_guard = EnvVarGuard::set("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0");
     let _conversion_delay_guard = EnvVarGuard::set(
         "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
         "25",
@@ -11029,6 +11141,253 @@ async fn p30_parsed_did_change_revision_is_retargeted_during_program_lowering_wh
         .file_text(file_id)
         .expect("file_text query")
         .expect("file text after program-lowering retarget");
+    assert_eq!(observed_text.as_ref(), v3_fixture.as_str());
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p31_did_change_revision_is_retargeted_during_program_lowering_inside_single_large_callable_body_when_newer_target_arrives(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn build_fixture(tag: &str) -> String {
+        let mut text = String::from("Процедура Тест()\n");
+        for idx in 0..256 {
+            text.push_str(&format!("    Сообщить(\"{tag}-{idx}\");\n"));
+        }
+        text.push_str("КонецПроцедуры\n");
+        text
+    }
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard = EnvVarGuard::set("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0");
+    let _conversion_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+        "40",
+    );
+
+    let v1_fixture = build_fixture("v1");
+    let v2_fixture = build_fixture("v2");
+    let v3_fixture = build_fixture("v3");
+    let v2_hash = *blake3::hash(v2_fixture.as_bytes()).as_bytes();
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        &v1_fixture,
+        "file:///did_change_retargeted_during_single_large_body_program_lowering_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize version 1 before single-large-body retarget test");
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object");
+
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: v2_fixture.clone(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v2 notification");
+    assert!(
+        did_change_v2_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current_checkpoint = server
+                .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+                .await
+                .and_then(|control| {
+                    control
+                        .phase_attribution_snapshot()
+                        .current_assembly_checkpoint
+                });
+            if current_checkpoint
+                == Some(super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("version 2 single-large-body worker must enter program lowering before retarget");
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let sustained_checkpoint = server
+        .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+        .await
+        .and_then(|control| {
+            control
+                .phase_attribution_snapshot()
+                .current_assembly_checkpoint
+        });
+    assert_eq!(
+        sustained_checkpoint,
+        Some(super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering),
+        "single-large-body fixture must keep the worker inside program lowering long enough to prove callable-body checkpoints"
+    );
+
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: v3_fixture.clone(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v3 notification");
+    assert!(
+        did_change_v3_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(3) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("newer target must materialize after single-large-body program-lowering retarget");
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    let retargeted_during_parse_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_during_parse";
+    let retargeted_before_parse_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_parse";
+    let retargeted_before_materialization_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_materialization";
+    let aborted_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_aborted";
+
+    let retargeted_during_parse_delta =
+        read_u64_metric(final_counters.get(retargeted_during_parse_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_during_parse_key)),
+        );
+    let retargeted_before_parse_delta =
+        read_u64_metric(final_counters.get(retargeted_before_parse_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_before_parse_key)),
+        );
+    let retargeted_before_materialization_delta =
+        read_u64_metric(final_counters.get(retargeted_before_materialization_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_before_materialization_key)),
+        );
+    let aborted_delta = read_u64_metric(final_counters.get(aborted_key))
+        .saturating_sub(read_u64_metric(baseline_counters.get(aborted_key)));
+
+    assert!(
+        retargeted_during_parse_delta > 0,
+        "single-large-body retarget must export the dedicated lifecycle reason, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        retargeted_before_parse_delta, 0,
+        "single-large-body retarget test must not regress into before-parse attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        retargeted_before_materialization_delta, 0,
+        "single-large-body retarget test must not regress into before-materialization attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        aborted_delta, 0,
+        "single-large-body retarget test must not regress into generic aborted attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_text = analysis
+        .file_text(file_id)
+        .expect("file_text query")
+        .expect("file text after single-large-body retarget");
     assert_eq!(observed_text.as_ref(), v3_fixture.as_str());
 
     drain_task.abort();
@@ -50767,6 +51126,615 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
                 .expect("serialize p52 real conf_big recovery report"),
         )
         .expect("write p52 real conf_big recovery report");
+        println!("{PROFILE_NAME}_path={}", report_path.display());
+
+        live_transport_close_document(&mut harness, &uri).await;
+        drop(server);
+        harness.shutdown().await;
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+}
+
+#[test]
+fn p53_real_conf_big_exact_program_lowering_report_live() {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("p53 tokio runtime");
+    runtime.block_on(async {
+        init_test_tracing();
+        struct EnvVarGuard {
+            key: &'static str,
+            previous: Option<String>,
+            reload_runtime_config: bool,
+        }
+
+        impl EnvVarGuard {
+            fn set(key: &'static str, value: &str) -> Self {
+                Self::set_with_reload(key, value, false)
+            }
+
+            fn set_with_reload(
+                key: &'static str,
+                value: &str,
+                reload_runtime_config: bool,
+            ) -> Self {
+                let previous = std::env::var(key).ok();
+                std::env::set_var(key, value);
+                if reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+                Self {
+                    key,
+                    previous,
+                    reload_runtime_config,
+                }
+            }
+        }
+
+        impl Drop for EnvVarGuard {
+            fn drop(&mut self) {
+                if let Some(previous) = &self.previous {
+                    std::env::set_var(self.key, previous);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+                if self.reload_runtime_config {
+                    bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+                }
+            }
+        }
+
+        const PROFILE_NAME: &str = "p53_real_conf_big_exact_program_lowering_report_live";
+        const APPLY_DELAY_MS: u64 = 4_000;
+        const DID_CHANGE_BLOCKING_PARSE_DELAY_MS: u64 = 1_500;
+        const TIMELINE_OBSERVE_BUDGET_MS: u64 = 30_000;
+
+        let _env_lock = lock_test_env().await;
+        let _apply_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS",
+            &APPLY_DELAY_MS.to_string(),
+        );
+        let did_change_blocking_parse_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+            &DID_CHANGE_BLOCKING_PARSE_DELAY_MS.to_string(),
+        );
+        let _debounce_guard =
+            EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+        let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-31-diagnostics-save-exact-program-lowering-bounding".to_string()
+        });
+
+        let Some(conf_big_root) = conf_big_root_for_tests() else {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+                );
+                return;
+            }
+            panic!(
+                "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+            );
+        };
+
+        let module_path = conf_big_large_module_path_for_tests(&conf_big_root);
+        if !module_path.exists() {
+            if allow_fixture_skip {
+                eprintln!(
+                    "skipping {PROFILE_NAME}: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                    module_path.display()
+                );
+                return;
+            }
+            panic!(
+                "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+                module_path.display()
+            );
+        }
+
+        let module_text =
+            std::fs::read_to_string(&module_path).expect("read conf_big module text for p53 report");
+        let workspace_setup = ScaleAwareWorkspaceSetup {
+            platform_docs_archive: syntax_helper_path_for_tests(),
+            configuration_path: conf_big_root.clone(),
+            platform_version: "8.3.25".to_string(),
+        };
+        let coordinator = Arc::new(SystemCoordinator::new());
+        let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator.clone()).await;
+        initialize_live_lsp_transport(&mut harness).await;
+        prime_server_with_workspace_setup(&server, &workspace_setup, "p53_real_conf_big_live_setup")
+            .await;
+
+        let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+        harness
+            .send_notification(
+                "textDocument/didOpen",
+                DidOpenTextDocumentParams {
+                    text_document: TextDocumentItem {
+                        uri: uri.clone(),
+                        language_id: "bsl".to_string(),
+                        version: 1,
+                        text: module_text.clone(),
+                    },
+                },
+            )
+            .await;
+
+        let file_id = server.get_or_create_file_id_v2(&uri).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(1)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didOpen must register version 1 for p53");
+        tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let ready = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned();
+                if ready
+                    .as_ref()
+                    .is_some_and(|state| state.parse_snapshot.file_version == 1)
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("didOpen must materialize same-version ready parse snapshot for p53");
+
+        let appended_procedure = "\nПроцедура Refactor31Live()\n    Возврат;\nКонецПроцедуры\n";
+        let semantic_procedure = "\nПроцедура Refactor31Live()\n    Сообщить(НеобъявленнаяПеременная);\nКонецПроцедуры\n";
+        let v2_text = format!("{module_text}{appended_procedure}");
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            2,
+            vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: v2_text.clone(),
+            }],
+        )
+        .await;
+
+        let v3_text = format!("{module_text}{semantic_procedure}");
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            3,
+            vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: v3_text.clone(),
+            }],
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let shadow_version = server
+                    .latest_document_shadow_state_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.version);
+                let ready_version = server
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .map(|state| state.parse_snapshot.file_version);
+                if shadow_version == Some(3) && ready_version == Some(1) {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("same-file churn must advance shadow state to v3 while ready snapshot still lags at v1 for p53");
+
+        drop(did_change_blocking_parse_delay_guard);
+
+        let replacement_start =
+            find_utf16_position_after_marker(&v3_text, "Процедура Refactor31Live()\n    ");
+        let replacement_end = find_utf16_position_after_marker(
+            &v3_text,
+            "Процедура Refactor31Live()\n    Сообщить(НеобъявленнаяПеременная);",
+        );
+        let v4_statement = "Сообщить(СовсемНеобъявленнаяПеременная);";
+        live_transport_ranged_did_change(
+            &mut harness,
+            &uri,
+            4,
+            vec![TextDocumentContentChangeEvent {
+                range: Some(Range {
+                    start: replacement_start,
+                    end: replacement_end,
+                }),
+                range_length: None,
+                text: v4_statement.to_string(),
+            }],
+        )
+        .await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let task_requested_version = {
+                    let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                    tasks.get(&file_id).map(|task| {
+                        task.target
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .requested_version
+                    })
+                };
+                if server
+                    .latest_received_file_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied()
+                    == Some(4)
+                    && task_requested_version == Some(4)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("didChange must schedule version 4 exact worker for p53");
+
+        live_transport_save_document(&mut harness, &uri).await;
+
+        let timeline_deadline = Instant::now() + Duration::from_millis(TIMELINE_OBSERVE_BUDGET_MS);
+        let timeline = loop {
+            let timeline =
+                live_transport_get_diagnostics_save_timeline(&mut harness, 53_100_902, 12).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            let matching_trace = traces
+                .iter()
+                .filter(|trace| {
+                    trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                        && trace
+                            .get("requested_version")
+                            .and_then(|value| value.as_i64())
+                            == Some(4)
+                })
+                .max_by_key(|trace| {
+                    trace
+                        .get("save_cycle_sequence")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                })
+                .cloned();
+            let Some(trace) = matching_trace else {
+                if Instant::now() >= timeline_deadline {
+                    panic!("p53 must expose a diagnostics save trace for requested_version=4");
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                continue;
+            };
+            let followup_publish = trace
+                .get("followup_publish")
+                .and_then(|value| value.as_object());
+            if followup_publish.is_some()
+                || trace.get("followup_semantic_path").and_then(|value| value.as_str()).is_some()
+            {
+                break trace;
+            }
+            if Instant::now() >= timeline_deadline {
+                panic!(
+                    "p53 must observe either a follow-up publish or a bounded follow-up semantic-path decision, last_trace={trace:?}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+
+        let full_publish = timeline
+            .get("followup_publish")
+            .and_then(|value| value.as_object())
+            .filter(|publish| {
+                publish.get("profile").and_then(|value| value.as_str()) == Some("idle_heavy")
+            });
+        let followup_semantic_path = full_publish
+            .and_then(|publish| publish.get("semantic_path").and_then(|value| value.as_str()))
+            .or_else(|| {
+                timeline
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+            });
+        assert!(
+            matches!(followup_semantic_path, Some("ready_artifacts") | Some("shadow_state")),
+            "p53 must expose whether save follow-up returned to ready_artifacts or still fell back, trace={timeline:?}"
+        );
+        if followup_semantic_path == Some("ready_artifacts") {
+            let full_publish = full_publish.expect(
+                "ready_artifacts live path must expose an idle_heavy follow-up publish object",
+            );
+            assert_eq!(
+                full_publish
+                    .get("semantic_parse_source")
+                    .and_then(|value| value.as_str()),
+                Some("snapshot")
+            );
+        } else {
+            assert_eq!(
+                timeline
+                    .get("followup_ready_snapshot_timeout_phase")
+                    .and_then(|value| value.as_str()),
+                Some("parse_exec"),
+                "if mixed load still falls back after refactor-31, the remaining bounded cause must stay inside parse_exec, trace={timeline:?}"
+            );
+            assert_eq!(
+                timeline
+                    .get("followup_ready_snapshot_parse_exec_timeout_subphase")
+                    .and_then(|value| value.as_str()),
+                Some("core_parse_build"),
+                "if mixed load still falls back after refactor-31, the residual must stay inside exact core_parse_build, trace={timeline:?}"
+            );
+            assert_eq!(
+                timeline
+                    .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint")
+                    .and_then(|value| value.as_str()),
+                Some("exact_ready_snapshot_assembly"),
+                "if mixed load still falls back after refactor-31, the residual must stay inside exact ready_snapshot_assembly, trace={timeline:?}"
+            );
+            assert_eq!(
+                timeline
+                    .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint")
+                    .and_then(|value| value.as_str()),
+                Some("program_lowering"),
+                "if mixed load still falls back after refactor-31, the residual must stay inside bounded exact program_lowering, trace={timeline:?}"
+            );
+        }
+
+        let program_conversion_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms")
+            .and_then(|value| value.as_u64());
+        let packaging_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms")
+            .and_then(|value| value.as_u64());
+        if let (Some(program_conversion_ms), Some(program_lowering_ms)) =
+            (program_conversion_ms, program_lowering_ms)
+        {
+            assert!(
+                program_conversion_ms >= program_lowering_ms,
+                "exported program_conversion_ms must stay coherent with program_lowering_ms, trace={timeline:?}"
+            );
+        }
+        if let (Some(program_conversion_ms), Some(packaging_ms)) =
+            (program_conversion_ms, packaging_ms)
+        {
+            assert!(
+                program_conversion_ms >= packaging_ms,
+                "exported program_conversion_ms must stay coherent with packaging_ms, trace={timeline:?}"
+            );
+        }
+
+        let observability = tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let response =
+                    live_transport_get_observability_metrics_response(&mut harness, 53_100_901)
+                        .await;
+                let evidence = response
+                    .get("didChangeParseSnapshotEvidence")
+                    .and_then(|value| value.get("entries"))
+                    .and_then(|value| value.as_array())
+                    .and_then(|entries| {
+                        entries.iter().find(|entry| {
+                            entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                                && entry
+                                    .get("requestedVersion")
+                                    .and_then(|value| value.as_i64())
+                                    == Some(4)
+                        })
+                    })
+                    .cloned();
+                if let Some(entry) = evidence {
+                    break entry;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .ok();
+        if let Some(observability) = observability.as_ref() {
+            assert_eq!(
+                observability.get("parseMode").and_then(|value| value.as_str()),
+                Some("incremental")
+            );
+            assert_eq!(
+                observability.get("baseTextSource").and_then(|value| value.as_str()),
+                Some("shadow_state")
+            );
+            assert_eq!(
+                observability.get("fallbackReason").and_then(|value| value.as_str()),
+                None
+            );
+            assert_eq!(
+                observability
+                    .get("parserBaseRootCause")
+                    .and_then(|value| value.as_str()),
+                None
+            );
+        } else {
+            assert_eq!(
+                followup_semantic_path,
+                Some("shadow_state"),
+                "missing didChange evidence is acceptable only when the mixed live path still falls back before exact worker materialization, trace={timeline:?}"
+            );
+        }
+
+        let report = serde_json::json!({
+            "profile": PROFILE_NAME,
+            "change_id": change_id,
+            "module_path": module_path.display().to_string(),
+            "uri": uri.to_string(),
+            "did_change_versions": [2, 3, 4],
+            "apply_delay_ms": APPLY_DELAY_MS,
+            "initial_did_change_blocking_parse_delay_ms": DID_CHANGE_BLOCKING_PARSE_DELAY_MS,
+            "did_change_evidence_present": observability.is_some(),
+            "parse_mode": observability.as_ref().and_then(|value| value.get("parseMode")).and_then(|value| value.as_str()),
+            "base_text_source": observability.as_ref().and_then(|value| value.get("baseTextSource")).and_then(|value| value.as_str()),
+            "change_shape": observability.as_ref().and_then(|value| value.get("changeShape")).and_then(|value| value.as_str()),
+            "content_changes_count": observability.as_ref().and_then(|value| value.get("contentChangesCount")).and_then(|value| value.as_u64()),
+            "replay_order": observability.as_ref().and_then(|value| value.get("replayOrder")).and_then(|value| value.as_str()),
+            "base_document_version": observability.as_ref().and_then(|value| value.get("baseDocumentVersion")).and_then(|value| value.as_i64()),
+            "changed_ranges_count": observability.as_ref().and_then(|value| value.get("changedRangesCount")).and_then(|value| value.as_u64()),
+            "fallback_reason": observability.as_ref().and_then(|value| value.get("fallbackReason")).and_then(|value| value.as_str()),
+            "parser_base_root_cause": observability.as_ref().and_then(|value| value.get("parserBaseRootCause")).and_then(|value| value.as_str()),
+            "save_cycle_sequence": timeline
+                .get("save_cycle_sequence")
+                .and_then(|value| value.as_u64()),
+            "diagnostics_generation": timeline
+                .get("diagnostics_generation")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_zero_probe": timeline
+                .get("followup_ready_snapshot_zero_probe")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_wait_probe": timeline
+                .get("followup_ready_snapshot_wait_probe")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_timeout_phase": timeline
+                .get("followup_ready_snapshot_timeout_phase")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_timeout_subphase": timeline
+                .get("followup_ready_snapshot_parse_exec_timeout_subphase")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_parse_build_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_parse_build_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms": program_conversion_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms": program_lowering_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms": packaging_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_dominant_subphase": timeline
+                .get("followup_ready_snapshot_parse_exec_dominant_subphase")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_dominant_subphase_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_dominant_subphase_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_relief_valve_outcome": timeline
+                .get("followup_ready_snapshot_relief_valve_outcome")
+                .and_then(|value| value.as_str()),
+            "followup_semantic_path": timeline
+                .get("followup_semantic_path")
+                .and_then(|value| value.as_str()),
+            "followup_publish_semantic_path": followup_semantic_path,
+            "followup_publish_semantic_parse_source": full_publish
+                .and_then(|publish| publish.get("semantic_parse_source"))
+                .and_then(|value| value.as_str()),
+            "followup_publish_elapsed_ms": full_publish
+                .and_then(|publish| publish.get("elapsed_ms"))
+                .and_then(|value| value.as_u64()),
+            "program_conversion_coherent_with_program_lowering": program_conversion_ms
+                .zip(program_lowering_ms)
+                .map(|(conversion, lowering)| conversion >= lowering),
+            "program_conversion_coherent_with_publishable_artifact_packaging": program_conversion_ms
+                .zip(packaging_ms)
+                .map(|(conversion, packaging)| conversion >= packaging),
+            "v2_text_len_bytes": v2_text.len(),
+            "v3_text_len_bytes": v3_text.len(),
+            "v4_statement_len_bytes": v4_statement.len(),
+        });
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("backend crate must live under the workspace root");
+        let report_path =
+            std::env::var("BSL_V2_REAL_CONF_BIG_EXACT_PROGRAM_LOWERING_REPORT")
+                .map(std::path::PathBuf::from)
+                .map(|path| {
+                    if path.is_relative() {
+                        workspace_root.join(path)
+                    } else {
+                        path
+                    }
+                })
+                .unwrap_or_else(|_| {
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("tests")
+                        .join("perf")
+                        .join("reports")
+                        .join(format!(
+                            "{change_id}-real-conf-big-exact-program-lowering-live.json"
+                        ))
+                });
+        if let Some(parent) = report_path.parent() {
+            std::fs::create_dir_all(parent)
+                .expect("failed to create directory for p53 real conf_big program-lowering report");
+        }
+        std::fs::write(
+            &report_path,
+            serde_json::to_string_pretty(&report)
+                .expect("serialize p53 real conf_big program-lowering report"),
+        )
+        .expect("write p53 real conf_big program-lowering report");
         println!("{PROFILE_NAME}_path={}", report_path.display());
 
         live_transport_close_document(&mut harness, &uri).await;

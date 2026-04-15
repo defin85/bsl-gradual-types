@@ -1,0 +1,28 @@
+{
+  "base_document_version": 3,
+  "base_text_source": "shadow_state",
+  "change_id": "refactor-32-ready-snapshot-shadow-state-lag-reduction",
+  "change_shape": "ranged",
+  "changed_ranges_count": 1,
+  "content_changes_count": 1,
+  "did_change_versions": [
+    2,
+    3,
+    4
+  ],
+  "fallback_reason": null,
+  "latest_ready_document_version": null,
+  "matching_ready_snapshot_for_shadow_state": null,
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "parse_mode": "incremental",
+  "parser_base_root_cause": null,
+  "profile": "p49_real_conf_big_stale_parser_base_root_cause_report_live",
+  "ready_snapshot_prime_attempted": null,
+  "replay_order": "receive_order",
+  "shadow_document_version": null,
+  "tree_cache_matches_shadow_text_after_prime": null,
+  "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl",
+  "v2_text_len_bytes": 375864,
+  "v3_text_len_bytes": 375914,
+  "v4_statement_len_bytes": 77
+}

@@ -162,6 +162,45 @@ pub fn convert_source_file_cached_with_observer(
     convert_source_file_cached_internal(node, source, line_index, &mut progress, &mut observer)
 }
 
+pub fn convert_source_file_cached_with_observer_and_reused_prefix(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    reused_prefix: &[Statement],
+    mut observer: impl FnMut(usize, usize) -> Result<(), String>,
+) -> Result<Vec<Statement>, String> {
+    let mut progress = LoweringProgressState::with_total_hint(
+        (node.child_count() as usize).saturating_sub(reused_prefix.len()),
+    );
+    let mut statements = Vec::with_capacity(
+        reused_prefix
+            .len()
+            .saturating_add(node.child_count() as usize),
+    );
+    let mut reused_index = 0usize;
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if reused_index < reused_prefix.len() && is_lowering_progress_unit(child.kind()) {
+            statements.push(reused_prefix[reused_index].clone());
+            reused_index = reused_index.saturating_add(1);
+            continue;
+        }
+        if let Some(stmt) = dispatch_statement_cached_internal(
+            &child,
+            source,
+            line_index,
+            &mut progress,
+            &mut observer,
+        )? {
+            statements.push(stmt);
+        }
+    }
+
+    progress.finish(&mut observer)?;
+    Ok(statements)
+}
+
 fn convert_source_file_cached_internal(
     node: &Node,
     source: &str,

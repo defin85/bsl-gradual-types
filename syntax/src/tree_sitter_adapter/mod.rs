@@ -38,7 +38,7 @@ mod syntax_error_enhancers;
 mod syntax_errors;
 pub mod utils;
 
-use crate::ast::{ParseResult, Program};
+use crate::ast::{ParseResult, Program, Statement};
 use bsl_shared::domain::types::ParseError;
 use span::LineIndex;
 use tree_sitter::Tree;
@@ -218,6 +218,26 @@ impl TreeSitterAdapter {
             &line_index,
             &mut observer,
         )?;
+        let program = Program { statements };
+        Ok(ParseResult::success(program))
+    }
+
+    pub fn convert_tree_fast_with_observer_and_reused_prefix(
+        tree: &Tree,
+        source: &str,
+        reused_prefix: &[Statement],
+        mut observer: impl FnMut(usize, usize) -> Result<(), String>,
+    ) -> Result<ParseResult, String> {
+        let root = tree.root_node();
+        let line_index = LineIndex::new(source);
+        let statements =
+            statement_converter::convert_source_file_cached_with_observer_and_reused_prefix(
+                &root,
+                source,
+                &line_index,
+                reused_prefix,
+                &mut observer,
+            )?;
         let program = Program { statements };
         Ok(ParseResult::success(program))
     }

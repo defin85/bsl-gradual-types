@@ -588,6 +588,23 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 | Some("document_symbol_side_work")
         )
     }
+
+    fn qualifies_did_save_seeded_exact_wait(self) -> bool {
+        self.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+            .is_some()
+            || self
+                .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
+                .is_some()
+            || self
+                .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
+                .is_some()
+            || matches!(
+                self.timeout_phase,
+                Some("post_parse_pre_materialization")
+                    | Some("ready_install")
+                    | Some("document_symbol_side_work")
+            )
+    }
 }
 
 struct SaveFollowupReadyArtifactsReply {
@@ -1549,15 +1566,29 @@ impl BslLanguageServer {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .clone();
+                    let exact_phase_attribution =
+                        DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+                            &task.control.phase_attribution_snapshot(),
+                            false,
+                        );
                     if target.requested_version == supersession_key.requested_version
                         && shadow_text_hash.map_or(true, |text_hash| target.text_hash == text_hash)
-                        && target.source
-                            != super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
                     {
                         exact_inflight_control = Some(Arc::clone(&task.control));
-                        // refactor-17 only reorders for already-known exact-task evidence.
-                        // The didSave refresh task seeded by the current save cycle does not qualify.
-                        ReadySnapshotTaskStateV2::InFlightSameVersion
+                        match target.source {
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => {
+                                exact_phase_attribution
+                                    .is_some_and(|attribution| {
+                                        attribution.qualifies_did_save_seeded_exact_wait()
+                                    })
+                                    .then_some(ReadySnapshotTaskStateV2::InFlightSameVersion)
+                                    .unwrap_or(ReadySnapshotTaskStateV2::Absent)
+                            }
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen
+                            | super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => {
+                                ReadySnapshotTaskStateV2::InFlightSameVersion
+                            }
+                        }
                     } else if target.requested_version == supersession_key.requested_version {
                         ReadySnapshotTaskStateV2::Absent
                     } else {

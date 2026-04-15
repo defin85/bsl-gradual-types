@@ -312,6 +312,7 @@ impl ParseSnapshotExecSubphaseAttribution {
 pub struct ParseSnapshotExecutionOptions<'a> {
     pub save_critical_initial: bool,
     pub save_critical_requested: Option<&'a AtomicBool>,
+    pub reused_program_prefix: Option<&'a [Statement]>,
     pub exact_ready_snapshot_control_callback:
         Option<&'a (dyn Fn() -> ParseSnapshotExactReadyControl + Send + Sync)>,
     pub progress_callback: Option<&'a (dyn Fn(ParseSnapshotExecSubphase) + Send + Sync)>,
@@ -1115,6 +1116,49 @@ impl ParserCoordinator {
             .set_shared(file_path, backend_tree, source, content_hash);
     }
 
+    pub fn prime_tree_cache_from_source_with_cancellation(
+        &self,
+        file_path: PathBuf,
+        source: String,
+        cancellation_flag: &AtomicBool,
+    ) -> Result<(), String> {
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+
+        let content_hash = hash_content(&source);
+        if self
+            .tree_cache
+            .get(&file_path)
+            .is_some_and(|(_, cached_source, cached_hash)| {
+                cached_hash == content_hash && cached_source == source
+            })
+        {
+            return Ok(());
+        }
+
+        match self
+            .tree_sitter
+            .parse_tree_only_with_cancellation(&source, None, cancellation_flag)
+        {
+            Ok(tree) => {
+                self.tree_cache.set(file_path, tree, source, content_hash);
+                Ok(())
+            }
+            Err(error) => {
+                if is_parse_cancelled_error(&error) {
+                    Err(error)
+                } else {
+                    error!(
+                        "Tree-sitter parsing failed during tree-cache prime: {}",
+                        error
+                    );
+                    Err(format!("Tree-sitter parsing failed: {}", error))
+                }
+            }
+        }
+    }
+
     fn begin_parse_snapshot_singleflight(
         &self,
         key: ParseSnapshotSingleflightKey,
@@ -1915,20 +1959,36 @@ impl ParserCoordinator {
             ParseSnapshotAssemblyCheckpoint::ProgramLowering,
         );
         let mut save_critical_during_lowering = options.save_critical_initial;
-        let parse_result =
-            TreeSitterAdapter::convert_tree_fast_with_observer(tree, content, |_, _| {
-                maybe_inject_parse_snapshot_program_conversion_progress_delay_for_test();
-                match Self::exact_ready_snapshot_control(cancellation_flag, options) {
-                    ParseSnapshotExactReadyControl::Continue => Ok(()),
-                    ParseSnapshotExactReadyControl::SaveCritical => {
-                        save_critical_during_lowering = true;
-                        Ok(())
-                    }
-                    ParseSnapshotExactReadyControl::Cancel => {
-                        Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string())
-                    }
+        let mut lowering_observer = |_, _| {
+            maybe_inject_parse_snapshot_program_conversion_progress_delay_for_test();
+            match Self::exact_ready_snapshot_control(cancellation_flag, options) {
+                ParseSnapshotExactReadyControl::Continue => Ok(()),
+                ParseSnapshotExactReadyControl::SaveCritical => {
+                    save_critical_during_lowering = true;
+                    Ok(())
                 }
-            })?;
+                ParseSnapshotExactReadyControl::Cancel => {
+                    Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string())
+                }
+            }
+        };
+        let parse_result = if let Some(reused_program_prefix) = options
+            .reused_program_prefix
+            .filter(|prefix| !prefix.is_empty())
+        {
+            TreeSitterAdapter::convert_tree_fast_with_observer_and_reused_prefix(
+                tree,
+                content,
+                reused_program_prefix,
+                &mut lowering_observer,
+            )?
+        } else {
+            TreeSitterAdapter::convert_tree_fast_with_observer(
+                tree,
+                content,
+                &mut lowering_observer,
+            )?
+        };
         match Self::exact_ready_snapshot_control(cancellation_flag, options) {
             ParseSnapshotExactReadyControl::Continue => {}
             ParseSnapshotExactReadyControl::SaveCritical => {

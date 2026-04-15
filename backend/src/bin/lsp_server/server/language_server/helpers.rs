@@ -324,6 +324,48 @@ pub(super) fn lsp_range_change_to_parser_edit(
     })
 }
 
+pub(super) fn whole_text_change_to_parser_edit(
+    previous_text: &str,
+    updated_text: &str,
+) -> Option<bsl_runtime::system::parser_coordinator::TextEdit> {
+    if previous_text == updated_text {
+        return None;
+    }
+
+    let common_prefix_bytes = previous_text
+        .chars()
+        .zip(updated_text.chars())
+        .take_while(|(previous, updated)| previous == updated)
+        .map(|(ch, _)| ch.len_utf8())
+        .sum::<usize>();
+    let previous_tail = &previous_text[common_prefix_bytes..];
+    let updated_tail = &updated_text[common_prefix_bytes..];
+    let common_suffix_bytes = previous_tail
+        .chars()
+        .rev()
+        .zip(updated_tail.chars().rev())
+        .take_while(|(previous, updated)| previous == updated)
+        .map(|(ch, _)| ch.len_utf8())
+        .sum::<usize>()
+        .min(previous_tail.len())
+        .min(updated_tail.len());
+    let previous_end_byte = previous_text.len().saturating_sub(common_suffix_bytes);
+    let updated_end_byte = updated_text.len().saturating_sub(common_suffix_bytes);
+    let line_index = bsl_line_index::LineIndex::new(previous_text);
+    let (start_line, start_utf16_column) =
+        line_index.byte_offset_to_utf16_position(previous_text, common_prefix_bytes);
+    let (old_end_line, old_end_utf16_column) =
+        line_index.byte_offset_to_utf16_position(previous_text, previous_end_byte);
+
+    Some(bsl_runtime::system::parser_coordinator::TextEdit {
+        start_line,
+        start_utf16_column,
+        old_end_line,
+        old_end_utf16_column,
+        new_text: updated_text[common_prefix_bytes..updated_end_byte].to_string(),
+    })
+}
+
 pub(super) fn unix_time_millis() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -965,7 +1007,10 @@ pub(super) fn normalize_optional_string(value: Option<String>) -> Option<String>
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_ranged_did_change_replay_plan, CanonicalRangedDidChangeReplayStep};
+    use super::{
+        canonicalize_ranged_did_change_replay_plan, whole_text_change_to_parser_edit,
+        CanonicalRangedDidChangeReplayStep,
+    };
     use crate::handlers::apply_text_edit;
     use bsl_line_index::byte_offset_to_utf16;
     use std::path::PathBuf;
@@ -1047,5 +1092,35 @@ mod tests {
         );
         assert_eq!(report.fallback_reason, None);
         assert_eq!(report.changed_ranges.len(), 2);
+    }
+
+    #[test]
+    fn whole_text_change_to_parser_edit_round_trips_append() {
+        let previous = "Процедура Тест()\n    Возврат;\nКонецПроцедуры\n".to_string();
+        let appended = "\nПроцедура Новая()\n    Сообщить(\"ok\");\nКонецПроцедуры\n";
+        let updated = format!("{previous}{appended}");
+
+        let edit = whole_text_change_to_parser_edit(&previous, &updated)
+            .expect("append should produce a parser edit");
+        let line_count = previous.lines().count() as u32;
+
+        assert_eq!(edit.start_line, line_count);
+        assert_eq!(edit.old_end_line, line_count);
+        assert_eq!(edit.new_text, appended);
+    }
+
+    #[test]
+    fn whole_text_change_to_parser_edit_round_trips_single_replacement() {
+        let previous = "Процедура Тест()\n    Сообщить(\"один\");\nКонецПроцедуры\n".to_string();
+        let updated = "Процедура Тест()\n    Сообщить(\"два\");\nКонецПроцедуры\n".to_string();
+
+        let edit = whole_text_change_to_parser_edit(&previous, &updated)
+            .expect("replacement should produce a parser edit");
+        let range = Range {
+            start: Position::new(edit.start_line, edit.start_utf16_column),
+            end: Position::new(edit.old_end_line, edit.old_end_utf16_column),
+        };
+
+        assert_eq!(apply_text_edit(&previous, range, &edit.new_text), updated);
     }
 }

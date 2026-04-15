@@ -7855,6 +7855,136 @@ async fn p24_diagnostics_save_timeline_skips_relief_valve_for_non_exact_current_
 }
 
 #[tokio::test]
+async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as_exact_current() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p32-ready-snapshot-relief-late-did-save.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1451);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 351,
+        save_cycle_sequence: 111,
+        requested_version: 131,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 131;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control
+        .transition_phase_attribution(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert!(
+        disposition.is_none(),
+        "late didSave task should still spend bounded relief wait before fallback, disposition={disposition:?}"
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_ne!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("skipped_not_exact_still_current")
+    );
+
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_timed_out"
+        )) > 0,
+        "late didSave exact path must export engaged_timed_out instead of skip, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worker() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24-ready-snapshot-relief-help.bsl").expect("uri");
@@ -11686,6 +11816,308 @@ async fn p30_parsed_did_change_revision_is_retargeted_during_publishable_artifac
         .file_text(file_id)
         .expect("file_text query")
         .expect("file text after publishable-packaging retarget");
+    assert_eq!(observed_text.as_ref(), v3_fixture.as_str());
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p32_ranged_did_change_program_lowering_retarget_preserves_parser_base_for_newer_target() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn build_fixture(tag: &str) -> String {
+        let mut text = String::from("Процедура Тест()\n");
+        for idx in 0..256 {
+            text.push_str(&format!("    Сообщить(\"{tag}-{idx}\");\n"));
+        }
+        text.push_str("КонецПроцедуры\n");
+        text
+    }
+
+    fn utf16_range_for_substring(source: &str, needle: &str) -> Range {
+        let start_byte = source
+            .find(needle)
+            .unwrap_or_else(|| panic!("needle not found: {needle}"));
+        let end_byte = start_byte + needle.len();
+        let start = &source[..start_byte];
+        let end = &source[..end_byte];
+        let start_line = start.lines().count().saturating_sub(1) as u32;
+        let start_character = start
+            .lines()
+            .last()
+            .unwrap_or("")
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+        let end_line = end.lines().count().saturating_sub(1) as u32;
+        let end_character = end
+            .lines()
+            .last()
+            .unwrap_or("")
+            .chars()
+            .map(|ch| ch.len_utf16())
+            .sum::<usize>() as u32;
+        Range {
+            start: Position::new(start_line, start_character),
+            end: Position::new(end_line, end_character),
+        }
+    }
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard = EnvVarGuard::set("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0");
+    let _conversion_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+        "40",
+    );
+
+    let v1_fixture = build_fixture("v1");
+    let v2_fixture = v1_fixture.replacen("v1-128", "v2-128", 1);
+    let v3_fixture = v2_fixture.replacen("v2-128", "v3-128", 1);
+    let v2_hash = *blake3::hash(v2_fixture.as_bytes()).as_bytes();
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        &v1_fixture,
+        "file:///did_change_ranged_program_lowering_parser_base_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect(
+        "opened fixture must materialize version 1 before ranged parser-base preservation test",
+    );
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object");
+
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: Some(utf16_range_for_substring(&v1_fixture, "v1-128")),
+                            range_length: None,
+                            text: "v2-128".to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v2 notification");
+    assert!(
+        did_change_v2_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current_checkpoint = server
+                .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+                .await
+                .and_then(|control| {
+                    control
+                        .phase_attribution_snapshot()
+                        .current_assembly_checkpoint
+                });
+            if current_checkpoint
+                == Some(super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("ranged v2 worker must enter program lowering before retarget");
+
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: Some(utf16_range_for_substring(&v2_fixture, "v2-128")),
+                            range_length: None,
+                            text: "v3-128".to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v3 notification");
+    assert!(
+        did_change_v3_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(3) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("newer ranged target must materialize after late parser-base preservation");
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    let retargeted_during_parse_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_during_parse";
+    let retargeted_before_materialization_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_materialization";
+    let retargeted_during_parse_delta =
+        read_u64_metric(final_counters.get(retargeted_during_parse_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_during_parse_key)),
+        );
+    let retargeted_before_materialization_delta =
+        read_u64_metric(final_counters.get(retargeted_before_materialization_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_before_materialization_key)),
+        );
+    assert_eq!(
+        retargeted_during_parse_delta, 0,
+        "late ranged preservation should stop cancelling at parse stage, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert!(
+        retargeted_before_materialization_delta > 0,
+        "late ranged preservation should hand off through retargeted_before_materialization instead, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    let evidence = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let execute = Request::build("workspace/executeCommand")
+                .id(32003)
+                .params(serde_json::json!({
+                    "command": "bsl.getObservabilityMetrics",
+                    "arguments": [],
+                }))
+                .finish();
+            let execute_response = service
+                .ready()
+                .await
+                .unwrap()
+                .call(execute)
+                .await
+                .expect("workspace/executeCommand request")
+                .expect("workspace/executeCommand response");
+            let value = serde_json::to_value(&execute_response).expect("serialize response");
+            let result = value.get("result").cloned().expect("result field");
+            let evidence = result
+                .get("didChangeParseSnapshotEvidence")
+                .and_then(|value| value.get("entries"))
+                .and_then(|value| value.as_array())
+                .and_then(|entries| {
+                    entries.iter().find(|entry| {
+                        entry.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                            && entry
+                                .get("requestedVersion")
+                                .and_then(|value| value.as_i64())
+                                == Some(3)
+                    })
+                })
+                .cloned();
+            if let Some(entry) = evidence {
+                break entry;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("ranged v3 didChange evidence must appear in observability metrics");
+
+    assert_eq!(
+        evidence.get("parseMode").and_then(|value| value.as_str()),
+        Some("incremental")
+    );
+    assert_eq!(
+        evidence
+            .get("fallbackReason")
+            .and_then(|value| value.as_str()),
+        None,
+        "late ranged parser-base preservation must avoid stale_parser_base fallback"
+    );
+    assert_eq!(
+        evidence
+            .get("parserBaseRootCause")
+            .and_then(|value| value.as_str()),
+        None
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_text = analysis
+        .file_text(file_id)
+        .expect("file_text query")
+        .expect("file text after ranged parser-base preservation");
     assert_eq!(observed_text.as_ref(), v3_fixture.as_str());
 
     drain_task.abort();
@@ -49500,7 +49932,7 @@ fn p49_real_conf_big_stale_parser_base_root_cause_report_live() {
             EnvVarGuard::set("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS", "1500");
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "refactor-22-did-change-parser-base-root-cause-attribution".to_string());
+            .unwrap_or_else(|_| "refactor-32-ready-snapshot-shadow-state-lag-reduction".to_string());
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {
@@ -49699,45 +50131,51 @@ fn p49_real_conf_big_stale_parser_base_root_cause_report_live() {
 
         assert_eq!(
             observability.get("parseMode").and_then(|value| value.as_str()),
-            Some("full")
+            Some("incremental")
         );
         assert_eq!(
             observability.get("baseTextSource").and_then(|value| value.as_str()),
             Some("shadow_state")
         );
         assert_eq!(
+            observability
+                .get("baseDocumentVersion")
+                .and_then(|value| value.as_i64()),
+            Some(3)
+        );
+        assert_eq!(
             observability.get("fallbackReason").and_then(|value| value.as_str()),
-            Some("stale_parser_base")
+            None
         );
         assert_eq!(
             observability
                 .get("parserBaseRootCause")
                 .and_then(|value| value.as_str()),
-            Some("ready_snapshot_lags_shadow_state")
+            None
         );
         assert_eq!(
             observability
                 .get("shadowDocumentVersion")
                 .and_then(|value| value.as_i64()),
-            Some(3)
+            None
         );
         assert_eq!(
             observability
                 .get("latestReadyDocumentVersion")
                 .and_then(|value| value.as_i64()),
-            Some(1)
+            None
         );
         assert_eq!(
             observability
                 .get("matchingReadySnapshotForShadowState")
                 .and_then(|value| value.as_bool()),
-            Some(false)
+            None
         );
         assert_eq!(
             observability
                 .get("readySnapshotPrimeAttempted")
                 .and_then(|value| value.as_bool()),
-            Some(false)
+            None
         );
 
         let report = serde_json::json!({
@@ -50683,7 +51121,7 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-27-diagnostics-save-exact-parse-exec-bounding".to_string()
+            "refactor-32-ready-snapshot-shadow-state-lag-reduction".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -50919,9 +51357,10 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
             let followup_publish = trace
                 .get("followup_publish")
                 .and_then(|value| value.as_object());
-            if followup_publish.is_some()
-                || trace.get("followup_semantic_path").and_then(|value| value.as_str()).is_some()
-            {
+            let followup_semantic_path = trace
+                .get("followup_semantic_path")
+                .and_then(|value| value.as_str());
+            if followup_publish.is_some() || followup_semantic_path == Some("shadow_state") {
                 break trace;
             }
             if Instant::now() >= timeline_deadline {
@@ -51268,7 +51707,7 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-31-diagnostics-save-exact-program-lowering-bounding".to_string()
+            "refactor-32-ready-snapshot-shadow-state-lag-reduction".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -51503,9 +51942,10 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
             let followup_publish = trace
                 .get("followup_publish")
                 .and_then(|value| value.as_object());
-            if followup_publish.is_some()
-                || trace.get("followup_semantic_path").and_then(|value| value.as_str()).is_some()
-            {
+            let followup_semantic_path = trace
+                .get("followup_semantic_path")
+                .and_then(|value| value.as_str());
+            if followup_publish.is_some() || followup_semantic_path == Some("shadow_state") {
                 break trace;
             }
             if Instant::now() >= timeline_deadline {
@@ -51880,7 +52320,7 @@ fn debug_real_conf_big_two_save_cycle_exact_program_lowering_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-31-diagnostics-save-exact-program-lowering-bounding".to_string()
+            "refactor-32-ready-snapshot-shadow-state-lag-reduction".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {

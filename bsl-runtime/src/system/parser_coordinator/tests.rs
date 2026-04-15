@@ -663,6 +663,7 @@ mod parse_snapshot_tests {
                 let options = ParseSnapshotExecutionOptions {
                     save_critical_initial: false,
                     save_critical_requested: Some(save_critical_requested.as_ref()),
+                    reused_program_prefix: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -760,6 +761,7 @@ mod parse_snapshot_tests {
                 let options = ParseSnapshotExecutionOptions {
                     save_critical_initial: false,
                     save_critical_requested: None,
+                    reused_program_prefix: None,
                     exact_ready_snapshot_control_callback: Some(&control),
                     progress_callback: None,
                     core_build_progress_callback: None,

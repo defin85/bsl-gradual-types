@@ -11034,6 +11034,240 @@ async fn p30_parsed_did_change_revision_is_retargeted_during_program_lowering_wh
     drain_task.abort();
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn p30_parsed_did_change_revision_is_retargeted_during_publishable_artifact_packaging_when_newer_target_arrives(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    fn build_fixture(tag: &str) -> String {
+        let mut text = String::from("Процедура Тест()\n");
+        for idx in 0..256 {
+            text.push_str(&format!("    Сообщить(\"{tag}-{idx}\");\n"));
+        }
+        text.push_str("КонецПроцедуры\n");
+        text
+    }
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard = EnvVarGuard::set("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0");
+    let _packaging_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_PARSE_SNAPSHOT_PUBLISHABLE_ARTIFACT_PACKAGING_DELAY_MS",
+        "10000",
+    );
+
+    let v1_fixture = build_fixture("v1");
+    let v2_fixture = build_fixture("v2");
+    let v3_fixture = build_fixture("v3");
+    let v2_hash = *blake3::hash(v2_fixture.as_bytes()).as_bytes();
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        &v1_fixture,
+        "file:///did_change_retargeted_during_publishable_artifact_packaging_fixture.bsl",
+    )
+    .await;
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize version 1 before publishable-packaging retarget test");
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object");
+
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: v2_fixture.clone(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v2 notification");
+    assert!(
+        did_change_v2_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current_checkpoint = server
+                .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+                .await
+                .and_then(|control| {
+                    control
+                        .phase_attribution_snapshot()
+                        .current_assembly_checkpoint
+                });
+            if current_checkpoint
+                == Some(
+                    super::super::ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging,
+                )
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("version 2 didChange worker must enter publishable packaging before retarget");
+
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: v3_fixture.clone(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange v3 notification");
+    assert!(
+        did_change_v3_response.is_none(),
+        "didChange is a notification"
+    );
+
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(3) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("newer target must materialize after publishable-packaging retarget");
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    let retargeted_during_parse_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_during_parse";
+    let retargeted_before_parse_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_parse";
+    let retargeted_before_materialization_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_materialization";
+    let aborted_key =
+        "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_aborted";
+
+    let retargeted_during_parse_delta =
+        read_u64_metric(final_counters.get(retargeted_during_parse_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_during_parse_key)),
+        );
+    let retargeted_before_parse_delta =
+        read_u64_metric(final_counters.get(retargeted_before_parse_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_before_parse_key)),
+        );
+    let retargeted_before_materialization_delta =
+        read_u64_metric(final_counters.get(retargeted_before_materialization_key)).saturating_sub(
+            read_u64_metric(baseline_counters.get(retargeted_before_materialization_key)),
+        );
+    let aborted_delta = read_u64_metric(final_counters.get(aborted_key))
+        .saturating_sub(read_u64_metric(baseline_counters.get(aborted_key)));
+
+    assert!(
+        retargeted_during_parse_delta > 0,
+        "publishable-packaging same-file retarget must export the dedicated lifecycle reason, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        retargeted_before_parse_delta, 0,
+        "publishable-packaging retarget test must not regress into before-parse attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        retargeted_before_materialization_delta, 0,
+        "publishable-packaging retarget test must not regress into before-materialization attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        aborted_delta, 0,
+        "publishable-packaging retarget test must not regress into generic aborted attribution, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    let analysis = server.analysis_v2.snapshot().await;
+    let observed_text = analysis
+        .file_text(file_id)
+        .expect("file_text query")
+        .expect("file text after publishable-packaging retarget");
+    assert_eq!(observed_text.as_ref(), v3_fixture.as_str());
+
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn p8_did_save_followup_quota_zero_disables_future_admissions_without_revoking_admitted_work()
 {
@@ -50450,6 +50684,12 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms")
                 .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms")
+                .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms")
                 .and_then(|value| value.as_u64()),
@@ -50494,10 +50734,20 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
             "v3_text_len_bytes": v3_text.len(),
             "v4_statement_len_bytes": v4_statement.len(),
         });
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("backend crate must live under the workspace root");
         let report_path = std::env::var(
             "BSL_V2_REAL_CONF_BIG_LAGGING_SHADOW_RECOVERY_SAVE_FOLLOWUP_REPORT",
         )
         .map(std::path::PathBuf::from)
+        .map(|path| {
+            if path.is_relative() {
+                workspace_root.join(path)
+            } else {
+                path
+            }
+        })
         .unwrap_or_else(|_| {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("tests")

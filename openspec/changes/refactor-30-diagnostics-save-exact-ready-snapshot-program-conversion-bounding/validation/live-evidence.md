@@ -2,7 +2,7 @@
 
 ## Commands
 
-- `CHANGE_ID=refactor-30-diagnostics-save-exact-ready-snapshot-program-conversion-bounding BSL_V2_REAL_CONF_BIG_LAGGING_SHADOW_RECOVERY_SAVE_FOLLOWUP_REPORT=/tmp/refactor-30-real-conf-big-lagging-shadow-recovery-save-followup-live.json cargo test -p bsl-backend --bin bsl-lsp-server p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live -- --nocapture`
+- `CHANGE_ID=refactor-30-diagnostics-save-exact-ready-snapshot-program-conversion-bounding BSL_V2_REAL_CONF_BIG_LAGGING_SHADOW_RECOVERY_SAVE_FOLLOWUP_REPORT=openspec/changes/refactor-30-diagnostics-save-exact-ready-snapshot-program-conversion-bounding/validation/refactor-30-real-conf-big-lagging-shadow-recovery-save-followup-live.json cargo test -p bsl-backend --bin bsl-lsp-server p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live -- --nocapture`
 
 ## Result
 
@@ -24,8 +24,10 @@
   - `followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint=exact_ready_snapshot_assembly`
   - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint=program_lowering`
   - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint=program_lowering`
-  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms=4016`
-  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms=4016`
+  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms=4004`
+  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms=4004`
+  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms=4004`
+  - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms=null`
   - `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms=null`
   - `followup_ready_snapshot_relief_valve_outcome=engaged_timed_out`
 

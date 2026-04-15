@@ -610,9 +610,9 @@ mod parse_snapshot_tests {
         );
     }
 
-    fn build_large_callable_fixture() -> String {
+    fn build_large_callable_fixture(statement_count: usize) -> String {
         let mut source = String::from("Процедура Тест()\n");
-        for index in 0..96 {
+        for index in 0..statement_count {
             source.push_str(&format!("    Значение{} = {};\n", index, index));
         }
         source.push_str("КонецПроцедуры");
@@ -624,12 +624,15 @@ mod parse_snapshot_tests {
         let _env_lock = lock_parse_snapshot_test_env();
         let _conversion_delay_guard = EnvVarGuard::set(
             "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
-            "15",
+            "40",
         );
 
         let parser = Arc::new(ParserCoordinator::with_fallback());
         let file_path = PathBuf::from("snapshot-save-critical-during-lowering.bsl");
-        let text = build_large_callable_fixture();
+        // Keep lowering in flight across multiple observer checkpoints so this
+        // regression proves bounded save-critical promotion instead of racing a
+        // nearly-finished conversion on fast CPUs.
+        let text = build_large_callable_fixture(512);
 
         parser
             .parse_incremental_with_report(file_path.clone(), text.clone(), Vec::new())
@@ -678,7 +681,7 @@ mod parse_snapshot_tests {
         entered_program_lowering_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("exact ready snapshot assembly must enter program lowering");
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(100));
         save_critical_requested.store(true, Ordering::SeqCst);
 
         let report = parse_thread
@@ -714,12 +717,12 @@ mod parse_snapshot_tests {
         let _env_lock = lock_parse_snapshot_test_env();
         let _conversion_delay_guard = EnvVarGuard::set(
             "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
-            "15",
+            "40",
         );
 
         let parser = Arc::new(ParserCoordinator::with_fallback());
         let file_path = PathBuf::from("snapshot-cancel-during-lowering.bsl");
-        let text = build_large_callable_fixture();
+        let text = build_large_callable_fixture(512);
 
         parser
             .parse_incremental_with_report(file_path.clone(), text.clone(), Vec::new())
@@ -775,7 +778,7 @@ mod parse_snapshot_tests {
         entered_program_lowering_rx
             .recv_timeout(Duration::from_secs(5))
             .expect("exact ready snapshot assembly must enter program lowering");
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(100));
         cancel_on_checkpoint.store(true, Ordering::SeqCst);
 
         let error = parse_thread

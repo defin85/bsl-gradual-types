@@ -24,3 +24,21 @@ Notes:
   `p29`, `p30`, and `p31`.
 - The single-large-body regression is
   `p31_did_change_revision_is_retargeted_during_program_lowering_inside_single_large_callable_body_when_newer_target_arrives`.
+
+## Post-review closure rerun
+
+Commands rerun locally on `2026-04-15` while closing the reviewed runtime-regression gap:
+
+```bash
+cargo test -p bsl-runtime parse_snapshot_tests
+cargo test -p bsl-backend p31_diagnostics_save_timeline_repeated_probe_snapshots_keep_exact_ready_snapshot_view_coherent
+cargo test -p bsl-backend p31_did_change_revision_is_retargeted_during_program_lowering_inside_single_large_callable_body_when_newer_target_arrives
+openspec validate refactor-31-diagnostics-save-exact-program-lowering-bounding --strict --no-interactive
+```
+
+Result:
+
+- All rerun commands passed.
+- The runtime regression
+  `save_critical_requested_during_program_lowering_returns_before_packaging_checkpoint`
+  now passes inside `cargo test -p bsl-runtime parse_snapshot_tests`.

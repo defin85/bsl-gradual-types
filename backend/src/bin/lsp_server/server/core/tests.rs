@@ -7426,6 +7426,70 @@ async fn p31_diagnostics_save_timeline_repeated_probe_snapshots_keep_exact_ready
 }
 
 #[tokio::test]
+async fn p31_diagnostics_save_timeline_reentered_program_lowering_keeps_program_conversion_coherent(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p31-ready-snapshot-reentered-program-lowering-coherent.bsl")
+        .expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(248),
+        diagnostics_generation: 48,
+        save_cycle_sequence: 24,
+        requested_version: 26,
+    };
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    control.transition_assembly_checkpoint_attribution(
+        super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("program-lowering reentry attribution");
+    assert_eq!(
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+        "mixed current/completed program_lowering state must not export incoherent aggregate"
+    );
+
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("not_ready"),
+        Some("timeout"),
+        Some("in_flight_same_version"),
+        Some(true),
+        Some(attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+        "timeline must keep the coherent aggregate view from reentered program_lowering snapshots"
+    );
+}
+
+#[tokio::test]
 async fn p23_diagnostics_save_timeline_reports_post_parse_timeout_phase_for_exact_worker() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p23-ready-snapshot-timeout-post-parse.bsl").expect("uri");

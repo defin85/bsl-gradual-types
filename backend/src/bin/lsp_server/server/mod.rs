@@ -605,20 +605,34 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
 
 impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
     pub(crate) fn current_program_conversion_ms(self: &Self) -> Option<u64> {
-        match self.current_assembly_checkpoint {
-            Some(ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering) => {
-                self.current_assembly_checkpoint_elapsed_ms
-            }
-            Some(ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging) => Some(
+        let lowering_ms = match self.current_assembly_checkpoint {
+            Some(ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering) => Some(
                 self.completed
                     .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
                     .unwrap_or(0)
-                    .saturating_add(self.current_assembly_checkpoint_elapsed_ms.unwrap_or(0)),
+                    .max(self.current_assembly_checkpoint_elapsed_ms.unwrap_or(0)),
             ),
             _ => {
                 self.completed
-                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
             }
+        };
+        let packaging_ms = match self.current_assembly_checkpoint {
+            Some(ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging) => Some(
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
+                    .unwrap_or(0)
+                    .max(self.current_assembly_checkpoint_elapsed_ms.unwrap_or(0)),
+            ),
+            _ => self
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+        };
+        match (lowering_ms, packaging_ms) {
+            (Some(lowering), Some(packaging)) => Some(lowering.saturating_add(packaging)),
+            (Some(lowering), None) => Some(lowering),
+            (None, Some(packaging)) => Some(packaging),
+            (None, None) => None,
         }
     }
 

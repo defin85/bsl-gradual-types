@@ -50,6 +50,25 @@ timeout is now dominated by `program_conversion`.
 This change targets what remains after all five: exact same-version `program_conversion` latency on
 the save-critical path.
 
+## Epic
+
+This change is tracked by Beads epic `bsl-gradual-types-ptc7`
+(`OpenSpec refactor-30: exact program_conversion bounding`).
+
+Execution children for this step:
+
+- `bsl-gradual-types-ptc7.1` - save-critical exact `program_conversion`
+- `bsl-gradual-types-ptc7.2` - bounded program-conversion checkpoints and attribution
+- `bsl-gradual-types-ptc7.3` - regressions and `conf_big` live evidence
+- `bsl-gradual-types-ptc7.4` - targeted validation and strict OpenSpec validation
+
+Dependency graph:
+
+- `bsl-gradual-types-ptc7.1` starts first;
+- `bsl-gradual-types-ptc7.2` depends on `.1`;
+- `bsl-gradual-types-ptc7.3` depends on `.1` and `.2`;
+- `bsl-gradual-types-ptc7.4` depends on `.3`.
+
 ## Impact
 
 - Affected specs:

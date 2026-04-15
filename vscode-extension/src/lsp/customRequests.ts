@@ -925,13 +925,17 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint?:
-        | 'program_conversion'
+        | 'program_lowering'
+        | 'publishable_artifact_packaging'
         | 'syntax_error_collection';
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint?:
-        | 'program_conversion'
+        | 'program_lowering'
+        | 'publishable_artifact_packaging'
         | 'syntax_error_collection';
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms?: number;

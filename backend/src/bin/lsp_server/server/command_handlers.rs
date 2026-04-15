@@ -1902,6 +1902,10 @@ mod tests {
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
                 None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:

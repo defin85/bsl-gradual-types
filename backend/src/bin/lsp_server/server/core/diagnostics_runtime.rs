@@ -151,6 +151,11 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
         Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
         Option<u64>,
+    pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms:
+        Option<u64>,
+    pub(crate)
+        parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+        Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
         Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
@@ -196,6 +201,12 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
                 .is_some()
             || attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
+                .is_some()
+            || attribution
                 .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
                 .is_some()
             || attribution
@@ -224,6 +235,11 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms: None,
             parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: attribution
                 .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: attribution
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+            parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                attribution
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
             parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
                 attribution
                     .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
@@ -407,18 +423,34 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                     .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
                     .flatten(),
             parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: snapshot
+                .current_program_conversion_ms(),
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: snapshot
                 .completed
-                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
                 .or_else(|| {
                     matches!(
                         snapshot.current_assembly_checkpoint,
                         Some(
-                            super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion
+                            super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering
                         )
                     )
                     .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
                     .flatten()
                 }),
+            parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                snapshot
+                    .completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
+                    .or_else(|| {
+                        matches!(
+                            snapshot.current_assembly_checkpoint,
+                            Some(
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging
+                            )
+                        )
+                        .then_some(snapshot.current_assembly_checkpoint_elapsed_ms)
+                        .flatten()
+                    }),
             parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
                 snapshot
                     .completed

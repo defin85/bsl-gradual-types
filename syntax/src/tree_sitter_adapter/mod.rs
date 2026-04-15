@@ -198,13 +198,25 @@ impl TreeSitterAdapter {
         source: &str,
         mut progress: impl FnMut(usize, usize),
     ) -> Result<ParseResult, String> {
+        Self::convert_tree_fast_with_observer(tree, source, |processed, total| {
+            progress(processed, total);
+            Ok(())
+        })
+    }
+
+    /// Быстрый путь для индексации с progress/cancellation observer.
+    pub fn convert_tree_fast_with_observer(
+        tree: &Tree,
+        source: &str,
+        mut observer: impl FnMut(usize, usize) -> Result<(), String>,
+    ) -> Result<ParseResult, String> {
         let root = tree.root_node();
         let line_index = LineIndex::new(source);
-        let statements = statement_converter::convert_source_file_cached_with_progress(
+        let statements = statement_converter::convert_source_file_cached_with_observer(
             &root,
             source,
             &line_index,
-            &mut progress,
+            &mut observer,
         )?;
         let program = Program { statements };
         Ok(ParseResult::success(program))

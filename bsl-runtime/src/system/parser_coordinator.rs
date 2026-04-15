@@ -99,6 +99,17 @@ fn maybe_inject_parse_snapshot_parse_progress_delay_for_test() {
     }
 }
 
+fn maybe_inject_parse_snapshot_program_conversion_progress_delay_for_test() {
+    if let Some(delay_ms) =
+        std::env::var("BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+    {
+        std::thread::sleep(Duration::from_millis(delay_ms));
+    }
+}
+
 fn maybe_inject_parse_snapshot_optional_cache_enrichment_delay_for_test() -> Option<u64> {
     std::env::var("BSL_TEST_PARSE_SNAPSHOT_OPTIONAL_CACHE_ENRICHMENT_DELAY_MS")
         .ok()
@@ -115,6 +126,13 @@ fn maybe_inject_parse_snapshot_tree_cache_install_delay_for_test() -> Option<u64
 
 fn maybe_inject_parse_snapshot_syntax_error_assembly_delay_for_test() -> Option<u64> {
     std::env::var("BSL_TEST_PARSE_SNAPSHOT_SYNTAX_ERROR_ASSEMBLY_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+}
+
+fn maybe_inject_parse_snapshot_publishable_artifact_packaging_delay_for_test() -> Option<u64> {
+    std::env::var("BSL_TEST_PARSE_SNAPSHOT_PUBLISHABLE_ARTIFACT_PACKAGING_DELAY_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|value| *value > 0)
@@ -244,14 +262,16 @@ impl ParseSnapshotCoreBuildCheckpoint {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseSnapshotAssemblyCheckpoint {
-    ProgramConversion,
+    ProgramLowering,
+    PublishableArtifactPackaging,
     SyntaxErrorCollection,
 }
 
 impl ParseSnapshotAssemblyCheckpoint {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::ProgramConversion => "program_conversion",
+            Self::ProgramLowering => "program_lowering",
+            Self::PublishableArtifactPackaging => "publishable_artifact_packaging",
             Self::SyntaxErrorCollection => "syntax_error_collection",
         }
     }
@@ -1856,9 +1876,41 @@ impl ParserCoordinator {
         );
         Self::notify_parse_snapshot_assembly_checkpoint(
             &options,
-            ParseSnapshotAssemblyCheckpoint::ProgramConversion,
+            ParseSnapshotAssemblyCheckpoint::ProgramLowering,
         );
-        let parse_result = TreeSitterAdapter::convert_tree_fast(tree, content)?;
+        let parse_result = TreeSitterAdapter::convert_tree_fast_with_observer(
+            tree,
+            content,
+            |_, _| {
+                maybe_inject_parse_snapshot_program_conversion_progress_delay_for_test();
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string())
+                } else {
+                    Ok(())
+                }
+            },
+        )?;
+        if cancellation_flag.load(Ordering::SeqCst) {
+            return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+        }
+        Self::notify_parse_snapshot_assembly_checkpoint(
+            &options,
+            ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging,
+        );
+        if let Some(delay_ms) =
+            maybe_inject_parse_snapshot_publishable_artifact_packaging_delay_for_test()
+        {
+            let deadline = std::time::Instant::now() + Duration::from_millis(delay_ms);
+            while std::time::Instant::now() < deadline {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                if Self::save_critical_requested(options) {
+                    return Ok((parse_result, true));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
         if cancellation_flag.load(Ordering::SeqCst) {
             return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
         }

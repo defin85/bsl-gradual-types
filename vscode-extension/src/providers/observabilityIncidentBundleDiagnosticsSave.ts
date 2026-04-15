@@ -35,6 +35,8 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint?: string;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint?: string;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms?: number;
@@ -206,6 +208,10 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
@@ -467,6 +473,10 @@ function formatFollowupReadySnapshotPhases(
         number | undefined,
     parseExecCoreBuildExactReadySnapshotAssemblyProgramConversionMs:
         number | undefined,
+    parseExecCoreBuildExactReadySnapshotAssemblyProgramLoweringMs:
+        number | undefined,
+    parseExecCoreBuildExactReadySnapshotAssemblyPublishableArtifactPackagingMs:
+        number | undefined,
     parseExecCoreBuildExactReadySnapshotAssemblySyntaxErrorCollectionMs:
         number | undefined,
     parseExecCoreBuildExactReadySnapshotAssemblyDominantCheckpoint:
@@ -505,6 +515,12 @@ function formatFollowupReadySnapshotPhases(
         )
         && !isPositiveTimingValue(
             parseExecCoreBuildExactReadySnapshotAssemblyProgramConversionMs
+        )
+        && !isPositiveTimingValue(
+            parseExecCoreBuildExactReadySnapshotAssemblyProgramLoweringMs
+        )
+        && !isPositiveTimingValue(
+            parseExecCoreBuildExactReadySnapshotAssemblyPublishableArtifactPackagingMs
         )
         && !isPositiveTimingValue(
             parseExecCoreBuildExactReadySnapshotAssemblySyntaxErrorCollectionMs
@@ -599,6 +615,24 @@ function formatFollowupReadySnapshotPhases(
     ) {
         parts.push(
             `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms=${parseExecCoreBuildExactReadySnapshotAssemblyProgramConversionMs}`
+        );
+    }
+    if (
+        isPositiveTimingValue(
+            parseExecCoreBuildExactReadySnapshotAssemblyProgramLoweringMs
+        )
+    ) {
+        parts.push(
+            `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms=${parseExecCoreBuildExactReadySnapshotAssemblyProgramLoweringMs}`
+        );
+    }
+    if (
+        isPositiveTimingValue(
+            parseExecCoreBuildExactReadySnapshotAssemblyPublishableArtifactPackagingMs
+        )
+    ) {
+        parts.push(
+            `followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms=${parseExecCoreBuildExactReadySnapshotAssemblyPublishableArtifactPackagingMs}`
         );
     }
     if (
@@ -759,6 +793,8 @@ export function renderDiagnosticsSaveSummaryLines(
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+            request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+            request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,

@@ -63,12 +63,12 @@ pub fn convert_source_file_cached(
     Ok(statements)
 }
 
-/// Конвертировать source_file с прогрессом по количеству детей корневого узла.
-pub fn convert_source_file_cached_with_progress(
+/// Конвертировать source_file с progress/cancellation observer.
+pub fn convert_source_file_cached_with_observer(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
-    mut progress: impl FnMut(usize, usize),
+    mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
     let mut statements = Vec::new();
     let mut cursor = node.walk();
@@ -77,8 +77,8 @@ pub fn convert_source_file_cached_with_progress(
 
     for child in node.children(&mut cursor) {
         processed = processed.saturating_add(1);
-        if processed == 1 || processed.is_multiple_of(1000) || processed == total {
-            progress(processed, total);
+        if processed == 1 || processed.is_multiple_of(256) || processed == total {
+            observer(processed, total)?;
         }
         if let Some(stmt) = dispatch_statement_cached(&child, source, line_index)? {
             statements.push(stmt);

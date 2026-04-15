@@ -359,7 +359,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -409,6 +409,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: 31,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms: 9,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: 3,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: 1,
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms: 2,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms: 6,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint: 'syntax_error_collection',
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms: 6,
@@ -442,7 +444,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -497,7 +499,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -535,7 +537,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -593,7 +595,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 15,
+                version: 16,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -763,6 +765,8 @@ suite('Observability Incident Bundle Test Suite', () => {
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms = undefined;
@@ -818,7 +822,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 15);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 16);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -880,6 +884,16 @@ suite('Observability Incident Bundle Test Suite', () => {
             bundle.incidentReport.diagnostics_save_requests[0]
                 .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
             3
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+            1
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+            2
         );
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0]
@@ -1119,6 +1133,16 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('followup_semantic_ir_source=snapshot_build'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_zero_probe=ready'));
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_task_state=ready_same_version'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms=1'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms=2'
+            )
+        );
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_relief_valve_outcome=engaged_helped'

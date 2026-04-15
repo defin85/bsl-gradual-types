@@ -112,7 +112,7 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 15;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 16;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 3;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
@@ -471,14 +471,16 @@ impl ReadyParseSnapshotCoreBuildCheckpointV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadyParseSnapshotAssemblyCheckpointV2 {
-    ProgramConversion = 1,
-    SyntaxErrorCollection = 2,
+    ProgramLowering = 1,
+    PublishableArtifactPackaging = 2,
+    SyntaxErrorCollection = 3,
 }
 
 impl ReadyParseSnapshotAssemblyCheckpointV2 {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            Self::ProgramConversion => "program_conversion",
+            Self::ProgramLowering => "program_lowering",
+            Self::PublishableArtifactPackaging => "publishable_artifact_packaging",
             Self::SyntaxErrorCollection => "syntax_error_collection",
         }
     }
@@ -491,6 +493,9 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionV2 {
     pub parse_exec_core_build_parser_tree_build_ms: Option<u64>,
     pub parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
     pub parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Option<u64>,
+    pub parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: Option<u64>,
+    pub parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+        Option<u64>,
     pub parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms: Option<u64>,
     pub parse_exec_core_build_tree_cache_install_ms: Option<u64>,
     pub parse_exec_optional_cache_enrichment_ms: Option<u64>,
@@ -554,8 +559,12 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
     pub(crate) fn dominant_assembly_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
         [
             (
-                "program_conversion",
-                self.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+                "program_lowering",
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+            ),
+            (
+                "publishable_artifact_packaging",
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
             ),
             (
                 "syntax_error_collection",
@@ -565,6 +574,19 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
         .into_iter()
         .filter_map(|(checkpoint, duration_ms)| duration_ms.map(|value| (checkpoint, value)))
         .max_by_key(|(_, duration_ms)| *duration_ms)
+    }
+
+    fn recompute_program_conversion_ms(&mut self) {
+        self.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms =
+            match (
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+                self.parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+            ) {
+                (Some(lowering), Some(packaging)) => Some(lowering.saturating_add(packaging)),
+                (Some(lowering), None) => Some(lowering),
+                (None, Some(packaging)) => Some(packaging),
+                (None, None) => None,
+            };
     }
 }
 
@@ -582,6 +604,23 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
 }
 
 impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
+    pub(crate) fn current_program_conversion_ms(self: &Self) -> Option<u64> {
+        match self.current_assembly_checkpoint {
+            Some(ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering) => {
+                self.current_assembly_checkpoint_elapsed_ms
+            }
+            Some(ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging) => Some(
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+                    .unwrap_or(0)
+                    .saturating_add(self.current_assembly_checkpoint_elapsed_ms.unwrap_or(0)),
+            ),
+            _ => self
+                .completed
+                .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        }
+    }
+
     pub(crate) fn dominant_phase(self: &Self) -> Option<(&'static str, u64)> {
         let completed = self.completed.dominant_phase();
         let current = self
@@ -874,9 +913,14 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
             .take()
             .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
         match checkpoint {
-            ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion => {
+            ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering => {
                 self.completed
-                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms =
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms =
+                    elapsed_ms;
+            }
+            ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging => {
+                self.completed
+                    .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms =
                     elapsed_ms;
             }
             ReadyParseSnapshotAssemblyCheckpointV2::SyntaxErrorCollection => {
@@ -885,6 +929,7 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
                     elapsed_ms;
             }
         }
+        self.completed.recompute_program_conversion_ms();
     }
 
     fn snapshot(&self, now: Instant) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {

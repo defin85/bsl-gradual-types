@@ -879,8 +879,11 @@ impl BslLanguageServer {
                     };
                     let assembly_progress = |checkpoint: bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint| {
                         let mapped = match checkpoint {
-                            bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::ProgramConversion => {
-                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramConversion
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::ProgramLowering => {
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering
+                            }
+                            bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging => {
+                                super::super::ReadyParseSnapshotAssemblyCheckpointV2::PublishableArtifactPackaging
                             }
                             bsl_runtime::system::parser_coordinator::ParseSnapshotAssemblyCheckpoint::SyntaxErrorCollection => {
                                 super::super::ReadyParseSnapshotAssemblyCheckpointV2::SyntaxErrorCollection

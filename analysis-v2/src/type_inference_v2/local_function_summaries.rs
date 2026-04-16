@@ -6,7 +6,7 @@ impl TypeInferencer<'_> {
         &self,
         program: &Program,
         base_env: &TypeEnv,
-    ) -> HashMap<String, LocalFunctionSummary> {
+    ) -> LocalFunctionSummariesProfiled {
         #[derive(Clone, Copy, Debug)]
         struct Def<'a> {
             params: &'a [String],
@@ -394,6 +394,7 @@ impl TypeInferencer<'_> {
             }
         }
 
+        let prep_started = Instant::now();
         let mut function_defs: Vec<(String, Def<'_>)> = Vec::new();
         for stmt in &program.statements {
             self.cancellation_checkpoint();
@@ -436,7 +437,10 @@ impl TypeInferencer<'_> {
             }
         }
         if function_defs.is_empty() {
-            return HashMap::new();
+            return LocalFunctionSummariesProfiled {
+                summaries: HashMap::new(),
+                profile: LocalFunctionSummariesProfile::default(),
+            };
         }
 
         // Stable node ordering: appearance in file.
@@ -470,6 +474,7 @@ impl TypeInferencer<'_> {
             edges[caller_idx].sort_unstable();
             edges[caller_idx].dedup();
         }
+        let prep_ms = prep_started.elapsed().as_millis();
 
         // Tarjan SCC
         fn scc_tarjan(edges: &[Vec<usize>]) -> Vec<Vec<usize>> {
@@ -538,6 +543,7 @@ impl TypeInferencer<'_> {
             ctx.sccs
         }
 
+        let fixed_point_setup_started = Instant::now();
         let sccs = scc_tarjan(&edges);
         let mut node_to_scc = vec![0usize; n];
         for (scc_id, nodes) in sccs.iter().enumerate() {
@@ -580,6 +586,8 @@ impl TypeInferencer<'_> {
                 }
             }
         }
+        let scc_count = sccs.len() as u64;
+        let fixed_point_setup_ms = fixed_point_setup_started.elapsed().as_millis();
 
         let mut states: Vec<LocalFunctionState> = (0..n)
             .map(|_| LocalFunctionState {
@@ -588,12 +596,18 @@ impl TypeInferencer<'_> {
             .collect();
 
         // Process SCCs in reverse topo order so that callees are stabilized first.
+        let fixed_point_started = Instant::now();
+        let mut snapshot_build_ms = 0_u128;
+        let mut body_infer_ms = 0_u128;
+        let mut fixed_point_iteration_count = 0_u64;
         for &scc_id in topo.iter().rev() {
             let nodes = &sccs[scc_id];
             loop {
+                fixed_point_iteration_count = fixed_point_iteration_count.saturating_add(1);
                 let mut changed = false;
 
                 // Snapshot: expose current return types to expression inference via env.local_function_summaries.
+                let snapshot_build_started = Instant::now();
                 let mut snapshot: HashMap<String, LocalFunctionSummary> = HashMap::new();
                 for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
                     snapshot.insert(
@@ -608,6 +622,8 @@ impl TypeInferencer<'_> {
                     );
                 }
                 let snapshot = Arc::new(snapshot);
+                snapshot_build_ms =
+                    snapshot_build_ms.saturating_add(snapshot_build_started.elapsed().as_millis());
 
                 for &node_idx in nodes {
                     let (_name_lower, def) = &function_defs[node_idx];
@@ -622,6 +638,7 @@ impl TypeInferencer<'_> {
 
                     let mut scratch_facts = SemanticFacts::default();
                     let mut return_types = ReturnTypeSet::default();
+                    let body_infer_started = Instant::now();
                     collect_return_type_names(
                         self,
                         def.body,
@@ -629,6 +646,8 @@ impl TypeInferencer<'_> {
                         &mut scratch_facts,
                         &mut return_types,
                     );
+                    body_infer_ms =
+                        body_infer_ms.saturating_add(body_infer_started.elapsed().as_millis());
 
                     if return_types.is_empty() || may_fallthrough[node_idx] {
                         return_types.insert_named("Неопределено");
@@ -645,6 +664,7 @@ impl TypeInferencer<'_> {
                 }
             }
         }
+        let fixed_point_ms = fixed_point_started.elapsed().as_millis();
 
         let mut out: HashMap<String, LocalFunctionSummary> = HashMap::new();
         for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
@@ -660,6 +680,17 @@ impl TypeInferencer<'_> {
             );
         }
 
-        out
+        LocalFunctionSummariesProfiled {
+            summaries: out,
+            profile: LocalFunctionSummariesProfile {
+                prep_ms: prep_ms.saturating_add(fixed_point_setup_ms),
+                fixed_point_ms,
+                snapshot_build_ms,
+                body_infer_ms,
+                function_count: n as u64,
+                scc_count,
+                fixed_point_iteration_count,
+            },
+        }
     }
 }

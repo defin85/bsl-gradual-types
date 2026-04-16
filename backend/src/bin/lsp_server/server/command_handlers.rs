@@ -1870,6 +1870,35 @@ mod tests {
                 snapshot_with_deps_ms: None,
                 syntax_diagnostics_query_ms: Some(9),
                 semantic_diagnostics_query_ms: None,
+                semantic_diagnostics_inputs_ms: None,
+                semantic_diagnostics_parse_result_ms: None,
+                semantic_diagnostics_ir_ms: None,
+                semantic_diagnostics_collect_ms: None,
+                semantic_diagnostics_flow_sensitive_ms: None,
+                semantic_diagnostics_ir_ast_to_ir_convert_ms: None,
+                semantic_diagnostics_ir_semantic_facts_materialize_ms: None,
+                semantic_diagnostics_ir_semantic_facts_seed_module_context_ms: None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms: None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms: None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
+                semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
+                semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
+                semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
+                semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_statement_count: None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
+                semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
             }),
             followup_publish: None,
@@ -1884,6 +1913,8 @@ mod tests {
             followup_ready_snapshot_task_state: Some("in_flight_same_version".to_string()),
             followup_ready_snapshot_timeout_phase: Some("parse_exec".to_string()),
             followup_ready_snapshot_timeout_phase_elapsed_ms: Some(3500),
+            followup_ready_snapshot_timeout_leaf: Some("parser_tree_build".to_string()),
+            followup_ready_snapshot_timeout_leaf_elapsed_ms: Some(3500),
             followup_ready_snapshot_parse_exec_ms: Some(3500),
             followup_ready_snapshot_parse_exec_timeout_subphase: Some(
                 "core_parse_build".to_string(),
@@ -1915,6 +1946,22 @@ mod tests {
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                 None,
@@ -2090,6 +2137,37 @@ mod tests {
                     snapshot_with_deps_ms: None,
                     syntax_diagnostics_query_ms: Some(12),
                     semantic_diagnostics_query_ms: None,
+                    semantic_diagnostics_inputs_ms: None,
+                    semantic_diagnostics_parse_result_ms: None,
+                    semantic_diagnostics_ir_ms: None,
+                    semantic_diagnostics_collect_ms: None,
+                    semantic_diagnostics_flow_sensitive_ms: None,
+                    semantic_diagnostics_ir_ast_to_ir_convert_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_materialize_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_seed_module_context_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
+                    semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
+                    semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                    semantic_diagnostics_ir_semantic_facts_statement_count: None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
+                    semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                     publish_wait_ms: Some(1),
                 }),
             },

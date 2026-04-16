@@ -52,6 +52,13 @@ pub(crate) struct TypeIndex {
 pub(crate) struct TypeIndexBuildProfile {
     pub seed_module_context_ms: u128,
     pub local_function_summaries_ms: u128,
+    pub local_function_summaries_prep_ms: u128,
+    pub local_function_summaries_fixed_point_ms: u128,
+    pub local_function_summaries_snapshot_build_ms: u128,
+    pub local_function_summaries_body_infer_ms: u128,
+    pub local_function_summaries_function_count: u64,
+    pub local_function_summaries_scc_count: u64,
+    pub local_function_summaries_fixed_point_iteration_count: u64,
     pub visit_statements_ms: u128,
     pub visit_callable_body_ms: u128,
     pub visit_callable_body_count: u64,
@@ -67,6 +74,23 @@ pub(crate) struct TypeIndexBuildProfile {
 pub(crate) struct TypeIndexBuildProfiled {
     pub index: TypeIndex,
     pub profile: TypeIndexBuildProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct LocalFunctionSummariesProfile {
+    pub prep_ms: u128,
+    pub fixed_point_ms: u128,
+    pub snapshot_build_ms: u128,
+    pub body_infer_ms: u128,
+    pub function_count: u64,
+    pub scc_count: u64,
+    pub fixed_point_iteration_count: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct LocalFunctionSummariesProfiled {
+    pub(super) summaries: HashMap<String, LocalFunctionSummary>,
+    pub(super) profile: LocalFunctionSummariesProfile,
 }
 
 #[derive(Debug, Clone)]
@@ -273,7 +297,7 @@ impl Default for TypeEnv {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-struct LocalFunctionSummary {
+pub(super) struct LocalFunctionSummary {
     return_type: TypeResolution,
     may_fallthrough: bool,
     params: Vec<String>,
@@ -478,8 +502,9 @@ impl<'a> TypeInferencer<'a> {
         self.cancellation_checkpoint();
         let local_function_summaries_started = Instant::now();
         let local_function_summaries = self.infer_local_function_summaries(program, &env);
-        let local_function_summary_count = local_function_summaries.len() as u64;
-        env.local_function_summaries = Arc::new(local_function_summaries);
+        let local_function_summary_count = local_function_summaries.summaries.len() as u64;
+        let local_function_summaries_profile = local_function_summaries.profile;
+        env.local_function_summaries = Arc::new(local_function_summaries.summaries);
         let local_function_summaries_ms = local_function_summaries_started.elapsed().as_millis();
         let source_incomplete_member_access_offsets =
             source_text.map(incomplete_member_access_dot_offsets);
@@ -628,6 +653,13 @@ impl<'a> TypeInferencer<'a> {
             source_text_len = source_text.map(|text| text.len()).unwrap_or(0),
             seed_module_context_ms,
             local_function_summaries_ms,
+            local_function_summaries_prep_ms = local_function_summaries_profile.prep_ms,
+            local_function_summaries_fixed_point_ms = local_function_summaries_profile.fixed_point_ms,
+            local_function_summaries_snapshot_build_ms = local_function_summaries_profile.snapshot_build_ms,
+            local_function_summaries_body_infer_ms = local_function_summaries_profile.body_infer_ms,
+            local_function_summaries_function_count = local_function_summaries_profile.function_count,
+            local_function_summaries_scc_count = local_function_summaries_profile.scc_count,
+            local_function_summaries_fixed_point_iteration_count = local_function_summaries_profile.fixed_point_iteration_count,
             visit_statements_ms,
             visit_callable_body_ms,
             visit_callable_body_count,
@@ -649,6 +681,18 @@ impl<'a> TypeInferencer<'a> {
             profile: TypeIndexBuildProfile {
                 seed_module_context_ms,
                 local_function_summaries_ms,
+                local_function_summaries_prep_ms: local_function_summaries_profile.prep_ms,
+                local_function_summaries_fixed_point_ms: local_function_summaries_profile
+                    .fixed_point_ms,
+                local_function_summaries_snapshot_build_ms: local_function_summaries_profile
+                    .snapshot_build_ms,
+                local_function_summaries_body_infer_ms: local_function_summaries_profile
+                    .body_infer_ms,
+                local_function_summaries_function_count: local_function_summaries_profile
+                    .function_count,
+                local_function_summaries_scc_count: local_function_summaries_profile.scc_count,
+                local_function_summaries_fixed_point_iteration_count:
+                    local_function_summaries_profile.fixed_point_iteration_count,
                 visit_statements_ms,
                 visit_callable_body_ms,
                 visit_callable_body_count,

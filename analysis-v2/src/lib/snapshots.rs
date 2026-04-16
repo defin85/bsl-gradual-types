@@ -747,6 +747,20 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                     semantic_facts_materialize_ms,
                     semantic_facts_seed_module_context_ms: profile.seed_module_context_ms,
                     semantic_facts_local_function_summaries_ms: profile.local_function_summaries_ms,
+                    semantic_facts_local_function_summaries_prep_ms: profile
+                        .local_function_summaries_prep_ms,
+                    semantic_facts_local_function_summaries_fixed_point_ms: profile
+                        .local_function_summaries_fixed_point_ms,
+                    semantic_facts_local_function_summaries_snapshot_build_ms: profile
+                        .local_function_summaries_snapshot_build_ms,
+                    semantic_facts_local_function_summaries_body_infer_ms: profile
+                        .local_function_summaries_body_infer_ms,
+                    semantic_facts_local_function_summaries_function_count: profile
+                        .local_function_summaries_function_count,
+                    semantic_facts_local_function_summaries_scc_count: profile
+                        .local_function_summaries_scc_count,
+                    semantic_facts_local_function_summaries_fixed_point_iteration_count: profile
+                        .local_function_summaries_fixed_point_iteration_count,
                     semantic_facts_visit_statements_ms: profile.visit_statements_ms,
                     semantic_facts_visit_callable_body_ms: profile.visit_callable_body_ms,
                     semantic_facts_visit_callable_body_count: profile.visit_callable_body_count,

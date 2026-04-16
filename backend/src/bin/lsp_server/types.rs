@@ -512,6 +512,56 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_diagnostics_query_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_inputs_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_parse_result_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_collect_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_flow_sensitive_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_ast_to_ir_convert_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_materialize_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_seed_module_context_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_visit_statements_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_statement_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summary_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_index_entry_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub publish_wait_ms: Option<u64>,
 }
 
@@ -550,6 +600,10 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_ready_snapshot_timeout_phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_timeout_phase_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_timeout_leaf: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_timeout_leaf_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -595,6 +649,30 @@ pub struct DiagnosticsSaveTimelineTrace {
         Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
         Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:

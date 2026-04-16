@@ -7,6 +7,72 @@ pub struct AnalysisV2 {
     settings: SettingsSnapshot,
 }
 
+fn merge_ir_build_profiles(
+    current: Option<crate::IrBuildProfile>,
+    next: crate::IrBuildProfile,
+) -> Option<crate::IrBuildProfile> {
+    let mut current = current.unwrap_or_default();
+    current.ast_to_ir_convert_ms = current
+        .ast_to_ir_convert_ms
+        .saturating_add(next.ast_to_ir_convert_ms);
+    current.semantic_facts_materialize_ms = current
+        .semantic_facts_materialize_ms
+        .saturating_add(next.semantic_facts_materialize_ms);
+    current.semantic_facts_seed_module_context_ms = current
+        .semantic_facts_seed_module_context_ms
+        .saturating_add(next.semantic_facts_seed_module_context_ms);
+    current.semantic_facts_local_function_summaries_ms = current
+        .semantic_facts_local_function_summaries_ms
+        .saturating_add(next.semantic_facts_local_function_summaries_ms);
+    current.semantic_facts_local_function_summaries_prep_ms = current
+        .semantic_facts_local_function_summaries_prep_ms
+        .saturating_add(next.semantic_facts_local_function_summaries_prep_ms);
+    current.semantic_facts_local_function_summaries_fixed_point_ms = current
+        .semantic_facts_local_function_summaries_fixed_point_ms
+        .saturating_add(next.semantic_facts_local_function_summaries_fixed_point_ms);
+    current.semantic_facts_local_function_summaries_snapshot_build_ms = current
+        .semantic_facts_local_function_summaries_snapshot_build_ms
+        .saturating_add(next.semantic_facts_local_function_summaries_snapshot_build_ms);
+    current.semantic_facts_local_function_summaries_body_infer_ms = current
+        .semantic_facts_local_function_summaries_body_infer_ms
+        .saturating_add(next.semantic_facts_local_function_summaries_body_infer_ms);
+    current.semantic_facts_local_function_summaries_function_count = current
+        .semantic_facts_local_function_summaries_function_count
+        .saturating_add(next.semantic_facts_local_function_summaries_function_count);
+    current.semantic_facts_local_function_summaries_scc_count = current
+        .semantic_facts_local_function_summaries_scc_count
+        .saturating_add(next.semantic_facts_local_function_summaries_scc_count);
+    current.semantic_facts_local_function_summaries_fixed_point_iteration_count = current
+        .semantic_facts_local_function_summaries_fixed_point_iteration_count
+        .saturating_add(next.semantic_facts_local_function_summaries_fixed_point_iteration_count);
+    current.semantic_facts_visit_statements_ms = current
+        .semantic_facts_visit_statements_ms
+        .saturating_add(next.semantic_facts_visit_statements_ms);
+    current.semantic_facts_visit_callable_body_ms = current
+        .semantic_facts_visit_callable_body_ms
+        .saturating_add(next.semantic_facts_visit_callable_body_ms);
+    current.semantic_facts_visit_callable_body_count = current
+        .semantic_facts_visit_callable_body_count
+        .saturating_add(next.semantic_facts_visit_callable_body_count);
+    current.semantic_facts_merge_control_flow_env_ms = current
+        .semantic_facts_merge_control_flow_env_ms
+        .saturating_add(next.semantic_facts_merge_control_flow_env_ms);
+    current.semantic_facts_merge_control_flow_env_count = current
+        .semantic_facts_merge_control_flow_env_count
+        .saturating_add(next.semantic_facts_merge_control_flow_env_count);
+    current.semantic_facts_statement_count = current
+        .semantic_facts_statement_count
+        .saturating_add(next.semantic_facts_statement_count);
+    current.semantic_facts_local_function_summary_count = current
+        .semantic_facts_local_function_summary_count
+        .saturating_add(next.semantic_facts_local_function_summary_count);
+    current.semantic_facts_index_entry_count = current
+        .semantic_facts_index_entry_count
+        .saturating_add(next.semantic_facts_index_entry_count);
+    current.total_ms = current.total_ms.saturating_add(next.total_ms);
+    Some(current)
+}
+
 impl AnalysisV2 {
     fn parse_snapshot_for_file(&self, file_id: FileId, file: SourceFile) -> Option<&ParseSnapshot> {
         let snapshot = self.parse_snapshots.get(&file_id)?;
@@ -1056,6 +1122,7 @@ impl AnalysisV2 {
                     parse_source: Some(parse_source),
                     ..SemanticDiagnosticsProfile::default()
                 },
+                ir_build_profile: None,
             }));
         }
 
@@ -1084,6 +1151,7 @@ impl AnalysisV2 {
                 parse_source: Some(parse_source),
                 ir_source: ir_profiled.source,
             },
+            ir_build_profile: Some(ir_profiled.profile),
         }))
     }
 
@@ -1140,6 +1208,7 @@ impl AnalysisV2 {
             .profile
             .ir_ms
             .saturating_add(ir_started.elapsed().as_millis());
+        base.ir_build_profile = merge_ir_build_profiles(base.ir_build_profile, ir_profiled.profile);
         if base.profile.ir_source.is_none() {
             base.profile.ir_source = ir_profiled.source;
         }

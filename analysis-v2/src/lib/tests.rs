@@ -1325,6 +1325,29 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         first.profile.ir_source,
         Some(IrArtifactSource::SnapshotBuild)
     );
+    let first_ir_build = first
+        .ir_build_profile
+        .expect("snapshot semantic diagnostics must expose IR build profile");
+    assert!(
+        first_ir_build.total_ms >= first_ir_build.ast_to_ir_convert_ms,
+        "snapshot IR build profile total must include AST->IR conversion"
+    );
+    assert!(
+        first_ir_build.total_ms >= first_ir_build.semantic_facts_materialize_ms,
+        "snapshot IR build profile total must include semantic-facts materialization"
+    );
+    assert!(
+        first_ir_build.semantic_facts_statement_count > 0,
+        "snapshot IR build profile must expose non-zero semantic statement count"
+    );
+    assert!(
+        first_ir_build.semantic_facts_local_function_summaries_function_count > 0,
+        "snapshot IR build profile must expose non-zero local function summary count"
+    );
+    assert!(
+        first_ir_build.semantic_facts_local_function_summaries_fixed_point_iteration_count > 0,
+        "snapshot IR build profile must expose fixed-point iteration count"
+    );
 
     let second = analysis
         .semantic_diagnostics_profiled(file_id)
@@ -1335,6 +1358,14 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         Some(SemanticDiagnosticsParseSource::Snapshot)
     );
     assert_eq!(second.profile.ir_source, Some(IrArtifactSource::ExactCache));
+    let second_ir_build = second
+        .ir_build_profile
+        .expect("cached semantic diagnostics must still expose IR build profile");
+    assert_eq!(
+        second_ir_build,
+        IrBuildProfile::default(),
+        "exact-cache semantic diagnostics should expose zero IR build breakdown"
+    );
 }
 
 #[test]

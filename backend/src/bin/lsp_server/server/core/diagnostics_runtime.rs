@@ -137,6 +137,8 @@ impl ReadySnapshotReliefValveOutcomeV2 {
 pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) timeout_phase: Option<&'static str>,
     pub(crate) timeout_phase_elapsed_ms: Option<u64>,
+    pub(crate) timeout_leaf: Option<&'static str>,
+    pub(crate) timeout_leaf_elapsed_ms: Option<u64>,
     pub(crate) parse_exec_ms: Option<u64>,
     pub(crate) parse_exec_timeout_subphase: Option<&'static str>,
     pub(crate) parse_exec_timeout_subphase_elapsed_ms: Option<u64>,
@@ -177,6 +179,14 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) program_lowering_reused_window_count: Option<u64>,
     pub(crate) program_lowering_rebuilt_window_count: Option<u64>,
     pub(crate) program_lowering_largest_rebuilt_window_lowering_units: Option<u64>,
+    pub(crate) program_lowering_fully_reused_top_level_node_count: Option<u64>,
+    pub(crate) program_lowering_fully_rebuilt_top_level_node_count: Option<u64>,
+    pub(crate) program_lowering_routine_body_reuse_node_count: Option<u64>,
+    pub(crate) program_lowering_fully_reused_top_level_lowering_units: Option<u64>,
+    pub(crate) program_lowering_fully_rebuilt_top_level_lowering_units: Option<u64>,
+    pub(crate) program_lowering_routine_body_reused_prefix_lowering_units: Option<u64>,
+    pub(crate) program_lowering_routine_body_reused_suffix_lowering_units: Option<u64>,
+    pub(crate) program_lowering_routine_body_rebuilt_lowering_units: Option<u64>,
 }
 
 impl DiagnosticsReadySnapshotPhaseAttributionV2 {
@@ -228,6 +238,8 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
         has_any.then_some(Self {
             timeout_phase: None,
             timeout_phase_elapsed_ms: None,
+            timeout_leaf: None,
+            timeout_leaf_elapsed_ms: None,
             parse_exec_ms: attribution.parse_exec_ms,
             parse_exec_timeout_subphase: None,
             parse_exec_timeout_subphase_elapsed_ms: None,
@@ -283,6 +295,22 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .map(|summary| summary.rebuilt_window_count),
             program_lowering_largest_rebuilt_window_lowering_units: program_lowering_summary
                 .map(|summary| summary.largest_rebuilt_window_lowering_units),
+            program_lowering_fully_reused_top_level_node_count: program_lowering_summary
+                .map(|summary| summary.fully_reused_top_level_node_count),
+            program_lowering_fully_rebuilt_top_level_node_count: program_lowering_summary
+                .map(|summary| summary.fully_rebuilt_top_level_node_count),
+            program_lowering_routine_body_reuse_node_count: program_lowering_summary
+                .map(|summary| summary.routine_body_reuse_node_count),
+            program_lowering_fully_reused_top_level_lowering_units: program_lowering_summary
+                .map(|summary| summary.fully_reused_top_level_lowering_units),
+            program_lowering_fully_rebuilt_top_level_lowering_units: program_lowering_summary
+                .map(|summary| summary.fully_rebuilt_top_level_lowering_units),
+            program_lowering_routine_body_reused_prefix_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_reused_prefix_lowering_units),
+            program_lowering_routine_body_reused_suffix_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_reused_suffix_lowering_units),
+            program_lowering_routine_body_rebuilt_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_rebuilt_lowering_units),
         })
     }
 
@@ -349,12 +377,72 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 Some(super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly),
             )
         );
+        let (timeout_leaf, timeout_leaf_elapsed_ms) = if include_timeout_phase {
+            match snapshot.current_phase {
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting) => {
+                    ("waiting", snapshot.current_phase_elapsed_ms)
+                }
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec) => {
+                    match snapshot.current_parse_exec_subphase {
+                        None => (
+                            "before_first_parse_exec_subphase",
+                            snapshot.current_phase_elapsed_ms,
+                        ),
+                        Some(
+                            super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+                        ) => match snapshot.current_core_build_checkpoint {
+                            None => (
+                                "before_first_core_build_checkpoint",
+                                snapshot.current_parse_exec_subphase_elapsed_ms,
+                            ),
+                            Some(
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+                            ) => match snapshot.current_assembly_checkpoint {
+                                None => (
+                                    "before_first_exact_ready_snapshot_assembly_checkpoint",
+                                    snapshot.current_core_build_checkpoint_elapsed_ms,
+                                ),
+                                Some(checkpoint) => (
+                                    checkpoint.as_str(),
+                                    snapshot.current_assembly_checkpoint_elapsed_ms,
+                                ),
+                            },
+                            Some(checkpoint) => (
+                                checkpoint.as_str(),
+                                snapshot.current_core_build_checkpoint_elapsed_ms,
+                            ),
+                        },
+                        Some(subphase) => {
+                            (subphase.as_str(), snapshot.current_parse_exec_subphase_elapsed_ms)
+                        }
+                    }
+                }
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization) => (
+                    "post_parse_pre_materialization",
+                    snapshot.current_phase_elapsed_ms,
+                ),
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall) => {
+                    ("ready_install", snapshot.current_phase_elapsed_ms)
+                }
+                Some(super::super::ReadyParseSnapshotAttributionPhaseV2::DocumentSymbolSideWork) => (
+                    "document_symbol_side_work",
+                    snapshot.current_phase_elapsed_ms,
+                ),
+                None => ("", None),
+            }
+        } else {
+            ("", None)
+        };
         let attribution = Self {
             timeout_phase: include_timeout_phase
                 .then(|| snapshot.current_phase.map(|phase| phase.as_str()))
                 .flatten(),
             timeout_phase_elapsed_ms: include_timeout_phase
                 .then_some(snapshot.current_phase_elapsed_ms)
+                .flatten(),
+            timeout_leaf: (include_timeout_phase && !timeout_leaf.is_empty()).then_some(timeout_leaf),
+            timeout_leaf_elapsed_ms: (include_timeout_phase && !timeout_leaf.is_empty())
+                .then_some(timeout_leaf_elapsed_ms)
                 .flatten(),
             parse_exec_ms: snapshot.completed.parse_exec_ms.or_else(|| {
                 matches!(
@@ -563,6 +651,14 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             program_lowering_reused_window_count: None,
             program_lowering_rebuilt_window_count: None,
             program_lowering_largest_rebuilt_window_lowering_units: None,
+            program_lowering_fully_reused_top_level_node_count: None,
+            program_lowering_fully_rebuilt_top_level_node_count: None,
+            program_lowering_routine_body_reuse_node_count: None,
+            program_lowering_fully_reused_top_level_lowering_units: None,
+            program_lowering_fully_rebuilt_top_level_lowering_units: None,
+            program_lowering_routine_body_reused_prefix_lowering_units: None,
+            program_lowering_routine_body_reused_suffix_lowering_units: None,
+            program_lowering_routine_body_rebuilt_lowering_units: None,
         };
         if diagnostics_save_coherence_debug_enabled() {
             emit_diagnostics_save_coherence_debug(format!(
@@ -634,6 +730,189 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct SemanticDiagnosticsIrBuildBreakdownV2 {
+    ast_to_ir_convert_ms: Option<Duration>,
+    semantic_facts_materialize_ms: Option<Duration>,
+    semantic_facts_seed_module_context_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_prep_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_fixed_point_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_snapshot_build_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_body_infer_ms: Option<Duration>,
+    semantic_facts_local_function_summaries_function_count: Option<u64>,
+    semantic_facts_local_function_summaries_scc_count: Option<u64>,
+    semantic_facts_local_function_summaries_fixed_point_iteration_count: Option<u64>,
+    semantic_facts_visit_statements_ms: Option<Duration>,
+    semantic_facts_visit_callable_body_ms: Option<Duration>,
+    semantic_facts_merge_control_flow_env_ms: Option<Duration>,
+    semantic_facts_visit_callable_body_count: Option<u64>,
+    semantic_facts_merge_control_flow_env_count: Option<u64>,
+    semantic_facts_statement_count: Option<u64>,
+    semantic_facts_local_function_summary_count: Option<u64>,
+    semantic_facts_index_entry_count: Option<u64>,
+}
+
+impl SemanticDiagnosticsIrBuildBreakdownV2 {
+    fn from_ir_build_profile(profile: bsl_analysis_v2::IrBuildProfile) -> Self {
+        let duration_from_profile_ms =
+            |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
+        Self {
+            ast_to_ir_convert_ms: (profile.ast_to_ir_convert_ms > 0)
+                .then(|| duration_from_profile_ms(profile.ast_to_ir_convert_ms)),
+            semantic_facts_materialize_ms: (profile.semantic_facts_materialize_ms > 0)
+                .then(|| duration_from_profile_ms(profile.semantic_facts_materialize_ms)),
+            semantic_facts_seed_module_context_ms: (profile.semantic_facts_seed_module_context_ms
+                > 0)
+            .then(|| duration_from_profile_ms(profile.semantic_facts_seed_module_context_ms)),
+            semantic_facts_local_function_summaries_ms: (profile
+                .semantic_facts_local_function_summaries_ms
+                > 0)
+            .then(|| duration_from_profile_ms(profile.semantic_facts_local_function_summaries_ms)),
+            semantic_facts_local_function_summaries_prep_ms: (profile
+                .semantic_facts_local_function_summaries_prep_ms
+                > 0)
+            .then(|| {
+                duration_from_profile_ms(profile.semantic_facts_local_function_summaries_prep_ms)
+            }),
+            semantic_facts_local_function_summaries_fixed_point_ms: (profile
+                .semantic_facts_local_function_summaries_fixed_point_ms
+                > 0)
+            .then(|| {
+                duration_from_profile_ms(
+                    profile.semantic_facts_local_function_summaries_fixed_point_ms,
+                )
+            }),
+            semantic_facts_local_function_summaries_snapshot_build_ms: (profile
+                .semantic_facts_local_function_summaries_snapshot_build_ms
+                > 0)
+            .then(|| {
+                duration_from_profile_ms(
+                    profile.semantic_facts_local_function_summaries_snapshot_build_ms,
+                )
+            }),
+            semantic_facts_local_function_summaries_body_infer_ms: (profile
+                .semantic_facts_local_function_summaries_body_infer_ms
+                > 0)
+            .then(|| {
+                duration_from_profile_ms(
+                    profile.semantic_facts_local_function_summaries_body_infer_ms,
+                )
+            }),
+            semantic_facts_local_function_summaries_function_count: (profile
+                .semantic_facts_local_function_summaries_function_count
+                > 0)
+            .then_some(profile.semantic_facts_local_function_summaries_function_count),
+            semantic_facts_local_function_summaries_scc_count: (profile
+                .semantic_facts_local_function_summaries_scc_count
+                > 0)
+            .then_some(profile.semantic_facts_local_function_summaries_scc_count),
+            semantic_facts_local_function_summaries_fixed_point_iteration_count: (profile
+                .semantic_facts_local_function_summaries_fixed_point_iteration_count
+                > 0)
+            .then_some(profile.semantic_facts_local_function_summaries_fixed_point_iteration_count),
+            semantic_facts_visit_statements_ms: (profile.semantic_facts_visit_statements_ms > 0)
+                .then(|| duration_from_profile_ms(profile.semantic_facts_visit_statements_ms)),
+            semantic_facts_visit_callable_body_ms: (profile.semantic_facts_visit_callable_body_ms
+                > 0)
+            .then(|| duration_from_profile_ms(profile.semantic_facts_visit_callable_body_ms)),
+            semantic_facts_merge_control_flow_env_ms: (profile
+                .semantic_facts_merge_control_flow_env_ms
+                > 0)
+            .then(|| duration_from_profile_ms(profile.semantic_facts_merge_control_flow_env_ms)),
+            semantic_facts_visit_callable_body_count: (profile
+                .semantic_facts_visit_callable_body_count
+                > 0)
+            .then_some(profile.semantic_facts_visit_callable_body_count),
+            semantic_facts_merge_control_flow_env_count: (profile
+                .semantic_facts_merge_control_flow_env_count
+                > 0)
+            .then_some(profile.semantic_facts_merge_control_flow_env_count),
+            semantic_facts_statement_count: (profile.semantic_facts_statement_count > 0)
+                .then_some(profile.semantic_facts_statement_count),
+            semantic_facts_local_function_summary_count: (profile
+                .semantic_facts_local_function_summary_count
+                > 0)
+            .then_some(profile.semantic_facts_local_function_summary_count),
+            semantic_facts_index_entry_count: (profile.semantic_facts_index_entry_count > 0)
+                .then_some(profile.semantic_facts_index_entry_count),
+        }
+    }
+
+    fn has_any(self) -> bool {
+        self.ast_to_ir_convert_ms.is_some()
+            || self.semantic_facts_materialize_ms.is_some()
+            || self.semantic_facts_seed_module_context_ms.is_some()
+            || self.semantic_facts_local_function_summaries_ms.is_some()
+            || self
+                .semantic_facts_local_function_summaries_prep_ms
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_fixed_point_ms
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_snapshot_build_ms
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_body_infer_ms
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_function_count
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_scc_count
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_fixed_point_iteration_count
+                .is_some()
+            || self.semantic_facts_visit_statements_ms.is_some()
+            || self.semantic_facts_visit_callable_body_ms.is_some()
+            || self.semantic_facts_merge_control_flow_env_ms.is_some()
+            || self.semantic_facts_visit_callable_body_count.is_some()
+            || self.semantic_facts_merge_control_flow_env_count.is_some()
+            || self.semantic_facts_statement_count.is_some()
+            || self.semantic_facts_local_function_summary_count.is_some()
+            || self.semantic_facts_index_entry_count.is_some()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SemanticDiagnosticsQueryBreakdownV2 {
+    inputs_ms: Option<Duration>,
+    parse_result_ms: Option<Duration>,
+    ir_ms: Option<Duration>,
+    collect_ms: Option<Duration>,
+    flow_sensitive_ms: Option<Duration>,
+    ir_build_breakdown: Option<SemanticDiagnosticsIrBuildBreakdownV2>,
+}
+
+impl SemanticDiagnosticsQueryBreakdownV2 {
+    fn from_profiled_result(profiled: &bsl_analysis_v2::SemanticDiagnosticsProfiledResult) -> Self {
+        let duration_from_profile_ms =
+            |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
+        Self {
+            inputs_ms: Some(duration_from_profile_ms(profiled.profile.inputs_ms)),
+            parse_result_ms: Some(duration_from_profile_ms(profiled.profile.parse_result_ms)),
+            ir_ms: Some(duration_from_profile_ms(profiled.profile.ir_ms)),
+            collect_ms: Some(duration_from_profile_ms(profiled.profile.collect_ms)),
+            flow_sensitive_ms: (profiled.profile.flow_sensitive_ms > 0)
+                .then(|| duration_from_profile_ms(profiled.profile.flow_sensitive_ms)),
+            ir_build_breakdown: profiled
+                .ir_build_profile
+                .map(SemanticDiagnosticsIrBuildBreakdownV2::from_ir_build_profile),
+        }
+    }
+
+    fn has_any(self) -> bool {
+        self.inputs_ms.is_some()
+            || self.parse_result_ms.is_some()
+            || self.ir_ms.is_some()
+            || self.collect_ms.is_some()
+            || self.flow_sensitive_ms.is_some()
+            || self.ir_build_breakdown.is_some_and(|value| value.has_any())
+    }
+}
+
 struct SaveFollowupReadyArtifactsReply {
     diagnostics: Vec<tower_lsp::lsp_types::Diagnostic>,
     observed_deps_id: String,
@@ -646,6 +925,7 @@ struct SaveFollowupReadyArtifactsReply {
     semantic_path: Option<&'static str>,
     semantic_parse_source: Option<&'static str>,
     semantic_ir_source: Option<&'static str>,
+    semantic_query_breakdown: Option<SemanticDiagnosticsQueryBreakdownV2>,
 }
 
 enum SaveFollowupReadyArtifactsAttemptV2 {
@@ -940,6 +1220,7 @@ impl BslLanguageServer {
         snapshot_with_deps_ms: Option<Duration>,
         syntax_diagnostics_query_ms: Option<Duration>,
         semantic_diagnostics_query_ms: Option<Duration>,
+        semantic_diagnostics_query_breakdown: Option<SemanticDiagnosticsQueryBreakdownV2>,
         publish_wait_ms: Option<Duration>,
         syntax_work_mode: Option<&'static str>,
         semantic_path: Option<&'static str>,
@@ -971,6 +1252,7 @@ impl BslLanguageServer {
             || snapshot_with_deps_ms.is_some()
             || syntax_diagnostics_query_ms.is_some()
             || semantic_diagnostics_query_ms.is_some()
+            || semantic_diagnostics_query_breakdown.is_some_and(|value| value.has_any())
             || publish_wait_ms.is_some())
         .then(|| crate::types::DiagnosticsSaveTimelinePublishTrace {
             profile: supersession_key.profile.as_str().to_string(),
@@ -993,6 +1275,122 @@ impl BslLanguageServer {
                 .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
             semantic_diagnostics_query_ms: semantic_diagnostics_query_ms
                 .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
+            semantic_diagnostics_inputs_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| duration_to_nonzero_ms(value.inputs_ms)),
+            semantic_diagnostics_parse_result_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| duration_to_nonzero_ms(value.parse_result_ms)),
+            semantic_diagnostics_ir_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| duration_to_nonzero_ms(value.ir_ms)),
+            semantic_diagnostics_collect_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| duration_to_nonzero_ms(value.collect_ms)),
+            semantic_diagnostics_flow_sensitive_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| duration_to_nonzero_ms(value.flow_sensitive_ms)),
+            semantic_diagnostics_ir_ast_to_ir_convert_ms: semantic_diagnostics_query_breakdown
+                .and_then(|value| value.ir_build_breakdown)
+                .and_then(|value| duration_to_nonzero_ms(value.ast_to_ir_convert_ms)),
+            semantic_diagnostics_ir_semantic_facts_materialize_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| duration_to_nonzero_ms(value.semantic_facts_materialize_ms)),
+            semantic_diagnostics_ir_semantic_facts_seed_module_context_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(value.semantic_facts_seed_module_context_ms)
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(value.semantic_facts_local_function_summaries_ms)
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(
+                            value.semantic_facts_local_function_summaries_prep_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(
+                            value.semantic_facts_local_function_summaries_fixed_point_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(
+                            value.semantic_facts_local_function_summaries_snapshot_build_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(
+                            value.semantic_facts_local_function_summaries_body_infer_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value.semantic_facts_local_function_summaries_function_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_local_function_summaries_scc_count),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value
+                            .semantic_facts_local_function_summaries_fixed_point_iteration_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_visit_statements_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(value.semantic_facts_visit_statements_ms)
+                    }),
+            semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(value.semantic_facts_visit_callable_body_ms)
+                    }),
+            semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_nonzero_ms(value.semantic_facts_merge_control_flow_env_ms)
+                    }),
+            semantic_diagnostics_ir_semantic_facts_visit_callable_body_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_visit_callable_body_count),
+            semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_merge_control_flow_env_count),
+            semantic_diagnostics_ir_semantic_facts_statement_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_statement_count),
+            semantic_diagnostics_ir_semantic_facts_local_function_summary_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_local_function_summary_count),
+            semantic_diagnostics_ir_semantic_facts_index_entry_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_index_entry_count),
             publish_wait_ms: publish_wait_ms
                 .map(|value| value.as_millis().min(u64::MAX as u128) as u64),
         });
@@ -2038,6 +2436,7 @@ impl BslLanguageServer {
                     let semantic_started = Instant::now();
                     let mut semantic_parse_source = None;
                     let mut semantic_ir_source = None;
+                    let mut semantic_query_breakdown = None;
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
                         &context_for_blocking,
                         bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
@@ -2056,6 +2455,10 @@ impl BslLanguageServer {
                     let duration_from_profile_ms =
                         |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
                     if let Some(profiled) = query {
+                        semantic_query_breakdown =
+                            Some(SemanticDiagnosticsQueryBreakdownV2::from_profiled_result(
+                                &profiled,
+                            ));
                         coordinator_for_blocking
                             .record_intellisense_v2_semantic_diagnostics_query_breakdown(
                                 duration_from_profile_ms(profiled.profile.inputs_ms),
@@ -2099,6 +2502,7 @@ impl BslLanguageServer {
                         semantic_path,
                         semantic_parse_source,
                         semantic_ir_source,
+                        semantic_query_breakdown,
                     })
                 },
             )
@@ -2129,6 +2533,7 @@ impl BslLanguageServer {
                         None,
                         runtime_queue_wait,
                         apply_lag,
+                        None,
                         None,
                         None,
                         None,
@@ -2172,6 +2577,7 @@ impl BslLanguageServer {
                     None,
                     reply.syntax_elapsed,
                     reply.semantic_elapsed,
+                    reply.semantic_query_breakdown,
                     None,
                     reply.syntax_work_mode,
                     reply.semantic_path,
@@ -2231,6 +2637,7 @@ impl BslLanguageServer {
                 None,
                 reply.syntax_elapsed,
                 reply.semantic_elapsed,
+                reply.semantic_query_breakdown,
                 Some(publish_started.elapsed()),
                 reply.syntax_work_mode,
                 reply.semantic_path,
@@ -2467,6 +2874,7 @@ impl BslLanguageServer {
                     let semantic_started = Instant::now();
                     let mut semantic_parse_source = None;
                     let mut semantic_ir_source = None;
+                    let mut semantic_query_breakdown = None;
                     let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
                         &context_for_blocking,
                         bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
@@ -2485,6 +2893,10 @@ impl BslLanguageServer {
                     let duration_from_profile_ms =
                         |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
                     if let Some(profiled) = query {
+                        semantic_query_breakdown =
+                            Some(SemanticDiagnosticsQueryBreakdownV2::from_profiled_result(
+                                &profiled,
+                            ));
                         coordinator_for_blocking
                             .record_intellisense_v2_semantic_diagnostics_query_breakdown(
                                 duration_from_profile_ms(profiled.profile.inputs_ms),
@@ -2528,6 +2940,7 @@ impl BslLanguageServer {
                         semantic_path,
                         semantic_parse_source,
                         semantic_ir_source,
+                        semantic_query_breakdown,
                     })
                 },
             )
@@ -2558,6 +2971,7 @@ impl BslLanguageServer {
                         None,
                         runtime_queue_wait,
                         apply_lag,
+                        None,
                         None,
                         None,
                         None,
@@ -2601,6 +3015,7 @@ impl BslLanguageServer {
                     None,
                     reply.syntax_elapsed,
                     reply.semantic_elapsed,
+                    reply.semantic_query_breakdown,
                     None,
                     reply.syntax_work_mode,
                     reply.semantic_path,
@@ -2653,6 +3068,7 @@ impl BslLanguageServer {
                 None,
                 reply.syntax_elapsed,
                 reply.semantic_elapsed,
+                reply.semantic_query_breakdown,
                 Some(publish_started.elapsed()),
                 reply.syntax_work_mode,
                 reply.semantic_path,
@@ -2857,6 +3273,7 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -2878,6 +3295,7 @@ impl BslLanguageServer {
                         blocking_queue_wait_elapsed,
                         wait_for_file_version_elapsed,
                         snapshot_with_deps_elapsed,
+                        None,
                         None,
                         None,
                         None,
@@ -2951,6 +3369,7 @@ impl BslLanguageServer {
                             Some(syntax_elapsed),
                             None,
                             None,
+                            None,
                             Some("recomputed"),
                             None,
                             None,
@@ -3000,6 +3419,7 @@ impl BslLanguageServer {
                             None,
                             None,
                             None,
+                            None,
                             pipeline_started,
                         )
                         .await;
@@ -3036,6 +3456,7 @@ impl BslLanguageServer {
                     Some(syntax_elapsed),
                     None,
                     None,
+                    None,
                     Some("recomputed"),
                     None,
                     None,
@@ -3068,6 +3489,7 @@ impl BslLanguageServer {
             wait_for_file_version_elapsed,
             snapshot_with_deps_elapsed,
             Some(syntax_elapsed),
+            None,
             None,
             Some(publish_started.elapsed()),
             Some("recomputed"),
@@ -3372,6 +3794,7 @@ impl BslLanguageServer {
                     None,
                     None,
                     None,
+                    None,
                     pipeline_started,
                 )
                 .await;
@@ -3432,6 +3855,7 @@ impl BslLanguageServer {
                             disposition,
                             None,
                             queue_wait_elapsed,
+                            None,
                             None,
                             None,
                             None,
@@ -3653,6 +4077,7 @@ impl BslLanguageServer {
                         None,
                         None,
                         None,
+                        None,
                         pipeline_started,
                     )
                     .await;
@@ -3710,6 +4135,8 @@ impl BslLanguageServer {
         };
         let mut followup_semantic_parse_source: Option<&'static str> = None;
         let mut followup_semantic_ir_source: Option<&'static str> = None;
+        let mut followup_semantic_query_breakdown: Option<SemanticDiagnosticsQueryBreakdownV2> =
+            None;
         if save_followup_from_did_save && run_semantic {
             self.coordinator
                 .record_intellisense_v2_diagnostics_save_followup_semantic_path("generic_pipeline");
@@ -4005,6 +4432,7 @@ impl BslLanguageServer {
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
+                    followup_semantic_query_breakdown,
                     None,
                     None,
                     followup_semantic_path,
@@ -4042,6 +4470,7 @@ impl BslLanguageServer {
                         Some(snapshot_elapsed),
                         syntax_stage_elapsed,
                         semantic_stage_elapsed,
+                        followup_semantic_query_breakdown,
                         None,
                         followup_syntax_work_mode,
                         followup_semantic_path,
@@ -4143,6 +4572,10 @@ impl BslLanguageServer {
                     };
                     match query {
                         Ok(Some(profiled)) => {
+                            let semantic_query_breakdown =
+                                SemanticDiagnosticsQueryBreakdownV2::from_profiled_result(
+                                    &profiled,
+                                );
                             coordinator_for_blocking
                                 .record_intellisense_v2_semantic_diagnostics_query_breakdown(
                                     duration_from_profile_ms(profiled.profile.inputs_ms),
@@ -4175,10 +4608,11 @@ impl BslLanguageServer {
                                 elapsed,
                                 profiled.profile.parse_source.map(|source| source.as_str()),
                                 profiled.profile.ir_source.map(|source| source.as_str()),
+                                Some(semantic_query_breakdown),
                             )
                         }
-                        Ok(None) => (Vec::new(), false, elapsed, None, None),
-                        Err(_) => (Vec::new(), true, elapsed, None, None),
+                        Ok(None) => (Vec::new(), false, elapsed, None, None, None),
+                        Err(_) => (Vec::new(), true, elapsed, None, None, None),
                     }
                 },
             )
@@ -4200,12 +4634,14 @@ impl BslLanguageServer {
                     semantic_elapsed,
                     semantic_parse_source,
                     semantic_ir_source,
+                    semantic_query_breakdown,
                 )) => {
                     diagnostics.extend(semantic_diagnostics);
                     was_cancelled |= semantic_cancelled;
                     semantic_stage_elapsed = Some(semantic_elapsed);
                     followup_semantic_parse_source = semantic_parse_source;
                     followup_semantic_ir_source = semantic_ir_source;
+                    followup_semantic_query_breakdown = semantic_query_breakdown;
                     if let Some(threshold) =
                         super::super::intellisense_v2_slow_query_warn_threshold()
                     {
@@ -4322,6 +4758,7 @@ impl BslLanguageServer {
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
+                    followup_semantic_query_breakdown,
                     None,
                     followup_syntax_work_mode,
                     followup_semantic_path,
@@ -4369,6 +4806,7 @@ impl BslLanguageServer {
                     Some(snapshot_elapsed),
                     syntax_stage_elapsed,
                     semantic_stage_elapsed,
+                    followup_semantic_query_breakdown,
                     None,
                     followup_syntax_work_mode,
                     followup_semantic_path,
@@ -4436,6 +4874,7 @@ impl BslLanguageServer {
             Some(snapshot_elapsed),
             syntax_stage_elapsed,
             semantic_stage_elapsed,
+            followup_semantic_query_breakdown,
             Some(publish_started.elapsed()),
             followup_syntax_work_mode,
             followup_semantic_path,

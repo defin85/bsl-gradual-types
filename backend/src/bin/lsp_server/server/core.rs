@@ -267,6 +267,22 @@ fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inn
         attribution.program_lowering_rebuilt_window_count;
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units =
         attribution.program_lowering_largest_rebuilt_window_lowering_units;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count =
+        attribution.program_lowering_fully_reused_top_level_node_count;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count =
+        attribution.program_lowering_fully_rebuilt_top_level_node_count;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count =
+        attribution.program_lowering_routine_body_reuse_node_count;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units =
+        attribution.program_lowering_fully_reused_top_level_lowering_units;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units =
+        attribution.program_lowering_fully_rebuilt_top_level_lowering_units;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units =
+        attribution.program_lowering_routine_body_reused_prefix_lowering_units;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units =
+        attribution.program_lowering_routine_body_reused_suffix_lowering_units;
+    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units =
+        attribution.program_lowering_routine_body_rebuilt_lowering_units;
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms =
         attribution
             .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms;
@@ -314,6 +330,14 @@ fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
     update_followup_timing_max(
         &mut trace.followup_ready_snapshot_timeout_phase_elapsed_ms,
         attribution.timeout_phase_elapsed_ms,
+    );
+    if trace.followup_ready_snapshot_timeout_leaf.is_none() {
+        trace.followup_ready_snapshot_timeout_leaf =
+            attribution.timeout_leaf.map(|value| value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_timeout_leaf_elapsed_ms,
+        attribution.timeout_leaf_elapsed_ms,
     );
     if trace
         .followup_ready_snapshot_parse_exec_timeout_subphase
@@ -905,6 +929,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -933,6 +959,22 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                     None,
@@ -1008,6 +1050,8 @@ impl BslLanguageServer {
                     followup_ready_snapshot_task_state: None,
                     followup_ready_snapshot_timeout_phase: None,
                     followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                    followup_ready_snapshot_timeout_leaf: None,
+                    followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                     followup_ready_snapshot_parse_exec_ms: None,
                     followup_ready_snapshot_parse_exec_timeout_subphase: None,
                     followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -1037,6 +1081,22 @@ impl BslLanguageServer {
                     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                         None,
                     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                        None,
+                    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                         None,
                     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                         None,
@@ -1195,6 +1255,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -1223,6 +1285,22 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                     None,
@@ -1350,6 +1428,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -1378,6 +1458,22 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                     None,
@@ -1461,6 +1557,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -1489,6 +1587,22 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                     None,
@@ -1588,6 +1702,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
                 followup_ready_snapshot_parse_exec_ms: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase: None,
                 followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
@@ -1616,6 +1732,22 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
                     None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                     None,

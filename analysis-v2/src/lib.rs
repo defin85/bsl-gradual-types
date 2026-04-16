@@ -300,6 +300,7 @@ pub struct SemanticDiagnosticsProfile {
 pub struct SemanticDiagnosticsProfiledResult {
     pub diagnostics: Arc<Vec<TypeDiagnostic>>,
     pub profile: SemanticDiagnosticsProfile,
+    pub ir_build_profile: Option<IrBuildProfile>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -308,6 +309,13 @@ pub struct IrBuildProfile {
     pub semantic_facts_materialize_ms: u128,
     pub semantic_facts_seed_module_context_ms: u128,
     pub semantic_facts_local_function_summaries_ms: u128,
+    pub semantic_facts_local_function_summaries_prep_ms: u128,
+    pub semantic_facts_local_function_summaries_fixed_point_ms: u128,
+    pub semantic_facts_local_function_summaries_snapshot_build_ms: u128,
+    pub semantic_facts_local_function_summaries_body_infer_ms: u128,
+    pub semantic_facts_local_function_summaries_function_count: u64,
+    pub semantic_facts_local_function_summaries_scc_count: u64,
+    pub semantic_facts_local_function_summaries_fixed_point_iteration_count: u64,
     pub semantic_facts_visit_statements_ms: u128,
     pub semantic_facts_visit_callable_body_ms: u128,
     pub semantic_facts_visit_callable_body_count: u64,

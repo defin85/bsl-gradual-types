@@ -265,6 +265,14 @@ pub struct ParseSnapshotProgramLoweringSummary {
     pub reused_window_count: u64,
     pub rebuilt_window_count: u64,
     pub largest_rebuilt_window_lowering_units: u64,
+    pub fully_reused_top_level_node_count: u64,
+    pub fully_rebuilt_top_level_node_count: u64,
+    pub routine_body_reuse_node_count: u64,
+    pub fully_reused_top_level_lowering_units: u64,
+    pub fully_rebuilt_top_level_lowering_units: u64,
+    pub routine_body_reused_prefix_lowering_units: u64,
+    pub routine_body_reused_suffix_lowering_units: u64,
+    pub routine_body_rebuilt_lowering_units: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1216,6 +1224,19 @@ impl ParserCoordinator {
             .parse_tree_only_with_cancellation(&source, None, cancellation_flag)
         {
             Ok(tree) => {
+                if exact_program_lowering_reuse_enabled() {
+                    match TreeSitterAdapter::convert_tree_fast(&tree, &source) {
+                        Ok(parse_result) => {
+                            self.store_ast_memory(ast_cache_key(&source), &parse_result);
+                        }
+                        Err(error) => {
+                            warn!(
+                                "Tree-sitter AST priming failed during tree-cache prime: {}",
+                                error
+                            );
+                        }
+                    }
+                }
                 self.tree_cache.set(file_path, tree, source, content_hash);
                 Ok(())
             }
@@ -2377,6 +2398,13 @@ impl ParserCoordinator {
             let reused_lowering_units =
                 Self::count_lowering_units_in_statements(reused_program_prefix);
             let rebuilt_lowering_units = total_lowering_units.saturating_sub(reused_lowering_units);
+            let reused_top_level_node_count = reused_program_prefix.len() as u64;
+            let rebuilt_top_level_node_count = parse_result
+                .program
+                .statements
+                .len()
+                .saturating_sub(reused_program_prefix.len())
+                as u64;
             return ParseSnapshotProgramLoweringSummary {
                 reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::ReusedPrefix,
                 reused_lowering_units,
@@ -2384,6 +2412,14 @@ impl ParserCoordinator {
                 reused_window_count: 1,
                 rebuilt_window_count: u64::from(rebuilt_lowering_units > 0),
                 largest_rebuilt_window_lowering_units: rebuilt_lowering_units,
+                fully_reused_top_level_node_count: reused_top_level_node_count,
+                fully_rebuilt_top_level_node_count: rebuilt_top_level_node_count,
+                routine_body_reuse_node_count: 0,
+                fully_reused_top_level_lowering_units: reused_lowering_units,
+                fully_rebuilt_top_level_lowering_units: rebuilt_lowering_units,
+                routine_body_reused_prefix_lowering_units: 0,
+                routine_body_reused_suffix_lowering_units: 0,
+                routine_body_rebuilt_lowering_units: 0,
             };
         }
         ParseSnapshotProgramLoweringSummary {
@@ -2393,6 +2429,14 @@ impl ParserCoordinator {
             reused_window_count: 0,
             rebuilt_window_count: u64::from(total_lowering_units > 0),
             largest_rebuilt_window_lowering_units: total_lowering_units,
+            fully_reused_top_level_node_count: 0,
+            fully_rebuilt_top_level_node_count: parse_result.program.statements.len() as u64,
+            routine_body_reuse_node_count: 0,
+            fully_reused_top_level_lowering_units: 0,
+            fully_rebuilt_top_level_lowering_units: total_lowering_units,
+            routine_body_reused_prefix_lowering_units: 0,
+            routine_body_reused_suffix_lowering_units: 0,
+            routine_body_rebuilt_lowering_units: 0,
         }
     }
 
@@ -2406,14 +2450,26 @@ impl ParserCoordinator {
         let mut reused_window_count = 0u64;
         let mut rebuilt_window_count = 0u64;
         let mut largest_rebuilt_window_lowering_units = 0u64;
+        let mut fully_reused_top_level_node_count = 0u64;
+        let mut fully_rebuilt_top_level_node_count = 0u64;
+        let mut routine_body_reuse_node_count = 0u64;
+        let mut fully_reused_top_level_lowering_units = 0u64;
+        let mut fully_rebuilt_top_level_lowering_units = 0u64;
+        let mut routine_body_reused_prefix_lowering_units = 0u64;
+        let mut routine_body_reused_suffix_lowering_units = 0u64;
+        let mut routine_body_rebuilt_lowering_units = 0u64;
         let mut previous_top_level_reused = false;
         let mut previous_top_level_rebuilt = false;
 
         for (idx, node_plan) in lowering_reuse_plan.top_level_nodes.iter().enumerate() {
             match node_plan {
                 LoweringReuseNodePlan::ReuseStatement(statement) => {
-                    reused_lowering_units =
-                        reused_lowering_units.saturating_add(Self::count_lowering_units(statement));
+                    let reused_units = Self::count_lowering_units(statement);
+                    reused_lowering_units = reused_lowering_units.saturating_add(reused_units);
+                    fully_reused_top_level_lowering_units =
+                        fully_reused_top_level_lowering_units.saturating_add(reused_units);
+                    fully_reused_top_level_node_count =
+                        fully_reused_top_level_node_count.saturating_add(1);
                     if !previous_top_level_reused {
                         reused_window_count = reused_window_count.saturating_add(1);
                     }
@@ -2427,6 +2483,10 @@ impl ParserCoordinator {
                         .unwrap_or(0);
                     rebuilt_lowering_units =
                         rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    fully_rebuilt_top_level_lowering_units =
+                        fully_rebuilt_top_level_lowering_units.saturating_add(rebuilt_window_units);
+                    fully_rebuilt_top_level_node_count =
+                        fully_rebuilt_top_level_node_count.saturating_add(1);
                     if !previous_top_level_rebuilt {
                         rebuilt_window_count = rebuilt_window_count.saturating_add(1);
                     }
@@ -2436,11 +2496,12 @@ impl ParserCoordinator {
                     previous_top_level_rebuilt = true;
                 }
                 LoweringReuseNodePlan::RebuildRoutineBody(body_reuse) => {
+                    let reused_prefix_lowering_units =
+                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_prefix);
+                    let reused_suffix_lowering_units =
+                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_suffix);
                     let reused_body_lowering_units =
-                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_prefix)
-                            .saturating_add(Self::count_lowering_units_in_statements(
-                                &body_reuse.reused_body_suffix,
-                            ));
+                        reused_prefix_lowering_units.saturating_add(reused_suffix_lowering_units);
                     let rebuilt_window_units = final_statements
                         .get(idx)
                         .map(Self::count_lowering_units)
@@ -2450,6 +2511,15 @@ impl ParserCoordinator {
                         reused_lowering_units.saturating_add(reused_body_lowering_units);
                     rebuilt_lowering_units =
                         rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    routine_body_reuse_node_count = routine_body_reuse_node_count.saturating_add(1);
+                    routine_body_reused_prefix_lowering_units =
+                        routine_body_reused_prefix_lowering_units
+                            .saturating_add(reused_prefix_lowering_units);
+                    routine_body_reused_suffix_lowering_units =
+                        routine_body_reused_suffix_lowering_units
+                            .saturating_add(reused_suffix_lowering_units);
+                    routine_body_rebuilt_lowering_units =
+                        routine_body_rebuilt_lowering_units.saturating_add(rebuilt_window_units);
                     if !body_reuse.reused_body_prefix.is_empty() {
                         reused_window_count = reused_window_count.saturating_add(1);
                     }
@@ -2488,6 +2558,14 @@ impl ParserCoordinator {
             reused_window_count,
             rebuilt_window_count,
             largest_rebuilt_window_lowering_units,
+            fully_reused_top_level_node_count,
+            fully_rebuilt_top_level_node_count,
+            routine_body_reuse_node_count,
+            fully_reused_top_level_lowering_units,
+            fully_rebuilt_top_level_lowering_units,
+            routine_body_reused_prefix_lowering_units,
+            routine_body_reused_suffix_lowering_units,
+            routine_body_rebuilt_lowering_units,
         }
     }
 

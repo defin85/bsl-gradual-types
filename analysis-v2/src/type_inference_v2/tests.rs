@@ -41,6 +41,30 @@ fn ir_program(
     program
 }
 
+fn semantic_facts_profile(
+    source: &str,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndexBuildProfile {
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse ok");
+    let mut program = crate::AstToIrConverter::convert_with_resolver(
+        parsed.program.clone(),
+        source.to_string(),
+        file_path.to_string(),
+        deps.repository.clone(),
+        deps.signature_index.clone(),
+        deps.resolver.clone(),
+    )
+    .expect("convert to ir");
+    super::materialize_semantic_facts_with_path_profiled(
+        &mut program,
+        &parsed.program,
+        source,
+        file_path,
+        deps,
+    )
+}
+
 fn structural_member_span_for_literal(source: &str, literal: &str) -> StructuralMemberSpan {
     structural_member_span_for_literal_occurrence(source, literal, 0)
 }
@@ -846,6 +870,137 @@ fn resolves_local_function_return_type_defined_later_in_common_module_file() {
         .type_at_byte_offset(offset)
         .expect("type at function call");
     assert_eq!(result.type_name(), "Строка");
+}
+
+#[test]
+fn singleton_non_recursive_local_summaries_skip_fixed_point_and_preserve_local_call_semantics() {
+    let source = r#"Процедура Тест()
+    x = СтрокаИзЛокальной();
+КонецПроцедуры
+
+Функция СтрокаИзЛокальной()
+    Возврат "Тест";
+КонецФункции
+"#;
+    let deps = deps_with_array_method();
+    let profile = semantic_facts_profile(source, "test.bsl", deps.clone());
+    assert_eq!(profile.local_function_summaries_function_count, 2);
+    assert_eq!(profile.local_function_summaries_scc_count, 2);
+    assert_eq!(
+        profile.local_function_summaries_fixed_point_iteration_count,
+        0
+    );
+    assert_eq!(
+        profile.local_function_summaries_singleton_fast_path_count,
+        2
+    );
+    assert_eq!(profile.local_function_summaries_recursive_scc_count, 0);
+
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+    let offset = source.find("СтрокаИзЛокальной()").expect("call") as u32;
+    let result = index.type_at_byte_offset(offset).expect("type at call");
+    assert_eq!(result.type_name(), "Строка");
+
+    let target = index
+        .call_method_target_at_byte_offset(offset)
+        .expect("local call target");
+    assert_eq!(target.method_name, "СтрокаИзЛокальной");
+    assert_eq!(
+        target
+            .signature
+            .as_ref()
+            .and_then(|signature| signature.return_type.as_deref()),
+        Some("Строка")
+    );
+    assert_eq!(
+        target.signature.as_ref().map(|signature| signature.source),
+        Some(SignatureSource::UserCode)
+    );
+    assert!(target.definition_location.is_some());
+}
+
+#[test]
+fn self_recursive_singleton_stays_on_convergence_path_and_preserves_local_call_semantics() {
+    let source = r#"Функция Сама(Флаг)
+    Если Флаг Тогда
+        Возврат Сама(Ложь);
+    КонецЕсли;
+    Возврат 1;
+КонецФункции
+
+Процедура Тест()
+    x = Сама(Истина);
+КонецПроцедуры
+"#;
+    let deps = deps_with_array_method();
+    let profile = semantic_facts_profile(source, "test.bsl", deps.clone());
+    assert_eq!(profile.local_function_summaries_function_count, 2);
+    assert_eq!(profile.local_function_summaries_scc_count, 2);
+    assert!(profile.local_function_summaries_fixed_point_iteration_count > 0);
+    assert_eq!(
+        profile.local_function_summaries_singleton_fast_path_count,
+        1
+    );
+    assert_eq!(profile.local_function_summaries_recursive_scc_count, 1);
+
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+    let offset = source.find("Сама(Истина)").expect("call") as u32;
+    let target = index
+        .call_method_target_at_byte_offset(offset)
+        .expect("self-recursive call target");
+    assert_eq!(target.method_name, "Сама");
+    assert_eq!(
+        target.signature.as_ref().map(|signature| signature.source),
+        Some(SignatureSource::UserCode)
+    );
+    assert!(target.definition_location.is_some());
+}
+
+#[test]
+fn mutually_recursive_local_summaries_reuse_stable_out_of_scc_semantics() {
+    let source = r#"Функция ВнешняяСтрока()
+    Возврат "Тест";
+КонецФункции
+
+Функция A(Флаг)
+    Если Флаг Тогда
+        Возврат ВнешняяСтрока();
+    КонецЕсли;
+    Возврат B();
+КонецФункции
+
+Функция B()
+    Возврат A(Истина);
+КонецФункции
+
+Процедура Тест()
+    x = A(Ложь);
+КонецПроцедуры
+"#;
+    let deps = deps_with_array_method();
+    let profile = semantic_facts_profile(source, "test.bsl", deps.clone());
+    assert_eq!(profile.local_function_summaries_function_count, 4);
+    assert_eq!(profile.local_function_summaries_scc_count, 3);
+    assert!(profile.local_function_summaries_fixed_point_iteration_count > 0);
+    assert_eq!(
+        profile.local_function_summaries_singleton_fast_path_count,
+        2
+    );
+    assert_eq!(profile.local_function_summaries_recursive_scc_count, 1);
+
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+    let offset = source.find("A(Ложь)").expect("call") as u32;
+    let target = index
+        .call_method_target_at_byte_offset(offset)
+        .expect("mutually recursive call target");
+    assert_eq!(target.method_name, "A");
+    assert_eq!(
+        target.signature.as_ref().map(|signature| signature.source),
+        Some(SignatureSource::UserCode)
+    );
 }
 
 #[test]

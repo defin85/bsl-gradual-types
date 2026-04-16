@@ -31,7 +31,8 @@ spending real CPU on avoidable summary orchestration rather than on unavoidable 
 - Require parity-preserving semantics: self-recursive or mutually recursive SCCs MUST still use a
   convergence path, and the new fast path MUST NOT weaken exact semantic results.
 - Require representative evidence and low-cardinality observability proving that the residual moved
-  away from file-wide fixed-point churn.
+  away from file-wide fixed-point churn, including explicit counters that distinguish singleton
+  fast-path wins from recursive-SCC residual work.
 
 ## Sequence
 

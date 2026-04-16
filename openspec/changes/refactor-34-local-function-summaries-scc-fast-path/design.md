@@ -37,7 +37,9 @@ framework itself rather than in unavoidable recursive convergence:
     effective summaries they would have observed under the legacy full snapshot.
 - Performance invariants:
   - singleton non-recursive SCCs MUST NOT enter the generic fixed-point loop;
-  - recursive SCC iterations MUST NOT rebuild a full-file local-summary snapshot on each iteration.
+  - recursive SCC iterations MUST NOT rebuild a full-file local-summary snapshot on each iteration;
+  - the `base + overlay` lookup model MUST NOT clone or rebuild unrelated out-of-SCC summaries per
+    SCC or per iteration under a different helper name.
 - Out of scope:
   - broad type-inference rewrites outside the local-function-summary hotspot;
   - routing, wait-policy, or fallback-behavior changes.
@@ -91,6 +93,12 @@ Lookup rules:
 
 This preserves the semantic contract of “current SCC sees the latest in-SCC summaries and stable
 out-of-SCC summaries” without rebuilding unrelated file-wide entries each iteration.
+
+The contract here is semantic and costed, not merely nominal:
+
+- it is acceptable to materialize the active SCC overlay for the current iteration;
+- it is not acceptable to clone, rebuild, or remap unrelated out-of-SCC summaries per SCC or per
+  iteration as part of serving the base view.
 
 ### 3. Keep the lookup refactor narrow
 
@@ -164,7 +172,9 @@ hot-path waste currently visible inside one canonical build.
   - `local_function_summaries_body_infer_ms`;
   - `function_count`;
   - `scc_count`;
-  - `fixed_point_iteration_count`.
+  - `fixed_point_iteration_count`;
+  - `singleton_fast_path_count`;
+  - `recursive_scc_count`.
 - Refresh representative live evidence on `conf_big`.
 
 ## Quality Gates
@@ -174,4 +184,6 @@ hot-path waste currently visible inside one canonical build.
   current baseline.
 - On singleton-heavy representative load, `fixed_point_iteration_count` is no longer approximately
   `2 * function_count`.
+- Representative evidence distinguishes singleton fast-path wins from recursive residual through
+  explicit bounded counters rather than inference from one aggregate iteration count.
 - Recursive SCC parity tests stay green.

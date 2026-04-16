@@ -6705,6 +6705,10 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_version_mismatch_on_sta
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -6877,6 +6881,10 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_superseded_when_newer_c
                     None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
                     None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
@@ -8076,6 +8084,10 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -8132,6 +8144,10 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                     Some(1),
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     Some(3),
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    Some(0),
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    Some(1),
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: Some(1),
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: Some(1),
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: Some(1),
@@ -8209,6 +8225,16 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
         followup_publish
             .semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count,
         Some(3)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count,
+        Some(0)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count,
+        Some(1)
     );
     assert_eq!(
         followup_publish.semantic_diagnostics_ir_semantic_facts_visit_statements_ms,
@@ -9016,6 +9042,10 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -9070,6 +9100,10 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                     None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
                     None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
@@ -14173,6 +14207,10 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -14235,6 +14273,10 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                     None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
                     None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
@@ -14427,6 +14469,10 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -14489,6 +14535,10 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                     None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
                     None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
@@ -54387,6 +54437,14 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                         && ready_artifacts_publish
                             .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count")
                             .and_then(|value| value.as_u64())
+                            .is_some()
+                        && ready_artifacts_publish
+                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count")
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                        && ready_artifacts_publish
+                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count")
+                            .and_then(|value| value.as_u64())
                             .is_some(),
                     "p55 must export local_function_summaries sub-breakdown when that IR subphase is observed, trace={timeline:?}"
                 );
@@ -54747,6 +54805,12 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count")
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_semantic_facts_visit_statements_ms": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_semantic_facts_visit_statements_ms")

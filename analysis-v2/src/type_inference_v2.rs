@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -59,6 +60,8 @@ pub(crate) struct TypeIndexBuildProfile {
     pub local_function_summaries_function_count: u64,
     pub local_function_summaries_scc_count: u64,
     pub local_function_summaries_fixed_point_iteration_count: u64,
+    pub local_function_summaries_singleton_fast_path_count: u64,
+    pub local_function_summaries_recursive_scc_count: u64,
     pub visit_statements_ms: u128,
     pub visit_callable_body_ms: u128,
     pub visit_callable_body_count: u64,
@@ -85,6 +88,8 @@ pub(crate) struct LocalFunctionSummariesProfile {
     pub function_count: u64,
     pub scc_count: u64,
     pub fixed_point_iteration_count: u64,
+    pub singleton_fast_path_count: u64,
+    pub recursive_scc_count: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -277,9 +282,52 @@ struct TypeEnv {
     instance_bindings: HashMap<String, InstanceBinding>,
     description_type_bindings: HashMap<String, TypeResolution>,
     instance_effects: InstanceEffectStore,
-    local_function_summaries: Arc<HashMap<String, LocalFunctionSummary>>,
+    local_function_summaries: LocalFunctionSummaryLookup,
     current_file_path: Arc<str>,
     module_type: Option<ModuleType>,
+}
+
+#[derive(Clone, Default)]
+struct LocalFunctionSummaryLookup {
+    stable: Option<Rc<RefCell<HashMap<String, LocalFunctionSummary>>>>,
+    overlay: Option<Arc<HashMap<String, LocalFunctionSummary>>>,
+}
+
+impl LocalFunctionSummaryLookup {
+    fn snapshot_arc(snapshot: Arc<HashMap<String, LocalFunctionSummary>>) -> Self {
+        Self {
+            stable: None,
+            overlay: Some(snapshot),
+        }
+    }
+
+    fn stable(stable: Rc<RefCell<HashMap<String, LocalFunctionSummary>>>) -> Self {
+        Self {
+            stable: Some(stable),
+            overlay: None,
+        }
+    }
+
+    fn overlay(
+        stable: Rc<RefCell<HashMap<String, LocalFunctionSummary>>>,
+        overlay: HashMap<String, LocalFunctionSummary>,
+    ) -> Self {
+        Self {
+            stable: Some(stable),
+            overlay: Some(Arc::new(overlay)),
+        }
+    }
+
+    fn get(&self, name: &str) -> Option<LocalFunctionSummary> {
+        self.overlay
+            .as_ref()
+            .and_then(|overlay| overlay.get(name).cloned())
+            .or_else(|| {
+                self.stable
+                    .as_ref()
+                    .and_then(|stable| stable.borrow().get(name).cloned())
+            })
+    }
 }
 
 impl Default for TypeEnv {
@@ -289,7 +337,7 @@ impl Default for TypeEnv {
             instance_bindings: HashMap::new(),
             description_type_bindings: HashMap::new(),
             instance_effects: InstanceEffectStore::default(),
-            local_function_summaries: Arc::new(HashMap::new()),
+            local_function_summaries: LocalFunctionSummaryLookup::default(),
             current_file_path: Arc::from(""),
             module_type: None,
         }
@@ -504,7 +552,8 @@ impl<'a> TypeInferencer<'a> {
         let local_function_summaries = self.infer_local_function_summaries(program, &env);
         let local_function_summary_count = local_function_summaries.summaries.len() as u64;
         let local_function_summaries_profile = local_function_summaries.profile;
-        env.local_function_summaries = Arc::new(local_function_summaries.summaries);
+        env.local_function_summaries =
+            LocalFunctionSummaryLookup::snapshot_arc(Arc::new(local_function_summaries.summaries));
         let local_function_summaries_ms = local_function_summaries_started.elapsed().as_millis();
         let source_incomplete_member_access_offsets =
             source_text.map(incomplete_member_access_dot_offsets);
@@ -660,6 +709,8 @@ impl<'a> TypeInferencer<'a> {
             local_function_summaries_function_count = local_function_summaries_profile.function_count,
             local_function_summaries_scc_count = local_function_summaries_profile.scc_count,
             local_function_summaries_fixed_point_iteration_count = local_function_summaries_profile.fixed_point_iteration_count,
+            local_function_summaries_singleton_fast_path_count = local_function_summaries_profile.singleton_fast_path_count,
+            local_function_summaries_recursive_scc_count = local_function_summaries_profile.recursive_scc_count,
             visit_statements_ms,
             visit_callable_body_ms,
             visit_callable_body_count,
@@ -693,6 +744,10 @@ impl<'a> TypeInferencer<'a> {
                 local_function_summaries_scc_count: local_function_summaries_profile.scc_count,
                 local_function_summaries_fixed_point_iteration_count:
                     local_function_summaries_profile.fixed_point_iteration_count,
+                local_function_summaries_singleton_fast_path_count:
+                    local_function_summaries_profile.singleton_fast_path_count,
+                local_function_summaries_recursive_scc_count: local_function_summaries_profile
+                    .recursive_scc_count,
                 visit_statements_ms,
                 visit_callable_body_ms,
                 visit_callable_body_count,

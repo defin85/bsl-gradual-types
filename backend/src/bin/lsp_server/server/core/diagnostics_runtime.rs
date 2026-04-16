@@ -743,6 +743,8 @@ struct SemanticDiagnosticsIrBuildBreakdownV2 {
     semantic_facts_local_function_summaries_function_count: Option<u64>,
     semantic_facts_local_function_summaries_scc_count: Option<u64>,
     semantic_facts_local_function_summaries_fixed_point_iteration_count: Option<u64>,
+    semantic_facts_local_function_summaries_singleton_fast_path_count: Option<u64>,
+    semantic_facts_local_function_summaries_recursive_scc_count: Option<u64>,
     semantic_facts_visit_statements_ms: Option<Duration>,
     semantic_facts_visit_callable_body_ms: Option<Duration>,
     semantic_facts_merge_control_flow_env_ms: Option<Duration>,
@@ -757,6 +759,10 @@ impl SemanticDiagnosticsIrBuildBreakdownV2 {
     fn from_ir_build_profile(profile: bsl_analysis_v2::IrBuildProfile) -> Self {
         let duration_from_profile_ms =
             |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
+        let local_function_summaries_observed = profile.semantic_facts_local_function_summaries_ms
+            > 0
+            || profile.semantic_facts_local_function_summaries_function_count > 0
+            || profile.semantic_facts_local_function_summary_count > 0;
         Self {
             ast_to_ir_convert_ms: (profile.ast_to_ir_convert_ms > 0)
                 .then(|| duration_from_profile_ms(profile.ast_to_ir_convert_ms)),
@@ -769,48 +775,46 @@ impl SemanticDiagnosticsIrBuildBreakdownV2 {
                 .semantic_facts_local_function_summaries_ms
                 > 0)
             .then(|| duration_from_profile_ms(profile.semantic_facts_local_function_summaries_ms)),
-            semantic_facts_local_function_summaries_prep_ms: (profile
-                .semantic_facts_local_function_summaries_prep_ms
-                > 0)
-            .then(|| {
-                duration_from_profile_ms(profile.semantic_facts_local_function_summaries_prep_ms)
-            }),
-            semantic_facts_local_function_summaries_fixed_point_ms: (profile
-                .semantic_facts_local_function_summaries_fixed_point_ms
-                > 0)
-            .then(|| {
-                duration_from_profile_ms(
-                    profile.semantic_facts_local_function_summaries_fixed_point_ms,
-                )
-            }),
-            semantic_facts_local_function_summaries_snapshot_build_ms: (profile
-                .semantic_facts_local_function_summaries_snapshot_build_ms
-                > 0)
-            .then(|| {
-                duration_from_profile_ms(
-                    profile.semantic_facts_local_function_summaries_snapshot_build_ms,
-                )
-            }),
-            semantic_facts_local_function_summaries_body_infer_ms: (profile
-                .semantic_facts_local_function_summaries_body_infer_ms
-                > 0)
-            .then(|| {
-                duration_from_profile_ms(
-                    profile.semantic_facts_local_function_summaries_body_infer_ms,
-                )
-            }),
-            semantic_facts_local_function_summaries_function_count: (profile
-                .semantic_facts_local_function_summaries_function_count
-                > 0)
-            .then_some(profile.semantic_facts_local_function_summaries_function_count),
-            semantic_facts_local_function_summaries_scc_count: (profile
-                .semantic_facts_local_function_summaries_scc_count
-                > 0)
-            .then_some(profile.semantic_facts_local_function_summaries_scc_count),
-            semantic_facts_local_function_summaries_fixed_point_iteration_count: (profile
-                .semantic_facts_local_function_summaries_fixed_point_iteration_count
-                > 0)
-            .then_some(profile.semantic_facts_local_function_summaries_fixed_point_iteration_count),
+            semantic_facts_local_function_summaries_prep_ms: local_function_summaries_observed
+                .then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_local_function_summaries_prep_ms,
+                    )
+                }),
+            semantic_facts_local_function_summaries_fixed_point_ms:
+                local_function_summaries_observed.then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_local_function_summaries_fixed_point_ms,
+                    )
+                }),
+            semantic_facts_local_function_summaries_snapshot_build_ms:
+                local_function_summaries_observed.then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_local_function_summaries_snapshot_build_ms,
+                    )
+                }),
+            semantic_facts_local_function_summaries_body_infer_ms:
+                local_function_summaries_observed.then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_local_function_summaries_body_infer_ms,
+                    )
+                }),
+            semantic_facts_local_function_summaries_function_count:
+                local_function_summaries_observed
+                    .then_some(profile.semantic_facts_local_function_summaries_function_count),
+            semantic_facts_local_function_summaries_scc_count: local_function_summaries_observed
+                .then_some(profile.semantic_facts_local_function_summaries_scc_count),
+            semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                local_function_summaries_observed.then_some(
+                    profile.semantic_facts_local_function_summaries_fixed_point_iteration_count,
+                ),
+            semantic_facts_local_function_summaries_singleton_fast_path_count:
+                local_function_summaries_observed.then_some(
+                    profile.semantic_facts_local_function_summaries_singleton_fast_path_count,
+                ),
+            semantic_facts_local_function_summaries_recursive_scc_count:
+                local_function_summaries_observed
+                    .then_some(profile.semantic_facts_local_function_summaries_recursive_scc_count),
             semantic_facts_visit_statements_ms: (profile.semantic_facts_visit_statements_ms > 0)
                 .then(|| duration_from_profile_ms(profile.semantic_facts_visit_statements_ms)),
             semantic_facts_visit_callable_body_ms: (profile.semantic_facts_visit_callable_body_ms
@@ -864,6 +868,12 @@ impl SemanticDiagnosticsIrBuildBreakdownV2 {
                 .is_some()
             || self
                 .semantic_facts_local_function_summaries_fixed_point_iteration_count
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_singleton_fast_path_count
+                .is_some()
+            || self
+                .semantic_facts_local_function_summaries_recursive_scc_count
                 .is_some()
             || self.semantic_facts_visit_statements_ms.is_some()
             || self.semantic_facts_visit_callable_body_ms.is_some()
@@ -1237,6 +1247,9 @@ impl BslLanguageServer {
 
         let runtime_queue_wait_ms = duration_to_nonzero_ms(runtime_queue_wait_ms);
         let apply_lag_ms = duration_to_nonzero_ms(apply_lag_ms);
+        let duration_to_ms = |value: Option<Duration>| {
+            value.map(|value| value.as_millis().min(u64::MAX as u128) as u64)
+        };
         let publish = (matches!(
             disposition,
             bsl_runtime::application::DiagnosticsDisposition::Published
@@ -1307,34 +1320,24 @@ impl BslLanguageServer {
             semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms:
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)
-                    .and_then(|value| {
-                        duration_to_nonzero_ms(
-                            value.semantic_facts_local_function_summaries_prep_ms,
-                        )
-                    }),
+                    .and_then(|value| duration_to_ms(value.semantic_facts_local_function_summaries_prep_ms)),
             semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms:
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)
                     .and_then(|value| {
-                        duration_to_nonzero_ms(
-                            value.semantic_facts_local_function_summaries_fixed_point_ms,
-                        )
+                        duration_to_ms(value.semantic_facts_local_function_summaries_fixed_point_ms)
                     }),
             semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms:
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)
                     .and_then(|value| {
-                        duration_to_nonzero_ms(
-                            value.semantic_facts_local_function_summaries_snapshot_build_ms,
-                        )
+                        duration_to_ms(value.semantic_facts_local_function_summaries_snapshot_build_ms)
                     }),
             semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms:
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)
                     .and_then(|value| {
-                        duration_to_nonzero_ms(
-                            value.semantic_facts_local_function_summaries_body_infer_ms,
-                        )
+                        duration_to_ms(value.semantic_facts_local_function_summaries_body_infer_ms)
                     }),
             semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count:
                 semantic_diagnostics_query_breakdown
@@ -1352,6 +1355,19 @@ impl BslLanguageServer {
                     .and_then(|value| {
                         value
                             .semantic_facts_local_function_summaries_fixed_point_iteration_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value
+                            .semantic_facts_local_function_summaries_singleton_fast_path_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value.semantic_facts_local_function_summaries_recursive_scc_count
                     }),
             semantic_diagnostics_ir_semantic_facts_visit_statements_ms:
                 semantic_diagnostics_query_breakdown

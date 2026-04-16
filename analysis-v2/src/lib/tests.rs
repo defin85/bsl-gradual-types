@@ -1344,9 +1344,11 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         first_ir_build.semantic_facts_local_function_summaries_function_count > 0,
         "snapshot IR build profile must expose non-zero local function summary count"
     );
-    assert!(
-        first_ir_build.semantic_facts_local_function_summaries_fixed_point_iteration_count > 0,
-        "snapshot IR build profile must expose fixed-point iteration count"
+    assert_eq!(
+        first_ir_build.semantic_facts_local_function_summaries_function_count,
+        first_ir_build.semantic_facts_local_function_summaries_singleton_fast_path_count
+            + first_ir_build.semantic_facts_local_function_summaries_recursive_scc_count,
+        "local routine accounting must partition into singleton fast path and recursive SCC work"
     );
 
     let second = analysis

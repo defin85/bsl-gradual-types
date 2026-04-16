@@ -187,6 +187,22 @@ impl TypeInferencer<'_> {
             }
         }
 
+        fn summary_for_idx(
+            idx: usize,
+            function_defs: &[(String, Def<'_>)],
+            states: &[LocalFunctionState],
+            may_fallthrough: &[bool],
+        ) -> LocalFunctionSummary {
+            let (_name_lower, def) = &function_defs[idx];
+            LocalFunctionSummary {
+                return_type: states[idx].return_type(),
+                may_fallthrough: may_fallthrough[idx],
+                params: def.params.to_vec(),
+                declaration_span: def.span,
+                is_function: def.is_function,
+            }
+        }
+
         #[derive(Debug, Clone, PartialEq, Default)]
         struct ReturnTypeSet {
             /// If any return expression is unknown/dynamic, the whole return type degrades to Dynamic.
@@ -596,32 +612,73 @@ impl TypeInferencer<'_> {
             .collect();
 
         // Process SCCs in reverse topo order so that callees are stabilized first.
-        let fixed_point_started = Instant::now();
+        let stable_summaries =
+            Rc::new(RefCell::new(HashMap::<String, LocalFunctionSummary>::new()));
+        let mut fixed_point_ms = 0_u128;
         let mut snapshot_build_ms = 0_u128;
         let mut body_infer_ms = 0_u128;
         let mut fixed_point_iteration_count = 0_u64;
+        let mut singleton_fast_path_count = 0_u64;
+        let mut recursive_scc_count = 0_u64;
         for &scc_id in topo.iter().rev() {
             let nodes = &sccs[scc_id];
+            let singleton_non_recursive = nodes.len() == 1 && !edges[nodes[0]].contains(&nodes[0]);
+            if singleton_non_recursive {
+                singleton_fast_path_count = singleton_fast_path_count.saturating_add(1);
+                let node_idx = nodes[0];
+                let (_name_lower, def) = &function_defs[node_idx];
+
+                let mut fn_env = base_env.clone();
+                fn_env.local_function_summaries =
+                    LocalFunctionSummaryLookup::stable(stable_summaries.clone());
+                for p in def.params {
+                    fn_env
+                        .variables
+                        .insert(p.to_lowercase(), TypeResolution::unknown());
+                }
+
+                let mut scratch_facts = SemanticFacts::default();
+                let mut return_types = ReturnTypeSet::default();
+                let body_infer_started = Instant::now();
+                collect_return_type_names(
+                    self,
+                    def.body,
+                    &mut fn_env,
+                    &mut scratch_facts,
+                    &mut return_types,
+                );
+                body_infer_ms =
+                    body_infer_ms.saturating_add(body_infer_started.elapsed().as_millis());
+
+                if return_types.is_empty() || may_fallthrough[node_idx] {
+                    return_types.insert_named("Неопределено");
+                }
+
+                states[node_idx].return_types = return_types;
+                stable_summaries.borrow_mut().insert(
+                    function_defs[node_idx].0.clone(),
+                    summary_for_idx(node_idx, &function_defs, &states, &may_fallthrough),
+                );
+                continue;
+            }
+
+            recursive_scc_count = recursive_scc_count.saturating_add(1);
+            let recursive_started = Instant::now();
             loop {
                 fixed_point_iteration_count = fixed_point_iteration_count.saturating_add(1);
                 let mut changed = false;
 
-                // Snapshot: expose current return types to expression inference via env.local_function_summaries.
+                // Expose stable out-of-SCC summaries plus current-SCC overlay to expression inference.
                 let snapshot_build_started = Instant::now();
-                let mut snapshot: HashMap<String, LocalFunctionSummary> = HashMap::new();
-                for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
-                    snapshot.insert(
-                        name_lower.clone(),
-                        LocalFunctionSummary {
-                            return_type: states[idx].return_type(),
-                            may_fallthrough: may_fallthrough[idx],
-                            params: def.params.to_vec(),
-                            declaration_span: def.span,
-                            is_function: def.is_function,
-                        },
+                let mut overlay: HashMap<String, LocalFunctionSummary> =
+                    HashMap::with_capacity(nodes.len());
+                for &idx in nodes {
+                    overlay.insert(
+                        function_defs[idx].0.clone(),
+                        summary_for_idx(idx, &function_defs, &states, &may_fallthrough),
                     );
                 }
-                let snapshot = Arc::new(snapshot);
+                let lookup = LocalFunctionSummaryLookup::overlay(stable_summaries.clone(), overlay);
                 snapshot_build_ms =
                     snapshot_build_ms.saturating_add(snapshot_build_started.elapsed().as_millis());
 
@@ -629,7 +686,7 @@ impl TypeInferencer<'_> {
                     let (_name_lower, def) = &function_defs[node_idx];
 
                     let mut fn_env = base_env.clone();
-                    fn_env.local_function_summaries = snapshot.clone();
+                    fn_env.local_function_summaries = lookup.clone();
                     for p in def.params {
                         fn_env
                             .variables
@@ -663,20 +720,21 @@ impl TypeInferencer<'_> {
                     break;
                 }
             }
+            fixed_point_ms = fixed_point_ms.saturating_add(recursive_started.elapsed().as_millis());
+            let mut stable_summaries_mut = stable_summaries.borrow_mut();
+            for &node_idx in nodes {
+                stable_summaries_mut.insert(
+                    function_defs[node_idx].0.clone(),
+                    summary_for_idx(node_idx, &function_defs, &states, &may_fallthrough),
+                );
+            }
         }
-        let fixed_point_ms = fixed_point_started.elapsed().as_millis();
 
         let mut out: HashMap<String, LocalFunctionSummary> = HashMap::new();
-        for (idx, (name_lower, def)) in function_defs.iter().enumerate() {
+        for (idx, (name_lower, _def)) in function_defs.iter().enumerate() {
             out.insert(
                 name_lower.clone(),
-                LocalFunctionSummary {
-                    return_type: states[idx].return_type(),
-                    may_fallthrough: may_fallthrough[idx],
-                    params: def.params.to_vec(),
-                    declaration_span: def.span,
-                    is_function: def.is_function,
-                },
+                summary_for_idx(idx, &function_defs, &states, &may_fallthrough),
             );
         }
 
@@ -690,6 +748,8 @@ impl TypeInferencer<'_> {
                 function_count: n as u64,
                 scc_count,
                 fixed_point_iteration_count,
+                singleton_fast_path_count,
+                recursive_scc_count,
             },
         }
     }

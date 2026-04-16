@@ -316,6 +316,8 @@ pub struct IrBuildProfile {
     pub semantic_facts_local_function_summaries_function_count: u64,
     pub semantic_facts_local_function_summaries_scc_count: u64,
     pub semantic_facts_local_function_summaries_fixed_point_iteration_count: u64,
+    pub semantic_facts_local_function_summaries_singleton_fast_path_count: u64,
+    pub semantic_facts_local_function_summaries_recursive_scc_count: u64,
     pub semantic_facts_visit_statements_ms: u128,
     pub semantic_facts_visit_callable_body_ms: u128,
     pub semantic_facts_visit_callable_body_count: u64,

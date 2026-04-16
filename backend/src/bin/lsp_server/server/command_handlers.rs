@@ -1891,6 +1891,10 @@ mod tests {
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
                     None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
@@ -2159,6 +2163,10 @@ mod tests {
                     semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count:
                         None,
                     semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
                         None,
                     semantic_diagnostics_ir_semantic_facts_visit_statements_ms: None,
                     semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: None,

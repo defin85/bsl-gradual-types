@@ -45,6 +45,12 @@ fn merge_ir_build_profiles(
     current.semantic_facts_local_function_summaries_fixed_point_iteration_count = current
         .semantic_facts_local_function_summaries_fixed_point_iteration_count
         .saturating_add(next.semantic_facts_local_function_summaries_fixed_point_iteration_count);
+    current.semantic_facts_local_function_summaries_singleton_fast_path_count = current
+        .semantic_facts_local_function_summaries_singleton_fast_path_count
+        .saturating_add(next.semantic_facts_local_function_summaries_singleton_fast_path_count);
+    current.semantic_facts_local_function_summaries_recursive_scc_count = current
+        .semantic_facts_local_function_summaries_recursive_scc_count
+        .saturating_add(next.semantic_facts_local_function_summaries_recursive_scc_count);
     current.semantic_facts_visit_statements_ms = current
         .semantic_facts_visit_statements_ms
         .saturating_add(next.semantic_facts_visit_statements_ms);

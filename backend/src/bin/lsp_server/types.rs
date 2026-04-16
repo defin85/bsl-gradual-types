@@ -546,6 +546,12 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count:
         Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_diagnostics_ir_semantic_facts_visit_statements_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: Option<u64>,

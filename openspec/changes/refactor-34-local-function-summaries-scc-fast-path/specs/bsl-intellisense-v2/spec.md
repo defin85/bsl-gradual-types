@@ -40,6 +40,8 @@ This behavior MUST:
 
 - let in-SCC lookups observe the latest current-SCC overlay values;
 - let out-of-SCC lookups observe stable already-finalized summaries;
+- avoid cloning, rebuilding, or remapping unrelated out-of-SCC summaries per SCC or per iteration
+  under a helper that is only nominally called `base`;
 - preserve deterministic ordering and convergence behavior for recursive SCCs.
 
 #### Scenario: Recursive SCC iterations reuse stable out-of-SCC summaries
@@ -60,7 +62,8 @@ This evidence MUST include at least:
 
 - total `local_function_summaries` latency;
 - `prep`, `fixed_point`, `snapshot_build`, and `body_infer` subphases;
-- `function_count`, `scc_count`, and fixed-point iteration count.
+- `function_count`, `scc_count`, and fixed-point iteration count;
+- `singleton_fast_path_count` and `recursive_scc_count`.
 
 #### Scenario: Representative report distinguishes singleton fast-path wins from recursive residual
 

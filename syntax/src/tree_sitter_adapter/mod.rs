@@ -46,6 +46,33 @@ use tree_sitter::Tree;
 // Re-exports for external use
 pub use syntax_errors::{collect_syntax_errors, collect_syntax_errors_cached};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoweringReusePlanOutcome {
+    FullRebuild,
+    TopLevelReuse,
+    RoutineBodyReuse,
+}
+
+#[derive(Debug, Clone)]
+pub struct RoutineBodyLoweringReusePlan {
+    pub original_body_len: usize,
+    pub reused_body_prefix: Vec<Statement>,
+    pub reused_body_suffix: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub enum LoweringReuseNodePlan {
+    Rebuild,
+    ReuseStatement(Statement),
+    RebuildRoutineBody(RoutineBodyLoweringReusePlan),
+}
+
+#[derive(Debug, Clone)]
+pub struct LoweringReusePlan {
+    pub outcome: LoweringReusePlanOutcome,
+    pub top_level_nodes: Vec<LoweringReuseNodePlan>,
+}
+
 /// Адаптер tree-sitter AST -> Program AST
 pub struct TreeSitterAdapter;
 
@@ -236,6 +263,26 @@ impl TreeSitterAdapter {
                 source,
                 &line_index,
                 reused_prefix,
+                &mut observer,
+            )?;
+        let program = Program { statements };
+        Ok(ParseResult::success(program))
+    }
+
+    pub fn convert_tree_fast_with_observer_and_reuse_plan(
+        tree: &Tree,
+        source: &str,
+        reuse_plan: &LoweringReusePlan,
+        mut observer: impl FnMut(usize, usize) -> Result<(), String>,
+    ) -> Result<ParseResult, String> {
+        let root = tree.root_node();
+        let line_index = LineIndex::new(source);
+        let statements =
+            statement_converter::convert_source_file_cached_with_observer_and_reuse_plan(
+                &root,
+                source,
+                &line_index,
+                reuse_plan,
                 &mut observer,
             )?;
         let program = Program { statements };

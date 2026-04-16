@@ -981,6 +981,8 @@ pub(crate) struct ReadyParseSnapshotStateV2 {
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
     pub syntax_errors_complete: bool,
     pub phase_attribution: ReadyParseSnapshotPhaseAttributionV2,
+    pub program_lowering_summary:
+        Option<bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary>,
 }
 
 #[derive(Debug, Clone)]

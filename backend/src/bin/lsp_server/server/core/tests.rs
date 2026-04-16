@@ -7736,6 +7736,87 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_timeout_for_exact_wo
 }
 
 #[tokio::test]
+async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p24b-program-lowering-reuse-summary.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(244),
+        diagnostics_generation: 44,
+        save_cycle_sequence: 12,
+        requested_version: 14,
+    };
+    let completed = super::super::ReadyParseSnapshotPhaseAttributionV2 {
+        parse_exec_ms: Some(84),
+        parse_exec_core_parse_build_ms: Some(84),
+        parse_exec_core_build_parser_tree_build_ms: Some(8),
+        parse_exec_core_build_exact_ready_snapshot_assembly_ms: Some(76),
+        parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Some(76),
+        parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: Some(70),
+        parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms: Some(
+            6,
+        ),
+        parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms: None,
+        parse_exec_core_build_tree_cache_install_ms: None,
+        parse_exec_optional_cache_enrichment_ms: None,
+        post_parse_pre_materialization_ms: Some(5),
+        ready_install_ms: Some(3),
+        document_symbol_side_work_ms: None,
+    };
+    let summary = bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary {
+        reuse_outcome: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseOutcome::RoutineBodyReuse,
+        reused_lowering_units: 41,
+        rebuilt_lowering_units: 7,
+        reused_window_count: 2,
+        rebuilt_window_count: 1,
+        largest_rebuilt_window_lowering_units: 7,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    let attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_completed(
+            &completed,
+            Some(&summary),
+        )
+        .expect("completed phase attribution with lowering summary");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("ready"),
+        Some("ready"),
+        Some("ready_same_version"),
+        Some(true),
+        Some(attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome
+            .as_deref(),
+        Some("routine_body_reuse")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units,
+        Some(41)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units,
+        Some(7)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count,
+        Some(2)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count,
+        Some(1)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units,
+        Some(7)
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_skips_relief_valve_for_non_exact_current_producer() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24-ready-snapshot-relief-skip-non-exact.bsl").expect("uri");
@@ -8091,6 +8172,7 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
                 ready_install_ms: Some(1),
                 document_symbol_side_work_ms: None,
             },
+            program_lowering_summary: None,
         };
         server_for_ready
             .latest_ready_parse_snapshots_v2
@@ -11980,6 +12062,21 @@ async fn p32_ranged_did_change_program_lowering_retarget_preserves_parser_base_f
     })
     .await
     .expect("ranged v2 worker must enter program lowering before retarget");
+
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let sustained_checkpoint = server
+        .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+        .await
+        .and_then(|control| {
+            control
+                .phase_attribution_snapshot()
+                .current_assembly_checkpoint
+        });
+    assert_eq!(
+        sustained_checkpoint,
+        Some(super::super::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering),
+        "ranged local-edit fixture must keep the worker inside program lowering long enough to prove reused-lowering checkpoints"
+    );
 
     let did_change_v3_response = service
         .ready()
@@ -41629,6 +41726,7 @@ async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
             source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
             syntax_errors_complete: true,
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
         },
     );
 
@@ -41801,6 +41899,7 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
             source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
             syntax_errors_complete: true,
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
         },
     );
 
@@ -41948,6 +42047,7 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
             source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
             syntax_errors_complete: true,
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
         },
     );
     server.refresh_snapshot_status_v2(file_id).await;
@@ -52023,6 +52123,24 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
         let packaging_ms = timeline
             .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms")
             .and_then(|value| value.as_u64());
+        let program_lowering_reuse_outcome = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome")
+            .and_then(|value| value.as_str());
+        let program_lowering_reused_lowering_units = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuilt_lowering_units = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reused_window_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuilt_window_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_largest_rebuilt_window_lowering_units = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units")
+            .and_then(|value| value.as_u64());
         if let (Some(program_conversion_ms), Some(program_lowering_ms)) =
             (program_conversion_ms, program_lowering_ms)
         {
@@ -52037,6 +52155,20 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
             assert!(
                 program_conversion_ms >= packaging_ms,
                 "exported program_conversion_ms must stay coherent with packaging_ms, trace={timeline:?}"
+            );
+        }
+        if program_lowering_ms.is_some() {
+            assert!(
+                program_lowering_reuse_outcome.is_some(),
+                "p53 live trace must export program-lowering reuse outcome when exact program_lowering is observed, trace={timeline:?}"
+            );
+            assert!(
+                program_lowering_reused_lowering_units.is_some()
+                    && program_lowering_rebuilt_lowering_units.is_some()
+                    && program_lowering_reused_window_count.is_some()
+                    && program_lowering_rebuilt_window_count.is_some()
+                    && program_lowering_largest_rebuilt_window_lowering_units.is_some(),
+                "p53 live trace must export bounded reuse-vs-rebuild summaries when exact program_lowering is observed, trace={timeline:?}"
             );
         }
 
@@ -52156,6 +52288,12 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
                 .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms": program_conversion_ms,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms": program_lowering_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome": program_lowering_reuse_outcome,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units": program_lowering_reused_lowering_units,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units": program_lowering_rebuilt_lowering_units,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count": program_lowering_reused_window_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count": program_lowering_rebuilt_window_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units": program_lowering_largest_rebuilt_window_lowering_units,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms": packaging_ms,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms")

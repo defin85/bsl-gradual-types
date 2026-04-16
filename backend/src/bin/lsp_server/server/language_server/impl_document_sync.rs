@@ -40,7 +40,11 @@ struct DeferredParseSnapshotWorkV2 {
 }
 
 enum BuildParseSnapshotOutcomeV2 {
-    Ready(bsl_analysis_v2::ParseSnapshot, DeferredParseSnapshotWorkV2),
+    Ready(
+        bsl_analysis_v2::ParseSnapshot,
+        DeferredParseSnapshotWorkV2,
+        bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+    ),
     Aborted(BuildParseSnapshotAbortReasonV2),
 }
 
@@ -516,6 +520,7 @@ impl BslLanguageServer {
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
         source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
         syntax_errors_complete: bool,
+        program_lowering_summary: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
     ) {
         self.latest_snapshot_failures_v2
             .write()
@@ -529,6 +534,7 @@ impl BslLanguageServer {
                 source,
                 syntax_errors_complete,
                 phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2::default(),
+                program_lowering_summary: Some(program_lowering_summary),
             },
         );
         self.refresh_snapshot_status_v2(file_id).await;
@@ -988,6 +994,7 @@ impl BslLanguageServer {
                             reused_program_prefix: reused_prefix_parse_result_for_parse
                                 .as_ref()
                                 .map(|parse_result| parse_result.program.statements.as_slice()),
+                            lowering_reuse_plan: None,
                             exact_ready_snapshot_control_callback: Some(
                                 &exact_ready_snapshot_control,
                             ),
@@ -1267,9 +1274,11 @@ impl BslLanguageServer {
                 attribution,
             );
         }
+        let program_lowering_summary = report.program_lowering_summary;
         BuildParseSnapshotOutcomeV2::Ready(
             parse_snapshot_from_report(file_id, version, report),
             deferred_work,
+            program_lowering_summary,
         )
     }
 
@@ -1565,7 +1574,7 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
             );
             self.refresh_snapshot_status_v2(file_id).await;
-            let (parse_snapshot, deferred_work) = match self
+            let (parse_snapshot, deferred_work, program_lowering_summary) = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
                     file_id,
                     version: target.requested_version,
@@ -1605,9 +1614,11 @@ impl BslLanguageServer {
                 })
                 .await
             {
-                BuildParseSnapshotOutcomeV2::Ready(parse_snapshot, deferred_work) => {
-                    (parse_snapshot, deferred_work)
-                }
+                BuildParseSnapshotOutcomeV2::Ready(
+                    parse_snapshot,
+                    deferred_work,
+                    program_lowering_summary,
+                ) => (parse_snapshot, deferred_work, program_lowering_summary),
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::RetargetedDuringParse,
                 ) => {
@@ -1707,6 +1718,7 @@ impl BslLanguageServer {
                 &parse_snapshot,
                 target.source,
                 !deferred_work.syntax_error_assembly,
+                program_lowering_summary,
             )
             .await;
             let ready_phase_snapshot = task_control.finish_phase_attribution();
@@ -2498,6 +2510,7 @@ impl BslLanguageServer {
                 return;
             }
 
+            let program_lowering_summary = report.program_lowering_summary;
             let parse_snapshot = parse_snapshot_from_report(file_id, requested_version, report);
             server
                 .record_ready_parse_snapshot_v2(
@@ -2506,6 +2519,7 @@ impl BslLanguageServer {
                     &parse_snapshot,
                     super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                     true,
+                    program_lowering_summary,
                 )
                 .await;
             let analysis = server.analysis_v2.snapshot().await;

@@ -1,13 +1,8 @@
-[mcp_servers.claude-context]
-command = "/home/egor/.local/bin/claude-context-mcp-local"
-startup_timeout_sec = 60.0
-
-[mcp_servers.claude-context.env]
-EMBEDDING_MODEL = "nomic-embed-text-v2-moe"
-EMBEDDING_PROVIDER = "Ollama"
-MILVUS_ADDRESS = "127.0.0.1:20530"
-CUSTOM_EXTENSIONS = ".bsl,.rs"
-CUSTOM_IGNORE_PATTERNS = "docs/**,openspec/**,vscode-extension/.vscode-test/**,**/target/**,**/node_modules/**,**/dist/**,**/build/**,**/coverage/**,**/tests/**,examples/**"
+# Claude Context comes from the shared user-level daemon configured in ~/.codex/config.toml.
+# Do not add a repo-local `mcp_servers.claude-context` command here.
+# Repo-owned Claude Context hints:
+#   customExtensions = [".bsl", ".rs"]
+# Ignore patterns belong in committed .contextignore.
 
 [mcp_servers.chrome-devtools]
 command = "npx"

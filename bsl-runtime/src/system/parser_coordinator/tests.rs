@@ -619,6 +619,533 @@ mod parse_snapshot_tests {
         source
     }
 
+    fn build_large_ascii_callable_fixture(statement_count: usize) -> String {
+        let mut source = String::from("Процедура Test()\n");
+        for index in 0..statement_count {
+            source.push_str(&format!("    Value{} = {};\n", index, index));
+        }
+        source.push_str("КонецПроцедуры");
+        source
+    }
+
+    fn replace_first_occurrence_edit(
+        source: &str,
+        needle: &str,
+        replacement: &str,
+    ) -> (String, TextEdit) {
+        let start_byte = source.find(needle).expect("needle must exist");
+        let old_end_byte = start_byte + needle.len();
+        let updated = source.replacen(needle, replacement, 1);
+        let line_index = crate::system::positioning::LineIndex::new(source);
+        let start_point = line_index.byte_offset_to_point(source, start_byte);
+        let old_end_point = line_index.byte_offset_to_point(source, old_end_byte);
+        let start_line = start_point.row as u32;
+        let old_end_line = old_end_point.row as u32;
+        let start_utf16_column =
+            line_index.byte_column_to_utf16(source, start_point.row, start_point.column);
+        let old_end_utf16_column =
+            line_index.byte_column_to_utf16(source, old_end_point.row, old_end_point.column);
+        (
+            updated,
+            TextEdit {
+                start_line,
+                start_utf16_column,
+                old_end_line,
+                old_end_utf16_column,
+                new_text: replacement.to_string(),
+            },
+        )
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_reuses_unchanged_routine_body_windows_for_local_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-plan.bsl");
+        let base = build_large_ascii_callable_fixture(12);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(&base, "Value7 = 7", "Value7 = 700");
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+
+        let plan = parser
+            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .expect("routine-body reuse plan");
+        assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
+        assert_eq!(plan.top_level_nodes.len(), 1);
+
+        let LoweringReuseNodePlan::RebuildRoutineBody(body_plan) = &plan.top_level_nodes[0] else {
+            panic!(
+                "expected routine body reuse plan, got {:?}",
+                plan.top_level_nodes
+            );
+        };
+        assert_eq!(body_plan.original_body_len, 12);
+        assert_eq!(body_plan.reused_body_prefix.len(), 7);
+        assert_eq!(body_plan.reused_body_suffix.len(), 4);
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_fails_closed_for_local_var_declaration_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-var-decl.bsl");
+        let base =
+            "Процедура Test()\n    Перем Local;\n    Value0 = 0;\n    Value1 = 1;\nКонецПроцедуры"
+                .to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(&base, "Перем Local", "Перем Local2");
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+
+        assert!(
+            parser
+                .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+                .is_none(),
+            "var-declaration edit must fail closed instead of reusing lowered body windows"
+        );
+    }
+
+    #[test]
+    fn exact_ready_snapshot_reuse_path_matches_full_parse_for_local_body_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-parity.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                updated.clone(),
+                vec![edit],
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path incremental report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let incremental_json =
+            serde_json::to_string(&report.parse_result).expect("serialize incremental parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(incremental_json, full_json);
+    }
+
+    #[test]
+    fn exact_ready_snapshot_reuse_path_reports_program_lowering_summary_for_local_body_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-summary.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                updated,
+                vec![edit],
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path incremental report");
+
+        assert_eq!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::RoutineBodyReuse
+        );
+        assert!(report.program_lowering_summary.reused_lowering_units > 0);
+        assert!(report.program_lowering_summary.rebuilt_lowering_units > 0);
+        assert_eq!(report.program_lowering_summary.reused_window_count, 2);
+        assert_eq!(report.program_lowering_summary.rebuilt_window_count, 1);
+        assert!(
+            report
+                .program_lowering_summary
+                .largest_rebuilt_window_lowering_units
+                > 0
+        );
+    }
+
+    #[test]
+    fn exact_program_lowering_reuse_kill_switch_disables_reuse_plan() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        {
+            let _reuse_guard = EnvVarGuard::set(
+                "BSL_INTELLISENSE_V2_EXACT_PROGRAM_LOWERING_REUSE_ENABLED",
+                "0",
+            );
+            global_runtime_config().reload_env_bootstrap_from_env();
+
+            let parser = ParserCoordinator::with_fallback();
+            let file_path = PathBuf::from("snapshot-routine-body-reuse-disabled.bsl");
+            let base = build_large_ascii_callable_fixture(24);
+
+            parser
+                .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+                .expect("seed snapshot");
+
+            let (updated, edit) =
+                replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+            let (old_tree, old_source, _) = parser
+                .tree_cache
+                .get(&file_path)
+                .expect("seeded tree cache entry");
+            let cancellation_flag = AtomicBool::new(false);
+            let (new_tree, changed_ranges) = parser
+                .tree_sitter
+                .parse_incremental_tree_only_with_cancellation(
+                    &updated,
+                    Some(old_tree.as_ref()),
+                    vec![edit.clone()],
+                    &old_source,
+                    &cancellation_flag,
+                )
+                .expect("incremental tree");
+            assert!(
+                parser
+                    .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+                    .is_none(),
+                "runtime kill switch must disable exact lowering reuse planning"
+            );
+
+            let report = parser
+                .parse_incremental_with_report_with_cancellation_and_options(
+                    file_path,
+                    updated,
+                    vec![edit],
+                    &AtomicBool::new(false),
+                    ParseSnapshotExecutionOptions {
+                        save_critical_initial: false,
+                        save_critical_requested: None,
+                        reused_program_prefix: None,
+                        lowering_reuse_plan: None,
+                        exact_ready_snapshot_control_callback: None,
+                        progress_callback: None,
+                        core_build_progress_callback: None,
+                        assembly_progress_callback: None,
+                    },
+                )
+                .expect("incremental report with kill switch disabled");
+
+            assert!(report.incremental);
+            assert!(report.fallback_reason.is_none());
+            assert_eq!(
+                report.program_lowering_summary.reuse_outcome,
+                ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+            );
+            assert_eq!(report.program_lowering_summary.reused_lowering_units, 0);
+            assert!(report.program_lowering_summary.rebuilt_lowering_units > 0);
+        }
+        global_runtime_config().reload_env_bootstrap_from_env();
+    }
+
+    #[test]
+    fn save_critical_requested_during_reused_program_lowering_returns_before_packaging_checkpoint()
+    {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _conversion_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+            "40",
+        );
+
+        let parser = Arc::new(ParserCoordinator::with_fallback());
+        let file_path = PathBuf::from("snapshot-save-critical-during-reused-lowering.bsl");
+        let base = build_large_ascii_callable_fixture(512);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value256 = 256", "Value256 = 1256");
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit.clone()],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let lowering_reuse_plan = parser
+            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .expect("local edit must produce lowering reuse plan");
+        assert_eq!(
+            lowering_reuse_plan.outcome,
+            LoweringReusePlanOutcome::RoutineBodyReuse,
+            "local body edit must exercise bounded routine-body reuse"
+        );
+
+        let cancellation_flag = Arc::new(AtomicBool::new(false));
+        let save_critical_requested = Arc::new(AtomicBool::new(false));
+        let checkpoints = Arc::new(Mutex::new(Vec::new()));
+        let (entered_program_lowering_tx, entered_program_lowering_rx) = mpsc::channel();
+
+        let parse_thread = {
+            let parser = Arc::clone(&parser);
+            let checkpoints = Arc::clone(&checkpoints);
+            let cancellation_flag = Arc::clone(&cancellation_flag);
+            let save_critical_requested = Arc::clone(&save_critical_requested);
+            let file_path = file_path.clone();
+            let updated = updated.clone();
+            std::thread::spawn(move || {
+                let assembly_progress = |checkpoint: ParseSnapshotAssemblyCheckpoint| {
+                    checkpoints
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(checkpoint);
+                    if checkpoint == ParseSnapshotAssemblyCheckpoint::ProgramLowering {
+                        let _ = entered_program_lowering_tx.send(());
+                    }
+                };
+                let options = ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: Some(save_critical_requested.as_ref()),
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: Some(&assembly_progress),
+                };
+                parser.parse_incremental_with_report_with_cancellation_and_options(
+                    file_path,
+                    updated,
+                    vec![edit],
+                    cancellation_flag.as_ref(),
+                    options,
+                )
+            })
+        };
+
+        entered_program_lowering_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reused exact path must enter program lowering");
+        std::thread::sleep(Duration::from_millis(100));
+        save_critical_requested.store(true, Ordering::SeqCst);
+
+        let report = parse_thread
+            .join()
+            .expect("parse thread join")
+            .expect("save-critical reuse parse report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert!(
+            report.parse_exec_subphases.deferred_syntax_error_assembly,
+            "save-critical promotion inside reused lowering must defer syntax-error assembly"
+        );
+
+        let checkpoints = checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::ProgramLowering),
+            "expected lowering checkpoint trace, got: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging),
+            "save-critical promotion during reused lowering must return before packaging checkpoint: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::SyntaxErrorCollection),
+            "save-critical promotion during reused lowering must return before syntax-error collection: {checkpoints:?}"
+        );
+    }
+
+    #[test]
+    fn exact_ready_control_callback_can_cancel_during_reused_program_lowering() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let _conversion_delay_guard = EnvVarGuard::set(
+            "BSL_TEST_PARSE_SNAPSHOT_PROGRAM_CONVERSION_PROGRESS_DELAY_MS",
+            "40",
+        );
+
+        let parser = Arc::new(ParserCoordinator::with_fallback());
+        let file_path = PathBuf::from("snapshot-cancel-during-reused-lowering.bsl");
+        let base = build_large_ascii_callable_fixture(512);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value256 = 256", "Value256 = 1256");
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit.clone()],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let lowering_reuse_plan = parser
+            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .expect("local edit must produce lowering reuse plan");
+        assert_eq!(
+            lowering_reuse_plan.outcome,
+            LoweringReusePlanOutcome::RoutineBodyReuse,
+            "local body edit must exercise bounded routine-body reuse"
+        );
+
+        let cancellation_flag = Arc::new(AtomicBool::new(false));
+        let cancel_on_checkpoint = Arc::new(AtomicBool::new(false));
+        let checkpoints = Arc::new(Mutex::new(Vec::new()));
+        let (entered_program_lowering_tx, entered_program_lowering_rx) = mpsc::channel();
+
+        let parse_thread = {
+            let parser = Arc::clone(&parser);
+            let checkpoints = Arc::clone(&checkpoints);
+            let cancellation_flag = Arc::clone(&cancellation_flag);
+            let cancel_on_checkpoint = Arc::clone(&cancel_on_checkpoint);
+            let file_path = file_path.clone();
+            let updated = updated.clone();
+            std::thread::spawn(move || {
+                let assembly_progress = |checkpoint: ParseSnapshotAssemblyCheckpoint| {
+                    checkpoints
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .push(checkpoint);
+                    if checkpoint == ParseSnapshotAssemblyCheckpoint::ProgramLowering {
+                        let _ = entered_program_lowering_tx.send(());
+                    }
+                };
+                let control = || {
+                    if cancel_on_checkpoint.load(Ordering::SeqCst) {
+                        ParseSnapshotExactReadyControl::Cancel
+                    } else {
+                        ParseSnapshotExactReadyControl::Continue
+                    }
+                };
+                let options = ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    exact_ready_snapshot_control_callback: Some(&control),
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: Some(&assembly_progress),
+                };
+                parser.parse_incremental_with_report_with_cancellation_and_options(
+                    file_path,
+                    updated,
+                    vec![edit],
+                    cancellation_flag.as_ref(),
+                    options,
+                )
+            })
+        };
+
+        entered_program_lowering_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("reused exact path must enter program lowering");
+        std::thread::sleep(Duration::from_millis(100));
+        cancel_on_checkpoint.store(true, Ordering::SeqCst);
+
+        let error = parse_thread
+            .join()
+            .expect("parse thread join")
+            .expect_err("control callback must cancel reused lowering parse");
+        assert!(
+            is_parse_cancelled_error(&error),
+            "reused lowering control cancel must surface as parse cancellation, got: {error}"
+        );
+
+        let checkpoints = checkpoints
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        assert!(
+            checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::ProgramLowering),
+            "expected lowering checkpoint trace, got: {checkpoints:?}"
+        );
+        assert!(
+            !checkpoints.contains(&ParseSnapshotAssemblyCheckpoint::PublishableArtifactPackaging),
+            "cancellation during reused lowering must not advance into packaging: {checkpoints:?}"
+        );
+    }
+
     #[test]
     fn save_critical_requested_during_program_lowering_returns_before_packaging_checkpoint() {
         let _env_lock = lock_parse_snapshot_test_env();
@@ -664,6 +1191,7 @@ mod parse_snapshot_tests {
                     save_critical_initial: false,
                     save_critical_requested: Some(save_critical_requested.as_ref()),
                     reused_program_prefix: None,
+                    lowering_reuse_plan: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -762,6 +1290,7 @@ mod parse_snapshot_tests {
                     save_critical_initial: false,
                     save_critical_requested: None,
                     reused_program_prefix: None,
+                    lowering_reuse_plan: None,
                     exact_ready_snapshot_control_callback: Some(&control),
                     progress_callback: None,
                     core_build_progress_callback: None,

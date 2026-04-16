@@ -1,5 +1,6 @@
 pub use bsl_syntax::tree_sitter_adapter::{
-    collect_syntax_errors, collect_syntax_errors_cached, TreeSitterAdapter,
+    collect_syntax_errors, collect_syntax_errors_cached, LoweringReuseNodePlan, LoweringReusePlan,
+    LoweringReusePlanOutcome, RoutineBodyLoweringReusePlan, TreeSitterAdapter,
 };
 
 pub mod directives {

@@ -1,0 +1,11 @@
+# Repo-specific Claude Context ignore patterns.
+docs/**
+openspec/**
+vscode-extension/.vscode-test/**
+**/target/**
+**/node_modules/**
+**/dist/**
+**/build/**
+**/coverage/**
+**/tests/**
+examples/**

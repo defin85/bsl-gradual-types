@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, RwLock};
 use std::time::Duration;
 use tracing::{debug, error, warn};
-use tree_sitter::{InputEdit, Parser, Point};
+use tree_sitter::{InputEdit, Node, Parser, Point};
 use url::Url;
 
 use crate::parsing::bsl::ast::{Expression, Program, Statement};
@@ -25,7 +25,10 @@ use crate::system::intellisense_index::{
 };
 use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use crate::system::tree_cache::{hash_content, TreeCache};
-use crate::system::tree_sitter_adapter::TreeSitterAdapter;
+use crate::system::tree_sitter_adapter::{
+    LoweringReuseNodePlan, LoweringReusePlan, LoweringReusePlanOutcome,
+    RoutineBodyLoweringReusePlan, TreeSitterAdapter,
+};
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 
@@ -42,6 +45,12 @@ fn is_cache_disabled_env() -> bool {
     global_runtime_config()
         .get_bool(RuntimeKey::CacheDisable)
         .unwrap_or(false)
+}
+
+fn exact_program_lowering_reuse_enabled() -> bool {
+    global_runtime_config()
+        .get_bool(RuntimeKey::IntellisenseV2ExactProgramLoweringReuseEnabled)
+        .unwrap_or(true)
 }
 
 const PARSE_COORDINATOR_CANCELLED_ERROR: &str = "Tree-sitter parsing cancelled";
@@ -226,6 +235,36 @@ pub struct ParseSnapshotReport {
     pub incremental: bool,
     pub fallback_reason: Option<String>,
     pub parse_exec_subphases: ParseSnapshotExecSubphaseAttribution,
+    pub program_lowering_summary: ParseSnapshotProgramLoweringSummary,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotProgramLoweringReuseOutcome {
+    FullRebuild,
+    ReusedPrefix,
+    TopLevelReuse,
+    RoutineBodyReuse,
+}
+
+impl ParseSnapshotProgramLoweringReuseOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::FullRebuild => "full_rebuild",
+            Self::ReusedPrefix => "reused_prefix",
+            Self::TopLevelReuse => "top_level_reuse",
+            Self::RoutineBodyReuse => "routine_body_reuse",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ParseSnapshotProgramLoweringSummary {
+    pub reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome,
+    pub reused_lowering_units: u64,
+    pub rebuilt_lowering_units: u64,
+    pub reused_window_count: u64,
+    pub rebuilt_window_count: u64,
+    pub largest_rebuilt_window_lowering_units: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -313,6 +352,7 @@ pub struct ParseSnapshotExecutionOptions<'a> {
     pub save_critical_initial: bool,
     pub save_critical_requested: Option<&'a AtomicBool>,
     pub reused_program_prefix: Option<&'a [Statement]>,
+    pub lowering_reuse_plan: Option<&'a LoweringReusePlan>,
     pub exact_ready_snapshot_control_callback:
         Option<&'a (dyn Fn() -> ParseSnapshotExactReadyControl + Send + Sync)>,
     pub progress_callback: Option<&'a (dyn Fn(ParseSnapshotExecSubphase) + Send + Sync)>,
@@ -530,6 +570,10 @@ impl ParserCoordinator {
                 let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_memory(new_hash, &result);
                 self.update_symbol_index(&file_path, &result);
                 return Ok(ParseSnapshotReport {
@@ -541,6 +585,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
         }
@@ -584,6 +629,10 @@ impl ParserCoordinator {
                 let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 if cancellation_flag.load(Ordering::SeqCst) {
                     return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
                 }
@@ -598,6 +647,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
         }
@@ -651,6 +701,7 @@ impl ParserCoordinator {
                 let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(&result, options);
                 if cancellation_flag.load(Ordering::SeqCst) {
                     return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
                 }
@@ -682,6 +733,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases,
+                    program_lowering_summary,
                 });
             }
         }
@@ -726,6 +778,10 @@ impl ParserCoordinator {
             if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_memory(new_hash, &result);
                 self.update_symbol_index(&file_path, &result);
                 return Ok(ParseSnapshotReport {
@@ -737,6 +793,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
         }
@@ -747,6 +804,10 @@ impl ParserCoordinator {
         match self.tree_sitter.parse_with_tree(&new_content) {
             Ok((tree, program)) => {
                 let backend_tree = Arc::new(tree.clone());
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &program,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
@@ -759,6 +820,7 @@ impl ParserCoordinator {
                     incremental: false,
                     fallback_reason: Some(fallback_reason.to_string()),
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 })
             }
             Err(error) => {
@@ -790,6 +852,10 @@ impl ParserCoordinator {
             if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 if cancellation_flag.load(Ordering::SeqCst) {
                     return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
                 }
@@ -804,6 +870,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
         }
@@ -823,6 +890,10 @@ impl ParserCoordinator {
         {
             Ok((tree, program)) => {
                 let backend_tree = Arc::new(tree.clone());
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &program,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
@@ -835,6 +906,7 @@ impl ParserCoordinator {
                     incremental: false,
                     fallback_reason: Some(fallback_reason.to_string()),
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 })
             }
             Err(error) => {
@@ -874,6 +946,7 @@ impl ParserCoordinator {
             ..Default::default()
         };
         parse_exec_subphases.deferred_syntax_error_assembly = deferred_syntax_error_assembly;
+        let program_lowering_summary = Self::summarize_program_lowering(&parse_result, options);
         if let Some(install_op) = tree_cache_install_op {
             match self.run_tree_cache_install_with_cancellation(
                 install_op,
@@ -911,6 +984,7 @@ impl ParserCoordinator {
             incremental,
             fallback_reason,
             parse_exec_subphases,
+            program_lowering_summary,
         })
     }
 
@@ -1259,6 +1333,10 @@ impl ParserCoordinator {
             if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_memory(new_hash, &result);
                 self.update_symbol_index(&file_path, &result);
                 return Ok(ParseSnapshotReport {
@@ -1270,6 +1348,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
 
@@ -1283,6 +1362,10 @@ impl ParserCoordinator {
             ) {
                 Ok((new_tree, program, changed_ranges)) => {
                     let backend_tree = Arc::new(new_tree.clone());
+                    let program_lowering_summary = Self::summarize_program_lowering(
+                        &program,
+                        ParseSnapshotExecutionOptions::default(),
+                    );
                     self.tree_cache.update(
                         &file_path,
                         new_tree,
@@ -1304,6 +1387,7 @@ impl ParserCoordinator {
                         incremental: true,
                         fallback_reason: None,
                         parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                        program_lowering_summary,
                     });
                 }
                 Err(e) => {
@@ -1319,6 +1403,10 @@ impl ParserCoordinator {
                     return match self.tree_sitter.parse_with_tree(&new_content) {
                         Ok((tree, program)) => {
                             let backend_tree = Arc::new(tree.clone());
+                            let program_lowering_summary = Self::summarize_program_lowering(
+                                &program,
+                                ParseSnapshotExecutionOptions::default(),
+                            );
                             self.store_ast_cache(
                                 new_hash,
                                 &program,
@@ -1341,6 +1429,7 @@ impl ParserCoordinator {
                                 fallback_reason,
                                 parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(
                                 ),
+                                program_lowering_summary,
                             })
                         }
                         Err(parse_err) => {
@@ -1358,6 +1447,10 @@ impl ParserCoordinator {
         match self.tree_sitter.parse_with_tree(&new_content) {
             Ok((tree, program)) => {
                 let backend_tree = Arc::new(tree.clone());
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &program,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
@@ -1370,6 +1463,7 @@ impl ParserCoordinator {
                     incremental: false,
                     fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 })
             }
             Err(e) => {
@@ -1398,6 +1492,10 @@ impl ParserCoordinator {
             if old_hash == new_tree_hash {
                 debug!("Content unchanged, using cached tree");
                 let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &result,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 if cancellation_flag.load(Ordering::SeqCst) {
                     return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
                 }
@@ -1412,6 +1510,7 @@ impl ParserCoordinator {
                     incremental: true,
                     fallback_reason: None,
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 });
             }
 
@@ -1426,6 +1525,10 @@ impl ParserCoordinator {
             ) {
                 Ok((new_tree, program, changed_ranges)) => {
                     let backend_tree = Arc::new(new_tree.clone());
+                    let program_lowering_summary = Self::summarize_program_lowering(
+                        &program,
+                        ParseSnapshotExecutionOptions::default(),
+                    );
                     self.tree_cache.update(
                         &file_path,
                         new_tree,
@@ -1447,6 +1550,7 @@ impl ParserCoordinator {
                         incremental: true,
                         fallback_reason: None,
                         parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                        program_lowering_summary,
                     });
                 }
                 Err(error) if is_parse_cancelled_error(&error) => {
@@ -1475,6 +1579,10 @@ impl ParserCoordinator {
                     ) {
                         Ok((tree, program)) => {
                             let backend_tree = Arc::new(tree.clone());
+                            let program_lowering_summary = Self::summarize_program_lowering(
+                                &program,
+                                ParseSnapshotExecutionOptions::default(),
+                            );
                             self.store_ast_cache(
                                 new_hash,
                                 &program,
@@ -1497,6 +1605,7 @@ impl ParserCoordinator {
                                 fallback_reason,
                                 parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(
                                 ),
+                                program_lowering_summary,
                             })
                         }
                         Err(parse_error) => {
@@ -1527,6 +1636,10 @@ impl ParserCoordinator {
         {
             Ok((tree, program)) => {
                 let backend_tree = Arc::new(tree.clone());
+                let program_lowering_summary = Self::summarize_program_lowering(
+                    &program,
+                    ParseSnapshotExecutionOptions::default(),
+                );
                 self.store_ast_cache(new_hash, &program, Some(file_path.as_path()), &new_content);
                 self.tree_cache
                     .set(file_path, tree, new_content.clone(), new_tree_hash);
@@ -1539,6 +1652,7 @@ impl ParserCoordinator {
                     incremental: false,
                     fallback_reason: Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
                     parse_exec_subphases: ParseSnapshotExecSubphaseAttribution::default(),
+                    program_lowering_summary,
                 })
             }
             Err(error) => {
@@ -1629,11 +1743,20 @@ impl ParserCoordinator {
                         );
                         Some(PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED.to_string())
                     } else {
+                        let lowering_reuse_plan = self.build_exact_lowering_reuse_plan(
+                            &old_source,
+                            &new_tree,
+                            &changed_ranges,
+                        );
+                        let parse_options = ParseSnapshotExecutionOptions {
+                            lowering_reuse_plan: lowering_reuse_plan.as_ref(),
+                            ..options
+                        };
                         match self.run_exact_ready_snapshot_assembly_with_cancellation(
                             &new_tree,
                             &new_content,
                             cancellation_flag,
-                            options,
+                            parse_options,
                         ) {
                             Ok((program, deferred_syntax_error_assembly)) => {
                                 return self.finalize_parse_snapshot_report_with_options(
@@ -1649,7 +1772,7 @@ impl ParserCoordinator {
                                     None,
                                     core_started,
                                     cancellation_flag,
-                                    options,
+                                    parse_options,
                                     Some(ParseSnapshotTreeCacheInstallOp::Update {
                                         file_path: file_path.clone(),
                                         tree: new_tree,
@@ -1943,6 +2066,797 @@ impl ParserCoordinator {
         }
     }
 
+    fn build_exact_lowering_reuse_plan(
+        &self,
+        old_source: &str,
+        new_tree: &tree_sitter::Tree,
+        changed_ranges: &[ParseChangedRange],
+    ) -> Option<LoweringReusePlan> {
+        if !exact_program_lowering_reuse_enabled() {
+            return None;
+        }
+        let previous_parse_result = self.ast_cache.get(ast_cache_key(old_source))?;
+        Self::derive_exact_lowering_reuse_plan(
+            previous_parse_result.as_ref(),
+            new_tree,
+            changed_ranges,
+        )
+    }
+
+    fn derive_exact_lowering_reuse_plan(
+        previous_parse_result: &ParseResult,
+        new_tree: &tree_sitter::Tree,
+        changed_ranges: &[ParseChangedRange],
+    ) -> Option<LoweringReusePlan> {
+        let previous_top_level = previous_parse_result.program.statements.as_slice();
+        if previous_top_level.is_empty() || changed_ranges.is_empty() {
+            return None;
+        }
+
+        let new_root = new_tree.root_node();
+        let new_top_level_nodes = Self::collect_direct_lowering_children(&new_root);
+        if new_top_level_nodes.len() != previous_top_level.len() {
+            return None;
+        }
+
+        let mut affected_top_level = vec![false; previous_top_level.len()];
+        for changed_range in changed_ranges {
+            let mut matched = false;
+            for (idx, statement) in previous_top_level.iter().enumerate() {
+                if Self::changed_range_touches_statement(changed_range, statement) {
+                    affected_top_level[idx] = true;
+                    matched = true;
+                }
+            }
+            if !matched {
+                return None;
+            }
+        }
+
+        let mut top_level_nodes = Vec::with_capacity(previous_top_level.len());
+        let mut affected_indices = Vec::new();
+        for (idx, statement) in previous_top_level.iter().enumerate() {
+            if affected_top_level[idx] {
+                affected_indices.push(idx);
+                top_level_nodes.push(LoweringReuseNodePlan::Rebuild);
+            } else {
+                top_level_nodes.push(LoweringReuseNodePlan::ReuseStatement(
+                    Self::rebase_statement(statement, changed_ranges),
+                ));
+            }
+        }
+
+        let mut outcome = if top_level_nodes
+            .iter()
+            .any(|node| matches!(node, LoweringReuseNodePlan::ReuseStatement(_)))
+        {
+            LoweringReusePlanOutcome::TopLevelReuse
+        } else {
+            LoweringReusePlanOutcome::FullRebuild
+        };
+
+        if affected_indices.len() == 1 {
+            let affected_idx = affected_indices[0];
+            if let Some(routine_plan) = Self::derive_routine_body_lowering_reuse_plan(
+                &previous_top_level[affected_idx],
+                &new_top_level_nodes[affected_idx],
+                changed_ranges,
+            ) {
+                outcome = match routine_plan {
+                    LoweringReuseNodePlan::RebuildRoutineBody(_) => {
+                        LoweringReusePlanOutcome::RoutineBodyReuse
+                    }
+                    LoweringReuseNodePlan::ReuseStatement(_) => {
+                        LoweringReusePlanOutcome::TopLevelReuse
+                    }
+                    LoweringReuseNodePlan::Rebuild => outcome,
+                };
+                top_level_nodes[affected_idx] = routine_plan;
+            }
+        }
+
+        if top_level_nodes
+            .iter()
+            .all(|node| matches!(node, LoweringReuseNodePlan::Rebuild))
+        {
+            return None;
+        }
+
+        Some(LoweringReusePlan {
+            outcome,
+            top_level_nodes,
+        })
+    }
+
+    fn derive_routine_body_lowering_reuse_plan(
+        previous_statement: &Statement,
+        new_routine_node: &Node<'_>,
+        changed_ranges: &[ParseChangedRange],
+    ) -> Option<LoweringReuseNodePlan> {
+        let (body, expected_kind) = match previous_statement {
+            Statement::FunctionDecl { body, .. } => (body.as_slice(), "function_definition"),
+            Statement::ProcedureDecl { body, .. } => (body.as_slice(), "procedure_definition"),
+            _ => return None,
+        };
+
+        if body.is_empty() || new_routine_node.kind() != expected_kind {
+            return None;
+        }
+
+        let new_body_nodes = Self::collect_direct_lowering_children(new_routine_node);
+        if new_body_nodes.len() != body.len() {
+            return None;
+        }
+
+        let first_body_span = Self::statement_span(&body[0]);
+        let last_body_span = Self::statement_span(body.last()?);
+        let mut affected_body = vec![false; body.len()];
+        let mut any_body_statement_affected = false;
+
+        for changed_range in changed_ranges {
+            if !Self::changed_range_within_bounds(
+                changed_range,
+                first_body_span.start,
+                last_body_span.end,
+            ) {
+                return None;
+            }
+
+            let mut matched = false;
+            for (idx, statement) in body.iter().enumerate() {
+                if Self::changed_range_touches_statement(changed_range, statement) {
+                    affected_body[idx] = true;
+                    matched = true;
+                    any_body_statement_affected = true;
+                }
+            }
+
+            if !matched && changed_range.old_end_byte > changed_range.start_byte {
+                // A replacement entirely between lowered siblings is too ambiguous.
+                return None;
+            }
+        }
+
+        if !any_body_statement_affected {
+            return Some(LoweringReuseNodePlan::ReuseStatement(
+                Self::rebase_statement(previous_statement, changed_ranges),
+            ));
+        }
+
+        let first_affected = affected_body.iter().position(|affected| *affected)?;
+        let last_affected = affected_body.iter().rposition(|affected| *affected)?;
+        if (first_affected..=last_affected)
+            .any(|idx| !Self::supports_routine_body_window_reuse(&body[idx]))
+        {
+            return None;
+        }
+
+        if first_affected == 0 && last_affected + 1 == body.len() {
+            return None;
+        }
+
+        Some(LoweringReuseNodePlan::RebuildRoutineBody(
+            RoutineBodyLoweringReusePlan {
+                original_body_len: body.len(),
+                reused_body_prefix: body[..first_affected]
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                reused_body_suffix: body[last_affected + 1..]
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+            },
+        ))
+    }
+
+    fn collect_direct_lowering_children<'a>(node: &'a Node<'a>) -> Vec<Node<'a>> {
+        let mut cursor = node.walk();
+        node.children(&mut cursor)
+            .filter(|child| Self::is_lowering_progress_unit_kind(child.kind()))
+            .collect()
+    }
+
+    fn is_lowering_progress_unit_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            "function_definition"
+                | "procedure_definition"
+                | "var_definition"
+                | "var_statement"
+                | "if_statement"
+                | "for_statement"
+                | "for_each_statement"
+                | "while_statement"
+                | "try_statement"
+                | "rise_error_statement"
+                | "assignment_statement"
+                | "return_statement"
+                | "call_statement"
+                | "break_statement"
+                | "continue_statement"
+                | "goto_statement"
+                | "label_statement"
+                | "execute_statement"
+                | "add_handler_statement"
+                | "remove_handler_statement"
+                | "await_statement"
+        )
+    }
+
+    fn statement_span(statement: &Statement) -> bsl_shared::ir::Span {
+        match statement {
+            Statement::Assignment { span, .. }
+            | Statement::VarDeclaration { span, .. }
+            | Statement::FunctionDecl { span, .. }
+            | Statement::ProcedureDecl { span, .. }
+            | Statement::If { span, .. }
+            | Statement::For { span, .. }
+            | Statement::ForEach { span, .. }
+            | Statement::While { span, .. }
+            | Statement::Return { span, .. }
+            | Statement::Try { span, .. }
+            | Statement::Call { span, .. }
+            | Statement::Break { span, .. }
+            | Statement::Continue { span, .. }
+            | Statement::Goto { span, .. }
+            | Statement::Label { span, .. }
+            | Statement::Execute { span, .. }
+            | Statement::RaiseError { span, .. }
+            | Statement::AddHandler { span, .. }
+            | Statement::RemoveHandler { span, .. }
+            | Statement::Await { span, .. } => *span,
+        }
+    }
+
+    fn supports_routine_body_window_reuse(statement: &Statement) -> bool {
+        matches!(
+            statement,
+            Statement::Assignment { .. }
+                | Statement::Return { .. }
+                | Statement::Call { .. }
+                | Statement::Break { .. }
+                | Statement::Continue { .. }
+                | Statement::Goto { .. }
+                | Statement::Label { .. }
+                | Statement::Execute { .. }
+                | Statement::RaiseError { .. }
+                | Statement::AddHandler { .. }
+                | Statement::RemoveHandler { .. }
+                | Statement::Await { .. }
+        )
+    }
+
+    fn changed_range_touches_statement(
+        changed_range: &ParseChangedRange,
+        statement: &Statement,
+    ) -> bool {
+        Self::changed_range_touches_span(changed_range, Self::statement_span(statement))
+    }
+
+    fn changed_range_touches_span(
+        changed_range: &ParseChangedRange,
+        span: bsl_shared::ir::Span,
+    ) -> bool {
+        let start = changed_range.start_byte;
+        let old_end = changed_range.old_end_byte;
+        if old_end > start {
+            start < span.end && old_end > span.start
+        } else {
+            span.start <= start && start <= span.end
+        }
+    }
+
+    fn changed_range_within_bounds(
+        changed_range: &ParseChangedRange,
+        start_bound: u32,
+        end_bound: u32,
+    ) -> bool {
+        let start = changed_range.start_byte;
+        let old_end = changed_range.old_end_byte.max(start);
+        start_bound <= start && old_end <= end_bound
+    }
+
+    fn summarize_program_lowering(
+        parse_result: &ParseResult,
+        options: ParseSnapshotExecutionOptions<'_>,
+    ) -> ParseSnapshotProgramLoweringSummary {
+        let total_lowering_units =
+            Self::count_lowering_units_in_statements(&parse_result.program.statements);
+        if let Some(lowering_reuse_plan) = options.lowering_reuse_plan {
+            return Self::summarize_program_lowering_reuse_plan(
+                lowering_reuse_plan,
+                &parse_result.program.statements,
+                total_lowering_units,
+            );
+        }
+        if let Some(reused_program_prefix) = options
+            .reused_program_prefix
+            .filter(|prefix| !prefix.is_empty())
+        {
+            let reused_lowering_units =
+                Self::count_lowering_units_in_statements(reused_program_prefix);
+            let rebuilt_lowering_units = total_lowering_units.saturating_sub(reused_lowering_units);
+            return ParseSnapshotProgramLoweringSummary {
+                reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::ReusedPrefix,
+                reused_lowering_units,
+                rebuilt_lowering_units,
+                reused_window_count: 1,
+                rebuilt_window_count: u64::from(rebuilt_lowering_units > 0),
+                largest_rebuilt_window_lowering_units: rebuilt_lowering_units,
+            };
+        }
+        ParseSnapshotProgramLoweringSummary {
+            reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::FullRebuild,
+            reused_lowering_units: 0,
+            rebuilt_lowering_units: total_lowering_units,
+            reused_window_count: 0,
+            rebuilt_window_count: u64::from(total_lowering_units > 0),
+            largest_rebuilt_window_lowering_units: total_lowering_units,
+        }
+    }
+
+    fn summarize_program_lowering_reuse_plan(
+        lowering_reuse_plan: &LoweringReusePlan,
+        final_statements: &[Statement],
+        total_lowering_units: u64,
+    ) -> ParseSnapshotProgramLoweringSummary {
+        let mut reused_lowering_units = 0u64;
+        let mut rebuilt_lowering_units = 0u64;
+        let mut reused_window_count = 0u64;
+        let mut rebuilt_window_count = 0u64;
+        let mut largest_rebuilt_window_lowering_units = 0u64;
+        let mut previous_top_level_reused = false;
+        let mut previous_top_level_rebuilt = false;
+
+        for (idx, node_plan) in lowering_reuse_plan.top_level_nodes.iter().enumerate() {
+            match node_plan {
+                LoweringReuseNodePlan::ReuseStatement(statement) => {
+                    reused_lowering_units =
+                        reused_lowering_units.saturating_add(Self::count_lowering_units(statement));
+                    if !previous_top_level_reused {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    previous_top_level_reused = true;
+                    previous_top_level_rebuilt = false;
+                }
+                LoweringReuseNodePlan::Rebuild => {
+                    let rebuilt_window_units = final_statements
+                        .get(idx)
+                        .map(Self::count_lowering_units)
+                        .unwrap_or(0);
+                    rebuilt_lowering_units =
+                        rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    if !previous_top_level_rebuilt {
+                        rebuilt_window_count = rebuilt_window_count.saturating_add(1);
+                    }
+                    largest_rebuilt_window_lowering_units =
+                        largest_rebuilt_window_lowering_units.max(rebuilt_window_units);
+                    previous_top_level_reused = false;
+                    previous_top_level_rebuilt = true;
+                }
+                LoweringReuseNodePlan::RebuildRoutineBody(body_reuse) => {
+                    let reused_body_lowering_units =
+                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_prefix)
+                            .saturating_add(Self::count_lowering_units_in_statements(
+                                &body_reuse.reused_body_suffix,
+                            ));
+                    let rebuilt_window_units = final_statements
+                        .get(idx)
+                        .map(Self::count_lowering_units)
+                        .unwrap_or(0)
+                        .saturating_sub(reused_body_lowering_units);
+                    reused_lowering_units =
+                        reused_lowering_units.saturating_add(reused_body_lowering_units);
+                    rebuilt_lowering_units =
+                        rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    if !body_reuse.reused_body_prefix.is_empty() {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    if !body_reuse.reused_body_suffix.is_empty() {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    if !previous_top_level_rebuilt {
+                        rebuilt_window_count = rebuilt_window_count.saturating_add(1);
+                    }
+                    largest_rebuilt_window_lowering_units =
+                        largest_rebuilt_window_lowering_units.max(rebuilt_window_units);
+                    previous_top_level_reused = false;
+                    previous_top_level_rebuilt = true;
+                }
+            }
+        }
+
+        ParseSnapshotProgramLoweringSummary {
+            reuse_outcome: match lowering_reuse_plan.outcome {
+                LoweringReusePlanOutcome::FullRebuild => {
+                    ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+                }
+                LoweringReusePlanOutcome::TopLevelReuse => {
+                    ParseSnapshotProgramLoweringReuseOutcome::TopLevelReuse
+                }
+                LoweringReusePlanOutcome::RoutineBodyReuse => {
+                    ParseSnapshotProgramLoweringReuseOutcome::RoutineBodyReuse
+                }
+            },
+            reused_lowering_units,
+            rebuilt_lowering_units: if rebuilt_lowering_units == 0 {
+                total_lowering_units.saturating_sub(reused_lowering_units)
+            } else {
+                rebuilt_lowering_units
+            },
+            reused_window_count,
+            rebuilt_window_count,
+            largest_rebuilt_window_lowering_units,
+        }
+    }
+
+    fn count_lowering_units_in_statements(statements: &[Statement]) -> u64 {
+        statements
+            .iter()
+            .map(Self::count_lowering_units)
+            .sum::<u64>()
+    }
+
+    fn count_lowering_units(statement: &Statement) -> u64 {
+        let nested = match statement {
+            Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
+                Self::count_lowering_units_in_statements(body)
+            }
+            Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => Self::count_lowering_units_in_statements(then_body).saturating_add(
+                else_body
+                    .as_ref()
+                    .map(|body| Self::count_lowering_units_in_statements(body))
+                    .unwrap_or(0),
+            ),
+            Statement::For { body, .. }
+            | Statement::ForEach { body, .. }
+            | Statement::While { body, .. } => Self::count_lowering_units_in_statements(body),
+            Statement::Try {
+                try_body,
+                except_body,
+                ..
+            } => Self::count_lowering_units_in_statements(try_body)
+                .saturating_add(Self::count_lowering_units_in_statements(except_body)),
+            Statement::Assignment { .. }
+            | Statement::VarDeclaration { .. }
+            | Statement::Return { .. }
+            | Statement::Call { .. }
+            | Statement::Break { .. }
+            | Statement::Continue { .. }
+            | Statement::Goto { .. }
+            | Statement::Label { .. }
+            | Statement::Execute { .. }
+            | Statement::RaiseError { .. }
+            | Statement::AddHandler { .. }
+            | Statement::RemoveHandler { .. }
+            | Statement::Await { .. } => 0,
+        };
+        1u64.saturating_add(nested)
+    }
+
+    fn rebase_statement(statement: &Statement, changed_ranges: &[ParseChangedRange]) -> Statement {
+        match statement {
+            Statement::Assignment {
+                target,
+                value,
+                span,
+            } => Statement::Assignment {
+                target: Self::rebase_expression(target, changed_ranges),
+                value: Self::rebase_expression(value, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::VarDeclaration {
+                name,
+                type_hint,
+                span,
+            } => Statement::VarDeclaration {
+                name: name.clone(),
+                type_hint: type_hint.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::FunctionDecl {
+                name,
+                params,
+                body,
+                compiler_directive,
+                is_export,
+                span,
+            } => Statement::FunctionDecl {
+                name: name.clone(),
+                params: params.clone(),
+                body: body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                compiler_directive: *compiler_directive,
+                is_export: *is_export,
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::ProcedureDecl {
+                name,
+                params,
+                body,
+                compiler_directive,
+                is_export,
+                span,
+            } => Statement::ProcedureDecl {
+                name: name.clone(),
+                params: params.clone(),
+                body: body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                compiler_directive: *compiler_directive,
+                is_export: *is_export,
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::If {
+                condition,
+                then_body,
+                else_body,
+                span,
+            } => Statement::If {
+                condition: Self::rebase_expression(condition, changed_ranges),
+                then_body: then_body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                else_body: else_body.as_ref().map(|body| {
+                    body.iter()
+                        .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                        .collect()
+                }),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::For {
+                variable,
+                start,
+                end,
+                body,
+                span,
+            } => Statement::For {
+                variable: variable.clone(),
+                start: Self::rebase_expression(start, changed_ranges),
+                end: Self::rebase_expression(end, changed_ranges),
+                body: body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::ForEach {
+                variable,
+                collection,
+                body,
+                span,
+            } => Statement::ForEach {
+                variable: variable.clone(),
+                collection: Self::rebase_expression(collection, changed_ranges),
+                body: body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::While {
+                condition,
+                body,
+                span,
+            } => Statement::While {
+                condition: Self::rebase_expression(condition, changed_ranges),
+                body: body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Return { value, span } => Statement::Return {
+                value: value
+                    .as_ref()
+                    .map(|expression| Self::rebase_expression(expression, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Try {
+                try_body,
+                except_body,
+                span,
+            } => Statement::Try {
+                try_body: try_body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                except_body: except_body
+                    .iter()
+                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Call { expression, span } => Statement::Call {
+                expression: Self::rebase_expression(expression, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Break { span } => Statement::Break {
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Continue { span } => Statement::Continue {
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Goto { label, span } => Statement::Goto {
+                label: label.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Label { name, span } => Statement::Label {
+                name: name.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Execute { code, span } => Statement::Execute {
+                code: Self::rebase_expression(code, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::RaiseError { message, span } => Statement::RaiseError {
+                message: message
+                    .as_ref()
+                    .map(|expression| Self::rebase_expression(expression, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::AddHandler {
+                event,
+                handler,
+                span,
+            } => Statement::AddHandler {
+                event: Self::rebase_expression(event, changed_ranges),
+                handler: Self::rebase_expression(handler, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::RemoveHandler {
+                event,
+                handler,
+                span,
+            } => Statement::RemoveHandler {
+                event: Self::rebase_expression(event, changed_ranges),
+                handler: Self::rebase_expression(handler, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Statement::Await { expression, span } => Statement::Await {
+                expression: Self::rebase_expression(expression, changed_ranges),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+        }
+    }
+
+    fn rebase_expression(
+        expression: &Expression,
+        changed_ranges: &[ParseChangedRange],
+    ) -> Expression {
+        match expression {
+            Expression::Identifier { name, span } => Expression::Identifier {
+                name: name.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::String { value, span } => Expression::String {
+                value: value.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Number { value, span } => Expression::Number {
+                value: *value,
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Boolean { value, span } => Expression::Boolean {
+                value: *value,
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Date { value, span } => Expression::Date {
+                value: value.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Call {
+                function,
+                args,
+                span,
+            } => Expression::Call {
+                function: Box::new(Self::rebase_expression(function, changed_ranges)),
+                args: args
+                    .iter()
+                    .map(|expression| Self::rebase_expression(expression, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Binary {
+                left,
+                operator,
+                right,
+                span,
+            } => Expression::Binary {
+                left: Box::new(Self::rebase_expression(left, changed_ranges)),
+                operator: operator.clone(),
+                right: Box::new(Self::rebase_expression(right, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Unary {
+                operator,
+                operand,
+                span,
+            } => Expression::Unary {
+                operator: operator.clone(),
+                operand: Box::new(Self::rebase_expression(operand, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Ternary {
+                condition,
+                then_expr,
+                else_expr,
+                span,
+            } => Expression::Ternary {
+                condition: Box::new(Self::rebase_expression(condition, changed_ranges)),
+                then_expr: Box::new(Self::rebase_expression(then_expr, changed_ranges)),
+                else_expr: Box::new(Self::rebase_expression(else_expr, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::New {
+                type_name,
+                args,
+                span,
+            } => Expression::New {
+                type_name: type_name.clone(),
+                args: args
+                    .iter()
+                    .map(|expression| Self::rebase_expression(expression, changed_ranges))
+                    .collect(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::PropertyAccess {
+                object,
+                property,
+                span,
+            } => Expression::PropertyAccess {
+                object: Box::new(Self::rebase_expression(object, changed_ranges)),
+                property: property.clone(),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::IndexAccess {
+                object,
+                index,
+                span,
+            } => Expression::IndexAccess {
+                object: Box::new(Self::rebase_expression(object, changed_ranges)),
+                index: Box::new(Self::rebase_expression(index, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+            Expression::Await { expression, span } => Expression::Await {
+                expression: Box::new(Self::rebase_expression(expression, changed_ranges)),
+                span: Self::rebase_span(*span, changed_ranges),
+            },
+        }
+    }
+
+    fn rebase_span(
+        span: bsl_shared::ir::Span,
+        changed_ranges: &[ParseChangedRange],
+    ) -> bsl_shared::ir::Span {
+        bsl_shared::ir::Span::new(
+            Self::rebase_offset(span.start, changed_ranges),
+            Self::rebase_offset(span.end, changed_ranges),
+        )
+    }
+
+    fn rebase_offset(old_offset: u32, changed_ranges: &[ParseChangedRange]) -> u32 {
+        let rebased = changed_ranges
+            .iter()
+            .fold(i64::from(old_offset), |acc, range| {
+                if old_offset >= range.old_end_byte {
+                    acc + i64::from(range.new_end_byte) - i64::from(range.old_end_byte)
+                } else {
+                    acc
+                }
+            });
+        rebased.max(0) as u32
+    }
+
     fn run_exact_ready_snapshot_assembly_with_cancellation(
         &self,
         tree: &tree_sitter::Tree,
@@ -1972,7 +2886,14 @@ impl ParserCoordinator {
                 }
             }
         };
-        let parse_result = if let Some(reused_program_prefix) = options
+        let parse_result = if let Some(lowering_reuse_plan) = options.lowering_reuse_plan {
+            TreeSitterAdapter::convert_tree_fast_with_observer_and_reuse_plan(
+                tree,
+                content,
+                lowering_reuse_plan,
+                &mut lowering_observer,
+            )?
+        } else if let Some(reused_program_prefix) = options
             .reused_program_prefix
             .filter(|prefix| !prefix.is_empty())
         {

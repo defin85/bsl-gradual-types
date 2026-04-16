@@ -282,6 +282,7 @@ pub enum RuntimeKey {
     IntellisenseV2CompletionCanaryPercent,
     IntellisenseV2CompletionQueueCapacity,
     IntellisenseV2DidSaveFollowupLaneQuota,
+    IntellisenseV2ExactProgramLoweringReuseEnabled,
     AgentHttpAddr,
     AgentHttpStaticDir,
     AgentStateTtlSecs,
@@ -332,6 +333,7 @@ impl RuntimeKey {
         RuntimeKey::IntellisenseV2CompletionCanaryPercent,
         RuntimeKey::IntellisenseV2CompletionQueueCapacity,
         RuntimeKey::IntellisenseV2DidSaveFollowupLaneQuota,
+        RuntimeKey::IntellisenseV2ExactProgramLoweringReuseEnabled,
         RuntimeKey::AgentHttpAddr,
         RuntimeKey::AgentHttpStaticDir,
         RuntimeKey::AgentStateTtlSecs,
@@ -595,6 +597,15 @@ impl RuntimeKey {
                 },
                 tier: ConfigTier::Stable,
                 default: Some(ConfigValue::Usize(1)),
+                mutability: self.mutability(),
+            },
+            RuntimeKey::IntellisenseV2ExactProgramLoweringReuseEnabled => KeySpec {
+                env: "BSL_INTELLISENSE_V2_EXACT_PROGRAM_LOWERING_REUSE_ENABLED",
+                kind: ValueKind::Bool {
+                    mode: BoolMode::Truthy,
+                },
+                tier: ConfigTier::Stable,
+                default: Some(ConfigValue::Bool(true)),
                 mutability: self.mutability(),
             },
             RuntimeKey::AgentHttpAddr => KeySpec {

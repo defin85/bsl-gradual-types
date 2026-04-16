@@ -40,6 +40,7 @@ use tracing::debug;
 use tree_sitter::Node;
 
 use super::span::{node_to_span_cached, LineIndex};
+use super::{LoweringReuseNodePlan, LoweringReusePlan};
 
 type LoweringObserver<'a> = dyn FnMut(usize, usize) -> Result<(), String> + 'a;
 
@@ -109,7 +110,69 @@ impl LoweringProgressState {
     }
 }
 
-fn is_lowering_progress_unit(kind: &str) -> bool {
+pub(crate) fn observe_reused_statement_progress(
+    statement: &Statement,
+    progress: &mut LoweringProgressState,
+    observer: &mut LoweringObserver<'_>,
+) -> Result<(), String> {
+    progress.observe_unit(observer)?;
+
+    match statement {
+        Statement::FunctionDecl { body, .. } | Statement::ProcedureDecl { body, .. } => {
+            observe_reused_statement_slice_progress(body, progress, observer)
+        }
+        Statement::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            observe_reused_statement_slice_progress(then_body, progress, observer)?;
+            if let Some(else_body) = else_body {
+                observe_reused_statement_slice_progress(else_body, progress, observer)?;
+            }
+            Ok(())
+        }
+        Statement::For { body, .. }
+        | Statement::ForEach { body, .. }
+        | Statement::While { body, .. } => {
+            observe_reused_statement_slice_progress(body, progress, observer)
+        }
+        Statement::Try {
+            try_body,
+            except_body,
+            ..
+        } => {
+            observe_reused_statement_slice_progress(try_body, progress, observer)?;
+            observe_reused_statement_slice_progress(except_body, progress, observer)
+        }
+        Statement::Assignment { .. }
+        | Statement::VarDeclaration { .. }
+        | Statement::Return { .. }
+        | Statement::Call { .. }
+        | Statement::Break { .. }
+        | Statement::Continue { .. }
+        | Statement::Goto { .. }
+        | Statement::Label { .. }
+        | Statement::Execute { .. }
+        | Statement::RaiseError { .. }
+        | Statement::AddHandler { .. }
+        | Statement::RemoveHandler { .. }
+        | Statement::Await { .. } => Ok(()),
+    }
+}
+
+fn observe_reused_statement_slice_progress(
+    statements: &[Statement],
+    progress: &mut LoweringProgressState,
+    observer: &mut LoweringObserver<'_>,
+) -> Result<(), String> {
+    for statement in statements {
+        observe_reused_statement_progress(statement, progress, observer)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn is_lowering_progress_unit_kind(kind: &str) -> bool {
     matches!(
         kind,
         "function_definition"
@@ -169,9 +232,7 @@ pub fn convert_source_file_cached_with_observer_and_reused_prefix(
     reused_prefix: &[Statement],
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
-    let mut progress = LoweringProgressState::with_total_hint(
-        (node.child_count() as usize).saturating_sub(reused_prefix.len()),
-    );
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
     let mut statements = Vec::with_capacity(
         reused_prefix
             .len()
@@ -181,8 +242,10 @@ pub fn convert_source_file_cached_with_observer_and_reused_prefix(
     let mut cursor = node.walk();
 
     for child in node.children(&mut cursor) {
-        if reused_index < reused_prefix.len() && is_lowering_progress_unit(child.kind()) {
-            statements.push(reused_prefix[reused_index].clone());
+        if reused_index < reused_prefix.len() && is_lowering_progress_unit_kind(child.kind()) {
+            let statement = &reused_prefix[reused_index];
+            observe_reused_statement_progress(statement, &mut progress, &mut observer)?;
+            statements.push(statement.clone());
             reused_index = reused_index.saturating_add(1);
             continue;
         }
@@ -195,6 +258,68 @@ pub fn convert_source_file_cached_with_observer_and_reused_prefix(
         )? {
             statements.push(stmt);
         }
+    }
+
+    progress.finish(&mut observer)?;
+    Ok(statements)
+}
+
+pub fn convert_source_file_cached_with_observer_and_reuse_plan(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    reuse_plan: &LoweringReusePlan,
+    mut observer: impl FnMut(usize, usize) -> Result<(), String>,
+) -> Result<Vec<Statement>, String> {
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
+    let mut statements = Vec::with_capacity(reuse_plan.top_level_nodes.len());
+    let mut reuse_index = 0usize;
+    let mut cursor = node.walk();
+
+    for child in node.children(&mut cursor) {
+        if !is_lowering_progress_unit_kind(child.kind()) {
+            if let Some(stmt) = dispatch_statement_cached_internal(
+                &child,
+                source,
+                line_index,
+                &mut progress,
+                &mut observer,
+            )? {
+                statements.push(stmt);
+            }
+            continue;
+        }
+
+        match reuse_plan.top_level_nodes.get(reuse_index) {
+            Some(LoweringReuseNodePlan::ReuseStatement(statement)) => {
+                observe_reused_statement_progress(statement, &mut progress, &mut observer)?;
+                statements.push(statement.clone());
+            }
+            Some(LoweringReuseNodePlan::RebuildRoutineBody(body_reuse)) => {
+                let stmt = declarations::convert_function_definition_cached_with_body_reuse(
+                    &child,
+                    source,
+                    line_index,
+                    &mut progress,
+                    &mut observer,
+                    body_reuse,
+                )?;
+                statements.push(stmt);
+            }
+            _ => {
+                if let Some(stmt) = dispatch_statement_cached_internal(
+                    &child,
+                    source,
+                    line_index,
+                    &mut progress,
+                    &mut observer,
+                )? {
+                    statements.push(stmt);
+                }
+            }
+        }
+
+        reuse_index = reuse_index.saturating_add(1);
     }
 
     progress.finish(&mut observer)?;
@@ -263,7 +388,7 @@ pub(crate) fn dispatch_statement_cached_internal(
     progress: &mut LoweringProgressState,
     observer: &mut LoweringObserver<'_>,
 ) -> Result<Option<Statement>, String> {
-    if is_lowering_progress_unit(node.kind()) {
+    if is_lowering_progress_unit_kind(node.kind()) {
         progress.observe_unit(observer)?;
     }
 

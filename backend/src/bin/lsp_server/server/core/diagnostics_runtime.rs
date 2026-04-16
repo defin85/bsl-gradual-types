@@ -171,11 +171,20 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) document_symbol_side_work_ms: Option<u64>,
     pub(crate) dominant_phase: Option<&'static str>,
     pub(crate) dominant_phase_ms: Option<u64>,
+    pub(crate) program_lowering_reuse_outcome: Option<&'static str>,
+    pub(crate) program_lowering_reused_lowering_units: Option<u64>,
+    pub(crate) program_lowering_rebuilt_lowering_units: Option<u64>,
+    pub(crate) program_lowering_reused_window_count: Option<u64>,
+    pub(crate) program_lowering_rebuilt_window_count: Option<u64>,
+    pub(crate) program_lowering_largest_rebuilt_window_lowering_units: Option<u64>,
 }
 
 impl DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) fn from_completed(
         attribution: &super::super::ReadyParseSnapshotPhaseAttributionV2,
+        program_lowering_summary: Option<
+            &bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+        >,
     ) -> Option<Self> {
         let (dominant_phase, dominant_phase_ms) = attribution.dominant_phase().unwrap_or(("", 0));
         let (dominant_parse_exec_subphase, dominant_parse_exec_subphase_ms) = attribution
@@ -262,6 +271,18 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             document_symbol_side_work_ms: attribution.document_symbol_side_work_ms,
             dominant_phase: (dominant_phase_ms > 0).then_some(dominant_phase),
             dominant_phase_ms: (dominant_phase_ms > 0).then_some(dominant_phase_ms),
+            program_lowering_reuse_outcome: program_lowering_summary
+                .map(|summary| summary.reuse_outcome.as_str()),
+            program_lowering_reused_lowering_units: program_lowering_summary
+                .map(|summary| summary.reused_lowering_units),
+            program_lowering_rebuilt_lowering_units: program_lowering_summary
+                .map(|summary| summary.rebuilt_lowering_units),
+            program_lowering_reused_window_count: program_lowering_summary
+                .map(|summary| summary.reused_window_count),
+            program_lowering_rebuilt_window_count: program_lowering_summary
+                .map(|summary| summary.rebuilt_window_count),
+            program_lowering_largest_rebuilt_window_lowering_units: program_lowering_summary
+                .map(|summary| summary.largest_rebuilt_window_lowering_units),
         })
     }
 
@@ -536,6 +557,12 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 }),
             dominant_phase: dominant.map(|(phase, _)| phase),
             dominant_phase_ms: dominant.map(|(_, duration_ms)| duration_ms),
+            program_lowering_reuse_outcome: None,
+            program_lowering_reused_lowering_units: None,
+            program_lowering_rebuilt_lowering_units: None,
+            program_lowering_reused_window_count: None,
+            program_lowering_rebuilt_window_count: None,
+            program_lowering_largest_rebuilt_window_lowering_units: None,
         };
         if diagnostics_save_coherence_debug_enabled() {
             emit_diagnostics_save_coherence_debug(format!(
@@ -1598,18 +1625,19 @@ impl BslLanguageServer {
                 None => ReadySnapshotTaskStateV2::Absent,
             }
         };
-        let ready_snapshot_phase_attribution = exact_inflight_control
+        let ready_snapshot_phase_attribution = ready_state
             .as_ref()
-            .and_then(|control| {
-                DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
-                    &control.phase_attribution_snapshot(),
-                    false,
+            .and_then(|state| {
+                DiagnosticsReadySnapshotPhaseAttributionV2::from_completed(
+                    &state.phase_attribution,
+                    state.program_lowering_summary.as_ref(),
                 )
             })
             .or_else(|| {
-                ready_state.as_ref().and_then(|state| {
-                    DiagnosticsReadySnapshotPhaseAttributionV2::from_completed(
-                        &state.phase_attribution,
+                exact_inflight_control.as_ref().and_then(|control| {
+                    DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+                        &control.phase_attribution_snapshot(),
+                        false,
                     )
                 })
             });
@@ -1746,21 +1774,25 @@ impl BslLanguageServer {
         ready_state: Option<&super::super::ReadyParseSnapshotStateV2>,
         include_timeout_phase: bool,
     ) -> Option<DiagnosticsReadySnapshotPhaseAttributionV2> {
-        if let Some(task_control) = self
-            .matching_background_parse_snapshot_task_control_v2(
-                supersession_key.file_id,
-                supersession_key.requested_version,
-                expected_text_hash,
+        if let Some(attribution) = ready_state.and_then(|state| {
+            DiagnosticsReadySnapshotPhaseAttributionV2::from_completed(
+                &state.phase_attribution,
+                state.program_lowering_summary.as_ref(),
             )
-            .await
-        {
-            return DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+        }) {
+            return Some(attribution);
+        }
+        self.matching_background_parse_snapshot_task_control_v2(
+            supersession_key.file_id,
+            supersession_key.requested_version,
+            expected_text_hash,
+        )
+        .await
+        .and_then(|task_control| {
+            DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
                 &task_control.phase_attribution_snapshot(),
                 include_timeout_phase,
-            );
-        }
-        ready_state.and_then(|state| {
-            DiagnosticsReadySnapshotPhaseAttributionV2::from_completed(&state.phase_attribution)
+            )
         })
     }
 

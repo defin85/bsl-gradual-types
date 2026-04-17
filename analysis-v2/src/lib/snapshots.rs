@@ -122,6 +122,31 @@ unsafe impl salsa::Update for SemanticDiagnosticsSnapshot {
     }
 }
 
+#[derive(Clone)]
+pub struct DiagnosticsTypeHintsSnapshot(Arc<SemanticTypeHints>);
+
+impl std::fmt::Debug for DiagnosticsTypeHintsSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DiagnosticsTypeHintsSnapshot(..)")
+    }
+}
+
+impl PartialEq for DiagnosticsTypeHintsSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for DiagnosticsTypeHintsSnapshot {}
+
+unsafe impl salsa::Update for DiagnosticsTypeHintsSnapshot {
+    unsafe fn maybe_update(old_pointer: *mut Self, new_value: Self) -> bool {
+        let old_value: &mut Self = unsafe { &mut *old_pointer };
+        *old_value = new_value;
+        true
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeIndexSnapshot {
     index: Arc<type_inference_v2::TypeIndex>,
@@ -286,10 +311,16 @@ pub fn semantic_diagnostics(
         return SemanticDiagnosticsSnapshot(Arc::new(Vec::new()));
     }
 
-    let program = ir(db, file, deps, settings).0;
+    let program = diagnostics_program(db, file, deps, settings).0;
+    let type_hints = diagnostics_type_hints(db, file, deps, settings).0;
     cancellation_checkpoint(db);
     let detail_level = settings.diagnostics_detail_level(db);
-    let diagnostics = collect_semantic_diagnostics_from_program(program, deps_data, detail_level);
+    let diagnostics = collect_semantic_diagnostics_with_type_hints(
+        program.as_ref(),
+        type_hints.as_ref(),
+        deps_data,
+        detail_level,
+    );
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
 }
 
@@ -315,7 +346,8 @@ pub fn semantic_diagnostics_flow_sensitive(
         return SemanticDiagnosticsSnapshot(base);
     }
 
-    let program = ir(db, file, deps, settings).0;
+    let program = diagnostics_program(db, file, deps, settings).0;
+    let type_hints = diagnostics_type_hints(db, file, deps, settings).0;
     cancellation_checkpoint(db);
     let deps_data = deps.data(db).0.clone();
     let resolver = deps_data
@@ -328,6 +360,7 @@ pub fn semantic_diagnostics_flow_sensitive(
     diagnostics.extend(flow_sensitive_null_safety_diagnostics(
         &program,
         resolver.as_ref(),
+        type_hints.as_ref(),
     ));
     diagnostics.sort_by(|a, b| {
         let severity_key = |severity: DiagnosticSeverity| match severity {
@@ -351,6 +384,80 @@ pub fn semantic_diagnostics_flow_sensitive(
     });
 
     SemanticDiagnosticsSnapshot(Arc::new(diagnostics))
+}
+
+#[salsa::tracked]
+pub fn diagnostics_program(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> SemanticProgramSnapshot {
+    cancellation_checkpoint(db);
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
+        return SemanticProgramSnapshot(Arc::new(empty_semantic_program_for_source(
+            file.path(db).as_ref(),
+            file.text(db).as_ref(),
+        )));
+    }
+
+    let source = file.text(db).to_string();
+    let file_path = file.path(db).to_string();
+    cancellation_checkpoint(db);
+    let checkpoint = || cancellation_checkpoint(db);
+    SemanticProgramSnapshot(
+        build_diagnostics_program_from_parsed_profiled_with_checkpoint(
+            parsed,
+            &source,
+            &file_path,
+            deps_data,
+            Some(&checkpoint),
+        )
+        .program,
+    )
+}
+
+#[salsa::tracked]
+pub fn diagnostics_type_hints(
+    db: &dyn salsa::Database,
+    file: SourceFile,
+    deps: DepsSnapshot,
+    settings: SettingsSnapshot,
+) -> DiagnosticsTypeHintsSnapshot {
+    cancellation_checkpoint(db);
+    let _deps_id = deps.id(db);
+    let _settings_id = settings.id(db);
+    let deps_data = deps.data(db).0.clone();
+
+    let parsed = parse_result(db, file, settings).0;
+    cancellation_checkpoint(db);
+    if !parsed.syntax_errors.is_empty()
+        && !syntax_errors_only_in_directives(file.text(db), &parsed.syntax_errors)
+    {
+        return DiagnosticsTypeHintsSnapshot(Arc::new(SemanticTypeHints::default()));
+    }
+
+    let file_path = file.path(db).to_string();
+    let program = diagnostics_program(db, file, deps, settings).0;
+    let checkpoint = || cancellation_checkpoint(db);
+    let facts = type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint(
+        &parsed.program,
+        &file_path,
+        deps_data,
+        &checkpoint,
+    );
+    DiagnosticsTypeHintsSnapshot(Arc::new(semantic_type_hints_from_facts(
+        program.as_ref(),
+        &facts,
+    )))
 }
 
 fn flow_type_at_byte_offset_impl(
@@ -396,6 +503,7 @@ fn flow_type_at_byte_offset_impl(
 fn flow_sensitive_null_safety_diagnostics(
     program: &SemanticProgram,
     resolver: &TypeResolver,
+    type_hints: &SemanticTypeHints,
 ) -> Vec<TypeDiagnostic> {
     use bsl_shared::domain::types::{ConcreteType, PlatformType, ResolutionResult, SpecialType};
     use bsl_shared::ir::CfgNodeKind;
@@ -469,15 +577,10 @@ fn flow_sensitive_null_safety_diagnostics(
 
     // Инициализация контекста из type_index по rhs-span присваивания.
     for node in &program.nodes {
-        let SemanticNodeKind::Assignment {
-            variable,
-            value_span,
-            ..
-        } = &node.kind
-        else {
+        let SemanticNodeKind::Assignment { variable, .. } = &node.kind else {
             continue;
         };
-        let Some(resolution) = program.semantic_facts.type_resolution_for_span(*value_span) else {
+        let Some(resolution) = type_hints.assignment_value_type(node.span).cloned() else {
             continue;
         };
         if is_nullish_resolution(&resolution) {
@@ -524,7 +627,15 @@ fn flow_sensitive_null_safety_diagnostics(
         .collect()
 }
 
+#[cfg(test)]
 fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHints {
+    semantic_type_hints_from_facts(program, &program.semantic_facts)
+}
+
+fn semantic_type_hints_from_facts(
+    program: &SemanticProgram,
+    facts: &bsl_shared::ir::SemanticFacts,
+) -> SemanticTypeHints {
     use bsl_shared::ir::SemanticNodeKind;
 
     fn receiver_span(
@@ -541,9 +652,7 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
     for node in &program.nodes {
         match &node.kind {
             SemanticNodeKind::Assignment { value_span, .. } => {
-                if let Some(resolution) =
-                    program.semantic_facts.type_resolution_for_span(*value_span)
-                {
+                if let Some(resolution) = facts.type_resolution_for_span(*value_span) {
                     hints
                         .assignment_value_type_by_span
                         .insert(node.span, resolution);
@@ -557,14 +666,12 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
             } => {
                 let arg_types: Vec<TypeResolution> = arg_spans
                     .iter()
-                    .filter_map(|span| program.semantic_facts.type_resolution_for_span(*span))
+                    .filter_map(|span| facts.type_resolution_for_span(*span))
                     .collect();
                 hints.call_arg_types_by_span.insert(node.span, arg_types);
 
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) =
-                        program.semantic_facts.type_resolution_for_span(span)
-                    {
+                    if let Some(receiver_type) = facts.type_resolution_for_span(span) {
                         hints
                             .call_receiver_type_by_span
                             .insert(node.span, receiver_type);
@@ -577,9 +684,7 @@ fn semantic_type_hints_from_program(program: &SemanticProgram) -> SemanticTypeHi
                 ..
             } => {
                 if let Some(span) = receiver_span(program, *object_node, *object_span) {
-                    if let Some(receiver_type) =
-                        program.semantic_facts.type_resolution_for_span(span)
-                    {
+                    if let Some(receiver_type) = facts.type_resolution_for_span(span) {
                         hints
                             .member_access_object_type_by_span
                             .insert(node.span, receiver_type);
@@ -644,6 +749,83 @@ fn syntax_errors_only_in_directives(code: &str, errors: &[ParseError]) -> bool {
     })
 }
 
+fn maybe_inject_ir_build_delay_for_test() {
+    if let Some(delay_ms) = std::env::var("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+    }
+}
+
+fn empty_semantic_program_for_source(file_path: &str, source: &str) -> SemanticProgram {
+    let mut program = SemanticProgram::new();
+    program.source_info.path = file_path.to_string();
+    program.source_info.content_hash = hash_content(source);
+    program
+}
+
+fn build_diagnostics_program_from_parsed_profiled_with_checkpoint(
+    parsed: Arc<bsl_syntax::ast::ParseResult>,
+    source: &str,
+    file_path: &str,
+    deps_data: Arc<SemanticDeps>,
+    cancellation_checkpoint: Option<&dyn Fn()>,
+) -> IrProfiledResult {
+    let started = Instant::now();
+    if let Some(checkpoint) = cancellation_checkpoint {
+        checkpoint();
+    }
+    maybe_inject_ir_build_delay_for_test();
+    let convert_started = Instant::now();
+    tracing::debug!(
+        target: "bsl_backend::analysis_v2",
+        file_path,
+        source_len = source.len(),
+        "diagnostics_program_build: ast_to_ir start"
+    );
+    match AstToIrConverter::convert_with_resolver_and_checkpoint(
+        parsed.program.clone(),
+        source.to_string(),
+        file_path.to_string(),
+        deps_data.repository.clone(),
+        deps_data.signature_index.clone(),
+        deps_data.resolver.clone(),
+        cancellation_checkpoint,
+    ) {
+        Ok(program) => {
+            let ast_to_ir_convert_ms = convert_started.elapsed().as_millis();
+            let total_ms = started.elapsed().as_millis();
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_path,
+                ast_to_ir_convert_ms,
+                total_ms,
+                "diagnostics_program_build: ast_to_ir finished"
+            );
+            IrProfiledResult {
+                program: Arc::new(program),
+                profile: IrBuildProfile {
+                    ast_to_ir_convert_ms,
+                    total_ms,
+                    ..IrBuildProfile::default()
+                },
+                source: None,
+            }
+        }
+        Err(_err) => IrProfiledResult {
+            program: Arc::new(empty_semantic_program_for_source(file_path, source)),
+            profile: IrBuildProfile {
+                ast_to_ir_convert_ms: convert_started.elapsed().as_millis(),
+                total_ms: started.elapsed().as_millis(),
+                ..IrBuildProfile::default()
+            },
+            source: None,
+        },
+    }
+}
+
 fn build_ir_from_parsed_profiled_with_checkpoint(
     parsed: Arc<bsl_syntax::ast::ParseResult>,
     source: &str,
@@ -655,16 +837,6 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
     fn checkpoint(cancellation_checkpoint: Option<&dyn Fn()>) {
         if let Some(checkpoint) = cancellation_checkpoint {
             checkpoint();
-        }
-    }
-
-    fn maybe_inject_ir_build_delay_for_test() {
-        if let Some(delay_ms) = std::env::var("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-        {
-            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
     }
 
@@ -796,38 +968,48 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                     semantic_facts_incomplete_call_target_recovery_count: profile
                         .incomplete_call_target_recovery_count,
                     semantic_facts_statement_count: profile.statement_count,
-                    semantic_facts_local_function_summary_count: profile.local_function_summary_count,
+                    semantic_facts_local_function_summary_count: profile
+                        .local_function_summary_count,
                     semantic_facts_index_entry_count: profile.index_entry_count,
                     total_ms,
                 },
                 source: None,
             }
         }
-        Err(_err) => {
-            let mut program = SemanticProgram::new();
-            program.source_info.path = file_path.to_string();
-            program.source_info.content_hash = hash_content(source);
-            IrProfiledResult {
-                program: Arc::new(program),
-                profile: IrBuildProfile {
-                    ast_to_ir_convert_ms: convert_started.elapsed().as_millis(),
-                    semantic_facts_materialize_ms: 0,
-                    total_ms: started.elapsed().as_millis(),
-                    ..IrBuildProfile::default()
-                },
-                source: None,
-            }
-        }
+        Err(_err) => IrProfiledResult {
+            program: Arc::new(empty_semantic_program_for_source(file_path, source)),
+            profile: IrBuildProfile {
+                ast_to_ir_convert_ms: convert_started.elapsed().as_millis(),
+                semantic_facts_materialize_ms: 0,
+                total_ms: started.elapsed().as_millis(),
+                ..IrBuildProfile::default()
+            },
+            source: None,
+        },
     }
 }
 
+#[cfg(test)]
 fn collect_semantic_diagnostics_from_program(
     program: Arc<SemanticProgram>,
     deps_data: Arc<SemanticDeps>,
     detail_level: DetailLevel,
 ) -> Vec<TypeDiagnostic> {
     let type_hints = semantic_type_hints_from_program(&program);
+    collect_semantic_diagnostics_with_type_hints(
+        program.as_ref(),
+        &type_hints,
+        deps_data,
+        detail_level,
+    )
+}
 
+fn collect_semantic_diagnostics_with_type_hints(
+    program: &SemanticProgram,
+    type_hints: &SemanticTypeHints,
+    deps_data: Arc<SemanticDeps>,
+    detail_level: DetailLevel,
+) -> Vec<TypeDiagnostic> {
     let resolver = deps_data
         .resolver
         .clone()
@@ -837,14 +1019,14 @@ fn collect_semantic_diagnostics_from_program(
 
     let mut visitor = SemanticValidationVisitor::with_detail_level(
         &validator,
-        &program,
+        program,
         resolver.as_ref(),
         &deps_data.signature_index,
         detail_level,
     );
     visitor.set_platform_signatures_loaded(deps_data.platform_signatures_loaded);
-    visitor.set_type_hints(Some(&type_hints));
-    walk_program(&program, &mut visitor);
+    visitor.set_type_hints(Some(type_hints));
+    walk_program(program, &mut visitor);
 
     let mut diagnostics = visitor.into_errors();
     diagnostics.sort_by(|a, b| {

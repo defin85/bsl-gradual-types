@@ -542,6 +542,17 @@ impl BasicObservability {
         }
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_materialization_path(&self, path: &str) {
+        let path = match path {
+            "diagnostics_only" => "diagnostics_only",
+            "full_semantic_facts_fallback" => "full_semantic_facts_fallback",
+            _ => "other",
+        };
+        let key =
+            format!("intellisense_v2_semantic_diagnostics_materialization_path_total_path_{path}");
+        self.metrics.increment(&key);
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,

@@ -2683,6 +2683,12 @@ impl BslLanguageServer {
                                     duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
                                 }),
                             );
+                        if let Some(path) = profiled.profile.materialization_path {
+                            coordinator_for_blocking
+                                .record_intellisense_v2_semantic_diagnostics_materialization_path(
+                                    path.as_str(),
+                                );
+                        }
                         semantic_parse_source =
                             profiled.profile.parse_source.map(|source| source.as_str());
                         semantic_ir_source =
@@ -3121,6 +3127,12 @@ impl BslLanguageServer {
                                     duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
                                 }),
                             );
+                        if let Some(path) = profiled.profile.materialization_path {
+                            coordinator_for_blocking
+                                .record_intellisense_v2_semantic_diagnostics_materialization_path(
+                                    path.as_str(),
+                                );
+                        }
                         semantic_parse_source =
                             profiled.profile.parse_source.map(|source| source.as_str());
                         semantic_ir_source =
@@ -4800,6 +4812,12 @@ impl BslLanguageServer {
                                         duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
                                     }),
                                 );
+                            if let Some(path) = profiled.profile.materialization_path {
+                                coordinator_for_blocking
+                                    .record_intellisense_v2_semantic_diagnostics_materialization_path(
+                                        path.as_str(),
+                                    );
+                            }
                             let mut diagnostics = Vec::new();
                             for error in profiled.diagnostics.iter() {
                                 if !semantic_show_hints

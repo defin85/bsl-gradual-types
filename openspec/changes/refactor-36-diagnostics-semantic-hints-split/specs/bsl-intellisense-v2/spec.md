@@ -48,10 +48,11 @@ or equivalent exact IR-derived artifact that interactive exact consumers reuse.
 The diagnostics-only path MUST NOT publish a trimmed semantic artifact into the current exact
 interactive slot for that target.
 
-#### Scenario: Diagnostics-only query does not poison later hover or completion
+#### Scenario: Diagnostics-only query does not poison later interactive exact requests
 
 - **GIVEN** a diagnostics-only semantic query already ran for the current exact target
-- **WHEN** a later interactive exact request such as hover or completion needs full semantic facts
+- **WHEN** a later interactive exact request such as hover, completion, definition,
+  `signatureHelp`, or type-at-position needs full semantic facts
 - **THEN** the runtime does not treat the diagnostics-only artifact as a cache hit for the full
   semantic contract
 - **AND** the interactive request still reads or builds full `SemanticFacts`

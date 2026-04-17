@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use bsl_analysis_v2::{AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SettingsId};
+use bsl_analysis_v2::{
+    AnalysisHostV2, Change as ChangeV2, FileId as V2FileId, SemanticDiagnosticsMaterializationPath,
+    SettingsId,
+};
 use bsl_backend::application::get_hover_info_with_semantic_program;
 use bsl_backend::helpers::hover_formatter::HoverFormatConfig;
 use bsl_backend::helpers::hover_formatter::HoverFormatter;
@@ -174,6 +177,85 @@ async fn test_hover_on_property_name_uses_exact_semantic_index_when_runtime_ir_f
     assert!(
         hover.contains("КоллекцияКолонокТаблицыЗначений"),
         "тип свойства должен приходить из exact semantic index, got: {}",
+        hover
+    );
+}
+
+#[tokio::test]
+async fn test_hover_on_property_name_uses_exact_semantic_index_after_diagnostics_only_query() {
+    let deps_bundle = support::deps_bundle_v2_with_syntax_helper();
+    let code = "Процедура Тест()\n\
+    ТаблЗнч = Новый ТаблицаЗначений;\n\
+    КолонкиТаблЗнач = ТаблЗнч.Колонки;\n\
+КонецПроцедуры";
+
+    let file_id = V2FileId(1);
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: deps_bundle.deps_id.clone(),
+        deps: deps_bundle.semantic_deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("hover-exact-index-after-diagnostics-only"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id,
+        text: Arc::from(code.to_string()),
+        version: 0,
+        path: Arc::from("inline.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .expect("semantic diagnostics profile")
+        .expect("semantic diagnostics result");
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    let mut poisoned_program = ir_program.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let deps = deps_bundle.semantic_deps.clone();
+    let resolver = deps
+        .resolver
+        .clone()
+        .unwrap_or_else(|| Arc::new(TypeResolver::new(deps.repository.clone())));
+    let metadata_lookup = TypeMetadataLookup::new(deps.repository.clone());
+    let hover_formatter =
+        HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup.clone());
+
+    let hover = get_hover_info_with_semantic_program(
+        &analysis,
+        file_id,
+        code,
+        2,
+        30,
+        false,
+        &metadata_lookup,
+        &hover_formatter,
+        Some(HoverFormatConfig::default()),
+        resolver.as_ref(),
+        poisoned_ir,
+    )
+    .expect("property hover from exact semantic index after diagnostics-only query");
+
+    assert!(
+        hover.contains("**Свойство:**"),
+        "hover должен использовать exact semantic index после diagnostics-only query: {}",
+        hover
+    );
+    assert!(
+        hover.contains("КоллекцияКолонокТаблицыЗначений"),
+        "тип свойства должен приходить из exact semantic index после diagnostics-only query, got: {}",
         hover
     );
 }

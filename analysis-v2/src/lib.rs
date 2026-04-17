@@ -268,6 +268,21 @@ impl SemanticDiagnosticsParseSource {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SemanticDiagnosticsMaterializationPath {
+    DiagnosticsOnly,
+    FullSemanticFactsFallback,
+}
+
+impl SemanticDiagnosticsMaterializationPath {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::DiagnosticsOnly => "diagnostics_only",
+            Self::FullSemanticFactsFallback => "full_semantic_facts_fallback",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IrArtifactSource {
     ExactCache,
     SnapshotBuild,
@@ -293,6 +308,7 @@ pub struct SemanticDiagnosticsProfile {
     pub flow_sensitive_ms: u128,
     pub total_ms: u128,
     pub parse_source: Option<SemanticDiagnosticsParseSource>,
+    pub materialization_path: Option<SemanticDiagnosticsMaterializationPath>,
     pub ir_source: Option<IrArtifactSource>,
 }
 

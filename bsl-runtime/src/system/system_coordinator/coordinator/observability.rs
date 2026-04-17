@@ -635,6 +635,11 @@ impl SystemCoordinator {
             );
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_materialization_path(&self, path: &str) {
+        self.observability
+            .record_intellisense_v2_semantic_diagnostics_materialization_path(path);
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,

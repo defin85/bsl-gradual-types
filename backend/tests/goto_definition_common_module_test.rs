@@ -2,7 +2,10 @@
 
 use bsl_analysis_v2::AstToIrConverter;
 use bsl_analysis_v2::SemanticDeps;
-use bsl_analysis_v2::{AnalysisHostV2, Change, DepsSnapshotId, FileId, SettingsId};
+use bsl_analysis_v2::{
+    AnalysisHostV2, Change, DepsSnapshotId, FileId, SemanticDiagnosticsMaterializationPath,
+    SettingsId,
+};
 use bsl_backend::application::type_system;
 use bsl_backend::system::build_deps_bundle_v2;
 use bsl_backend::system::SystemCoordinator;
@@ -1047,6 +1050,142 @@ fn goto_definition_uses_exact_semantic_index_when_runtime_ir_facts_are_missing()
         method_col,
     )
     .expect("method definition target from exact semantic index");
+
+    assert!(
+        target_method.span.is_some(),
+        "method definition should include declaration span"
+    );
+    let expected_module = root
+        .join("Documents")
+        .join("Док1")
+        .join("Ext")
+        .join("ObjectModule.bsl")
+        .canonicalize()
+        .expect("canonicalize expected module");
+    let actual_module = target_method
+        .file_path
+        .canonicalize()
+        .expect("canonicalize actual module");
+    assert_eq!(actual_module, expected_module);
+}
+
+#[test]
+fn goto_definition_uses_exact_semantic_index_after_diagnostics_only_query() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+
+    std::fs::write(
+        root.join("Configuration.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Configuration uuid="00000000-0000-0000-0000-000000000000">
+    <Properties>
+      <Name>TestConfig</Name>
+      <CompatibilityMode>Version8_3_25</CompatibilityMode>
+    </Properties>
+    <ChildObjects>
+      <Document>Док1</Document>
+    </ChildObjects>
+  </Configuration>
+</MetaDataObject>
+"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(root.join("Documents")).unwrap();
+    std::fs::write(
+        root.join("Documents").join("Док1.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses">
+  <Document uuid="00000000-0000-0000-0000-000000000001">
+    <Properties>
+      <Name>Док1</Name>
+    </Properties>
+  </Document>
+</MetaDataObject>
+"#,
+    )
+    .unwrap();
+
+    std::fs::create_dir_all(root.join("Documents").join("Док1").join("Ext")).unwrap();
+    std::fs::write(
+        root.join("Documents")
+            .join("Док1")
+            .join("Ext")
+            .join("ObjectModule.bsl"),
+        concat!(
+            "Процедура МойМетод() Экспорт\n",
+            "КонецПроцедуры\n",
+            "\n",
+            "Процедура Тест()\n",
+            "    ЭтотОбъект.МойМетод();\n",
+            "КонецПроцедуры\n"
+        ),
+    )
+    .unwrap();
+
+    let coordinator = SystemCoordinator::new();
+    coordinator
+        .start_with_paths_blocking(None, Some(Path::new(root)), Some("8.3.25"), None)
+        .expect("startup");
+
+    let deps_bundle = build_deps_bundle_v2(&coordinator, None, Some(root)).expect("deps bundle");
+    let producer_deps = deps_bundle.semantic_deps.clone();
+
+    let source = concat!(
+        "Процедура Тест()\n",
+        "    ЭтотОбъект.МойМетод();\n",
+        "КонецПроцедуры\n"
+    );
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1);
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("goto-definition-exact-index-after-diagnostics-only"),
+        deps: producer_deps,
+    });
+    host.apply_change(Change::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("goto-definition-exact-index-after-diagnostics-only"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(source.to_string()),
+        version: 0,
+        path: Arc::from("Documents/Док1/Ext/ObjectModule.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .expect("semantic diagnostics profile")
+        .expect("semantic diagnostics result");
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
+    let ir = analysis.ir(file_id).ok().flatten().expect("ir");
+    let mut poisoned_program = ir.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let call_line = source.lines().nth(1).expect("call line");
+    let method_byte = call_line.find("МойМетод").expect("method byte");
+    let method_col = utf16_col(call_line, method_byte);
+
+    let target_method = goto_definition_with_analysis(
+        source,
+        &analysis,
+        file_id,
+        poisoned_ir,
+        empty_semantic_deps(),
+        1,
+        method_col,
+    )
+    .expect("method definition target from exact semantic index after diagnostics-only query");
 
     assert!(
         target_method.span.is_some(),

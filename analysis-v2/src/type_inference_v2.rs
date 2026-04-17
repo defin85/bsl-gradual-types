@@ -110,6 +110,12 @@ struct SemanticFactsBuildProfiled {
     profile: TypeIndexBuildProfile,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SemanticMaterializationMode {
+    Full,
+    DiagnosticsOnly,
+}
+
 impl TypeIndex {
     fn from_semantic_facts(facts: &SemanticFacts) -> Self {
         Self {
@@ -416,6 +422,7 @@ struct TypeInferencer<'a> {
         RefCell<HashMap<DefinitionLocationCacheKey, Option<TypeDefinitionLocation>>>,
     stats: TypeInferencerStats,
     cancellation_checkpoint: Option<&'a dyn Fn()>,
+    materialization_mode: SemanticMaterializationMode,
 }
 
 #[path = "type_inference_v2/expression_helpers.rs"]
@@ -440,6 +447,18 @@ impl<'a> TypeInferencer<'a> {
         deps: Arc<SemanticDeps>,
         cancellation_checkpoint: Option<&'a dyn Fn()>,
     ) -> Self {
+        Self::with_materialization_mode_and_checkpoint(
+            deps,
+            SemanticMaterializationMode::Full,
+            cancellation_checkpoint,
+        )
+    }
+
+    fn with_materialization_mode_and_checkpoint(
+        deps: Arc<SemanticDeps>,
+        materialization_mode: SemanticMaterializationMode,
+        cancellation_checkpoint: Option<&'a dyn Fn()>,
+    ) -> Self {
         let resolver = deps
             .resolver
             .clone()
@@ -457,7 +476,12 @@ impl<'a> TypeInferencer<'a> {
             definition_location_cache: RefCell::new(HashMap::new()),
             stats: TypeInferencerStats::default(),
             cancellation_checkpoint,
+            materialization_mode,
         }
+    }
+
+    fn materializes_exact_semantic_artifacts(&self) -> bool {
+        matches!(self.materialization_mode, SemanticMaterializationMode::Full)
     }
 
     fn add_u128_stat(stat: &Cell<u128>, value: u128) {
@@ -562,7 +586,11 @@ impl<'a> TypeInferencer<'a> {
             LocalFunctionSummaryLookup::snapshot_arc(Arc::new(local_function_summaries.summaries));
         let local_function_summaries_ms = local_function_summaries_started.elapsed().as_millis();
         let source_incomplete_member_access_offsets =
-            source_text.map(incomplete_member_access_dot_offsets);
+            if self.materializes_exact_semantic_artifacts() {
+                source_text.map(incomplete_member_access_dot_offsets)
+            } else {
+                None
+            };
 
         let visit_statements_started = Instant::now();
         for stmt in &program.statements {
@@ -589,97 +617,108 @@ impl<'a> TypeInferencer<'a> {
                         &env,
                         &mut facts,
                     );
-                    if let Some(source_text) = source_text {
-                        let started = Instant::now();
-                        self.record_source_incomplete_member_access_entries(
-                            source_text,
-                            *span,
-                            source_incomplete_member_access_offsets.as_deref(),
-                            &fn_env,
-                            &mut facts,
-                        );
-                        Self::add_u128_stat(
-                            &self.stats.source_incomplete_member_access_recovery_ms,
-                            started.elapsed().as_millis(),
-                        );
-                        Self::add_u64_stat(
-                            &self.stats.source_incomplete_member_access_recovery_count,
-                            1,
-                        );
+                    if self.materializes_exact_semantic_artifacts() {
+                        if let Some(source_text) = source_text {
+                            let started = Instant::now();
+                            self.record_source_incomplete_member_access_entries(
+                                source_text,
+                                *span,
+                                source_incomplete_member_access_offsets.as_deref(),
+                                &fn_env,
+                                &mut facts,
+                            );
+                            Self::add_u128_stat(
+                                &self.stats.source_incomplete_member_access_recovery_ms,
+                                started.elapsed().as_millis(),
+                            );
+                            Self::add_u64_stat(
+                                &self.stats.source_incomplete_member_access_recovery_count,
+                                1,
+                            );
+                        }
                     }
-                    if let Some(recovery) = recovery {
-                        let member_recovery_started = Instant::now();
-                        self.record_incomplete_member_access_recovery_entries(
-                            recovery, *span, &fn_env, &mut facts,
-                        );
-                        Self::add_u128_stat(
-                            &self.stats.syntax_incomplete_member_access_recovery_ms,
-                            member_recovery_started.elapsed().as_millis(),
-                        );
-                        Self::add_u64_stat(
-                            &self.stats.syntax_incomplete_member_access_recovery_count,
-                            1,
-                        );
-                        let call_target_started = Instant::now();
-                        self.record_incomplete_call_target_recovery_entries(
-                            recovery, *span, &fn_env, &mut facts,
-                        );
-                        Self::add_u128_stat(
-                            &self.stats.incomplete_call_target_recovery_ms,
-                            call_target_started.elapsed().as_millis(),
-                        );
-                        Self::add_u64_stat(&self.stats.incomplete_call_target_recovery_count, 1);
+                    if self.materializes_exact_semantic_artifacts() {
+                        if let Some(recovery) = recovery {
+                            let member_recovery_started = Instant::now();
+                            self.record_incomplete_member_access_recovery_entries(
+                                recovery, *span, &fn_env, &mut facts,
+                            );
+                            Self::add_u128_stat(
+                                &self.stats.syntax_incomplete_member_access_recovery_ms,
+                                member_recovery_started.elapsed().as_millis(),
+                            );
+                            Self::add_u64_stat(
+                                &self.stats.syntax_incomplete_member_access_recovery_count,
+                                1,
+                            );
+                            let call_target_started = Instant::now();
+                            self.record_incomplete_call_target_recovery_entries(
+                                recovery, *span, &fn_env, &mut facts,
+                            );
+                            Self::add_u128_stat(
+                                &self.stats.incomplete_call_target_recovery_ms,
+                                call_target_started.elapsed().as_millis(),
+                            );
+                            Self::add_u64_stat(
+                                &self.stats.incomplete_call_target_recovery_count,
+                                1,
+                            );
+                        }
                     }
                 }
                 _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
         }
-        if let Some(source_text) = source_text {
-            let started = Instant::now();
-            self.record_source_incomplete_member_access_entries(
-                source_text,
-                bsl_shared::ir::Span::new(0, source_text.len() as u32),
-                source_incomplete_member_access_offsets.as_deref(),
-                &env,
-                &mut facts,
-            );
-            Self::add_u128_stat(
-                &self.stats.source_incomplete_member_access_recovery_ms,
-                started.elapsed().as_millis(),
-            );
-            Self::add_u64_stat(
-                &self.stats.source_incomplete_member_access_recovery_count,
-                1,
-            );
+        if self.materializes_exact_semantic_artifacts() {
+            if let Some(source_text) = source_text {
+                let started = Instant::now();
+                self.record_source_incomplete_member_access_entries(
+                    source_text,
+                    bsl_shared::ir::Span::new(0, source_text.len() as u32),
+                    source_incomplete_member_access_offsets.as_deref(),
+                    &env,
+                    &mut facts,
+                );
+                Self::add_u128_stat(
+                    &self.stats.source_incomplete_member_access_recovery_ms,
+                    started.elapsed().as_millis(),
+                );
+                Self::add_u64_stat(
+                    &self.stats.source_incomplete_member_access_recovery_count,
+                    1,
+                );
+            }
         }
-        if let Some(recovery) = recovery {
-            let member_recovery_started = Instant::now();
-            self.record_incomplete_member_access_recovery_entries(
-                recovery,
-                bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
-                &env,
-                &mut facts,
-            );
-            Self::add_u128_stat(
-                &self.stats.syntax_incomplete_member_access_recovery_ms,
-                member_recovery_started.elapsed().as_millis(),
-            );
-            Self::add_u64_stat(
-                &self.stats.syntax_incomplete_member_access_recovery_count,
-                1,
-            );
-            let call_target_started = Instant::now();
-            self.record_incomplete_call_target_recovery_entries(
-                recovery,
-                bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
-                &env,
-                &mut facts,
-            );
-            Self::add_u128_stat(
-                &self.stats.incomplete_call_target_recovery_ms,
-                call_target_started.elapsed().as_millis(),
-            );
-            Self::add_u64_stat(&self.stats.incomplete_call_target_recovery_count, 1);
+        if self.materializes_exact_semantic_artifacts() {
+            if let Some(recovery) = recovery {
+                let member_recovery_started = Instant::now();
+                self.record_incomplete_member_access_recovery_entries(
+                    recovery,
+                    bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
+                    &env,
+                    &mut facts,
+                );
+                Self::add_u128_stat(
+                    &self.stats.syntax_incomplete_member_access_recovery_ms,
+                    member_recovery_started.elapsed().as_millis(),
+                );
+                Self::add_u64_stat(
+                    &self.stats.syntax_incomplete_member_access_recovery_count,
+                    1,
+                );
+                let call_target_started = Instant::now();
+                self.record_incomplete_call_target_recovery_entries(
+                    recovery,
+                    bsl_shared::ir::Span::new(0, recovery.source_text.len() as u32),
+                    &env,
+                    &mut facts,
+                );
+                Self::add_u128_stat(
+                    &self.stats.incomplete_call_target_recovery_ms,
+                    call_target_started.elapsed().as_millis(),
+                );
+                Self::add_u64_stat(&self.stats.incomplete_call_target_recovery_count, 1);
+            }
         }
         let visit_statements_ms = visit_statements_started.elapsed().as_millis();
         let visit_callable_body_ms = self.stats.visit_callable_body_ms.get();
@@ -1387,6 +1426,9 @@ impl<'a> TypeInferencer<'a> {
         resolution: &TypeResolution,
         facts: &mut SemanticFacts,
     ) {
+        if !self.materializes_exact_semantic_artifacts() {
+            return;
+        }
         let Some(location) = self.semantic_definition_location(resolution) else {
             return;
         };
@@ -2359,6 +2401,9 @@ impl<'a> TypeInferencer<'a> {
         target: SemanticMethodTarget,
         facts: &mut SemanticFacts,
     ) {
+        if !self.materializes_exact_semantic_artifacts() {
+            return;
+        }
         facts
             .call_method_targets_by_span
             .insert(call_span, target.clone());
@@ -2373,6 +2418,9 @@ impl<'a> TypeInferencer<'a> {
         type_name: &str,
         facts: &mut SemanticFacts,
     ) {
+        if !self.materializes_exact_semantic_artifacts() {
+            return;
+        }
         let type_name = type_name.trim().trim_end_matches("()").trim();
         if type_name.is_empty() {
             return;
@@ -3615,6 +3663,21 @@ pub(crate) fn materialize_semantic_facts_with_path_profiled(
     );
     program.semantic_facts = profiled.facts;
     profiled.profile
+}
+
+pub(crate) fn build_diagnostics_semantic_facts_with_path_and_checkpoint(
+    parsed_program: &Program,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+    cancellation_checkpoint: &dyn Fn(),
+) -> SemanticFacts {
+    TypeInferencer::with_materialization_mode_and_checkpoint(
+        deps,
+        SemanticMaterializationMode::DiagnosticsOnly,
+        Some(cancellation_checkpoint),
+    )
+    .build_facts_internal(parsed_program, file_path, None, None)
+    .facts
 }
 
 pub(crate) fn materialize_semantic_facts_with_path_profiled_and_checkpoint(

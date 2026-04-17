@@ -187,6 +187,8 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
         Duration::from_millis(11),
         Some(Duration::from_millis(13)),
     );
+    observability
+        .record_intellisense_v2_semantic_diagnostics_materialization_path("diagnostics_only");
 
     let exported = observability.get_metrics().export_metrics();
     let counters = counters(&exported);
@@ -204,6 +206,7 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
         "intellisense_v2_completion_exact_type_index_wait_promotion_total",
         "intellisense_v2_completion_exact_type_index_wait_join_total",
         "intellisense_v2_completion_exact_type_index_wait_ready_after_wait_total",
+        "intellisense_v2_semantic_diagnostics_materialization_path_total_path_diagnostics_only",
     ] {
         assert_eq!(
             counter_value(counters, key),

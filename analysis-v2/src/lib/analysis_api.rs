@@ -1074,6 +1074,63 @@ impl AnalysisV2 {
         }))
     }
 
+    fn diagnostics_program_profiled(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<IrProfiledResult>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let source = file.text(&self.db);
+            let deps_data = self.deps.data(&self.db).0.clone();
+            let parsed = snapshot.parse_result.clone();
+            let file_path = file.path(&self.db);
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version = file.version(&self.db),
+                file_path = %file_path,
+                source_len = source.len(),
+                "diagnostics_program_profiled: build_from_parsed start"
+            );
+            let checkpoint = || cancellation_checkpoint(&self.db);
+            let mut profiled = cancellable(|| {
+                build_diagnostics_program_from_parsed_profiled_with_checkpoint(
+                    parsed,
+                    source.as_ref(),
+                    file_path.as_ref(),
+                    deps_data,
+                    Some(&checkpoint),
+                )
+            })?;
+            tracing::debug!(
+                target: "bsl_backend::analysis_v2",
+                file_id = file_id.0,
+                file_version = file.version(&self.db),
+                file_path = %file_path,
+                ir_ms = profiled.profile.total_ms,
+                ast_to_ir_convert_ms = profiled.profile.ast_to_ir_convert_ms,
+                "diagnostics_program_profiled: build_from_parsed finished"
+            );
+            profiled.source = Some(IrArtifactSource::SnapshotBuild);
+            return Ok(Some(profiled));
+        }
+
+        let ir_started = Instant::now();
+        let program =
+            cancellable(|| crate::diagnostics_program(&self.db, file, self.deps, self.settings).0)?;
+        Ok(Some(IrProfiledResult {
+            program,
+            profile: IrBuildProfile {
+                total_ms: ir_started.elapsed().as_millis(),
+                ..IrBuildProfile::default()
+            },
+            source: Some(IrArtifactSource::Salsa),
+        }))
+    }
+
     pub fn syntax_diagnostics(&self, file_id: FileId) -> Cancellable<Option<Arc<Vec<ParseError>>>> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(None);
@@ -1105,6 +1162,17 @@ impl AnalysisV2 {
             return Ok(None);
         };
         cancellable(|| semantic_diagnostics(&self.db, file, self.deps, self.settings).0).map(Some)
+    }
+
+    pub fn diagnostics_type_hints(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<Arc<SemanticTypeHints>>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+        cancellable(|| crate::diagnostics_type_hints(&self.db, file, self.deps, self.settings).0)
+            .map(Some)
     }
 
     pub fn semantic_diagnostics_profiled(
@@ -1144,6 +1212,7 @@ impl AnalysisV2 {
                     parse_result_ms,
                     total_ms: started.elapsed().as_millis(),
                     parse_source: Some(parse_source),
+                    materialization_path: None,
                     ..SemanticDiagnosticsProfile::default()
                 },
                 ir_build_profile: None,
@@ -1151,15 +1220,39 @@ impl AnalysisV2 {
         }
 
         let ir_started = Instant::now();
-        let ir_profiled = self
-            .ir_profiled(file_id)?
-            .expect("file present for semantic diagnostics ir");
-        let program = ir_profiled.program;
+        let program_profiled = self
+            .diagnostics_program_profiled(file_id)?
+            .expect("file present for semantic diagnostics program");
+        let program = program_profiled.program;
+        let type_hints = if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
+            let file_path = file.path(&self.db);
+            let checkpoint = || cancellation_checkpoint(&self.db);
+            let parsed = snapshot.parse_result.clone();
+            let program = program.clone();
+            Arc::new(cancellable(|| {
+                let facts =
+                    type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint(
+                        &parsed.program,
+                        file_path.as_ref(),
+                        deps_data.clone(),
+                        &checkpoint,
+                    );
+                semantic_type_hints_from_facts(program.as_ref(), &facts)
+            })?)
+        } else {
+            self.diagnostics_type_hints(file_id)?
+                .expect("file present for semantic diagnostics type hints")
+        };
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();
         let diagnostics = cancellable(|| {
-            collect_semantic_diagnostics_from_program(program, deps_data, detail_level)
+            collect_semantic_diagnostics_with_type_hints(
+                program.as_ref(),
+                type_hints.as_ref(),
+                deps_data,
+                detail_level,
+            )
         })?;
         let collect_ms = collect_started.elapsed().as_millis();
 
@@ -1173,9 +1266,10 @@ impl AnalysisV2 {
                 flow_sensitive_ms: 0,
                 total_ms: started.elapsed().as_millis(),
                 parse_source: Some(parse_source),
-                ir_source: ir_profiled.source,
+                materialization_path: Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly),
+                ir_source: program_profiled.source,
             },
-            ir_build_profile: Some(ir_profiled.profile),
+            ir_build_profile: Some(program_profiled.profile),
         }))
     }
 
@@ -1224,17 +1318,18 @@ impl AnalysisV2 {
         }
 
         let ir_started = Instant::now();
-        let ir_profiled = self
-            .ir_profiled(file_id)?
-            .expect("file present for flow-sensitive semantic diagnostics ir");
-        let program = ir_profiled.program;
+        let program_profiled = self
+            .diagnostics_program_profiled(file_id)?
+            .expect("file present for flow-sensitive semantic diagnostics program");
+        let program = program_profiled.program;
         base.profile.ir_ms = base
             .profile
             .ir_ms
             .saturating_add(ir_started.elapsed().as_millis());
-        base.ir_build_profile = merge_ir_build_profiles(base.ir_build_profile, ir_profiled.profile);
+        base.ir_build_profile =
+            merge_ir_build_profiles(base.ir_build_profile, program_profiled.profile);
         if base.profile.ir_source.is_none() {
-            base.profile.ir_source = ir_profiled.source;
+            base.profile.ir_source = program_profiled.source;
         }
 
         let flow_started = Instant::now();
@@ -1243,10 +1338,14 @@ impl AnalysisV2 {
             .resolver
             .clone()
             .unwrap_or_else(|| Arc::new(TypeResolver::new(deps_data.repository.clone())));
+        let type_hints = self
+            .diagnostics_type_hints(file_id)?
+            .expect("file present for flow-sensitive semantic diagnostics type hints");
         let mut diagnostics = (*base.diagnostics).clone();
         diagnostics.extend(flow_sensitive_null_safety_diagnostics(
             &program,
             resolver.as_ref(),
+            type_hints.as_ref(),
         ));
         diagnostics.sort_by(|a, b| {
             let severity_key = |severity: DiagnosticSeverity| match severity {

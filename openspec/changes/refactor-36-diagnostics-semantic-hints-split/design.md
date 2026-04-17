@@ -1,13 +1,14 @@
 ## Context
 
-After `refactor-34`, representative save-follow-up evidence still shows a large diagnostics-side
-semantic residual even when the heavy follow-up publishes through `ready_artifacts`:
+Representative `2026-04-17` save-follow-up evidence still shows a large diagnostics-side semantic
+residual even when the heavy follow-up publishes through `ready_artifacts`:
 
-- `semantic_diagnostics_query_ms` is about `1293ms`;
-- `semantic_diagnostics_ir_ms` is about `802ms`;
-- `semantic_facts_materialize_ms` is about `613ms`;
-- `visit_statements_ms` is about `290ms`;
-- `visit_callable_body_ms` is about `201ms`.
+- post-`refactor-35`: `semantic_diagnostics_query_ms` is about `1293ms`,
+  `semantic_diagnostics_ir_ms` about `802ms`, `semantic_facts_materialize_ms` about `613ms`,
+  `visit_statements_ms` about `290ms`, and `visit_callable_body_ms` about `201ms`;
+- later post-`refactor-37`: the parser-side `program_lowering_ms` for the same representative path
+  dropped to `244ms`, but `semantic_diagnostics_query_ms` still measured `2451ms` and
+  `semantic_diagnostics_ir_ms` still measured `1611ms`.
 
 This residual is no longer primarily about local-function summary convergence.
 It is primarily about building more semantic facts than semantic diagnostics actually consume.
@@ -51,8 +52,8 @@ At minimum that artifact should cover:
 
 ### 2. Keep full `SemanticFacts` for interactive exact features
 
-Completion, hover, definition, type-at-position, and other interactive exact features should keep
-their current full semantic contract.
+Completion, hover, definition, `signatureHelp`, type-at-position, and other interactive exact
+features should keep their current full semantic contract.
 The diagnostics-only path is a narrower consumer optimization, not a redefinition of the canonical
 exact semantic artifact.
 
@@ -77,7 +78,8 @@ trimmed `SemanticProgram` or completion-head substitute into the current interac
 path.
 
 Otherwise a trimmed artifact could be mistaken for a full exact semantic artifact by later
-interactive queries, which would poison completion/hover/definition behavior.
+interactive queries, which would poison completion/hover/definition/`signatureHelp`/
+type-at-position behavior.
 
 ### 5. Observability must show which semantic path ran
 
@@ -90,12 +92,13 @@ Representative evidence must distinguish:
 Without that split, a timing win would be hard to attribute and regressions would be harder to
 localize.
 
-### 6. Keep this change sequentially after the parser-path reduction
+### 6. Keep this change measurable after the parser-path reductions
 
-`refactor-35` should land first so parser-path improvement and diagnostics-path improvement remain
-separately measurable on `p55`.
+`refactor-35` and the later parser-side follow-up `refactor-37` should be treated as the baseline
+before judging this change on `p55`.
 This avoids conflating exact lowering wins with semantic-facts wins in the same representative
-bundle.
+bundle and keeps the semantic residual attributable once parser-side rebuild cost has already been
+reduced.
 
 ## Alternatives Considered
 
@@ -120,14 +123,14 @@ Representative live testing already failed to show a meaningful `p55` win from t
 - Add parity regressions comparing diagnostics output between the full semantic path and the new
   diagnostics-only hints path.
 - Add cache-isolation regressions proving diagnostics-only queries cannot poison later interactive
-  exact requests.
-- Refresh representative `p55` evidence against the post-`refactor-35` baseline.
+  exact requests, including `signatureHelp`.
+- Refresh representative `p55` evidence against the latest post-parser-side baseline.
 
 ## Quality Gates
 
 - Representative `p55` still publishes through `ready_artifacts`.
 - Representative evidence shows the diagnostics path used diagnostics-only hints or truthfully fell
   back to full semantic facts.
-- Representative diagnostics-side residual is materially lower than the post-`refactor-35`
+- Representative diagnostics-side residual is materially lower than the latest post-parser-side
   baseline.
 - Interactive exact features remain on full `SemanticFacts`, and cache-isolation regressions pass.

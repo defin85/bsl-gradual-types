@@ -14,7 +14,8 @@ mod signature_help_handler;
 use std::sync::Arc;
 
 use bsl_analysis_v2::{
-    AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
+    AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId,
+    SemanticDiagnosticsMaterializationPath, SettingsId,
 };
 use bsl_backend::system::{
     IndexItem, IndexItemKind, IndexKind, IndexSnapshot, IntellisenseIndexStore, TypeKind,
@@ -595,6 +596,84 @@ async fn lsp_signature_help_uses_exact_semantic_index_when_runtime_ir_facts_are_
         None,
     )
     .expect("method signature help from exact semantic index");
+
+    let method_label = method
+        .signatures
+        .first()
+        .map(|sig| sig.label.as_str())
+        .unwrap_or("");
+    assert!(method_label.contains("Добавить("), "label={method_label}");
+    assert_eq!(method.active_parameter, Some(1));
+}
+
+#[tokio::test]
+async fn lsp_signature_help_uses_exact_semantic_index_after_diagnostics_only_query() {
+    let env = build_env();
+    let content = r#"Процедура Тест()
+    МойМассив = Новый Массив();
+    МойМассив.Добавить(1, 2);
+КонецПроцедуры"#;
+    let uri =
+        Url::parse("file:///test_signature_help_v2_after_diagnostics_only.bsl").expect("test uri");
+
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("signature-help-after-diagnostics-only"),
+        deps: env.deps.clone(),
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("signature-help-after-diagnostics-only"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from(
+            uri.to_file_path()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_else(|| uri.to_string()),
+        ),
+    });
+
+    let analysis = host.analysis();
+    let file_id = V2FileId(1);
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .expect("semantic diagnostics profile")
+        .expect("semantic diagnostics result");
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+
+    analysis
+        .precompute_type_index_for_file(file_id, Some(0), 0)
+        .expect("precompute exact type index");
+    let file_content = analysis
+        .file_text(file_id)
+        .ok()
+        .flatten()
+        .expect("file_text");
+    let ir_program = analysis.ir(file_id).ok().flatten().expect("ir");
+    let stripped_deps = build_deps(Arc::new(InMemoryTypeRepository::new()));
+    let method_pos = position_at_marker(content, "МойМассив.Добавить(1, ");
+
+    let mut poisoned_program = ir_program.as_ref().clone();
+    poisoned_program.semantic_facts = Default::default();
+    let poisoned_ir = Arc::new(poisoned_program);
+
+    let method = signature_help_handler::handle_signature_help_v2(
+        &analysis,
+        file_id,
+        file_content,
+        method_pos,
+        poisoned_ir,
+        stripped_deps,
+        None,
+    )
+    .expect("method signature help from exact semantic index after diagnostics-only query");
 
     let method_label = method
         .signatures

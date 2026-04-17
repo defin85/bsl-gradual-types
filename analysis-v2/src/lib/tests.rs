@@ -1148,6 +1148,203 @@ fn semantic_diagnostics_depend_on_deps_id() {
 }
 
 #[test]
+fn diagnostics_type_hints_match_program_projection() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(314);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-diagnostics-type-hints"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Procedure Test()\n\
+                 LocalArray = New Array;\n\
+                 LocalArray.Add(1);\n\
+                 LocalValue = LocalArray.UnknownProperty;\n\
+                 EndProcedure",
+        ),
+        version: 1,
+        path: Arc::from("diagnostics-type-hints.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let hints = analysis
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints");
+    let program = analysis
+        .ir(file_id)
+        .unwrap()
+        .expect("full semantic program");
+    let expected = semantic_type_hints_from_program(program.as_ref());
+
+    assert_eq!(
+        hints.assignment_value_type_by_span,
+        expected.assignment_value_type_by_span
+    );
+    assert_eq!(
+        hints.call_receiver_type_by_span,
+        expected.call_receiver_type_by_span
+    );
+    assert_eq!(
+        hints.call_arg_types_by_span,
+        expected.call_arg_types_by_span
+    );
+    assert_eq!(
+        hints.member_access_object_type_by_span,
+        expected.member_access_object_type_by_span
+    );
+    assert!(
+        !hints.assignment_value_type_by_span.is_empty(),
+        "assignment hints must include LocalArray = New Array"
+    );
+    assert!(
+        !hints.call_receiver_type_by_span.is_empty(),
+        "call receiver hints must include LocalArray.Add(...)"
+    );
+    assert!(
+        !hints.call_arg_types_by_span.is_empty(),
+        "call arg hints must include Add(1)"
+    );
+    assert!(
+        !hints.member_access_object_type_by_span.is_empty(),
+        "member access hints must include LocalArray.UnknownProperty"
+    );
+}
+
+#[test]
+fn diagnostics_type_hints_skip_when_syntax_errors_present() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(315);
+
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from("Procedure Test(\nEndProcedure"),
+        version: 1,
+        path: Arc::from("diagnostics-type-hints-syntax-error.bsl"),
+    });
+
+    let hints = host
+        .analysis()
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints for syntax-error file");
+
+    assert!(hints.assignment_value_type_by_span.is_empty());
+    assert!(hints.call_receiver_type_by_span.is_empty());
+    assert!(hints.call_arg_types_by_span.is_empty());
+    assert!(hints.member_access_object_type_by_span.is_empty());
+}
+
+#[test]
+fn diagnostics_type_hints_do_not_publish_completion_head_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(316);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             LocalArray = New Array;\n\
+             LocalArray.Add(1);\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-diagnostics-type-hints-cache"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text,
+        version: 1,
+        path: Arc::from("diagnostics-type-hints-cache.bsl"),
+    });
+
+    let analysis = host.snapshot();
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness before diagnostics-only hints"),
+        "diagnostics-only hints must not rely on the exact completion-head cache"
+    );
+
+    let hints = analysis
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints");
+    assert!(
+        !hints.call_receiver_type_by_span.is_empty(),
+        "diagnostics-only hints query must still materialize receiver hints"
+    );
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness after diagnostics-only hints"),
+        "diagnostics-only hints must not publish completion-head artifacts"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_preserve_parity_with_explicit_diagnostics_type_hints() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(317);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-semantic-diagnostics-parity"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Procedure Test()\n\
+                 LocalArray = New Array;\n\
+                 LocalArray.Add(1);\n\
+                 LocalValue = LocalArray.UnknownProperty;\n\
+                 EndProcedure",
+        ),
+        version: 1,
+        path: Arc::from("semantic-diagnostics-parity.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let program = analysis
+        .ir(file_id)
+        .unwrap()
+        .expect("full semantic program");
+    let deps_data = analysis.deps.data(&analysis.db).0.clone();
+    let detail_level = analysis.settings.diagnostics_detail_level(&analysis.db);
+    let type_hints = analysis
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints");
+
+    let expected =
+        collect_semantic_diagnostics_from_program(program.clone(), deps_data.clone(), detail_level);
+    let actual = collect_semantic_diagnostics_with_type_hints(
+        program.as_ref(),
+        type_hints.as_ref(),
+        deps_data,
+        detail_level,
+    );
+
+    let normalize = |diagnostics: Vec<TypeDiagnostic>| {
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.span.start,
+                    diagnostic.span.end,
+                    diagnostic.severity,
+                    diagnostic.message,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(normalize(actual), normalize(expected));
+}
+
+#[test]
 fn semantic_diagnostics_respect_diagnostics_detail_level() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(1);
@@ -1322,6 +1519,10 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         Some(SemanticDiagnosticsParseSource::Snapshot)
     );
     assert_eq!(
+        first.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    assert_eq!(
         first.profile.ir_source,
         Some(IrArtifactSource::SnapshotBuild)
     );
@@ -1332,23 +1533,9 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         first_ir_build.total_ms >= first_ir_build.ast_to_ir_convert_ms,
         "snapshot IR build profile total must include AST->IR conversion"
     );
-    assert!(
-        first_ir_build.total_ms >= first_ir_build.semantic_facts_materialize_ms,
-        "snapshot IR build profile total must include semantic-facts materialization"
-    );
-    assert!(
-        first_ir_build.semantic_facts_statement_count > 0,
-        "snapshot IR build profile must expose non-zero semantic statement count"
-    );
-    assert!(
-        first_ir_build.semantic_facts_local_function_summaries_function_count > 0,
-        "snapshot IR build profile must expose non-zero local function summary count"
-    );
     assert_eq!(
-        first_ir_build.semantic_facts_local_function_summaries_function_count,
-        first_ir_build.semantic_facts_local_function_summaries_singleton_fast_path_count
-            + first_ir_build.semantic_facts_local_function_summaries_recursive_scc_count,
-        "local routine accounting must partition into singleton fast path and recursive SCC work"
+        first_ir_build.semantic_facts_materialize_ms, 0,
+        "diagnostics-only semantic path must not materialize full semantic facts"
     );
 
     let second = analysis
@@ -1359,14 +1546,244 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
         second.profile.parse_source,
         Some(SemanticDiagnosticsParseSource::Snapshot)
     );
-    assert_eq!(second.profile.ir_source, Some(IrArtifactSource::ExactCache));
+    assert_eq!(
+        second.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    assert_eq!(
+        second.profile.ir_source,
+        Some(IrArtifactSource::SnapshotBuild)
+    );
     let second_ir_build = second
         .ir_build_profile
         .expect("cached semantic diagnostics must still expose IR build profile");
+    assert!(
+        second_ir_build.total_ms >= second_ir_build.ast_to_ir_convert_ms,
+        "repeated diagnostics-only profile must still expose AST->IR timing"
+    );
     assert_eq!(
-        second_ir_build,
-        IrBuildProfile::default(),
-        "exact-cache semantic diagnostics should expose zero IR build breakdown"
+        second_ir_build.semantic_facts_materialize_ms, 0,
+        "repeated diagnostics-only profile must stay off the full semantic-facts path"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_profiled_do_not_publish_completion_head_artifact() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(313);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             LocalArray = New Array;\n\
+             LocalArray.Add(1);\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-profiled-no-exact-cache"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-profiled-no-exact-cache.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness before profiled semantic diagnostics"),
+        "profiled semantic diagnostics must start without exact completion-head artifacts"
+    );
+
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("profiled semantic diagnostics");
+    assert_eq!(
+        profiled.profile.ir_source,
+        Some(IrArtifactSource::SnapshotBuild)
+    );
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness after profiled semantic diagnostics"),
+        "profiled diagnostics-only path must not publish completion-head artifacts"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_profiled_do_not_poison_later_completion_head_query() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(318);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ЛокМассив = Новый Массив;\n\
+             ДляCompletion = ЛокМассив;\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-profiled-completion-head-isolation"),
+        deps: array_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-profiled-completion-head-isolation.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let completion_probe = text
+        .match_indices("ЛокМассив")
+        .nth(1)
+        .map(|(idx, marker)| idx + marker.len() - 1)
+        .expect("second ЛокМассив occurrence")
+        .min(u32::MAX as usize) as u32;
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness before diagnostics-only path"),
+        "diagnostics-only path must not start with a published completion-head artifact"
+    );
+
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("profiled semantic diagnostics");
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    assert_eq!(
+        analysis
+            .completion_head_type_at_byte_offset(file_id, completion_probe)
+            .expect("completion head query after diagnostics-only path"),
+        None,
+        "diagnostics-only path must fail closed instead of publishing a completion-head artifact"
+    );
+    assert!(
+        !analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness after diagnostics-only path"),
+        "diagnostics-only path must keep completion-head readiness false"
+    );
+
+    let _ = analysis
+        .ir(file_id)
+        .expect("materialize exact IR after diagnostics-only path");
+    let completion_head = analysis
+        .completion_head_type_at_byte_offset(file_id, completion_probe)
+        .expect("completion head query after exact IR publish")
+        .expect("completion head resolution after exact IR publish");
+    assert_eq!(completion_head.type_name(), "Массив<Неопределено>");
+    assert!(
+        analysis
+            .current_completion_head_ready(file_id)
+            .expect("completion head readiness after exact IR publish"),
+        "exact IR publish must still materialize a valid completion-head artifact"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_profiled_do_not_poison_later_exact_type_index_query() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(319);
+    let text: Arc<str> = Arc::from(
+        "Процедура Тест()\n\
+             ЛокМассив = Новый Массив;\n\
+             ДляТипа = ЛокМассив;\n\
+             КонецПроцедуры",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-profiled-type-index-isolation"),
+        deps: array_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-profiled-type-index-isolation.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let analysis = host.snapshot();
+    let probe = text
+        .match_indices("ЛокМассив")
+        .nth(1)
+        .map(|(idx, marker)| idx + marker.len() - 1)
+        .expect("second ЛокМассив occurrence")
+        .min(u32::MAX as usize) as u32;
+    assert!(
+        !analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("type-index readiness before diagnostics-only path"),
+        "diagnostics-only path must not start with a published exact type index"
+    );
+
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("profiled semantic diagnostics");
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    let serve_only_before = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only query after diagnostics-only path");
+    assert_eq!(
+        serve_only_before.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexFallbackUnavailable
+    );
+    assert!(
+        serve_only_before.resolution.is_none(),
+        "diagnostics-only path must fail closed instead of publishing an exact type index"
+    );
+    assert!(
+        !analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("type-index readiness after diagnostics-only path"),
+        "diagnostics-only path must keep exact type-index readiness false"
+    );
+
+    let precompute = analysis
+        .precompute_type_index_for_file(file_id, Some(1), 0)
+        .expect("precompute exact type index after diagnostics-only path");
+    assert_eq!(
+        precompute.reason_code,
+        TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored
+    );
+    assert_eq!(precompute.file_version, Some(1));
+    assert!(
+        analysis
+            .current_type_index_serve_only_ready(file_id)
+            .expect("type-index readiness after exact precompute"),
+        "exact precompute must still publish a valid exact type index"
+    );
+
+    let serve_only_after = analysis
+        .type_at_byte_offset_serve_only_profiled(file_id, probe)
+        .expect("serve-only query after exact precompute");
+    assert_eq!(
+        serve_only_after.serve_reason_code,
+        TypeIndexServeReasonCode::TypeIndexExactHit
+    );
+    assert_eq!(
+        serve_only_after
+            .resolution
+            .expect("type resolution after exact precompute")
+            .type_name(),
+        "Массив<Неопределено>"
     );
 }
 

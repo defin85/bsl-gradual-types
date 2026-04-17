@@ -182,5 +182,11 @@ fast path; it runs the parity regressions, backend observability export check,
 the representative `conf_big` ready-snapshot leaf live gate, and strict
 OpenSpec validation while writing the live report into the active change's
 `validation/` directory.
+`./scripts/validate-refactor-39-ready-snapshot-timeout-shadow-state-fallback-bounding.sh`
+is the canonical targeted validation bundle for the representative save-followup
+family; it runs the timeout/continuation timeline regressions, refreshes the
+checked-in `conf_big` representative bundle plus the exhausted-continuation
+timeout sidecar, and writes both live reports into the active change's
+`validation/` directory before strict OpenSpec validation.
 
 Use these only when the task explicitly needs readiness/perf evidence.

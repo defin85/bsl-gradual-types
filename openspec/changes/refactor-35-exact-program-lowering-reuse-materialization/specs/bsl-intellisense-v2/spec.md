@@ -13,8 +13,9 @@ This behavior MUST:
   `refactor-33-exact-program-lowering-changed-range-reuse`;
 - preserve exact same-version semantics, latest-wins supersession, and truthful
   cancellation/retarget behavior for save-follow-up exact assembly;
-- avoid recursive clone/rebase work proportional to the full reused subtree size when the reuse
-  plan already proved that region unchanged.
+- remove the second full-subtree deep-clone during final `Program` assembly for reused regions;
+- allow at most one bounded rebase/update pass needed to align moved reused nodes to the current
+  revision, rather than silently expanding this change into a broader structural-sharing rewrite.
 
 #### Scenario: Local same-file edit reuses unchanged lowered regions without a second deep clone
 

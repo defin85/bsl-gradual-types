@@ -71,6 +71,11 @@ fall back to the full path rather than publish reduced diagnostics silently.
 Diagnostics-only artifacts must be ephemeral or live under a separate diagnostics cache namespace.
 They must not be stored under the current full exact semantic cache key.
 
+In the current architecture, that also means diagnostics-only materialization cannot reuse or
+overwrite the existing exact `ir_profiled` / `remember_ir_artifact` slot and cannot publish a
+trimmed `SemanticProgram` or completion-head substitute into the current interactive exact cache
+path.
+
 Otherwise a trimmed artifact could be mistaken for a full exact semantic artifact by later
 interactive queries, which would poison completion/hover/definition behavior.
 

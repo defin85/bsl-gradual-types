@@ -59,6 +59,11 @@ windows by ownership.
 That removes the second deep-clone step that currently copies unchanged `Statement` trees back into
 the final `Program`.
 
+This decision does not require eliminating every recursive span update performed while deriving the
+reuse plan.
+The contract for this change is to remove the second full-tree clone/materialization pass during
+final assembly; broader structural sharing that also removes rebasing remains part of Decision 5.
+
 Observability counters such as reused/rebuilt unit counts should be computed before the plan is
 consumed, so the runtime does not need a second pass over cloned trees merely to describe what
 happened.

@@ -43,6 +43,10 @@ cache identity for the same `(file, version, deps, settings)` target.
 
 Diagnostics-only artifacts MUST be ephemeral or stored under a separate diagnostics cache namespace
 so later interactive exact consumers cannot mistake them for full `SemanticFacts`.
+This isolation requirement also applies to any cached `SemanticProgram`, completion-head artifact,
+or equivalent exact IR-derived artifact that interactive exact consumers reuse.
+The diagnostics-only path MUST NOT publish a trimmed semantic artifact into the current exact
+interactive slot for that target.
 
 #### Scenario: Diagnostics-only query does not poison later hover or completion
 

@@ -6714,6 +6714,17 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_version_mismatch_on_sta
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -6891,6 +6902,17 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_superseded_when_newer_c
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -7950,6 +7972,31 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
         routine_body_reused_prefix_lowering_units: 7,
         routine_body_reused_suffix_lowering_units: 4,
         routine_body_rebuilt_lowering_units: 7,
+        reuse_plan_build_source: Some(
+            bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReusePlanBuildSource::Owned,
+        ),
+        reuse_plan_take_if_unique_hit: Some(true),
+        reuse_plan_borrowed_cache_hit: Some(false),
+        reuse_plan_build_ms: Some(9),
+        reuse_plan_owned_build_ms: Some(9),
+        reuse_plan_borrowed_build_ms: None,
+        reuse_plan_rebase_ms: Some(6),
+        reuse_plan_rebase_statement_count: Some(5),
+        reused_progress_ms: Some(18),
+        reused_progress_call_count: Some(2),
+        rebuild_dispatch_ms: Some(31),
+        rebuild_dispatch_call_count: Some(1),
+        rebuild_dispatch_callable_ms: Some(31),
+        rebuild_dispatch_callable_call_count: Some(1),
+        rebuild_dispatch_callable_body_dispatch_ms: Some(11),
+        rebuild_dispatch_callable_body_dispatch_call_count: Some(1),
+        rebuild_dispatch_callable_non_body_dispatch_ms: Some(20),
+        rebuild_dispatch_control_flow_ms: Some(0),
+        rebuild_dispatch_control_flow_call_count: Some(0),
+        rebuild_dispatch_simple_ms: Some(0),
+        rebuild_dispatch_simple_call_count: Some(0),
+        rebuild_dispatch_other_ms: Some(0),
+        rebuild_dispatch_other_call_count: Some(0),
     };
 
     server.begin_diagnostics_save_timeline_cycle(&uri, key);
@@ -8027,6 +8074,99 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units,
         Some(7)
     );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source
+            .as_deref(),
+        Some("owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit,
+        Some(true)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit,
+        Some(false)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms,
+        Some(9)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms,
+        Some(9)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms,
+        None
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms,
+        Some(6)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count,
+        Some(5)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms,
+        Some(18)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count,
+        Some(2)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms,
+        Some(31)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count,
+        Some(1)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms,
+        Some(31)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count,
+        Some(1)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms,
+        Some(11)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count,
+        Some(1)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms,
+        Some(20)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count,
+        Some(0)
+    );
 }
 
 #[tokio::test]
@@ -8093,6 +8233,17 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -8153,6 +8304,18 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: Some(1),
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: Some(2),
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: Some(3),
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    Some(4),
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    Some(2),
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    Some(5),
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    Some(3),
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms:
+                    Some(6),
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    Some(4),
                 semantic_diagnostics_ir_semantic_facts_statement_count: Some(8),
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: Some(1),
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: Some(5),
@@ -8255,6 +8418,35 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
     assert_eq!(
         followup_publish.semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count,
         Some(3)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms,
+        Some(5)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count,
+        Some(3)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms,
+        Some(6)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count,
+        Some(4)
     );
     assert_eq!(
         followup_publish.semantic_diagnostics_ir_semantic_facts_statement_count,
@@ -9051,6 +9243,17 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -9110,6 +9313,17 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -14216,6 +14430,17 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -14283,6 +14508,17 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -14478,6 +14714,17 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -14545,6 +14792,17 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -52852,6 +53110,75 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
         let program_lowering_routine_body_rebuilt_lowering_units = timeline
             .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units")
             .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_build_source = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source")
+            .and_then(|value| value.as_str());
+        let program_lowering_reuse_plan_take_if_unique_hit = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit")
+            .and_then(|value| value.as_bool());
+        let program_lowering_reuse_plan_borrowed_cache_hit = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit")
+            .and_then(|value| value.as_bool());
+        let program_lowering_reuse_plan_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_owned_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_borrowed_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_rebase_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_rebase_statement_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reused_progress_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reused_progress_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_body_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_body_dispatch_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_control_flow_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_control_flow_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_simple_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_simple_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_other_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_other_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count")
+            .and_then(|value| value.as_u64());
         assert_optional_u64_budget(
             &timeline,
             "p53",
@@ -52910,7 +53237,28 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
                     && program_lowering_fully_rebuilt_top_level_lowering_units.is_some()
                     && program_lowering_routine_body_reused_prefix_lowering_units.is_some()
                     && program_lowering_routine_body_reused_suffix_lowering_units.is_some()
-                    && program_lowering_routine_body_rebuilt_lowering_units.is_some(),
+                    && program_lowering_routine_body_rebuilt_lowering_units.is_some()
+                    && program_lowering_reuse_plan_build_source.is_some()
+                    && program_lowering_reuse_plan_take_if_unique_hit.is_some()
+                    && program_lowering_reuse_plan_borrowed_cache_hit.is_some()
+                    && program_lowering_reuse_plan_build_ms.is_some()
+                    && program_lowering_reuse_plan_rebase_ms.is_some()
+                    && program_lowering_reuse_plan_rebase_statement_count.is_some()
+                    && program_lowering_reused_progress_ms.is_some()
+                    && program_lowering_reused_progress_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_ms.is_some()
+                    && program_lowering_rebuild_dispatch_callable_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_body_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_control_flow_ms.is_some()
+                    && program_lowering_rebuild_dispatch_control_flow_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_simple_ms.is_some()
+                    && program_lowering_rebuild_dispatch_simple_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_other_ms.is_some()
+                    && program_lowering_rebuild_dispatch_other_call_count.is_some(),
                 "p53 live trace must export bounded reuse-vs-rebuild summaries when exact program_lowering is observed, trace={timeline:?}"
             );
         }
@@ -53043,6 +53391,29 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units": program_lowering_routine_body_reused_prefix_lowering_units,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units": program_lowering_routine_body_reused_suffix_lowering_units,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units": program_lowering_routine_body_rebuilt_lowering_units,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source": program_lowering_reuse_plan_build_source,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit": program_lowering_reuse_plan_take_if_unique_hit,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit": program_lowering_reuse_plan_borrowed_cache_hit,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms": program_lowering_reuse_plan_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms": program_lowering_reuse_plan_owned_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms": program_lowering_reuse_plan_borrowed_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms": program_lowering_reuse_plan_rebase_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count": program_lowering_reuse_plan_rebase_statement_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms": program_lowering_reused_progress_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count": program_lowering_reused_progress_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms": program_lowering_rebuild_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count": program_lowering_rebuild_dispatch_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms": program_lowering_rebuild_dispatch_callable_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count": program_lowering_rebuild_dispatch_callable_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms": program_lowering_rebuild_dispatch_callable_body_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count": program_lowering_rebuild_dispatch_callable_body_dispatch_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms": program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms": program_lowering_rebuild_dispatch_control_flow_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count": program_lowering_rebuild_dispatch_control_flow_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms": program_lowering_rebuild_dispatch_simple_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count": program_lowering_rebuild_dispatch_simple_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms": program_lowering_rebuild_dispatch_other_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count": program_lowering_rebuild_dispatch_other_call_count,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms": packaging_ms,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms")
@@ -54536,6 +54907,18 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                     || ready_artifacts_publish
                         .get("semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms")
                         .and_then(|value| value.as_u64())
+                        .is_some()
+                    || ready_artifacts_publish
+                        .get("semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms")
+                        .and_then(|value| value.as_u64())
+                        .is_some()
+                    || ready_artifacts_publish
+                        .get("semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms")
+                        .and_then(|value| value.as_u64())
+                        .is_some()
+                    || ready_artifacts_publish
+                        .get("semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms")
+                        .and_then(|value| value.as_u64())
                         .is_some(),
                 "p55 must export at least one non-zero semantic IR leaf subphase when semantic IR latency is observed, trace={timeline:?}"
             );
@@ -54658,6 +55041,75 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         let program_lowering_routine_body_rebuilt_lowering_units = timeline
             .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units")
             .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_build_source = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source")
+            .and_then(|value| value.as_str());
+        let program_lowering_reuse_plan_take_if_unique_hit = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit")
+            .and_then(|value| value.as_bool());
+        let program_lowering_reuse_plan_borrowed_cache_hit = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit")
+            .and_then(|value| value.as_bool());
+        let program_lowering_reuse_plan_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_owned_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_borrowed_build_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_rebase_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reuse_plan_rebase_statement_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reused_progress_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_reused_progress_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_body_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_body_dispatch_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_control_flow_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_control_flow_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_simple_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_simple_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_other_ms = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms")
+            .and_then(|value| value.as_u64());
+        let program_lowering_rebuild_dispatch_other_call_count = timeline
+            .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count")
+            .and_then(|value| value.as_u64());
         if program_lowering_ms.is_some() {
             assert!(
                 program_lowering_reuse_outcome.is_some(),
@@ -54676,7 +55128,28 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                     && program_lowering_fully_rebuilt_top_level_lowering_units.is_some()
                     && program_lowering_routine_body_reused_prefix_lowering_units.is_some()
                     && program_lowering_routine_body_reused_suffix_lowering_units.is_some()
-                    && program_lowering_routine_body_rebuilt_lowering_units.is_some(),
+                    && program_lowering_routine_body_rebuilt_lowering_units.is_some()
+                    && program_lowering_reuse_plan_build_source.is_some()
+                    && program_lowering_reuse_plan_take_if_unique_hit.is_some()
+                    && program_lowering_reuse_plan_borrowed_cache_hit.is_some()
+                    && program_lowering_reuse_plan_build_ms.is_some()
+                    && program_lowering_reuse_plan_rebase_ms.is_some()
+                    && program_lowering_reuse_plan_rebase_statement_count.is_some()
+                    && program_lowering_reused_progress_ms.is_some()
+                    && program_lowering_reused_progress_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_ms.is_some()
+                    && program_lowering_rebuild_dispatch_callable_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_body_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms.is_some()
+                    && program_lowering_rebuild_dispatch_control_flow_ms.is_some()
+                    && program_lowering_rebuild_dispatch_control_flow_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_simple_ms.is_some()
+                    && program_lowering_rebuild_dispatch_simple_call_count.is_some()
+                    && program_lowering_rebuild_dispatch_other_ms.is_some()
+                    && program_lowering_rebuild_dispatch_other_call_count.is_some(),
                 "p55 must export bounded reuse-vs-rebuild summary on the production-like path, trace={timeline:?}"
             );
         }
@@ -54837,6 +55310,29 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units": program_lowering_routine_body_reused_prefix_lowering_units,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units": program_lowering_routine_body_reused_suffix_lowering_units,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units": program_lowering_routine_body_rebuilt_lowering_units,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source": program_lowering_reuse_plan_build_source,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit": program_lowering_reuse_plan_take_if_unique_hit,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit": program_lowering_reuse_plan_borrowed_cache_hit,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms": program_lowering_reuse_plan_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms": program_lowering_reuse_plan_owned_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms": program_lowering_reuse_plan_borrowed_build_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms": program_lowering_reuse_plan_rebase_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count": program_lowering_reuse_plan_rebase_statement_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms": program_lowering_reused_progress_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count": program_lowering_reused_progress_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms": program_lowering_rebuild_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count": program_lowering_rebuild_dispatch_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms": program_lowering_rebuild_dispatch_callable_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count": program_lowering_rebuild_dispatch_callable_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms": program_lowering_rebuild_dispatch_callable_body_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count": program_lowering_rebuild_dispatch_callable_body_dispatch_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms": program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms": program_lowering_rebuild_dispatch_control_flow_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count": program_lowering_rebuild_dispatch_control_flow_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms": program_lowering_rebuild_dispatch_simple_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count": program_lowering_rebuild_dispatch_simple_call_count,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms": program_lowering_rebuild_dispatch_other_ms,
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count": program_lowering_rebuild_dispatch_other_call_count,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms": packaging_ms,
             "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms")
@@ -54961,6 +55457,24 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count")
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_semantic_facts_statement_count": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_semantic_facts_statement_count")

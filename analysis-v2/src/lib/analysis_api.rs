@@ -66,6 +66,24 @@ fn merge_ir_build_profiles(
     current.semantic_facts_merge_control_flow_env_count = current
         .semantic_facts_merge_control_flow_env_count
         .saturating_add(next.semantic_facts_merge_control_flow_env_count);
+    current.semantic_facts_source_incomplete_member_access_recovery_ms = current
+        .semantic_facts_source_incomplete_member_access_recovery_ms
+        .saturating_add(next.semantic_facts_source_incomplete_member_access_recovery_ms);
+    current.semantic_facts_source_incomplete_member_access_recovery_count = current
+        .semantic_facts_source_incomplete_member_access_recovery_count
+        .saturating_add(next.semantic_facts_source_incomplete_member_access_recovery_count);
+    current.semantic_facts_syntax_incomplete_member_access_recovery_ms = current
+        .semantic_facts_syntax_incomplete_member_access_recovery_ms
+        .saturating_add(next.semantic_facts_syntax_incomplete_member_access_recovery_ms);
+    current.semantic_facts_syntax_incomplete_member_access_recovery_count = current
+        .semantic_facts_syntax_incomplete_member_access_recovery_count
+        .saturating_add(next.semantic_facts_syntax_incomplete_member_access_recovery_count);
+    current.semantic_facts_incomplete_call_target_recovery_ms = current
+        .semantic_facts_incomplete_call_target_recovery_ms
+        .saturating_add(next.semantic_facts_incomplete_call_target_recovery_ms);
+    current.semantic_facts_incomplete_call_target_recovery_count = current
+        .semantic_facts_incomplete_call_target_recovery_count
+        .saturating_add(next.semantic_facts_incomplete_call_target_recovery_count);
     current.semantic_facts_statement_count = current
         .semantic_facts_statement_count
         .saturating_add(next.semantic_facts_statement_count);

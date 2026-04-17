@@ -187,6 +187,29 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) program_lowering_routine_body_reused_prefix_lowering_units: Option<u64>,
     pub(crate) program_lowering_routine_body_reused_suffix_lowering_units: Option<u64>,
     pub(crate) program_lowering_routine_body_rebuilt_lowering_units: Option<u64>,
+    pub(crate) program_lowering_reuse_plan_build_source: Option<&'static str>,
+    pub(crate) program_lowering_reuse_plan_take_if_unique_hit: Option<bool>,
+    pub(crate) program_lowering_reuse_plan_borrowed_cache_hit: Option<bool>,
+    pub(crate) program_lowering_reuse_plan_build_ms: Option<u64>,
+    pub(crate) program_lowering_reuse_plan_owned_build_ms: Option<u64>,
+    pub(crate) program_lowering_reuse_plan_borrowed_build_ms: Option<u64>,
+    pub(crate) program_lowering_reuse_plan_rebase_ms: Option<u64>,
+    pub(crate) program_lowering_reuse_plan_rebase_statement_count: Option<u64>,
+    pub(crate) program_lowering_reused_progress_ms: Option<u64>,
+    pub(crate) program_lowering_reused_progress_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_callable_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_callable_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_callable_body_dispatch_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_callable_body_dispatch_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_control_flow_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_control_flow_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_simple_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_simple_call_count: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_other_ms: Option<u64>,
+    pub(crate) program_lowering_rebuild_dispatch_other_call_count: Option<u64>,
 }
 
 impl DiagnosticsReadySnapshotPhaseAttributionV2 {
@@ -311,6 +334,55 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .map(|summary| summary.routine_body_reused_suffix_lowering_units),
             program_lowering_routine_body_rebuilt_lowering_units: program_lowering_summary
                 .map(|summary| summary.routine_body_rebuilt_lowering_units),
+            program_lowering_reuse_plan_build_source: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_build_source.map(|value| value.as_str())),
+            program_lowering_reuse_plan_take_if_unique_hit: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_take_if_unique_hit),
+            program_lowering_reuse_plan_borrowed_cache_hit: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_borrowed_cache_hit),
+            program_lowering_reuse_plan_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_build_ms),
+            program_lowering_reuse_plan_owned_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_owned_build_ms),
+            program_lowering_reuse_plan_borrowed_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_borrowed_build_ms),
+            program_lowering_reuse_plan_rebase_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_rebase_ms),
+            program_lowering_reuse_plan_rebase_statement_count: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_rebase_statement_count),
+            program_lowering_reused_progress_ms: program_lowering_summary
+                .and_then(|summary| summary.reused_progress_ms),
+            program_lowering_reused_progress_call_count: program_lowering_summary
+                .and_then(|summary| summary.reused_progress_call_count),
+            program_lowering_rebuild_dispatch_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_ms),
+            program_lowering_rebuild_dispatch_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_call_count),
+            program_lowering_rebuild_dispatch_callable_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_callable_ms),
+            program_lowering_rebuild_dispatch_callable_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_callable_call_count),
+            program_lowering_rebuild_dispatch_callable_body_dispatch_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_callable_body_dispatch_ms),
+            program_lowering_rebuild_dispatch_callable_body_dispatch_call_count:
+                program_lowering_summary.and_then(|summary| {
+                    summary.rebuild_dispatch_callable_body_dispatch_call_count
+                }),
+            program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms:
+                program_lowering_summary
+                    .and_then(|summary| summary.rebuild_dispatch_callable_non_body_dispatch_ms),
+            program_lowering_rebuild_dispatch_control_flow_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_control_flow_ms),
+            program_lowering_rebuild_dispatch_control_flow_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_control_flow_call_count),
+            program_lowering_rebuild_dispatch_simple_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_simple_ms),
+            program_lowering_rebuild_dispatch_simple_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_simple_call_count),
+            program_lowering_rebuild_dispatch_other_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_other_ms),
+            program_lowering_rebuild_dispatch_other_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_other_call_count),
         })
     }
 
@@ -659,6 +731,29 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             program_lowering_routine_body_reused_prefix_lowering_units: None,
             program_lowering_routine_body_reused_suffix_lowering_units: None,
             program_lowering_routine_body_rebuilt_lowering_units: None,
+            program_lowering_reuse_plan_build_source: None,
+            program_lowering_reuse_plan_take_if_unique_hit: None,
+            program_lowering_reuse_plan_borrowed_cache_hit: None,
+            program_lowering_reuse_plan_build_ms: None,
+            program_lowering_reuse_plan_owned_build_ms: None,
+            program_lowering_reuse_plan_borrowed_build_ms: None,
+            program_lowering_reuse_plan_rebase_ms: None,
+            program_lowering_reuse_plan_rebase_statement_count: None,
+            program_lowering_reused_progress_ms: None,
+            program_lowering_reused_progress_call_count: None,
+            program_lowering_rebuild_dispatch_ms: None,
+            program_lowering_rebuild_dispatch_call_count: None,
+            program_lowering_rebuild_dispatch_callable_ms: None,
+            program_lowering_rebuild_dispatch_callable_call_count: None,
+            program_lowering_rebuild_dispatch_callable_body_dispatch_ms: None,
+            program_lowering_rebuild_dispatch_callable_body_dispatch_call_count: None,
+            program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms: None,
+            program_lowering_rebuild_dispatch_control_flow_ms: None,
+            program_lowering_rebuild_dispatch_control_flow_call_count: None,
+            program_lowering_rebuild_dispatch_simple_ms: None,
+            program_lowering_rebuild_dispatch_simple_call_count: None,
+            program_lowering_rebuild_dispatch_other_ms: None,
+            program_lowering_rebuild_dispatch_other_call_count: None,
         };
         if diagnostics_save_coherence_debug_enabled() {
             emit_diagnostics_save_coherence_debug(format!(
@@ -750,6 +845,12 @@ struct SemanticDiagnosticsIrBuildBreakdownV2 {
     semantic_facts_merge_control_flow_env_ms: Option<Duration>,
     semantic_facts_visit_callable_body_count: Option<u64>,
     semantic_facts_merge_control_flow_env_count: Option<u64>,
+    semantic_facts_source_incomplete_member_access_recovery_ms: Option<Duration>,
+    semantic_facts_source_incomplete_member_access_recovery_count: Option<u64>,
+    semantic_facts_syntax_incomplete_member_access_recovery_ms: Option<Duration>,
+    semantic_facts_syntax_incomplete_member_access_recovery_count: Option<u64>,
+    semantic_facts_incomplete_call_target_recovery_ms: Option<Duration>,
+    semantic_facts_incomplete_call_target_recovery_count: Option<u64>,
     semantic_facts_statement_count: Option<u64>,
     semantic_facts_local_function_summary_count: Option<u64>,
     semantic_facts_index_entry_count: Option<u64>,
@@ -832,6 +933,45 @@ impl SemanticDiagnosticsIrBuildBreakdownV2 {
                 .semantic_facts_merge_control_flow_env_count
                 > 0)
             .then_some(profile.semantic_facts_merge_control_flow_env_count),
+            semantic_facts_source_incomplete_member_access_recovery_ms: (profile
+                .semantic_facts_source_incomplete_member_access_recovery_ms
+                > 0
+                || profile.semantic_facts_source_incomplete_member_access_recovery_count > 0)
+                .then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_source_incomplete_member_access_recovery_ms,
+                    )
+                }),
+            semantic_facts_source_incomplete_member_access_recovery_count: (profile
+                .semantic_facts_source_incomplete_member_access_recovery_count
+                > 0)
+            .then_some(profile.semantic_facts_source_incomplete_member_access_recovery_count),
+            semantic_facts_syntax_incomplete_member_access_recovery_ms: (profile
+                .semantic_facts_syntax_incomplete_member_access_recovery_ms
+                > 0
+                || profile.semantic_facts_syntax_incomplete_member_access_recovery_count > 0)
+                .then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_syntax_incomplete_member_access_recovery_ms,
+                    )
+                }),
+            semantic_facts_syntax_incomplete_member_access_recovery_count: (profile
+                .semantic_facts_syntax_incomplete_member_access_recovery_count
+                > 0)
+            .then_some(profile.semantic_facts_syntax_incomplete_member_access_recovery_count),
+            semantic_facts_incomplete_call_target_recovery_ms: (profile
+                .semantic_facts_incomplete_call_target_recovery_ms
+                > 0
+                || profile.semantic_facts_incomplete_call_target_recovery_count > 0)
+                .then(|| {
+                    duration_from_profile_ms(
+                        profile.semantic_facts_incomplete_call_target_recovery_ms,
+                    )
+                }),
+            semantic_facts_incomplete_call_target_recovery_count: (profile
+                .semantic_facts_incomplete_call_target_recovery_count
+                > 0)
+            .then_some(profile.semantic_facts_incomplete_call_target_recovery_count),
             semantic_facts_statement_count: (profile.semantic_facts_statement_count > 0)
                 .then_some(profile.semantic_facts_statement_count),
             semantic_facts_local_function_summary_count: (profile
@@ -880,6 +1020,24 @@ impl SemanticDiagnosticsIrBuildBreakdownV2 {
             || self.semantic_facts_merge_control_flow_env_ms.is_some()
             || self.semantic_facts_visit_callable_body_count.is_some()
             || self.semantic_facts_merge_control_flow_env_count.is_some()
+            || self
+                .semantic_facts_source_incomplete_member_access_recovery_ms
+                .is_some()
+            || self
+                .semantic_facts_source_incomplete_member_access_recovery_count
+                .is_some()
+            || self
+                .semantic_facts_syntax_incomplete_member_access_recovery_ms
+                .is_some()
+            || self
+                .semantic_facts_syntax_incomplete_member_access_recovery_count
+                .is_some()
+            || self
+                .semantic_facts_incomplete_call_target_recovery_ms
+                .is_some()
+            || self
+                .semantic_facts_incomplete_call_target_recovery_count
+                .is_some()
             || self.semantic_facts_statement_count.is_some()
             || self.semantic_facts_local_function_summary_count.is_some()
             || self.semantic_facts_index_entry_count.is_some()
@@ -1395,6 +1553,46 @@ impl BslLanguageServer {
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)
                     .and_then(|value| value.semantic_facts_merge_control_flow_env_count),
+            semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_ms(
+                            value.semantic_facts_source_incomplete_member_access_recovery_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value.semantic_facts_source_incomplete_member_access_recovery_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_ms(
+                            value.semantic_facts_syntax_incomplete_member_access_recovery_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        value.semantic_facts_syntax_incomplete_member_access_recovery_count
+                    }),
+            semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| {
+                        duration_to_ms(
+                            value.semantic_facts_incomplete_call_target_recovery_ms,
+                        )
+                    }),
+            semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                semantic_diagnostics_query_breakdown
+                    .and_then(|value| value.ir_build_breakdown)
+                    .and_then(|value| value.semantic_facts_incomplete_call_target_recovery_count),
             semantic_diagnostics_ir_semantic_facts_statement_count:
                 semantic_diagnostics_query_breakdown
                     .and_then(|value| value.ir_build_breakdown)

@@ -1900,6 +1900,17 @@ mod tests {
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                 semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                 semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                    None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms: None,
+                semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                    None,
                 semantic_diagnostics_ir_semantic_facts_statement_count: None,
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
@@ -1966,6 +1977,52 @@ mod tests {
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms:
+                None,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count:
                 None,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
                 None,
@@ -2173,6 +2230,18 @@ mod tests {
                     semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: None,
                     semantic_diagnostics_ir_semantic_facts_visit_callable_body_count: None,
                     semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count: None,
+                    semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms:
+                        None,
+                    semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count:
+                        None,
                     semantic_diagnostics_ir_semantic_facts_statement_count: None,
                     semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                     semantic_diagnostics_ir_semantic_facts_index_entry_count: None,

@@ -734,6 +734,18 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                 semantic_facts_visit_callable_body_count = profile.visit_callable_body_count,
                 semantic_facts_merge_control_flow_env_ms = profile.merge_control_flow_env_ms,
                 semantic_facts_merge_control_flow_env_count = profile.merge_control_flow_env_count,
+                semantic_facts_source_incomplete_member_access_recovery_ms =
+                    profile.source_incomplete_member_access_recovery_ms,
+                semantic_facts_source_incomplete_member_access_recovery_count =
+                    profile.source_incomplete_member_access_recovery_count,
+                semantic_facts_syntax_incomplete_member_access_recovery_ms =
+                    profile.syntax_incomplete_member_access_recovery_ms,
+                semantic_facts_syntax_incomplete_member_access_recovery_count =
+                    profile.syntax_incomplete_member_access_recovery_count,
+                semantic_facts_incomplete_call_target_recovery_ms =
+                    profile.incomplete_call_target_recovery_ms,
+                semantic_facts_incomplete_call_target_recovery_count =
+                    profile.incomplete_call_target_recovery_count,
                 semantic_facts_statement_count = profile.statement_count,
                 semantic_facts_local_function_summary_count = profile.local_function_summary_count,
                 semantic_facts_index_entry_count = profile.index_entry_count,
@@ -771,6 +783,18 @@ fn build_ir_from_parsed_profiled_with_checkpoint(
                     semantic_facts_merge_control_flow_env_ms: profile.merge_control_flow_env_ms,
                     semantic_facts_merge_control_flow_env_count: profile
                         .merge_control_flow_env_count,
+                    semantic_facts_source_incomplete_member_access_recovery_ms: profile
+                        .source_incomplete_member_access_recovery_ms,
+                    semantic_facts_source_incomplete_member_access_recovery_count: profile
+                        .source_incomplete_member_access_recovery_count,
+                    semantic_facts_syntax_incomplete_member_access_recovery_ms: profile
+                        .syntax_incomplete_member_access_recovery_ms,
+                    semantic_facts_syntax_incomplete_member_access_recovery_count: profile
+                        .syntax_incomplete_member_access_recovery_count,
+                    semantic_facts_incomplete_call_target_recovery_ms: profile
+                        .incomplete_call_target_recovery_ms,
+                    semantic_facts_incomplete_call_target_recovery_count: profile
+                        .incomplete_call_target_recovery_count,
                     semantic_facts_statement_count: profile.statement_count,
                     semantic_facts_local_function_summary_count: profile.local_function_summary_count,
                     semantic_facts_index_entry_count: profile.index_entry_count,

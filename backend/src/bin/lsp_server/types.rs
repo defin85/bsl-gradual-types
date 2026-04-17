@@ -806,6 +806,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_relief_valve_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_continuation_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_shadow_state_available: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_wait_reason: Option<String>,

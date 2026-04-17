@@ -444,6 +444,13 @@ fn set_diagnostics_save_timeline_followup_relief_valve_inner(
         elapsed.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
 }
 
+fn set_diagnostics_save_timeline_followup_ready_snapshot_continuation_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    reason: &'static str,
+) {
+    trace.followup_ready_snapshot_continuation_reason = Some(reason.to_string());
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DiagnosticsSaveTimelineFastlaneProgress {
     Pending,
@@ -1092,6 +1099,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_outcome: None,
                 followup_ready_snapshot_relief_valve_budget_ms: None,
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_blocker_reason: None,
@@ -1260,6 +1268,7 @@ impl BslLanguageServer {
                     followup_ready_snapshot_relief_valve_outcome: None,
                     followup_ready_snapshot_relief_valve_budget_ms: None,
                     followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                    followup_ready_snapshot_continuation_reason: None,
                     followup_shadow_state_available: None,
                     followup_wait_reason: None,
                     followup_blocker_reason: None,
@@ -1510,6 +1519,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_outcome: None,
                 followup_ready_snapshot_relief_valve_budget_ms: None,
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_blocker_reason: None,
@@ -1729,6 +1739,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_outcome: None,
                 followup_ready_snapshot_relief_valve_budget_ms: None,
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_blocker_reason: None,
@@ -1740,6 +1751,178 @@ impl BslLanguageServer {
             }
         });
         set_diagnostics_save_timeline_followup_relief_valve_inner(trace, outcome, budget, elapsed);
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_ready_snapshot_continuation(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        reason: &'static str,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) {
+            set_diagnostics_save_timeline_followup_ready_snapshot_continuation_inner(trace, reason);
+            return;
+        }
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                first_publish: None,
+                followup_publish: None,
+                save_fastlane_outcome: None,
+                idle_heavy_outcome: None,
+                followup_syntax_work_mode: None,
+                followup_semantic_path: None,
+                followup_semantic_parse_source: None,
+                followup_semantic_ir_source: None,
+                followup_ready_snapshot_zero_probe: None,
+                followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_task_state: None,
+                followup_ready_snapshot_timeout_phase: None,
+                followup_ready_snapshot_timeout_phase_elapsed_ms: None,
+                followup_ready_snapshot_timeout_leaf: None,
+                followup_ready_snapshot_timeout_leaf_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_ms: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase: None,
+                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_largest_rebuilt_window_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reuse_node_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_reused_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_fully_rebuilt_top_level_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_prefix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_reused_suffix_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms:
+                    None,
+                followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms: None,
+                followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: None,
+                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase: None,
+                followup_ready_snapshot_parse_exec_dominant_subphase_ms: None,
+                followup_ready_snapshot_post_parse_pre_materialization_ms: None,
+                followup_ready_snapshot_ready_install_ms: None,
+                followup_ready_snapshot_document_symbol_side_work_ms: None,
+                followup_ready_snapshot_dominant_phase: None,
+                followup_ready_snapshot_dominant_phase_ms: None,
+                followup_ready_snapshot_relief_valve_outcome: None,
+                followup_ready_snapshot_relief_valve_budget_ms: None,
+                followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
+                followup_shadow_state_available: None,
+                followup_wait_reason: None,
+                followup_blocker_reason: None,
+                followup_runtime_queue_wait_ms: None,
+                followup_apply_lag_ms: None,
+                followup_wait_for_file_version_ms: None,
+                followup_snapshot_with_deps_ms: None,
+                terminal_outcome: None,
+            }
+        });
+        set_diagnostics_save_timeline_followup_ready_snapshot_continuation_inner(trace, reason);
     }
 
     pub(crate) fn record_diagnostics_save_timeline_followup_wait_state(
@@ -1904,6 +2087,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_outcome: None,
                 followup_ready_snapshot_relief_valve_budget_ms: None,
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_blocker_reason: None,
@@ -2095,6 +2279,7 @@ impl BslLanguageServer {
                 followup_ready_snapshot_relief_valve_outcome: None,
                 followup_ready_snapshot_relief_valve_budget_ms: None,
                 followup_ready_snapshot_relief_valve_elapsed_ms: None,
+                followup_ready_snapshot_continuation_reason: None,
                 followup_shadow_state_available: None,
                 followup_wait_reason: None,
                 followup_blocker_reason: None,

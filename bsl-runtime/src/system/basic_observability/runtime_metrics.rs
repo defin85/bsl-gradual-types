@@ -90,6 +90,17 @@ fn normalize_diagnostics_save_followup_relief_valve_outcome_label(outcome: &str)
     }
 }
 
+fn normalize_diagnostics_save_followup_continuation_reason_label(reason: &str) -> &'static str {
+    match reason {
+        "continued_still_current" => "continued_still_current",
+        "exhausted_continuation_proof" => "exhausted_continuation_proof",
+        "superseded" => "superseded",
+        "cancelled" => "cancelled",
+        "other_terminal" => "other_terminal",
+        _ => "other",
+    }
+}
+
 impl BasicObservability {
     pub fn record_intellisense_v2_document_symbol_outcome(&self, outcome: &str) {
         let outcome = match outcome {
@@ -257,6 +268,17 @@ impl BasicObservability {
         self.metrics.increment(&counter_key);
         self.metrics
             .observe_histogram(&histogram_key, duration.as_millis() as f64);
+    }
+
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation(
+        &self,
+        reason: &str,
+    ) {
+        let reason = normalize_diagnostics_save_followup_continuation_reason_label(reason);
+        let key = format!(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_{reason}"
+        );
+        self.metrics.increment(&key);
     }
 
     pub fn record_intellisense_v2_completion_exact_type_index_wait_outcome(&self, reason: &str) {

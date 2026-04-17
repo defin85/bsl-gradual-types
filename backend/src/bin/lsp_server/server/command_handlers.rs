@@ -2050,6 +2050,7 @@ mod tests {
             followup_ready_snapshot_relief_valve_outcome: Some("engaged_timed_out".to_string()),
             followup_ready_snapshot_relief_valve_budget_ms: Some(500),
             followup_ready_snapshot_relief_valve_elapsed_ms: Some(500),
+            followup_ready_snapshot_continuation_reason: None,
             followup_shadow_state_available: Some(false),
             followup_wait_reason: None,
             followup_blocker_reason: None,

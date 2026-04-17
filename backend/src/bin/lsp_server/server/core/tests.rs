@@ -301,6 +301,12 @@ const UNIFIED_STAGE_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_skipped_apply_lag",
     "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_skipped_timeout_phase_unavailable",
     "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_skipped_timeout_phase_waiting",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_continued_still_current",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_exhausted_continuation_proof",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_superseded",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_cancelled",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_other_terminal",
+    "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_other",
     "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_pending_publish",
     "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_runtime_queue_wait",
     "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_semantic_work",
@@ -7914,6 +7920,10 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_timeout_for_exact_wo
             .is_some_and(|value| value >= relief_budget_ms.saturating_sub(50)),
         "relief timeout trace must expose spent extra wait close to budget, trace={trace:?}"
     );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("exhausted_continuation_proof")
+    );
     let metrics = server.coordinator.observability_metrics();
     let counters = metrics
         .get("counters")
@@ -7930,6 +7940,12 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_timeout_for_exact_wo
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_timed_out"
         )) > 0,
         "relief timeout path must export explicit timeout outcome counter, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_exhausted_continuation_proof"
+        )) > 0,
+        "relief timeout path must export exhausted continuation proof counter, counters={counters:?}"
     );
 }
 
@@ -8654,7 +8670,7 @@ async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as
                     super::super::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
-                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
@@ -8696,6 +8712,10 @@ async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as
             .as_deref(),
         Some("engaged_timed_out")
     );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("exhausted_continuation_proof")
+    );
     assert_ne!(
         trace
             .followup_ready_snapshot_relief_valve_outcome
@@ -8715,6 +8735,124 @@ async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_timed_out"
         )) > 0,
         "late didSave exact path must export engaged_timed_out instead of skip, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
+async fn p32_diagnostics_save_timeline_continuation_reports_superseded_generation() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p32-ready-snapshot-continuation-superseded-generation.bsl")
+        .expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1452);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 352,
+        save_cycle_sequence: 112,
+        requested_version: 132,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 132;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+    let server_for_supersession = server.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(550)).await;
+        server_for_supersession
+            .diagnostics_generation_v2
+            .write()
+            .await
+            .insert(file_id, key.diagnostics_generation + 1);
+        control.control_notify.notify_waiters();
+    });
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        disposition,
+        Some(bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration)
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("superseded")
+    );
+    assert!(
+        trace.followup_semantic_path.is_none(),
+        "superseded continuation must not degrade into shadow_state semantic work, trace={trace:?}"
     );
 }
 
@@ -8860,6 +8998,10 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
             .as_deref(),
         Some("engaged_helped")
     );
+    assert!(
+        trace.followup_ready_snapshot_continuation_reason.is_none(),
+        "engaged_helped path must not set continuation reason, trace={trace:?}"
+    );
     assert_eq!(
         trace.followup_ready_snapshot_relief_valve_budget_ms,
         Some(
@@ -8894,6 +9036,180 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_helped"
         )) > 0,
         "engaged_helped path must export explicit valve outcome counter, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
+async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_after_relief_timeout() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p24-ready-snapshot-relief-continued-still-current.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1461);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 361,
+        save_cycle_sequence: 121,
+        requested_version: 141,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+    let server_for_ready = server.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(550)).await;
+        control.transition_parse_exec_subphase_attribution(
+            super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+        );
+        let parse_snapshot = parse_snapshot_for_test(
+            file_id,
+            key.requested_version,
+            exact_text.as_ref(),
+            Vec::new(),
+            false,
+            None,
+        );
+        let ready_state = ReadyParseSnapshotStateV2 {
+            text: exact_text,
+            parse_snapshot,
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+            syntax_errors_complete: true,
+            phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2 {
+                parse_exec_ms: Some(4100),
+                parse_exec_core_parse_build_ms: Some(4100),
+                parse_exec_core_build_parser_tree_build_ms: Some(4100),
+                parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                    None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                parse_exec_core_build_tree_cache_install_ms: None,
+                parse_exec_optional_cache_enrichment_ms: None,
+                post_parse_pre_materialization_ms: None,
+                ready_install_ms: Some(1),
+                document_symbol_side_work_ms: None,
+            },
+            program_lowering_summary: None,
+        };
+        server_for_ready
+            .latest_ready_parse_snapshots_v2
+            .write()
+            .await
+            .insert(file_id, ready_state);
+        control.materialized_notify.notify_waiters();
+    });
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        disposition,
+        Some(bsl_runtime::application::DiagnosticsDisposition::Published)
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("continued_still_current")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_relief_valve_outcome_ready"
+        )) > 0,
+        "continued still-current path must export a ready relief probe, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_continued_still_current"
+        )) > 0,
+        "continued still-current path must export continuation reason counter, counters={counters:?}"
     );
 }
 
@@ -9052,6 +9368,10 @@ async fn p26_diagnostics_save_timeline_relief_valve_does_not_skip_apply_lag_for_
             .followup_ready_snapshot_relief_valve_outcome
             .as_deref(),
         Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("exhausted_continuation_proof")
     );
     assert_ne!(
         trace
@@ -10381,6 +10701,13 @@ async fn p26_did_save_followup_relief_valve_publishes_ready_artifacts_despite_de
             .get("followup_ready_snapshot_relief_valve_outcome")
             .and_then(|value| value.as_str()),
         Some("engaged_helped")
+    );
+    assert!(
+        trace
+            .get("followup_ready_snapshot_continuation_reason")
+            .and_then(|value| value.as_str())
+            .is_none(),
+        "direct relief help must not leave continuation reason, trace={trace:?}"
     );
     assert_eq!(
         full_publish
@@ -54102,6 +54429,12 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
                     "{label} must report engaged_timed_out relief attribution, trace={trace:?}"
                 );
                 assert_eq!(
+                    trace.get("followup_ready_snapshot_continuation_reason")
+                        .and_then(|value| value.as_str()),
+                    Some("exhausted_continuation_proof"),
+                    "{label} must distinguish exhausted continuation proof from terminal supersession or cancellation, trace={trace:?}"
+                );
+                assert_eq!(
                     trace.get("followup_shadow_state_available")
                         .and_then(|value| value.as_bool()),
                     Some(true),
@@ -54295,6 +54628,8 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_relief_valve_outcome_timeout";
         let relief_timed_out_key =
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_engaged_timed_out";
+        let continuation_exhausted_key =
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_exhausted_continuation_proof";
         let shadow_path_key =
             "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state";
         let ready_path_key =
@@ -54314,6 +54649,12 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
             read_u64_metric(final_counters.get(relief_timed_out_key)).saturating_sub(
                 read_u64_metric(baseline_counters.get(relief_timed_out_key)),
             );
+        let continuation_exhausted_delta = read_u64_metric(
+            final_counters.get(continuation_exhausted_key),
+        )
+        .saturating_sub(read_u64_metric(
+            baseline_counters.get(continuation_exhausted_key),
+        ));
         let shadow_path_delta = read_u64_metric(final_counters.get(shadow_path_key))
             .saturating_sub(read_u64_metric(baseline_counters.get(shadow_path_key)));
         let ready_path_delta = read_u64_metric(final_counters.get(ready_path_key))
@@ -54346,6 +54687,10 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
         assert!(
             relief_timed_out_delta >= 1,
             "p54 must record at least one engaged_timed_out relief outcome on the incident path, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+        );
+        assert!(
+            continuation_exhausted_delta >= 1,
+            "p54 must record exhausted continuation proof on the incident path, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
         );
         assert!(
             shadow_path_delta >= 2,
@@ -54385,6 +54730,7 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
             "bounded_wait_timeout_delta": bounded_wait_timeout_delta,
             "relief_probe_timeout_delta": relief_probe_timeout_delta,
             "relief_timed_out_delta": relief_timed_out_delta,
+            "continuation_exhausted_delta": continuation_exhausted_delta,
             "shadow_path_delta": shadow_path_delta,
             "ready_path_delta": ready_path_delta,
             "semantic_query_total_delta": semantic_query_total_delta,
@@ -55381,6 +55727,9 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_relief_valve_outcome": timeline
                 .get("followup_ready_snapshot_relief_valve_outcome")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_continuation_reason": timeline
+                .get("followup_ready_snapshot_continuation_reason")
                 .and_then(|value| value.as_str()),
             "followup_semantic_path": timeline
                 .get("followup_semantic_path")

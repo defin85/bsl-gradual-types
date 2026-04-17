@@ -24,6 +24,9 @@ pub(crate) const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET: Duration =
     Duration::from_millis(3_500);
 pub(crate) const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_RELIEF_VALVE_BUDGET: Duration =
     Duration::from_millis(500);
+const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_LEASE_BUDGET: Duration =
+    Duration::from_millis(250);
+const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_MAX_RENEWALS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReadyParseSnapshotProbeSlotV2 {
@@ -131,6 +134,73 @@ impl ReadySnapshotReliefValveOutcomeV2 {
             Self::SkippedTimeoutPhaseWaiting => "skipped_timeout_phase_waiting",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadySnapshotContinuationReasonV2 {
+    ContinuedStillCurrent,
+    ExhaustedContinuationProof,
+    Superseded,
+    Cancelled,
+    OtherTerminal,
+}
+
+impl ReadySnapshotContinuationReasonV2 {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ContinuedStillCurrent => "continued_still_current",
+            Self::ExhaustedContinuationProof => "exhausted_continuation_proof",
+            Self::Superseded => "superseded",
+            Self::Cancelled => "cancelled",
+            Self::OtherTerminal => "other_terminal",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReadySnapshotContinuationObservationV2 {
+    phase: Option<super::super::ReadyParseSnapshotAttributionPhaseV2>,
+    parse_exec_subphase: Option<super::super::ReadyParseSnapshotParseExecSubphaseV2>,
+    core_build_checkpoint: Option<super::super::ReadyParseSnapshotCoreBuildCheckpointV2>,
+    assembly_checkpoint: Option<super::super::ReadyParseSnapshotAssemblyCheckpointV2>,
+}
+
+impl ReadySnapshotContinuationObservationV2 {
+    fn from_snapshot(
+        snapshot: &super::super::ReadyParseSnapshotPhaseAttributionSnapshotV2,
+    ) -> Self {
+        Self {
+            phase: snapshot.current_phase,
+            parse_exec_subphase: snapshot.current_parse_exec_subphase,
+            core_build_checkpoint: snapshot.current_core_build_checkpoint,
+            assembly_checkpoint: snapshot.current_assembly_checkpoint,
+        }
+    }
+
+    fn qualifies_continuation(self) -> bool {
+        matches!(
+            self.phase,
+            Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec)
+                | Some(
+                    super::super::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization
+                )
+                | Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall)
+                | Some(super::super::ReadyParseSnapshotAttributionPhaseV2::DocumentSymbolSideWork)
+        )
+    }
+
+    fn progressed_since(self, previous: Self) -> bool {
+        self != previous
+    }
+}
+
+enum ReadySnapshotContinuationResultV2 {
+    Executed(bsl_runtime::application::DiagnosticsDisposition),
+    FallbackExhaustedProof,
+    Terminal {
+        disposition: bsl_runtime::application::DiagnosticsDisposition,
+        reason: ReadySnapshotContinuationReasonV2,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1999,6 +2069,21 @@ impl BslLanguageServer {
             .filter(|state| state.parse_snapshot.file_version == requested_version)
     }
 
+    async fn ready_parse_snapshot_state_for_target_v2(
+        &self,
+        file_id: V2FileId,
+        requested_version: i32,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> Option<super::super::ReadyParseSnapshotStateV2> {
+        self.ready_parse_snapshot_state_for_version_v2(file_id, requested_version)
+            .await
+            .filter(|state| {
+                expected_text_hash.map_or(true, |text_hash| {
+                    *blake3::hash(state.text.as_bytes()).as_bytes() == text_hash
+                })
+            })
+    }
+
     async fn save_fastlane_syntax_artifacts_for_version_v2(
         &self,
         file_id: V2FileId,
@@ -2082,9 +2167,10 @@ impl BslLanguageServer {
         let wait_started = Instant::now();
         loop {
             if let Some(state) = self
-                .ready_parse_snapshot_state_for_version_v2(
+                .ready_parse_snapshot_state_for_target_v2(
                     supersession_key.file_id,
                     supersession_key.requested_version,
+                    expected_text_hash,
                 )
                 .await
             {
@@ -2188,9 +2274,10 @@ impl BslLanguageServer {
             .as_ref()
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
         let ready_state = self
-            .ready_parse_snapshot_state_for_version_v2(
+            .ready_parse_snapshot_state_for_target_v2(
                 supersession_key.file_id,
                 supersession_key.requested_version,
+                shadow_text_hash,
             )
             .await;
         let mut exact_inflight_control = None;
@@ -2379,6 +2466,28 @@ impl BslLanguageServer {
         );
     }
 
+    fn record_diagnostics_save_followup_continuation_reason_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        reason: ReadySnapshotContinuationReasonV2,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.coordinator
+            .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation(
+                reason.as_str(),
+            );
+        self.record_diagnostics_save_timeline_followup_ready_snapshot_continuation(
+            uri,
+            cycle_key,
+            reason.as_str(),
+        );
+    }
+
     async fn ready_snapshot_phase_attribution_for_probe_v2(
         &self,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
@@ -2406,6 +2515,228 @@ impl BslLanguageServer {
                 include_timeout_phase,
             )
         })
+    }
+
+    async fn ready_snapshot_continuation_terminal_state_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+    ) -> Option<(
+        bsl_runtime::application::DiagnosticsDisposition,
+        ReadySnapshotContinuationReasonV2,
+    )> {
+        let current_generation = self
+            .current_diagnostics_generation_v2(supersession_key.file_id)
+            .await;
+        let current_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&supersession_key.file_id)
+            .copied();
+        let disposition = self.diagnostics_cancelled_disposition_v2(
+            cancel_token,
+            current_generation,
+            supersession_key.diagnostics_generation,
+            current_version,
+            supersession_key.requested_version,
+        );
+        match disposition {
+            bsl_runtime::application::DiagnosticsDisposition::SupersededGeneration
+            | bsl_runtime::application::DiagnosticsDisposition::SupersededVersion => {
+                Some((disposition, ReadySnapshotContinuationReasonV2::Superseded))
+            }
+            bsl_runtime::application::DiagnosticsDisposition::ClientCancel => {
+                Some((disposition, ReadySnapshotContinuationReasonV2::Cancelled))
+            }
+            bsl_runtime::application::DiagnosticsDisposition::OtherCancel
+                if cancel_token.is_some_and(|token| token.is_cancelled()) =>
+            {
+                Some((disposition, ReadySnapshotContinuationReasonV2::Cancelled))
+            }
+            bsl_runtime::application::DiagnosticsDisposition::OtherCancel => None,
+            _ => Some((
+                disposition,
+                ReadySnapshotContinuationReasonV2::OtherTerminal,
+            )),
+        }
+    }
+
+    async fn finalize_diagnostics_save_followup_terminal_disposition_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        disposition: bsl_runtime::application::DiagnosticsDisposition,
+        pipeline_started: Instant,
+    ) -> bsl_runtime::application::DiagnosticsDisposition {
+        self.finalize_diagnostics_save_profile_result_v2(
+            uri,
+            supersession_key,
+            trigger,
+            disposition,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            pipeline_started,
+        )
+        .await
+    }
+
+    async fn current_ready_snapshot_continuation_observation_v2(
+        &self,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> Option<(
+        Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>,
+        ReadySnapshotContinuationObservationV2,
+    )> {
+        let control = self
+            .matching_background_parse_snapshot_task_control_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+                expected_text_hash,
+            )
+            .await?;
+        let observation = ReadySnapshotContinuationObservationV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+        );
+        Some((control, observation))
+    }
+
+    async fn continue_save_followup_ready_snapshot_after_relief_timeout_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        pipeline_started: Instant,
+        show_hints: bool,
+        flow_sensitive_semantic: bool,
+        followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> ReadySnapshotContinuationResultV2 {
+        if let Some((disposition, reason)) = self
+            .ready_snapshot_continuation_terminal_state_v2(supersession_key, cancel_token)
+            .await
+        {
+            return ReadySnapshotContinuationResultV2::Terminal {
+                disposition,
+                reason,
+            };
+        }
+        let Some((_, mut observation)) = self
+            .current_ready_snapshot_continuation_observation_v2(
+                supersession_key,
+                expected_text_hash,
+            )
+            .await
+        else {
+            return ReadySnapshotContinuationResultV2::FallbackExhaustedProof;
+        };
+        if !observation.qualifies_continuation() {
+            return ReadySnapshotContinuationResultV2::FallbackExhaustedProof;
+        }
+
+        let mut renewals = 0usize;
+        loop {
+            if self
+                .ready_parse_snapshot_state_for_target_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                    expected_text_hash,
+                )
+                .await
+                .is_some()
+            {
+                if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
+                    .try_execute_save_followup_from_ready_artifacts_v2(
+                        uri,
+                        supersession_key,
+                        trigger,
+                        cancel_token,
+                        ReadyParseSnapshotProbeSlotV2::ReliefValve,
+                        Duration::ZERO,
+                        pipeline_started,
+                        show_hints,
+                        flow_sensitive_semantic,
+                        followup_lane_guard,
+                    )
+                    .await
+                {
+                    return ReadySnapshotContinuationResultV2::Executed(disposition);
+                }
+            }
+
+            if let Some((disposition, reason)) = self
+                .ready_snapshot_continuation_terminal_state_v2(supersession_key, cancel_token)
+                .await
+            {
+                return ReadySnapshotContinuationResultV2::Terminal {
+                    disposition,
+                    reason,
+                };
+            }
+            if renewals >= SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_MAX_RENEWALS {
+                return ReadySnapshotContinuationResultV2::FallbackExhaustedProof;
+            }
+
+            let Some((task_control, _)) = self
+                .current_ready_snapshot_continuation_observation_v2(
+                    supersession_key,
+                    expected_text_hash,
+                )
+                .await
+            else {
+                return ReadySnapshotContinuationResultV2::FallbackExhaustedProof;
+            };
+            let materialized = task_control.materialized_notify.notified();
+            let control = task_control.control_notify.notified();
+            tokio::pin!(materialized);
+            tokio::pin!(control);
+            tokio::select! {
+                _ = tokio::time::sleep(SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_LEASE_BUDGET) => {}
+                _ = &mut materialized => {}
+                _ = &mut control => {}
+            }
+
+            if let Some((disposition, reason)) = self
+                .ready_snapshot_continuation_terminal_state_v2(supersession_key, cancel_token)
+                .await
+            {
+                return ReadySnapshotContinuationResultV2::Terminal {
+                    disposition,
+                    reason,
+                };
+            }
+            let Some((_, next_observation)) = self
+                .current_ready_snapshot_continuation_observation_v2(
+                    supersession_key,
+                    expected_text_hash,
+                )
+                .await
+            else {
+                continue;
+            };
+            if !next_observation.qualifies_continuation()
+                || !next_observation.progressed_since(observation)
+            {
+                return ReadySnapshotContinuationResultV2::FallbackExhaustedProof;
+            }
+            renewals = renewals.saturating_add(1);
+            observation = next_observation;
+        }
     }
 
     async fn diagnostics_followup_apply_lag_v2(
@@ -3394,8 +3725,8 @@ impl BslLanguageServer {
                 );
                 Some(disposition)
             }
-            SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(outcome) => {
-                let outcome = match outcome {
+            SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(probe_outcome) => {
+                let outcome = match probe_outcome {
                     ReadyParseSnapshotProbeOutcomeV2::Ready
                     | ReadyParseSnapshotProbeOutcomeV2::NotReady
                     | ReadyParseSnapshotProbeOutcomeV2::Timeout => {
@@ -3421,7 +3752,116 @@ impl BslLanguageServer {
                     SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_RELIEF_VALVE_BUDGET,
                     Some(relief_elapsed),
                 );
-                None
+                match probe_outcome {
+                    ReadyParseSnapshotProbeOutcomeV2::Timeout => {
+                        match self
+                            .continue_save_followup_ready_snapshot_after_relief_timeout_v2(
+                                uri,
+                                supersession_key,
+                                trigger,
+                                cancel_token,
+                                pipeline_started,
+                                show_hints,
+                                flow_sensitive_semantic,
+                                followup_lane_guard,
+                                branch_context.shadow_text_hash,
+                            )
+                            .await
+                        {
+                            ReadySnapshotContinuationResultV2::Executed(disposition) => {
+                                self.record_diagnostics_save_followup_continuation_reason_v2(
+                                    uri,
+                                    supersession_key,
+                                    ReadySnapshotContinuationReasonV2::ContinuedStillCurrent,
+                                );
+                                Some(disposition)
+                            }
+                            ReadySnapshotContinuationResultV2::FallbackExhaustedProof => {
+                                self.record_diagnostics_save_followup_continuation_reason_v2(
+                                    uri,
+                                    supersession_key,
+                                    ReadySnapshotContinuationReasonV2::ExhaustedContinuationProof,
+                                );
+                                None
+                            }
+                            ReadySnapshotContinuationResultV2::Terminal {
+                                disposition,
+                                reason,
+                            } => {
+                                self.record_diagnostics_save_followup_continuation_reason_v2(
+                                    uri,
+                                    supersession_key,
+                                    reason,
+                                );
+                                Some(
+                                    self.finalize_diagnostics_save_followup_terminal_disposition_v2(
+                                        uri,
+                                        supersession_key,
+                                        trigger,
+                                        disposition,
+                                        pipeline_started,
+                                    )
+                                    .await,
+                                )
+                            }
+                        }
+                    }
+                    ReadyParseSnapshotProbeOutcomeV2::VersionMismatch
+                    | ReadyParseSnapshotProbeOutcomeV2::GenerationMismatch
+                    | ReadyParseSnapshotProbeOutcomeV2::Cancelled
+                    | ReadyParseSnapshotProbeOutcomeV2::Superseded => {
+                        let (disposition, reason) = self
+                            .ready_snapshot_continuation_terminal_state_v2(
+                                supersession_key,
+                                cancel_token,
+                            )
+                            .await
+                            .unwrap_or((
+                                self.diagnostics_cancelled_disposition_v2(
+                                    cancel_token,
+                                    self.current_diagnostics_generation_v2(
+                                        supersession_key.file_id,
+                                    )
+                                    .await,
+                                    supersession_key.diagnostics_generation,
+                                    self.latest_received_file_versions_v2
+                                        .read()
+                                        .await
+                                        .get(&supersession_key.file_id)
+                                        .copied(),
+                                    supersession_key.requested_version,
+                                ),
+                                match probe_outcome {
+                                    ReadyParseSnapshotProbeOutcomeV2::Cancelled => {
+                                        ReadySnapshotContinuationReasonV2::Cancelled
+                                    }
+                                    ReadyParseSnapshotProbeOutcomeV2::VersionMismatch
+                                    | ReadyParseSnapshotProbeOutcomeV2::GenerationMismatch
+                                    | ReadyParseSnapshotProbeOutcomeV2::Superseded => {
+                                        ReadySnapshotContinuationReasonV2::Superseded
+                                    }
+                                    _ => ReadySnapshotContinuationReasonV2::OtherTerminal,
+                                },
+                            ));
+                        self.record_diagnostics_save_followup_continuation_reason_v2(
+                            uri,
+                            supersession_key,
+                            reason,
+                        );
+                        Some(
+                            self.finalize_diagnostics_save_followup_terminal_disposition_v2(
+                                uri,
+                                supersession_key,
+                                trigger,
+                                disposition,
+                                pipeline_started,
+                            )
+                            .await,
+                        )
+                    }
+                    ReadyParseSnapshotProbeOutcomeV2::Ready
+                    | ReadyParseSnapshotProbeOutcomeV2::NotReady => None,
+                }
             }
         }
     }

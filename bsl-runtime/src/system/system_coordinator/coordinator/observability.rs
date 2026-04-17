@@ -225,6 +225,14 @@ impl SystemCoordinator {
             );
     }
 
+    pub fn record_intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation(
+        &self,
+        reason: &str,
+    ) {
+        self.observability
+            .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation(reason);
+    }
+
     pub fn record_intellisense_v2_completion_head_to_exact_upgrade(
         &self,
         duration: std::time::Duration,

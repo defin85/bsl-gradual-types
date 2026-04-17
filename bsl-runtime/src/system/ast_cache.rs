@@ -62,6 +62,32 @@ impl AstCache {
         result
     }
 
+    pub fn take_if_unique(&self, key: [u8; 32]) -> Option<ParseResult> {
+        let mut storage = self
+            .storage
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let entry = storage.pop(&key);
+
+        let mut stats = self
+            .stats
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(entry) = entry {
+            stats.hits += 1;
+            match Arc::try_unwrap(entry) {
+                Ok(parse_result) => Some(parse_result),
+                Err(shared_entry) => {
+                    storage.put(key, shared_entry);
+                    None
+                }
+            }
+        } else {
+            stats.misses += 1;
+            None
+        }
+    }
+
     pub fn put(&self, key: [u8; 32], value: Arc<ParseResult>) {
         let mut storage = self
             .storage

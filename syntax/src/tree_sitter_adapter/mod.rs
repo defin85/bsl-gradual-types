@@ -38,6 +38,9 @@ mod syntax_error_enhancers;
 mod syntax_errors;
 pub mod utils;
 
+use std::collections::VecDeque;
+use std::time::Duration;
+
 use crate::ast::{ParseResult, Program, Statement};
 use bsl_shared::domain::types::ParseError;
 use span::LineIndex;
@@ -56,8 +59,10 @@ pub enum LoweringReusePlanOutcome {
 #[derive(Debug, Clone)]
 pub struct RoutineBodyLoweringReusePlan {
     pub original_body_len: usize,
-    pub reused_body_prefix: Vec<Statement>,
-    pub reused_body_suffix: Vec<Statement>,
+    pub reused_prefix_len: usize,
+    pub reused_suffix_start: usize,
+    pub reused_body_prefix: VecDeque<Statement>,
+    pub reused_body_suffix: VecDeque<Statement>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +76,25 @@ pub enum LoweringReuseNodePlan {
 pub struct LoweringReusePlan {
     pub outcome: LoweringReusePlanOutcome,
     pub top_level_nodes: Vec<LoweringReuseNodePlan>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LoweringExecutionAttribution {
+    pub reused_progress_elapsed: Duration,
+    pub reused_progress_call_count: u64,
+    pub rebuild_dispatch_elapsed: Duration,
+    pub rebuild_dispatch_call_count: u64,
+    pub rebuild_dispatch_callable_elapsed: Duration,
+    pub rebuild_dispatch_callable_call_count: u64,
+    pub rebuild_dispatch_callable_body_dispatch_elapsed: Duration,
+    pub rebuild_dispatch_callable_body_dispatch_call_count: u64,
+    pub rebuild_dispatch_callable_non_body_dispatch_elapsed: Duration,
+    pub rebuild_dispatch_control_flow_elapsed: Duration,
+    pub rebuild_dispatch_control_flow_call_count: u64,
+    pub rebuild_dispatch_simple_elapsed: Duration,
+    pub rebuild_dispatch_simple_call_count: u64,
+    pub rebuild_dispatch_other_elapsed: Duration,
+    pub rebuild_dispatch_other_call_count: u64,
 }
 
 /// Адаптер tree-sitter AST -> Program AST
@@ -272,7 +296,8 @@ impl TreeSitterAdapter {
     pub fn convert_tree_fast_with_observer_and_reuse_plan(
         tree: &Tree,
         source: &str,
-        reuse_plan: &LoweringReusePlan,
+        reuse_plan: &mut LoweringReusePlan,
+        execution_attribution: &mut LoweringExecutionAttribution,
         mut observer: impl FnMut(usize, usize) -> Result<(), String>,
     ) -> Result<ParseResult, String> {
         let root = tree.root_node();
@@ -283,6 +308,7 @@ impl TreeSitterAdapter {
                 source,
                 &line_index,
                 reuse_plan,
+                execution_attribution,
                 &mut observer,
             )?;
         let program = Program { statements };

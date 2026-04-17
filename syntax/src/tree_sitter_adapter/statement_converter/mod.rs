@@ -40,11 +40,19 @@ use tracing::debug;
 use tree_sitter::Node;
 
 use super::span::{node_to_span_cached, LineIndex};
-use super::{LoweringReuseNodePlan, LoweringReusePlan};
+use super::{LoweringExecutionAttribution, LoweringReuseNodePlan, LoweringReusePlan};
 
 type LoweringObserver<'a> = dyn FnMut(usize, usize) -> Result<(), String> + 'a;
 
 const LOWERING_PROGRESS_BATCH_UNITS: usize = 64;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RebuildDispatchBucket {
+    Callable,
+    ControlFlow,
+    Simple,
+    Other,
+}
 
 pub(crate) struct LoweringProgressState {
     enabled: bool,
@@ -172,6 +180,86 @@ fn observe_reused_statement_slice_progress(
     Ok(())
 }
 
+fn take_reused_statement(node_plan: &mut LoweringReuseNodePlan) -> Option<Statement> {
+    match std::mem::replace(node_plan, LoweringReuseNodePlan::Rebuild) {
+        LoweringReuseNodePlan::ReuseStatement(statement) => Some(statement),
+        other => {
+            *node_plan = other;
+            None
+        }
+    }
+}
+
+fn rebuild_dispatch_bucket_for_kind(kind: &str) -> RebuildDispatchBucket {
+    match kind {
+        "function_definition" | "procedure_definition" => RebuildDispatchBucket::Callable,
+        "if_statement" | "for_statement" | "for_each_statement" | "while_statement"
+        | "try_statement" => RebuildDispatchBucket::ControlFlow,
+        "var_definition"
+        | "var_statement"
+        | "rise_error_statement"
+        | "assignment_statement"
+        | "return_statement"
+        | "call_statement"
+        | "break_statement"
+        | "continue_statement"
+        | "goto_statement"
+        | "label_statement"
+        | "execute_statement"
+        | "add_handler_statement"
+        | "remove_handler_statement"
+        | "await_statement" => RebuildDispatchBucket::Simple,
+        _ => RebuildDispatchBucket::Other,
+    }
+}
+
+pub(crate) fn record_rebuild_dispatch_attribution(
+    execution_attribution: &mut LoweringExecutionAttribution,
+    node_kind: &str,
+    elapsed: std::time::Duration,
+) {
+    execution_attribution.rebuild_dispatch_elapsed = execution_attribution
+        .rebuild_dispatch_elapsed
+        .saturating_add(elapsed);
+    execution_attribution.rebuild_dispatch_call_count = execution_attribution
+        .rebuild_dispatch_call_count
+        .saturating_add(1);
+    match rebuild_dispatch_bucket_for_kind(node_kind) {
+        RebuildDispatchBucket::Callable => {
+            execution_attribution.rebuild_dispatch_callable_elapsed = execution_attribution
+                .rebuild_dispatch_callable_elapsed
+                .saturating_add(elapsed);
+            execution_attribution.rebuild_dispatch_callable_call_count = execution_attribution
+                .rebuild_dispatch_callable_call_count
+                .saturating_add(1);
+        }
+        RebuildDispatchBucket::ControlFlow => {
+            execution_attribution.rebuild_dispatch_control_flow_elapsed = execution_attribution
+                .rebuild_dispatch_control_flow_elapsed
+                .saturating_add(elapsed);
+            execution_attribution.rebuild_dispatch_control_flow_call_count = execution_attribution
+                .rebuild_dispatch_control_flow_call_count
+                .saturating_add(1);
+        }
+        RebuildDispatchBucket::Simple => {
+            execution_attribution.rebuild_dispatch_simple_elapsed = execution_attribution
+                .rebuild_dispatch_simple_elapsed
+                .saturating_add(elapsed);
+            execution_attribution.rebuild_dispatch_simple_call_count = execution_attribution
+                .rebuild_dispatch_simple_call_count
+                .saturating_add(1);
+        }
+        RebuildDispatchBucket::Other => {
+            execution_attribution.rebuild_dispatch_other_elapsed = execution_attribution
+                .rebuild_dispatch_other_elapsed
+                .saturating_add(elapsed);
+            execution_attribution.rebuild_dispatch_other_call_count = execution_attribution
+                .rebuild_dispatch_other_call_count
+                .saturating_add(1);
+        }
+    }
+}
+
 pub(crate) fn is_lowering_progress_unit_kind(kind: &str) -> bool {
     matches!(
         kind,
@@ -268,7 +356,8 @@ pub fn convert_source_file_cached_with_observer_and_reuse_plan(
     node: &Node,
     source: &str,
     line_index: &LineIndex,
-    reuse_plan: &LoweringReusePlan,
+    reuse_plan: &mut LoweringReusePlan,
+    execution_attribution: &mut LoweringExecutionAttribution,
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
     let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
@@ -278,22 +367,39 @@ pub fn convert_source_file_cached_with_observer_and_reuse_plan(
 
     for child in node.children(&mut cursor) {
         if !is_lowering_progress_unit_kind(child.kind()) {
-            if let Some(stmt) = dispatch_statement_cached_internal(
+            let node_kind = child.kind();
+            let started = std::time::Instant::now();
+            if let Some(stmt) = dispatch_statement_cached_internal_with_attribution(
                 &child,
                 source,
                 line_index,
                 &mut progress,
                 &mut observer,
+                Some(execution_attribution),
             )? {
                 statements.push(stmt);
             }
+            record_rebuild_dispatch_attribution(
+                execution_attribution,
+                node_kind,
+                started.elapsed(),
+            );
             continue;
         }
 
-        match reuse_plan.top_level_nodes.get(reuse_index) {
-            Some(LoweringReuseNodePlan::ReuseStatement(statement)) => {
-                observe_reused_statement_progress(statement, &mut progress, &mut observer)?;
-                statements.push(statement.clone());
+        match reuse_plan.top_level_nodes.get_mut(reuse_index) {
+            Some(node_plan @ LoweringReuseNodePlan::ReuseStatement(_)) => {
+                let statement = take_reused_statement(node_plan)
+                    .expect("reuse-plan statement must remain available during materialization");
+                let started = std::time::Instant::now();
+                observe_reused_statement_progress(&statement, &mut progress, &mut observer)?;
+                execution_attribution.reused_progress_elapsed = execution_attribution
+                    .reused_progress_elapsed
+                    .saturating_add(started.elapsed());
+                execution_attribution.reused_progress_call_count = execution_attribution
+                    .reused_progress_call_count
+                    .saturating_add(1);
+                statements.push(statement);
             }
             Some(LoweringReuseNodePlan::RebuildRoutineBody(body_reuse)) => {
                 let stmt = declarations::convert_function_definition_cached_with_body_reuse(
@@ -303,19 +409,28 @@ pub fn convert_source_file_cached_with_observer_and_reuse_plan(
                     &mut progress,
                     &mut observer,
                     body_reuse,
+                    execution_attribution,
                 )?;
                 statements.push(stmt);
             }
             _ => {
-                if let Some(stmt) = dispatch_statement_cached_internal(
+                let node_kind = child.kind();
+                let started = std::time::Instant::now();
+                if let Some(stmt) = dispatch_statement_cached_internal_with_attribution(
                     &child,
                     source,
                     line_index,
                     &mut progress,
                     &mut observer,
+                    Some(execution_attribution),
                 )? {
                     statements.push(stmt);
                 }
+                record_rebuild_dispatch_attribution(
+                    execution_attribution,
+                    node_kind,
+                    started.elapsed(),
+                );
             }
         }
 
@@ -388,6 +503,19 @@ pub(crate) fn dispatch_statement_cached_internal(
     progress: &mut LoweringProgressState,
     observer: &mut LoweringObserver<'_>,
 ) -> Result<Option<Statement>, String> {
+    dispatch_statement_cached_internal_with_attribution(
+        node, source, line_index, progress, observer, None,
+    )
+}
+
+pub(crate) fn dispatch_statement_cached_internal_with_attribution(
+    node: &Node,
+    source: &str,
+    line_index: &LineIndex,
+    progress: &mut LoweringProgressState,
+    observer: &mut LoweringObserver<'_>,
+    execution_attribution: Option<&mut LoweringExecutionAttribution>,
+) -> Result<Option<Statement>, String> {
     if is_lowering_progress_unit_kind(node.kind()) {
         progress.observe_unit(observer)?;
     }
@@ -396,7 +524,12 @@ pub(crate) fn dispatch_statement_cached_internal(
         // Declarations
         "function_definition" | "procedure_definition" => {
             Ok(Some(declarations::convert_function_definition_cached(
-                node, source, line_index, progress, observer,
+                node,
+                source,
+                line_index,
+                progress,
+                observer,
+                execution_attribution,
             )?))
         }
         "var_definition" | "var_statement" => Ok(Some(

@@ -984,24 +984,23 @@ impl BslLanguageServer {
                             bsl_runtime::system::parser_coordinator::ParseSnapshotExactReadyControl::Continue
                         }
                     };
-                    let parse_options =
-                        bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions {
-                            save_critical_initial: matches!(
-                                request.admission_lane,
-                                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
-                            ),
-                            save_critical_requested: Some(&progress_control.promotion_requested),
-                            reused_program_prefix: reused_prefix_parse_result_for_parse
-                                .as_ref()
-                                .map(|parse_result| parse_result.program.statements.as_slice()),
-                            lowering_reuse_plan: None,
-                            exact_ready_snapshot_control_callback: Some(
-                                &exact_ready_snapshot_control,
-                            ),
-                            progress_callback: Some(&parse_exec_progress),
-                            core_build_progress_callback: Some(&core_build_progress),
-                            assembly_progress_callback: Some(&assembly_progress),
-                        };
+                    let mut parse_options =
+                        bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions::default();
+                    parse_options.save_critical_initial = matches!(
+                        request.admission_lane,
+                        Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+                    );
+                    parse_options.save_critical_requested =
+                        Some(&progress_control.promotion_requested);
+                    parse_options.reused_program_prefix = reused_prefix_parse_result_for_parse
+                        .as_ref()
+                        .map(|parse_result| parse_result.program.statements.as_slice());
+                    parse_options.lowering_reuse_plan = None;
+                    parse_options.exact_ready_snapshot_control_callback =
+                        Some(&exact_ready_snapshot_control);
+                    parse_options.progress_callback = Some(&parse_exec_progress);
+                    parse_options.core_build_progress_callback = Some(&core_build_progress);
+                    parse_options.assembly_progress_callback = Some(&assembly_progress);
                     let mut effective_forced_full_parse_reason = forced_full_parse_reason;
                     if effective_forced_full_parse_reason
                         == Some(

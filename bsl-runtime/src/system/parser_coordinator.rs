@@ -5,7 +5,7 @@
 #![allow(clippy::explicit_counter_loop)]
 
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -26,8 +26,8 @@ use crate::system::intellisense_index::{
 use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
 use crate::system::tree_cache::{hash_content, TreeCache};
 use crate::system::tree_sitter_adapter::{
-    LoweringReuseNodePlan, LoweringReusePlan, LoweringReusePlanOutcome,
-    RoutineBodyLoweringReusePlan, TreeSitterAdapter,
+    LoweringExecutionAttribution, LoweringReuseNodePlan, LoweringReusePlan,
+    LoweringReusePlanOutcome, RoutineBodyLoweringReusePlan, TreeSitterAdapter,
 };
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
@@ -273,6 +273,102 @@ pub struct ParseSnapshotProgramLoweringSummary {
     pub routine_body_reused_prefix_lowering_units: u64,
     pub routine_body_reused_suffix_lowering_units: u64,
     pub routine_body_rebuilt_lowering_units: u64,
+    pub reuse_plan_build_source: Option<ParseSnapshotProgramLoweringReusePlanBuildSource>,
+    pub reuse_plan_take_if_unique_hit: Option<bool>,
+    pub reuse_plan_borrowed_cache_hit: Option<bool>,
+    pub reuse_plan_build_ms: Option<u64>,
+    pub reuse_plan_owned_build_ms: Option<u64>,
+    pub reuse_plan_borrowed_build_ms: Option<u64>,
+    pub reuse_plan_rebase_ms: Option<u64>,
+    pub reuse_plan_rebase_statement_count: Option<u64>,
+    pub reused_progress_ms: Option<u64>,
+    pub reused_progress_call_count: Option<u64>,
+    pub rebuild_dispatch_ms: Option<u64>,
+    pub rebuild_dispatch_call_count: Option<u64>,
+    pub rebuild_dispatch_callable_ms: Option<u64>,
+    pub rebuild_dispatch_callable_call_count: Option<u64>,
+    pub rebuild_dispatch_callable_body_dispatch_ms: Option<u64>,
+    pub rebuild_dispatch_callable_body_dispatch_call_count: Option<u64>,
+    pub rebuild_dispatch_callable_non_body_dispatch_ms: Option<u64>,
+    pub rebuild_dispatch_control_flow_ms: Option<u64>,
+    pub rebuild_dispatch_control_flow_call_count: Option<u64>,
+    pub rebuild_dispatch_simple_ms: Option<u64>,
+    pub rebuild_dispatch_simple_call_count: Option<u64>,
+    pub rebuild_dispatch_other_ms: Option<u64>,
+    pub rebuild_dispatch_other_call_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotProgramLoweringReusePlanBuildSource {
+    Owned,
+    Borrowed,
+}
+
+impl ParseSnapshotProgramLoweringReusePlanBuildSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Owned => "owned",
+            Self::Borrowed => "borrowed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct ParseSnapshotProgramLoweringAttribution {
+    reuse_plan_build_source: Option<ParseSnapshotProgramLoweringReusePlanBuildSource>,
+    reuse_plan_take_if_unique_hit: Option<bool>,
+    reuse_plan_borrowed_cache_hit: Option<bool>,
+    reuse_plan_build_ms: Option<u64>,
+    reuse_plan_owned_build_ms: Option<u64>,
+    reuse_plan_borrowed_build_ms: Option<u64>,
+    reuse_plan_rebase_ms: Option<u64>,
+    reuse_plan_rebase_statement_count: Option<u64>,
+    reused_progress_ms: Option<u64>,
+    reused_progress_call_count: Option<u64>,
+    rebuild_dispatch_ms: Option<u64>,
+    rebuild_dispatch_call_count: Option<u64>,
+    rebuild_dispatch_callable_ms: Option<u64>,
+    rebuild_dispatch_callable_call_count: Option<u64>,
+    rebuild_dispatch_callable_body_dispatch_ms: Option<u64>,
+    rebuild_dispatch_callable_body_dispatch_call_count: Option<u64>,
+    rebuild_dispatch_callable_non_body_dispatch_ms: Option<u64>,
+    rebuild_dispatch_control_flow_ms: Option<u64>,
+    rebuild_dispatch_control_flow_call_count: Option<u64>,
+    rebuild_dispatch_simple_ms: Option<u64>,
+    rebuild_dispatch_simple_call_count: Option<u64>,
+    rebuild_dispatch_other_ms: Option<u64>,
+    rebuild_dispatch_other_call_count: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParseSnapshotProgramLoweringSummaryNode {
+    ReuseStatement {
+        reused_lowering_units: u64,
+    },
+    Rebuild,
+    RebuildRoutineBody {
+        reused_prefix_lowering_units: u64,
+        reused_suffix_lowering_units: u64,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct ParseSnapshotProgramLoweringSummaryPlan {
+    reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome,
+    nodes: Vec<ParseSnapshotProgramLoweringSummaryNode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RoutineBodyReuseDecision {
+    ReuseWholeStatement,
+    ReuseWindow(RoutineBodyReuseWindow),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RoutineBodyReuseWindow {
+    original_body_len: usize,
+    reused_prefix_len: usize,
+    reused_suffix_start: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -361,6 +457,8 @@ pub struct ParseSnapshotExecutionOptions<'a> {
     pub save_critical_requested: Option<&'a AtomicBool>,
     pub reused_program_prefix: Option<&'a [Statement]>,
     pub lowering_reuse_plan: Option<&'a LoweringReusePlan>,
+    lowering_reuse_summary: Option<&'a ParseSnapshotProgramLoweringSummaryPlan>,
+    lowering_reuse_attribution: Option<&'a ParseSnapshotProgramLoweringAttribution>,
     pub exact_ready_snapshot_control_callback:
         Option<&'a (dyn Fn() -> ParseSnapshotExactReadyControl + Send + Sync)>,
     pub progress_callback: Option<&'a (dyn Fn(ParseSnapshotExecSubphase) + Send + Sync)>,
@@ -1024,13 +1122,20 @@ impl ParserCoordinator {
                     ParseSnapshotCoreBuildCheckpoint::ExactReadySnapshotAssembly,
                 );
                 debug!("Content unchanged, using cached tree");
+                let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
                 let (result, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &old_tree,
                         &new_content,
                         cancellation_flag,
                         options,
+                        &mut lowering_attribution,
+                        None,
                     )?;
+                let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_attribution: Some(&lowering_attribution),
+                    ..options
+                };
                 return self.finalize_parse_snapshot_report_with_options(
                     &file_path,
                     &new_content,
@@ -1044,7 +1149,7 @@ impl ParserCoordinator {
                     None,
                     core_started,
                     cancellation_flag,
-                    options,
+                    report_options,
                     None,
                     deferred_syntax_error_assembly,
                 );
@@ -1075,14 +1180,21 @@ impl ParserCoordinator {
             cancellation_flag,
         ) {
             Ok(tree) => {
+                let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
                 let (program, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &tree,
                         &new_content,
                         cancellation_flag,
                         options,
+                        &mut lowering_attribution,
+                        None,
                     )?;
                 let tree_for_cache = tree.clone();
+                let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_attribution: Some(&lowering_attribution),
+                    ..options
+                };
                 self.finalize_parse_snapshot_report_with_options(
                     &file_path,
                     &new_content,
@@ -1096,7 +1208,7 @@ impl ParserCoordinator {
                     Some(fallback_reason.to_string()),
                     core_started,
                     cancellation_flag,
-                    options,
+                    report_options,
                     Some(ParseSnapshotTreeCacheInstallOp::Set {
                         file_path: file_path.clone(),
                         tree: tree_for_cache,
@@ -1711,13 +1823,20 @@ impl ParserCoordinator {
                 );
                 let core_started = std::time::Instant::now();
                 debug!("Content unchanged, using cached tree");
+                let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
                 let (result, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &old_tree,
                         &new_content,
                         cancellation_flag,
                         options,
+                        &mut lowering_attribution,
+                        None,
                     )?;
+                let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_attribution: Some(&lowering_attribution),
+                    ..options
+                };
                 return self.finalize_parse_snapshot_report_with_options(
                     &file_path,
                     &new_content,
@@ -1731,7 +1850,7 @@ impl ParserCoordinator {
                     None,
                     core_started,
                     cancellation_flag,
-                    options,
+                    report_options,
                     None,
                     deferred_syntax_error_assembly,
                 );
@@ -1764,22 +1883,35 @@ impl ParserCoordinator {
                         );
                         Some(PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED.to_string())
                     } else {
-                        let lowering_reuse_plan = self.build_exact_lowering_reuse_plan(
+                        let mut lowering_attribution =
+                            ParseSnapshotProgramLoweringAttribution::default();
+                        let mut lowering_reuse_plan = self.build_exact_lowering_reuse_plan(
                             &old_source,
                             &new_tree,
                             &changed_ranges,
+                            &mut lowering_attribution,
                         );
-                        let parse_options = ParseSnapshotExecutionOptions {
-                            lowering_reuse_plan: lowering_reuse_plan.as_ref(),
+                        let lowering_reuse_summary = lowering_reuse_plan
+                            .as_ref()
+                            .map(Self::build_program_lowering_summary_plan);
+                        let assembly_options = ParseSnapshotExecutionOptions {
+                            lowering_reuse_summary: lowering_reuse_summary.as_ref(),
                             ..options
                         };
                         match self.run_exact_ready_snapshot_assembly_with_cancellation(
                             &new_tree,
                             &new_content,
                             cancellation_flag,
-                            parse_options,
+                            assembly_options,
+                            &mut lowering_attribution,
+                            lowering_reuse_plan.as_mut(),
                         ) {
                             Ok((program, deferred_syntax_error_assembly)) => {
+                                let report_options = ParseSnapshotExecutionOptions {
+                                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
+                                    lowering_reuse_attribution: Some(&lowering_attribution),
+                                    ..options
+                                };
                                 return self.finalize_parse_snapshot_report_with_options(
                                     &file_path,
                                     &new_content,
@@ -1793,7 +1925,7 @@ impl ParserCoordinator {
                                     None,
                                     core_started,
                                     cancellation_flag,
-                                    parse_options,
+                                    report_options,
                                     Some(ParseSnapshotTreeCacheInstallOp::Update {
                                         file_path: file_path.clone(),
                                         tree: new_tree,
@@ -1852,13 +1984,21 @@ impl ParserCoordinator {
                 cancellation_flag,
             ) {
                 Ok(tree) => {
+                    let mut lowering_attribution =
+                        ParseSnapshotProgramLoweringAttribution::default();
                     let (program, deferred_syntax_error_assembly) = self
                         .run_exact_ready_snapshot_assembly_with_cancellation(
                             &tree,
                             &new_content,
                             cancellation_flag,
                             options,
+                            &mut lowering_attribution,
+                            None,
                         )?;
+                    let report_options = ParseSnapshotExecutionOptions {
+                        lowering_reuse_attribution: Some(&lowering_attribution),
+                        ..options
+                    };
                     self.finalize_parse_snapshot_report_with_options(
                         &file_path,
                         &new_content,
@@ -1872,7 +2012,7 @@ impl ParserCoordinator {
                         fallback_reason,
                         fallback_core_started,
                         cancellation_flag,
-                        options,
+                        report_options,
                         Some(ParseSnapshotTreeCacheInstallOp::Set {
                             file_path: file_path.clone(),
                             tree,
@@ -1917,13 +2057,20 @@ impl ParserCoordinator {
             cancellation_flag,
         ) {
             Ok(tree) => {
+                let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
                 let (program, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &tree,
                         &new_content,
                         cancellation_flag,
                         options,
+                        &mut lowering_attribution,
+                        None,
                     )?;
+                let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_attribution: Some(&lowering_attribution),
+                    ..options
+                };
                 self.finalize_parse_snapshot_report_with_options(
                     &file_path,
                     &new_content,
@@ -1937,7 +2084,7 @@ impl ParserCoordinator {
                     Some(PARSE_SNAPSHOT_FALLBACK_NO_PREVIOUS_TREE.to_string()),
                     core_started,
                     cancellation_flag,
-                    options,
+                    report_options,
                     Some(ParseSnapshotTreeCacheInstallOp::Set {
                         file_path: file_path.clone(),
                         tree,
@@ -2092,22 +2239,59 @@ impl ParserCoordinator {
         old_source: &str,
         new_tree: &tree_sitter::Tree,
         changed_ranges: &[ParseChangedRange],
+        attribution: &mut ParseSnapshotProgramLoweringAttribution,
     ) -> Option<LoweringReusePlan> {
         if !exact_program_lowering_reuse_enabled() {
             return None;
         }
-        let previous_parse_result = self.ast_cache.get(ast_cache_key(old_source))?;
-        Self::derive_exact_lowering_reuse_plan(
+        let cache_key = ast_cache_key(old_source);
+        attribution.reuse_plan_take_if_unique_hit = Some(false);
+        attribution.reuse_plan_borrowed_cache_hit = Some(false);
+        if let Some(previous_parse_result) = self.ast_cache.take_if_unique(cache_key) {
+            attribution.reuse_plan_take_if_unique_hit = Some(true);
+            let started = std::time::Instant::now();
+            match Self::derive_exact_lowering_reuse_plan_owned(
+                previous_parse_result,
+                new_tree,
+                changed_ranges,
+                attribution,
+            ) {
+                Ok(plan) => {
+                    let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                    attribution.reuse_plan_build_source =
+                        Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Owned);
+                    attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                    attribution.reuse_plan_owned_build_ms = Some(elapsed_ms);
+                    return Some(plan);
+                }
+                Err(previous_parse_result) => {
+                    self.ast_cache
+                        .put(cache_key, Arc::new(previous_parse_result));
+                }
+            }
+        }
+        let previous_parse_result = self.ast_cache.get(cache_key)?;
+        attribution.reuse_plan_borrowed_cache_hit = Some(true);
+        let started = std::time::Instant::now();
+        let plan = Self::derive_exact_lowering_reuse_plan(
             previous_parse_result.as_ref(),
             new_tree,
             changed_ranges,
-        )
+            attribution,
+        )?;
+        let elapsed_ms = duration_to_u64_ms(started.elapsed());
+        attribution.reuse_plan_build_source =
+            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
+        attribution.reuse_plan_build_ms = Some(elapsed_ms);
+        attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
+        Some(plan)
     }
 
     fn derive_exact_lowering_reuse_plan(
         previous_parse_result: &ParseResult,
         new_tree: &tree_sitter::Tree,
         changed_ranges: &[ParseChangedRange],
+        attribution: &mut ParseSnapshotProgramLoweringAttribution,
     ) -> Option<LoweringReusePlan> {
         let previous_top_level = previous_parse_result.program.statements.as_slice();
         if previous_top_level.is_empty() || changed_ranges.is_empty() {
@@ -2120,68 +2304,74 @@ impl ParserCoordinator {
             return None;
         }
 
-        let mut affected_top_level = vec![false; previous_top_level.len()];
-        for changed_range in changed_ranges {
-            let mut matched = false;
-            for (idx, statement) in previous_top_level.iter().enumerate() {
-                if Self::changed_range_touches_statement(changed_range, statement) {
-                    affected_top_level[idx] = true;
-                    matched = true;
-                }
-            }
-            if !matched {
-                return None;
-            }
+        let affected_top_level =
+            Self::derive_affected_statement_mask(previous_top_level, changed_ranges)?;
+        let affected_indices: Vec<_> = affected_top_level
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, affected)| affected.then_some(idx))
+            .collect();
+        let routine_reuse = if affected_indices.len() == 1 {
+            let affected_idx = affected_indices[0];
+            Self::derive_routine_body_reuse_decision(
+                &previous_top_level[affected_idx],
+                &new_top_level_nodes[affected_idx],
+                changed_ranges,
+            )
+            .map(|decision| (affected_idx, decision))
+        } else {
+            None
+        };
+        let has_unaffected_top_level = affected_top_level.iter().any(|affected| !*affected);
+        if !has_unaffected_top_level && routine_reuse.is_none() {
+            return None;
         }
 
         let mut top_level_nodes = Vec::with_capacity(previous_top_level.len());
-        let mut affected_indices = Vec::new();
+        let mut rebase_elapsed = Duration::ZERO;
+        let mut rebase_statement_count = 0u64;
         for (idx, statement) in previous_top_level.iter().enumerate() {
             if affected_top_level[idx] {
-                affected_indices.push(idx);
                 top_level_nodes.push(LoweringReuseNodePlan::Rebuild);
             } else {
+                let started = std::time::Instant::now();
                 top_level_nodes.push(LoweringReuseNodePlan::ReuseStatement(
                     Self::rebase_statement(statement, changed_ranges),
                 ));
+                rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                rebase_statement_count = rebase_statement_count.saturating_add(1);
             }
         }
 
-        let mut outcome = if top_level_nodes
-            .iter()
-            .any(|node| matches!(node, LoweringReuseNodePlan::ReuseStatement(_)))
-        {
+        let mut outcome = if has_unaffected_top_level {
             LoweringReusePlanOutcome::TopLevelReuse
         } else {
             LoweringReusePlanOutcome::FullRebuild
         };
 
-        if affected_indices.len() == 1 {
-            let affected_idx = affected_indices[0];
-            if let Some(routine_plan) = Self::derive_routine_body_lowering_reuse_plan(
+        if let Some((affected_idx, decision)) = routine_reuse {
+            let routine_plan = Self::derive_routine_body_lowering_reuse_plan(
                 &previous_top_level[affected_idx],
-                &new_top_level_nodes[affected_idx],
+                decision,
                 changed_ranges,
-            ) {
-                outcome = match routine_plan {
-                    LoweringReuseNodePlan::RebuildRoutineBody(_) => {
-                        LoweringReusePlanOutcome::RoutineBodyReuse
-                    }
-                    LoweringReuseNodePlan::ReuseStatement(_) => {
-                        LoweringReusePlanOutcome::TopLevelReuse
-                    }
-                    LoweringReuseNodePlan::Rebuild => outcome,
-                };
+                &mut rebase_elapsed,
+                &mut rebase_statement_count,
+            );
+            outcome = match decision {
+                RoutineBodyReuseDecision::ReuseWholeStatement => {
+                    LoweringReusePlanOutcome::TopLevelReuse
+                }
+                RoutineBodyReuseDecision::ReuseWindow(_) => {
+                    LoweringReusePlanOutcome::RoutineBodyReuse
+                }
+            };
+            if let Some(routine_plan) = routine_plan {
                 top_level_nodes[affected_idx] = routine_plan;
             }
         }
 
-        if top_level_nodes
-            .iter()
-            .all(|node| matches!(node, LoweringReuseNodePlan::Rebuild))
-        {
-            return None;
-        }
+        attribution.reuse_plan_rebase_ms = Some(duration_to_u64_ms(rebase_elapsed));
+        attribution.reuse_plan_rebase_statement_count = Some(rebase_statement_count);
 
         Some(LoweringReusePlan {
             outcome,
@@ -2189,11 +2379,182 @@ impl ParserCoordinator {
         })
     }
 
+    fn derive_exact_lowering_reuse_plan_owned(
+        previous_parse_result: ParseResult,
+        new_tree: &tree_sitter::Tree,
+        changed_ranges: &[ParseChangedRange],
+        attribution: &mut ParseSnapshotProgramLoweringAttribution,
+    ) -> Result<LoweringReusePlan, ParseResult> {
+        let previous_top_level = previous_parse_result.program.statements.as_slice();
+        if previous_top_level.is_empty() || changed_ranges.is_empty() {
+            return Err(previous_parse_result);
+        }
+
+        let new_root = new_tree.root_node();
+        let new_top_level_nodes = Self::collect_direct_lowering_children(&new_root);
+        if new_top_level_nodes.len() != previous_top_level.len() {
+            return Err(previous_parse_result);
+        }
+
+        let affected_top_level =
+            match Self::derive_affected_statement_mask(previous_top_level, changed_ranges) {
+                Some(mask) => mask,
+                None => return Err(previous_parse_result),
+            };
+        let affected_indices: Vec<_> = affected_top_level
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, affected)| affected.then_some(idx))
+            .collect();
+        let routine_reuse = if affected_indices.len() == 1 {
+            let affected_idx = affected_indices[0];
+            Self::derive_routine_body_reuse_decision(
+                &previous_top_level[affected_idx],
+                &new_top_level_nodes[affected_idx],
+                changed_ranges,
+            )
+            .map(|decision| (affected_idx, decision))
+        } else {
+            None
+        };
+        let has_unaffected_top_level = affected_top_level.iter().any(|affected| !*affected);
+        if !has_unaffected_top_level && routine_reuse.is_none() {
+            return Err(previous_parse_result);
+        }
+
+        let mut outcome = if has_unaffected_top_level {
+            LoweringReusePlanOutcome::TopLevelReuse
+        } else {
+            LoweringReusePlanOutcome::FullRebuild
+        };
+        if let Some((_, decision)) = routine_reuse {
+            outcome = match decision {
+                RoutineBodyReuseDecision::ReuseWholeStatement => {
+                    LoweringReusePlanOutcome::TopLevelReuse
+                }
+                RoutineBodyReuseDecision::ReuseWindow(_) => {
+                    LoweringReusePlanOutcome::RoutineBodyReuse
+                }
+            };
+        }
+
+        let mut rebase_elapsed = Duration::ZERO;
+        let mut rebase_statement_count = 0u64;
+        let top_level_nodes = previous_parse_result
+            .program
+            .statements
+            .into_iter()
+            .enumerate()
+            .map(|(idx, mut statement)| {
+                if !affected_top_level[idx] {
+                    let started = std::time::Instant::now();
+                    Self::rebase_statement_in_place(&mut statement, changed_ranges);
+                    rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                    rebase_statement_count = rebase_statement_count.saturating_add(1);
+                    LoweringReuseNodePlan::ReuseStatement(statement)
+                } else if let Some((affected_idx, decision)) =
+                    routine_reuse.filter(|(affected_idx, _)| *affected_idx == idx)
+                {
+                    let _ = affected_idx;
+                    Self::build_owned_routine_body_lowering_reuse_plan(
+                        statement,
+                        decision,
+                        changed_ranges,
+                        &mut rebase_elapsed,
+                        &mut rebase_statement_count,
+                    )
+                } else {
+                    LoweringReuseNodePlan::Rebuild
+                }
+            })
+            .collect();
+
+        attribution.reuse_plan_rebase_ms = Some(duration_to_u64_ms(rebase_elapsed));
+        attribution.reuse_plan_rebase_statement_count = Some(rebase_statement_count);
+
+        Ok(LoweringReusePlan {
+            outcome,
+            top_level_nodes,
+        })
+    }
+
+    fn derive_affected_statement_mask(
+        statements: &[Statement],
+        changed_ranges: &[ParseChangedRange],
+    ) -> Option<Vec<bool>> {
+        let mut affected = vec![false; statements.len()];
+        for changed_range in changed_ranges {
+            let mut matched = false;
+            for (idx, statement) in statements.iter().enumerate() {
+                if Self::changed_range_touches_statement(changed_range, statement) {
+                    affected[idx] = true;
+                    matched = true;
+                }
+            }
+            if !matched {
+                return None;
+            }
+        }
+        Some(affected)
+    }
+
     fn derive_routine_body_lowering_reuse_plan(
+        previous_statement: &Statement,
+        decision: RoutineBodyReuseDecision,
+        changed_ranges: &[ParseChangedRange],
+        rebase_elapsed: &mut Duration,
+        rebase_statement_count: &mut u64,
+    ) -> Option<LoweringReuseNodePlan> {
+        match decision {
+            RoutineBodyReuseDecision::ReuseWholeStatement => {
+                let started = std::time::Instant::now();
+                let statement = Self::rebase_statement(previous_statement, changed_ranges);
+                *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                Some(LoweringReuseNodePlan::ReuseStatement(statement))
+            }
+            RoutineBodyReuseDecision::ReuseWindow(window) => {
+                let body = match previous_statement {
+                    Statement::FunctionDecl { body, .. }
+                    | Statement::ProcedureDecl { body, .. } => body.as_slice(),
+                    _ => return None,
+                };
+                Some(LoweringReuseNodePlan::RebuildRoutineBody(
+                    RoutineBodyLoweringReusePlan {
+                        original_body_len: window.original_body_len,
+                        reused_prefix_len: window.reused_prefix_len,
+                        reused_suffix_start: window.reused_suffix_start,
+                        reused_body_prefix: body[..window.reused_prefix_len]
+                            .iter()
+                            .map(|statement| {
+                                let started = std::time::Instant::now();
+                                let rebased = Self::rebase_statement(statement, changed_ranges);
+                                *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                                *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                                rebased
+                            })
+                            .collect(),
+                        reused_body_suffix: body[window.reused_suffix_start..]
+                            .iter()
+                            .map(|statement| {
+                                let started = std::time::Instant::now();
+                                let rebased = Self::rebase_statement(statement, changed_ranges);
+                                *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                                *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                                rebased
+                            })
+                            .collect(),
+                    },
+                ))
+            }
+        }
+    }
+
+    fn derive_routine_body_reuse_decision(
         previous_statement: &Statement,
         new_routine_node: &Node<'_>,
         changed_ranges: &[ParseChangedRange],
-    ) -> Option<LoweringReuseNodePlan> {
+    ) -> Option<RoutineBodyReuseDecision> {
         let (body, expected_kind) = match previous_statement {
             Statement::FunctionDecl { body, .. } => (body.as_slice(), "function_definition"),
             Statement::ProcedureDecl { body, .. } => (body.as_slice(), "procedure_definition"),
@@ -2239,9 +2600,7 @@ impl ParserCoordinator {
         }
 
         if !any_body_statement_affected {
-            return Some(LoweringReuseNodePlan::ReuseStatement(
-                Self::rebase_statement(previous_statement, changed_ranges),
-            ));
+            return Some(RoutineBodyReuseDecision::ReuseWholeStatement);
         }
 
         let first_affected = affected_body.iter().position(|affected| *affected)?;
@@ -2256,19 +2615,64 @@ impl ParserCoordinator {
             return None;
         }
 
-        Some(LoweringReuseNodePlan::RebuildRoutineBody(
-            RoutineBodyLoweringReusePlan {
+        Some(RoutineBodyReuseDecision::ReuseWindow(
+            RoutineBodyReuseWindow {
                 original_body_len: body.len(),
-                reused_body_prefix: body[..first_affected]
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                reused_body_suffix: body[last_affected + 1..]
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
+                reused_prefix_len: first_affected,
+                reused_suffix_start: last_affected + 1,
             },
         ))
+    }
+
+    fn build_owned_routine_body_lowering_reuse_plan(
+        mut previous_statement: Statement,
+        decision: RoutineBodyReuseDecision,
+        changed_ranges: &[ParseChangedRange],
+        rebase_elapsed: &mut Duration,
+        rebase_statement_count: &mut u64,
+    ) -> LoweringReuseNodePlan {
+        match decision {
+            RoutineBodyReuseDecision::ReuseWholeStatement => {
+                let started = std::time::Instant::now();
+                Self::rebase_statement_in_place(&mut previous_statement, changed_ranges);
+                *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                LoweringReuseNodePlan::ReuseStatement(previous_statement)
+            }
+            RoutineBodyReuseDecision::ReuseWindow(window) => {
+                let body = match &mut previous_statement {
+                    Statement::FunctionDecl { body, .. }
+                    | Statement::ProcedureDecl { body, .. } => body,
+                    _ => unreachable!(
+                        "owned routine-body reuse must only receive routine statements"
+                    ),
+                };
+                let mut reused_body_suffix = body.split_off(window.reused_suffix_start);
+                let _reused_gap = body.split_off(window.reused_prefix_len);
+                let reused_body_prefix = std::mem::take(body);
+                let mut reused_body_prefix: VecDeque<_> = reused_body_prefix.into();
+                let mut reused_body_suffix: VecDeque<_> = reused_body_suffix.drain(..).collect();
+                for statement in reused_body_prefix.iter_mut() {
+                    let started = std::time::Instant::now();
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                    *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                    *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                }
+                for statement in reused_body_suffix.iter_mut() {
+                    let started = std::time::Instant::now();
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                    *rebase_elapsed = rebase_elapsed.saturating_add(started.elapsed());
+                    *rebase_statement_count = rebase_statement_count.saturating_add(1);
+                }
+                LoweringReuseNodePlan::RebuildRoutineBody(RoutineBodyLoweringReusePlan {
+                    original_body_len: window.original_body_len,
+                    reused_prefix_len: window.reused_prefix_len,
+                    reused_suffix_start: window.reused_suffix_start,
+                    reused_body_prefix,
+                    reused_body_suffix,
+                })
+            }
+        }
     }
 
     fn collect_direct_lowering_children<'a>(node: &'a Node<'a>) -> Vec<Node<'a>> {
@@ -2334,6 +2738,10 @@ impl ParserCoordinator {
         matches!(
             statement,
             Statement::Assignment { .. }
+                | Statement::If { .. }
+                | Statement::For { .. }
+                | Statement::ForEach { .. }
+                | Statement::While { .. }
                 | Statement::Return { .. }
                 | Statement::Call { .. }
                 | Statement::Break { .. }
@@ -2384,11 +2792,24 @@ impl ParserCoordinator {
     ) -> ParseSnapshotProgramLoweringSummary {
         let total_lowering_units =
             Self::count_lowering_units_in_statements(&parse_result.program.statements);
+        if let Some(lowering_reuse_summary) = options.lowering_reuse_summary {
+            return Self::apply_program_lowering_attribution(
+                Self::summarize_program_lowering_summary_plan(
+                    lowering_reuse_summary,
+                    &parse_result.program.statements,
+                    total_lowering_units,
+                ),
+                options.lowering_reuse_attribution,
+            );
+        }
         if let Some(lowering_reuse_plan) = options.lowering_reuse_plan {
-            return Self::summarize_program_lowering_reuse_plan(
-                lowering_reuse_plan,
-                &parse_result.program.statements,
-                total_lowering_units,
+            return Self::apply_program_lowering_attribution(
+                Self::summarize_program_lowering_reuse_plan(
+                    lowering_reuse_plan,
+                    &parse_result.program.statements,
+                    total_lowering_units,
+                ),
+                options.lowering_reuse_attribution,
             );
         }
         if let Some(reused_program_prefix) = options
@@ -2405,38 +2826,312 @@ impl ParserCoordinator {
                 .len()
                 .saturating_sub(reused_program_prefix.len())
                 as u64;
-            return ParseSnapshotProgramLoweringSummary {
-                reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::ReusedPrefix,
-                reused_lowering_units,
-                rebuilt_lowering_units,
-                reused_window_count: 1,
-                rebuilt_window_count: u64::from(rebuilt_lowering_units > 0),
-                largest_rebuilt_window_lowering_units: rebuilt_lowering_units,
-                fully_reused_top_level_node_count: reused_top_level_node_count,
-                fully_rebuilt_top_level_node_count: rebuilt_top_level_node_count,
+            return Self::apply_program_lowering_attribution(
+                ParseSnapshotProgramLoweringSummary {
+                    reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::ReusedPrefix,
+                    reused_lowering_units,
+                    rebuilt_lowering_units,
+                    reused_window_count: 1,
+                    rebuilt_window_count: u64::from(rebuilt_lowering_units > 0),
+                    largest_rebuilt_window_lowering_units: rebuilt_lowering_units,
+                    fully_reused_top_level_node_count: reused_top_level_node_count,
+                    fully_rebuilt_top_level_node_count: rebuilt_top_level_node_count,
+                    routine_body_reuse_node_count: 0,
+                    fully_reused_top_level_lowering_units: reused_lowering_units,
+                    fully_rebuilt_top_level_lowering_units: rebuilt_lowering_units,
+                    routine_body_reused_prefix_lowering_units: 0,
+                    routine_body_reused_suffix_lowering_units: 0,
+                    routine_body_rebuilt_lowering_units: 0,
+                    reuse_plan_build_source: None,
+                    reuse_plan_take_if_unique_hit: None,
+                    reuse_plan_borrowed_cache_hit: None,
+                    reuse_plan_build_ms: None,
+                    reuse_plan_owned_build_ms: None,
+                    reuse_plan_borrowed_build_ms: None,
+                    reuse_plan_rebase_ms: None,
+                    reuse_plan_rebase_statement_count: None,
+                    reused_progress_ms: None,
+                    reused_progress_call_count: None,
+                    rebuild_dispatch_ms: None,
+                    rebuild_dispatch_call_count: None,
+                    rebuild_dispatch_callable_ms: None,
+                    rebuild_dispatch_callable_call_count: None,
+                    rebuild_dispatch_callable_body_dispatch_ms: None,
+                    rebuild_dispatch_callable_body_dispatch_call_count: None,
+                    rebuild_dispatch_callable_non_body_dispatch_ms: None,
+                    rebuild_dispatch_control_flow_ms: None,
+                    rebuild_dispatch_control_flow_call_count: None,
+                    rebuild_dispatch_simple_ms: None,
+                    rebuild_dispatch_simple_call_count: None,
+                    rebuild_dispatch_other_ms: None,
+                    rebuild_dispatch_other_call_count: None,
+                },
+                options.lowering_reuse_attribution,
+            );
+        }
+        Self::apply_program_lowering_attribution(
+            ParseSnapshotProgramLoweringSummary {
+                reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::FullRebuild,
+                reused_lowering_units: 0,
+                rebuilt_lowering_units: total_lowering_units,
+                reused_window_count: 0,
+                rebuilt_window_count: u64::from(total_lowering_units > 0),
+                largest_rebuilt_window_lowering_units: total_lowering_units,
+                fully_reused_top_level_node_count: 0,
+                fully_rebuilt_top_level_node_count: parse_result.program.statements.len() as u64,
                 routine_body_reuse_node_count: 0,
-                fully_reused_top_level_lowering_units: reused_lowering_units,
-                fully_rebuilt_top_level_lowering_units: rebuilt_lowering_units,
+                fully_reused_top_level_lowering_units: 0,
+                fully_rebuilt_top_level_lowering_units: total_lowering_units,
                 routine_body_reused_prefix_lowering_units: 0,
                 routine_body_reused_suffix_lowering_units: 0,
                 routine_body_rebuilt_lowering_units: 0,
-            };
+                reuse_plan_build_source: None,
+                reuse_plan_take_if_unique_hit: None,
+                reuse_plan_borrowed_cache_hit: None,
+                reuse_plan_build_ms: None,
+                reuse_plan_owned_build_ms: None,
+                reuse_plan_borrowed_build_ms: None,
+                reuse_plan_rebase_ms: None,
+                reuse_plan_rebase_statement_count: None,
+                reused_progress_ms: None,
+                reused_progress_call_count: None,
+                rebuild_dispatch_ms: None,
+                rebuild_dispatch_call_count: None,
+                rebuild_dispatch_callable_ms: None,
+                rebuild_dispatch_callable_call_count: None,
+                rebuild_dispatch_callable_body_dispatch_ms: None,
+                rebuild_dispatch_callable_body_dispatch_call_count: None,
+                rebuild_dispatch_callable_non_body_dispatch_ms: None,
+                rebuild_dispatch_control_flow_ms: None,
+                rebuild_dispatch_control_flow_call_count: None,
+                rebuild_dispatch_simple_ms: None,
+                rebuild_dispatch_simple_call_count: None,
+                rebuild_dispatch_other_ms: None,
+                rebuild_dispatch_other_call_count: None,
+            },
+            options.lowering_reuse_attribution,
+        )
+    }
+
+    fn apply_program_lowering_attribution(
+        mut summary: ParseSnapshotProgramLoweringSummary,
+        attribution: Option<&ParseSnapshotProgramLoweringAttribution>,
+    ) -> ParseSnapshotProgramLoweringSummary {
+        let Some(attribution) = attribution else {
+            return summary;
+        };
+        summary.reuse_plan_build_source = attribution.reuse_plan_build_source;
+        summary.reuse_plan_take_if_unique_hit = attribution.reuse_plan_take_if_unique_hit;
+        summary.reuse_plan_borrowed_cache_hit = attribution.reuse_plan_borrowed_cache_hit;
+        summary.reuse_plan_build_ms = attribution.reuse_plan_build_ms;
+        summary.reuse_plan_owned_build_ms = attribution.reuse_plan_owned_build_ms;
+        summary.reuse_plan_borrowed_build_ms = attribution.reuse_plan_borrowed_build_ms;
+        summary.reuse_plan_rebase_ms = attribution.reuse_plan_rebase_ms;
+        summary.reuse_plan_rebase_statement_count = attribution.reuse_plan_rebase_statement_count;
+        summary.reused_progress_ms = attribution.reused_progress_ms;
+        summary.reused_progress_call_count = attribution.reused_progress_call_count;
+        summary.rebuild_dispatch_ms = attribution.rebuild_dispatch_ms;
+        summary.rebuild_dispatch_call_count = attribution.rebuild_dispatch_call_count;
+        summary.rebuild_dispatch_callable_ms = attribution.rebuild_dispatch_callable_ms;
+        summary.rebuild_dispatch_callable_call_count =
+            attribution.rebuild_dispatch_callable_call_count;
+        summary.rebuild_dispatch_callable_body_dispatch_ms =
+            attribution.rebuild_dispatch_callable_body_dispatch_ms;
+        summary.rebuild_dispatch_callable_body_dispatch_call_count =
+            attribution.rebuild_dispatch_callable_body_dispatch_call_count;
+        summary.rebuild_dispatch_callable_non_body_dispatch_ms =
+            attribution.rebuild_dispatch_callable_non_body_dispatch_ms;
+        summary.rebuild_dispatch_control_flow_ms = attribution.rebuild_dispatch_control_flow_ms;
+        summary.rebuild_dispatch_control_flow_call_count =
+            attribution.rebuild_dispatch_control_flow_call_count;
+        summary.rebuild_dispatch_simple_ms = attribution.rebuild_dispatch_simple_ms;
+        summary.rebuild_dispatch_simple_call_count = attribution.rebuild_dispatch_simple_call_count;
+        summary.rebuild_dispatch_other_ms = attribution.rebuild_dispatch_other_ms;
+        summary.rebuild_dispatch_other_call_count = attribution.rebuild_dispatch_other_call_count;
+        summary
+    }
+
+    fn build_program_lowering_summary_plan(
+        lowering_reuse_plan: &LoweringReusePlan,
+    ) -> ParseSnapshotProgramLoweringSummaryPlan {
+        let nodes = lowering_reuse_plan
+            .top_level_nodes
+            .iter()
+            .map(|node_plan| match node_plan {
+                LoweringReuseNodePlan::ReuseStatement(statement) => {
+                    ParseSnapshotProgramLoweringSummaryNode::ReuseStatement {
+                        reused_lowering_units: Self::count_lowering_units(statement),
+                    }
+                }
+                LoweringReuseNodePlan::Rebuild => ParseSnapshotProgramLoweringSummaryNode::Rebuild,
+                LoweringReuseNodePlan::RebuildRoutineBody(body_reuse) => {
+                    ParseSnapshotProgramLoweringSummaryNode::RebuildRoutineBody {
+                        reused_prefix_lowering_units: Self::count_lowering_units_in_iter(
+                            body_reuse.reused_body_prefix.iter(),
+                        ),
+                        reused_suffix_lowering_units: Self::count_lowering_units_in_iter(
+                            body_reuse.reused_body_suffix.iter(),
+                        ),
+                    }
+                }
+            })
+            .collect();
+
+        ParseSnapshotProgramLoweringSummaryPlan {
+            reuse_outcome: match lowering_reuse_plan.outcome {
+                LoweringReusePlanOutcome::FullRebuild => {
+                    ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+                }
+                LoweringReusePlanOutcome::TopLevelReuse => {
+                    ParseSnapshotProgramLoweringReuseOutcome::TopLevelReuse
+                }
+                LoweringReusePlanOutcome::RoutineBodyReuse => {
+                    ParseSnapshotProgramLoweringReuseOutcome::RoutineBodyReuse
+                }
+            },
+            nodes,
         }
+    }
+
+    fn summarize_program_lowering_summary_plan(
+        lowering_reuse_summary: &ParseSnapshotProgramLoweringSummaryPlan,
+        final_statements: &[Statement],
+        total_lowering_units: u64,
+    ) -> ParseSnapshotProgramLoweringSummary {
+        let mut reused_lowering_units = 0u64;
+        let mut rebuilt_lowering_units = 0u64;
+        let mut reused_window_count = 0u64;
+        let mut rebuilt_window_count = 0u64;
+        let mut largest_rebuilt_window_lowering_units = 0u64;
+        let mut fully_reused_top_level_node_count = 0u64;
+        let mut fully_rebuilt_top_level_node_count = 0u64;
+        let mut routine_body_reuse_node_count = 0u64;
+        let mut fully_reused_top_level_lowering_units = 0u64;
+        let mut fully_rebuilt_top_level_lowering_units = 0u64;
+        let mut routine_body_reused_prefix_lowering_units = 0u64;
+        let mut routine_body_reused_suffix_lowering_units = 0u64;
+        let mut routine_body_rebuilt_lowering_units = 0u64;
+        let mut previous_top_level_reused = false;
+        let mut previous_top_level_rebuilt = false;
+
+        for (idx, node_plan) in lowering_reuse_summary.nodes.iter().enumerate() {
+            match node_plan {
+                ParseSnapshotProgramLoweringSummaryNode::ReuseStatement {
+                    reused_lowering_units: reused_units,
+                } => {
+                    reused_lowering_units = reused_lowering_units.saturating_add(*reused_units);
+                    fully_reused_top_level_lowering_units =
+                        fully_reused_top_level_lowering_units.saturating_add(*reused_units);
+                    fully_reused_top_level_node_count =
+                        fully_reused_top_level_node_count.saturating_add(1);
+                    if !previous_top_level_reused {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    previous_top_level_reused = true;
+                    previous_top_level_rebuilt = false;
+                }
+                ParseSnapshotProgramLoweringSummaryNode::Rebuild => {
+                    let rebuilt_window_units = final_statements
+                        .get(idx)
+                        .map(Self::count_lowering_units)
+                        .unwrap_or(0);
+                    rebuilt_lowering_units =
+                        rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    fully_rebuilt_top_level_lowering_units =
+                        fully_rebuilt_top_level_lowering_units.saturating_add(rebuilt_window_units);
+                    fully_rebuilt_top_level_node_count =
+                        fully_rebuilt_top_level_node_count.saturating_add(1);
+                    if !previous_top_level_rebuilt {
+                        rebuilt_window_count = rebuilt_window_count.saturating_add(1);
+                    }
+                    largest_rebuilt_window_lowering_units =
+                        largest_rebuilt_window_lowering_units.max(rebuilt_window_units);
+                    previous_top_level_reused = false;
+                    previous_top_level_rebuilt = true;
+                }
+                ParseSnapshotProgramLoweringSummaryNode::RebuildRoutineBody {
+                    reused_prefix_lowering_units,
+                    reused_suffix_lowering_units,
+                } => {
+                    let reused_body_lowering_units = (*reused_prefix_lowering_units)
+                        .saturating_add(*reused_suffix_lowering_units);
+                    let rebuilt_window_units = final_statements
+                        .get(idx)
+                        .map(Self::count_lowering_units)
+                        .unwrap_or(0)
+                        .saturating_sub(reused_body_lowering_units);
+                    reused_lowering_units =
+                        reused_lowering_units.saturating_add(reused_body_lowering_units);
+                    rebuilt_lowering_units =
+                        rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    routine_body_reuse_node_count = routine_body_reuse_node_count.saturating_add(1);
+                    routine_body_reused_prefix_lowering_units =
+                        routine_body_reused_prefix_lowering_units
+                            .saturating_add(*reused_prefix_lowering_units);
+                    routine_body_reused_suffix_lowering_units =
+                        routine_body_reused_suffix_lowering_units
+                            .saturating_add(*reused_suffix_lowering_units);
+                    routine_body_rebuilt_lowering_units =
+                        routine_body_rebuilt_lowering_units.saturating_add(rebuilt_window_units);
+                    if *reused_prefix_lowering_units > 0 {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    if *reused_suffix_lowering_units > 0 {
+                        reused_window_count = reused_window_count.saturating_add(1);
+                    }
+                    if !previous_top_level_rebuilt {
+                        rebuilt_window_count = rebuilt_window_count.saturating_add(1);
+                    }
+                    largest_rebuilt_window_lowering_units =
+                        largest_rebuilt_window_lowering_units.max(rebuilt_window_units);
+                    previous_top_level_reused = false;
+                    previous_top_level_rebuilt = true;
+                }
+            }
+        }
+
         ParseSnapshotProgramLoweringSummary {
-            reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::FullRebuild,
-            reused_lowering_units: 0,
-            rebuilt_lowering_units: total_lowering_units,
-            reused_window_count: 0,
-            rebuilt_window_count: u64::from(total_lowering_units > 0),
-            largest_rebuilt_window_lowering_units: total_lowering_units,
-            fully_reused_top_level_node_count: 0,
-            fully_rebuilt_top_level_node_count: parse_result.program.statements.len() as u64,
-            routine_body_reuse_node_count: 0,
-            fully_reused_top_level_lowering_units: 0,
-            fully_rebuilt_top_level_lowering_units: total_lowering_units,
-            routine_body_reused_prefix_lowering_units: 0,
-            routine_body_reused_suffix_lowering_units: 0,
-            routine_body_rebuilt_lowering_units: 0,
+            reuse_outcome: lowering_reuse_summary.reuse_outcome,
+            reused_lowering_units,
+            rebuilt_lowering_units: if rebuilt_lowering_units == 0 {
+                total_lowering_units.saturating_sub(reused_lowering_units)
+            } else {
+                rebuilt_lowering_units
+            },
+            reused_window_count,
+            rebuilt_window_count,
+            largest_rebuilt_window_lowering_units,
+            fully_reused_top_level_node_count,
+            fully_rebuilt_top_level_node_count,
+            routine_body_reuse_node_count,
+            fully_reused_top_level_lowering_units,
+            fully_rebuilt_top_level_lowering_units,
+            routine_body_reused_prefix_lowering_units,
+            routine_body_reused_suffix_lowering_units,
+            routine_body_rebuilt_lowering_units,
+            reuse_plan_build_source: None,
+            reuse_plan_take_if_unique_hit: None,
+            reuse_plan_borrowed_cache_hit: None,
+            reuse_plan_build_ms: None,
+            reuse_plan_owned_build_ms: None,
+            reuse_plan_borrowed_build_ms: None,
+            reuse_plan_rebase_ms: None,
+            reuse_plan_rebase_statement_count: None,
+            reused_progress_ms: None,
+            reused_progress_call_count: None,
+            rebuild_dispatch_ms: None,
+            rebuild_dispatch_call_count: None,
+            rebuild_dispatch_callable_ms: None,
+            rebuild_dispatch_callable_call_count: None,
+            rebuild_dispatch_callable_body_dispatch_ms: None,
+            rebuild_dispatch_callable_body_dispatch_call_count: None,
+            rebuild_dispatch_callable_non_body_dispatch_ms: None,
+            rebuild_dispatch_control_flow_ms: None,
+            rebuild_dispatch_control_flow_call_count: None,
+            rebuild_dispatch_simple_ms: None,
+            rebuild_dispatch_simple_call_count: None,
+            rebuild_dispatch_other_ms: None,
+            rebuild_dispatch_other_call_count: None,
         }
     }
 
@@ -2497,9 +3192,9 @@ impl ParserCoordinator {
                 }
                 LoweringReuseNodePlan::RebuildRoutineBody(body_reuse) => {
                     let reused_prefix_lowering_units =
-                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_prefix);
+                        Self::count_lowering_units_in_iter(body_reuse.reused_body_prefix.iter());
                     let reused_suffix_lowering_units =
-                        Self::count_lowering_units_in_statements(&body_reuse.reused_body_suffix);
+                        Self::count_lowering_units_in_iter(body_reuse.reused_body_suffix.iter());
                     let reused_body_lowering_units =
                         reused_prefix_lowering_units.saturating_add(reused_suffix_lowering_units);
                     let rebuilt_window_units = final_statements
@@ -2566,14 +3261,38 @@ impl ParserCoordinator {
             routine_body_reused_prefix_lowering_units,
             routine_body_reused_suffix_lowering_units,
             routine_body_rebuilt_lowering_units,
+            reuse_plan_build_source: None,
+            reuse_plan_take_if_unique_hit: None,
+            reuse_plan_borrowed_cache_hit: None,
+            reuse_plan_build_ms: None,
+            reuse_plan_owned_build_ms: None,
+            reuse_plan_borrowed_build_ms: None,
+            reuse_plan_rebase_ms: None,
+            reuse_plan_rebase_statement_count: None,
+            reused_progress_ms: None,
+            reused_progress_call_count: None,
+            rebuild_dispatch_ms: None,
+            rebuild_dispatch_call_count: None,
+            rebuild_dispatch_callable_ms: None,
+            rebuild_dispatch_callable_call_count: None,
+            rebuild_dispatch_callable_body_dispatch_ms: None,
+            rebuild_dispatch_callable_body_dispatch_call_count: None,
+            rebuild_dispatch_callable_non_body_dispatch_ms: None,
+            rebuild_dispatch_control_flow_ms: None,
+            rebuild_dispatch_control_flow_call_count: None,
+            rebuild_dispatch_simple_ms: None,
+            rebuild_dispatch_simple_call_count: None,
+            rebuild_dispatch_other_ms: None,
+            rebuild_dispatch_other_call_count: None,
         }
     }
 
     fn count_lowering_units_in_statements(statements: &[Statement]) -> u64 {
-        statements
-            .iter()
-            .map(Self::count_lowering_units)
-            .sum::<u64>()
+        Self::count_lowering_units_in_iter(statements.iter())
+    }
+
+    fn count_lowering_units_in_iter<'a>(statements: impl Iterator<Item = &'a Statement>) -> u64 {
+        statements.map(Self::count_lowering_units).sum::<u64>()
     }
 
     fn count_lowering_units(statement: &Statement) -> u64 {
@@ -2618,297 +3337,209 @@ impl ParserCoordinator {
     }
 
     fn rebase_statement(statement: &Statement, changed_ranges: &[ParseChangedRange]) -> Statement {
+        let mut statement = statement.clone();
+        Self::rebase_statement_in_place(&mut statement, changed_ranges);
+        statement
+    }
+
+    fn rebase_statement_in_place(statement: &mut Statement, changed_ranges: &[ParseChangedRange]) {
         match statement {
             Statement::Assignment {
                 target,
                 value,
                 span,
-            } => Statement::Assignment {
-                target: Self::rebase_expression(target, changed_ranges),
-                value: Self::rebase_expression(value, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::VarDeclaration {
-                name,
-                type_hint,
-                span,
-            } => Statement::VarDeclaration {
-                name: name.clone(),
-                type_hint: type_hint.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::FunctionDecl {
-                name,
-                params,
-                body,
-                compiler_directive,
-                is_export,
-                span,
-            } => Statement::FunctionDecl {
-                name: name.clone(),
-                params: params.clone(),
-                body: body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                compiler_directive: *compiler_directive,
-                is_export: *is_export,
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::ProcedureDecl {
-                name,
-                params,
-                body,
-                compiler_directive,
-                is_export,
-                span,
-            } => Statement::ProcedureDecl {
-                name: name.clone(),
-                params: params.clone(),
-                body: body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                compiler_directive: *compiler_directive,
-                is_export: *is_export,
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(target, changed_ranges);
+                Self::rebase_expression_in_place(value, changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Statement::VarDeclaration { span, .. }
+            | Statement::Break { span }
+            | Statement::Continue { span }
+            | Statement::Goto { span, .. }
+            | Statement::Label { span, .. } => {
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Statement::FunctionDecl { body, span, .. }
+            | Statement::ProcedureDecl { body, span, .. } => {
+                for statement in body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::If {
                 condition,
                 then_body,
                 else_body,
                 span,
-            } => Statement::If {
-                condition: Self::rebase_expression(condition, changed_ranges),
-                then_body: then_body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                else_body: else_body.as_ref().map(|body| {
-                    body.iter()
-                        .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                        .collect()
-                }),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(condition, changed_ranges);
+                for statement in then_body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                if let Some(body) = else_body.as_mut() {
+                    for statement in body.iter_mut() {
+                        Self::rebase_statement_in_place(statement, changed_ranges);
+                    }
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::For {
-                variable,
                 start,
                 end,
                 body,
                 span,
-            } => Statement::For {
-                variable: variable.clone(),
-                start: Self::rebase_expression(start, changed_ranges),
-                end: Self::rebase_expression(end, changed_ranges),
-                body: body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+                ..
+            } => {
+                Self::rebase_expression_in_place(start, changed_ranges);
+                Self::rebase_expression_in_place(end, changed_ranges);
+                for statement in body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::ForEach {
-                variable,
                 collection,
                 body,
                 span,
-            } => Statement::ForEach {
-                variable: variable.clone(),
-                collection: Self::rebase_expression(collection, changed_ranges),
-                body: body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+                ..
+            } => {
+                Self::rebase_expression_in_place(collection, changed_ranges);
+                for statement in body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::While {
                 condition,
                 body,
                 span,
-            } => Statement::While {
-                condition: Self::rebase_expression(condition, changed_ranges),
-                body: body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Return { value, span } => Statement::Return {
-                value: value
-                    .as_ref()
-                    .map(|expression| Self::rebase_expression(expression, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(condition, changed_ranges);
+                for statement in body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Statement::Return { value, span } => {
+                if let Some(expression) = value.as_mut() {
+                    Self::rebase_expression_in_place(expression, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::Try {
                 try_body,
                 except_body,
                 span,
-            } => Statement::Try {
-                try_body: try_body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                except_body: except_body
-                    .iter()
-                    .map(|statement| Self::rebase_statement(statement, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Call { expression, span } => Statement::Call {
-                expression: Self::rebase_expression(expression, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Break { span } => Statement::Break {
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Continue { span } => Statement::Continue {
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Goto { label, span } => Statement::Goto {
-                label: label.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Label { name, span } => Statement::Label {
-                name: name.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Execute { code, span } => Statement::Execute {
-                code: Self::rebase_expression(code, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::RaiseError { message, span } => Statement::RaiseError {
-                message: message
-                    .as_ref()
-                    .map(|expression| Self::rebase_expression(expression, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                for statement in try_body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                for statement in except_body.iter_mut() {
+                    Self::rebase_statement_in_place(statement, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Statement::Call { expression, span }
+            | Statement::Execute {
+                code: expression,
+                span,
+            }
+            | Statement::Await { expression, span } => {
+                Self::rebase_expression_in_place(expression, changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Statement::RaiseError { message, span } => {
+                if let Some(expression) = message.as_mut() {
+                    Self::rebase_expression_in_place(expression, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Statement::AddHandler {
                 event,
                 handler,
                 span,
-            } => Statement::AddHandler {
-                event: Self::rebase_expression(event, changed_ranges),
-                handler: Self::rebase_expression(handler, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::RemoveHandler {
+            }
+            | Statement::RemoveHandler {
                 event,
                 handler,
                 span,
-            } => Statement::RemoveHandler {
-                event: Self::rebase_expression(event, changed_ranges),
-                handler: Self::rebase_expression(handler, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Statement::Await { expression, span } => Statement::Await {
-                expression: Self::rebase_expression(expression, changed_ranges),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(event, changed_ranges);
+                Self::rebase_expression_in_place(handler, changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
         }
     }
 
-    fn rebase_expression(
-        expression: &Expression,
+    fn rebase_expression_in_place(
+        expression: &mut Expression,
         changed_ranges: &[ParseChangedRange],
-    ) -> Expression {
+    ) {
         match expression {
-            Expression::Identifier { name, span } => Expression::Identifier {
-                name: name.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::String { value, span } => Expression::String {
-                value: value.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::Number { value, span } => Expression::Number {
-                value: *value,
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::Boolean { value, span } => Expression::Boolean {
-                value: *value,
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::Date { value, span } => Expression::Date {
-                value: value.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            Expression::Identifier { span, .. }
+            | Expression::String { span, .. }
+            | Expression::Number { span, .. }
+            | Expression::Boolean { span, .. }
+            | Expression::Date { span, .. } => {
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Expression::Call {
                 function,
                 args,
                 span,
-            } => Expression::Call {
-                function: Box::new(Self::rebase_expression(function, changed_ranges)),
-                args: args
-                    .iter()
-                    .map(|expression| Self::rebase_expression(expression, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(function.as_mut(), changed_ranges);
+                for expression in args.iter_mut() {
+                    Self::rebase_expression_in_place(expression, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Expression::Binary {
-                left,
-                operator,
-                right,
-                span,
-            } => Expression::Binary {
-                left: Box::new(Self::rebase_expression(left, changed_ranges)),
-                operator: operator.clone(),
-                right: Box::new(Self::rebase_expression(right, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::Unary {
-                operator,
-                operand,
-                span,
-            } => Expression::Unary {
-                operator: operator.clone(),
-                operand: Box::new(Self::rebase_expression(operand, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+                left, right, span, ..
+            } => {
+                Self::rebase_expression_in_place(left.as_mut(), changed_ranges);
+                Self::rebase_expression_in_place(right.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Expression::Unary { operand, span, .. } => {
+                Self::rebase_expression_in_place(operand.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Expression::Ternary {
                 condition,
                 then_expr,
                 else_expr,
                 span,
-            } => Expression::Ternary {
-                condition: Box::new(Self::rebase_expression(condition, changed_ranges)),
-                then_expr: Box::new(Self::rebase_expression(then_expr, changed_ranges)),
-                else_expr: Box::new(Self::rebase_expression(else_expr, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::New {
-                type_name,
-                args,
-                span,
-            } => Expression::New {
-                type_name: type_name.clone(),
-                args: args
-                    .iter()
-                    .map(|expression| Self::rebase_expression(expression, changed_ranges))
-                    .collect(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::PropertyAccess {
-                object,
-                property,
-                span,
-            } => Expression::PropertyAccess {
-                object: Box::new(Self::rebase_expression(object, changed_ranges)),
-                property: property.clone(),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(condition.as_mut(), changed_ranges);
+                Self::rebase_expression_in_place(then_expr.as_mut(), changed_ranges);
+                Self::rebase_expression_in_place(else_expr.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Expression::New { args, span, .. } => {
+                for expression in args.iter_mut() {
+                    Self::rebase_expression_in_place(expression, changed_ranges);
+                }
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Expression::PropertyAccess { object, span, .. } => {
+                Self::rebase_expression_in_place(object.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
             Expression::IndexAccess {
                 object,
                 index,
                 span,
-            } => Expression::IndexAccess {
-                object: Box::new(Self::rebase_expression(object, changed_ranges)),
-                index: Box::new(Self::rebase_expression(index, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
-            Expression::Await { expression, span } => Expression::Await {
-                expression: Box::new(Self::rebase_expression(expression, changed_ranges)),
-                span: Self::rebase_span(*span, changed_ranges),
-            },
+            } => {
+                Self::rebase_expression_in_place(object.as_mut(), changed_ranges);
+                Self::rebase_expression_in_place(index.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
+            Expression::Await { expression, span } => {
+                Self::rebase_expression_in_place(expression.as_mut(), changed_ranges);
+                *span = Self::rebase_span(*span, changed_ranges);
+            }
         }
     }
 
@@ -2941,6 +3572,8 @@ impl ParserCoordinator {
         content: &str,
         cancellation_flag: &AtomicBool,
         options: ParseSnapshotExecutionOptions<'_>,
+        lowering_attribution: &mut ParseSnapshotProgramLoweringAttribution,
+        lowering_reuse_plan: Option<&mut LoweringReusePlan>,
     ) -> Result<(ParseResult, bool), String> {
         Self::notify_parse_snapshot_core_build_checkpoint(
             &options,
@@ -2964,13 +3597,58 @@ impl ParserCoordinator {
                 }
             }
         };
-        let parse_result = if let Some(lowering_reuse_plan) = options.lowering_reuse_plan {
+        let parse_result = if let Some(lowering_reuse_plan) = lowering_reuse_plan {
+            let mut execution_attribution = LoweringExecutionAttribution::default();
             TreeSitterAdapter::convert_tree_fast_with_observer_and_reuse_plan(
                 tree,
                 content,
                 lowering_reuse_plan,
+                &mut execution_attribution,
                 &mut lowering_observer,
-            )?
+            )
+            .map(|parse_result| {
+                lowering_attribution.reused_progress_ms = Some(duration_to_u64_ms(
+                    execution_attribution.reused_progress_elapsed,
+                ));
+                lowering_attribution.reused_progress_call_count =
+                    Some(execution_attribution.reused_progress_call_count);
+                lowering_attribution.rebuild_dispatch_ms = Some(duration_to_u64_ms(
+                    execution_attribution.rebuild_dispatch_elapsed,
+                ));
+                lowering_attribution.rebuild_dispatch_call_count =
+                    Some(execution_attribution.rebuild_dispatch_call_count);
+                lowering_attribution.rebuild_dispatch_callable_ms = Some(duration_to_u64_ms(
+                    execution_attribution.rebuild_dispatch_callable_elapsed,
+                ));
+                lowering_attribution.rebuild_dispatch_callable_call_count =
+                    Some(execution_attribution.rebuild_dispatch_callable_call_count);
+                lowering_attribution.rebuild_dispatch_callable_body_dispatch_ms =
+                    Some(duration_to_u64_ms(
+                        execution_attribution.rebuild_dispatch_callable_body_dispatch_elapsed,
+                    ));
+                lowering_attribution.rebuild_dispatch_callable_body_dispatch_call_count =
+                    Some(execution_attribution.rebuild_dispatch_callable_body_dispatch_call_count);
+                lowering_attribution.rebuild_dispatch_callable_non_body_dispatch_ms =
+                    Some(duration_to_u64_ms(
+                        execution_attribution.rebuild_dispatch_callable_non_body_dispatch_elapsed,
+                    ));
+                lowering_attribution.rebuild_dispatch_control_flow_ms = Some(duration_to_u64_ms(
+                    execution_attribution.rebuild_dispatch_control_flow_elapsed,
+                ));
+                lowering_attribution.rebuild_dispatch_control_flow_call_count =
+                    Some(execution_attribution.rebuild_dispatch_control_flow_call_count);
+                lowering_attribution.rebuild_dispatch_simple_ms = Some(duration_to_u64_ms(
+                    execution_attribution.rebuild_dispatch_simple_elapsed,
+                ));
+                lowering_attribution.rebuild_dispatch_simple_call_count =
+                    Some(execution_attribution.rebuild_dispatch_simple_call_count);
+                lowering_attribution.rebuild_dispatch_other_ms = Some(duration_to_u64_ms(
+                    execution_attribution.rebuild_dispatch_other_elapsed,
+                ));
+                lowering_attribution.rebuild_dispatch_other_call_count =
+                    Some(execution_attribution.rebuild_dispatch_other_call_count);
+                parse_result
+            })?
         } else if let Some(reused_program_prefix) = options
             .reused_program_prefix
             .filter(|prefix| !prefix.is_empty())

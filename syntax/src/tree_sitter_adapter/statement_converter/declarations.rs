@@ -20,8 +20,17 @@ pub(crate) fn convert_function_definition_cached(
     line_index: &LineIndex,
     progress: &mut super::LoweringProgressState,
     observer: &mut super::LoweringObserver<'_>,
+    execution_attribution: Option<&mut super::LoweringExecutionAttribution>,
 ) -> Result<Statement, String> {
-    convert_function_definition_cached_internal(node, source, line_index, progress, observer, None)
+    convert_function_definition_cached_internal(
+        node,
+        source,
+        line_index,
+        progress,
+        observer,
+        None,
+        execution_attribution,
+    )
 }
 
 pub(crate) fn convert_function_definition_cached_with_body_reuse(
@@ -30,7 +39,8 @@ pub(crate) fn convert_function_definition_cached_with_body_reuse(
     line_index: &LineIndex,
     progress: &mut super::LoweringProgressState,
     observer: &mut super::LoweringObserver<'_>,
-    body_reuse: &RoutineBodyLoweringReusePlan,
+    body_reuse: &mut RoutineBodyLoweringReusePlan,
+    execution_attribution: &mut super::LoweringExecutionAttribution,
 ) -> Result<Statement, String> {
     convert_function_definition_cached_internal(
         node,
@@ -39,6 +49,7 @@ pub(crate) fn convert_function_definition_cached_with_body_reuse(
         progress,
         observer,
         Some(body_reuse),
+        Some(execution_attribution),
     )
 }
 
@@ -48,8 +59,10 @@ fn convert_function_definition_cached_internal(
     line_index: &LineIndex,
     progress: &mut super::LoweringProgressState,
     observer: &mut super::LoweringObserver<'_>,
-    body_reuse: Option<&RoutineBodyLoweringReusePlan>,
+    mut body_reuse: Option<&mut RoutineBodyLoweringReusePlan>,
+    mut execution_attribution: Option<&mut super::LoweringExecutionAttribution>,
 ) -> Result<Statement, String> {
+    let callable_started = std::time::Instant::now();
     let span = node_to_span_cached(node, source, line_index);
     let mut cursor = node.walk();
     let mut name = String::new();
@@ -58,10 +71,8 @@ fn convert_function_definition_cached_internal(
     let is_procedure = node.kind() == "procedure_definition";
     let mut is_export = false;
     let mut lowered_body_index = 0usize;
-    let reused_suffix_start = body_reuse.map(|plan| {
-        plan.original_body_len
-            .saturating_sub(plan.reused_body_suffix.len())
-    });
+    let mut callable_body_dispatch_elapsed = std::time::Duration::default();
+    let mut callable_body_dispatch_call_count = 0u64;
 
     // Ищем директиву компилятора перед функцией/процедурой
     let compiler_directive = find_preceding_directive(node, source)?;
@@ -84,20 +95,50 @@ fn convert_function_definition_cached_internal(
             }
             _ => {
                 if super::is_lowering_progress_unit_kind(child.kind()) {
-                    if let Some(plan) = body_reuse {
-                        if lowered_body_index < plan.reused_body_prefix.len() {
-                            let reused = &plan.reused_body_prefix[lowered_body_index];
-                            super::observe_reused_statement_progress(reused, progress, observer)?;
-                            body.push(reused.clone());
+                    if let Some(plan) = body_reuse.as_deref_mut() {
+                        if lowered_body_index < plan.reused_prefix_len {
+                            let reused = plan
+                                .reused_body_prefix
+                                .pop_front()
+                                .expect("reused body prefix entry must exist");
+                            let started = std::time::Instant::now();
+                            super::observe_reused_statement_progress(&reused, progress, observer)?;
+                            if let Some(execution_attribution) =
+                                execution_attribution.as_deref_mut()
+                            {
+                                execution_attribution.reused_progress_elapsed =
+                                    execution_attribution
+                                        .reused_progress_elapsed
+                                        .saturating_add(started.elapsed());
+                                execution_attribution.reused_progress_call_count =
+                                    execution_attribution
+                                        .reused_progress_call_count
+                                        .saturating_add(1);
+                            }
+                            body.push(reused);
                             lowered_body_index = lowered_body_index.saturating_add(1);
                             continue;
                         }
-                        if reused_suffix_start.is_some_and(|start| lowered_body_index >= start) {
-                            let suffix_index =
-                                lowered_body_index.saturating_sub(reused_suffix_start.unwrap());
-                            let reused = &plan.reused_body_suffix[suffix_index];
-                            super::observe_reused_statement_progress(reused, progress, observer)?;
-                            body.push(reused.clone());
+                        if lowered_body_index >= plan.reused_suffix_start {
+                            let reused = plan
+                                .reused_body_suffix
+                                .pop_front()
+                                .expect("reused body suffix entry must exist");
+                            let started = std::time::Instant::now();
+                            super::observe_reused_statement_progress(&reused, progress, observer)?;
+                            if let Some(execution_attribution) =
+                                execution_attribution.as_deref_mut()
+                            {
+                                execution_attribution.reused_progress_elapsed =
+                                    execution_attribution
+                                        .reused_progress_elapsed
+                                        .saturating_add(started.elapsed());
+                                execution_attribution.reused_progress_call_count =
+                                    execution_attribution
+                                        .reused_progress_call_count
+                                        .saturating_add(1);
+                            }
+                            body.push(reused);
                             lowered_body_index = lowered_body_index.saturating_add(1);
                             continue;
                         }
@@ -105,13 +146,59 @@ fn convert_function_definition_cached_internal(
                     lowered_body_index = lowered_body_index.saturating_add(1);
                 }
                 // Собираем тело функции через dispatcher
-                if let Some(stmt) = super::dispatch_statement_cached_internal(
-                    &child, source, line_index, progress, observer,
-                )? {
+                let node_kind = child.kind();
+                let started = std::time::Instant::now();
+                let maybe_stmt =
+                    if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
+                        super::dispatch_statement_cached_internal_with_attribution(
+                            &child,
+                            source,
+                            line_index,
+                            progress,
+                            observer,
+                            Some(execution_attribution),
+                        )?
+                    } else {
+                        super::dispatch_statement_cached_internal(
+                            &child, source, line_index, progress, observer,
+                        )?
+                    };
+                if let Some(stmt) = maybe_stmt {
                     body.push(stmt);
+                }
+                let elapsed = started.elapsed();
+                callable_body_dispatch_elapsed =
+                    callable_body_dispatch_elapsed.saturating_add(elapsed);
+                callable_body_dispatch_call_count =
+                    callable_body_dispatch_call_count.saturating_add(1);
+                if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
+                    super::record_rebuild_dispatch_attribution(
+                        execution_attribution,
+                        node_kind,
+                        elapsed,
+                    );
                 }
             }
         }
+    }
+
+    if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
+        execution_attribution.rebuild_dispatch_callable_body_dispatch_elapsed =
+            execution_attribution
+                .rebuild_dispatch_callable_body_dispatch_elapsed
+                .saturating_add(callable_body_dispatch_elapsed);
+        execution_attribution.rebuild_dispatch_callable_body_dispatch_call_count =
+            execution_attribution
+                .rebuild_dispatch_callable_body_dispatch_call_count
+                .saturating_add(callable_body_dispatch_call_count);
+        execution_attribution.rebuild_dispatch_callable_non_body_dispatch_elapsed =
+            execution_attribution
+                .rebuild_dispatch_callable_non_body_dispatch_elapsed
+                .saturating_add(
+                    callable_started
+                        .elapsed()
+                        .saturating_sub(callable_body_dispatch_elapsed),
+                );
     }
 
     if is_procedure {

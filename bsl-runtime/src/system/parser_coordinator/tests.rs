@@ -684,9 +684,15 @@ mod parse_snapshot_tests {
                 &cancellation_flag,
             )
             .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
 
         let plan = parser
-            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
             .expect("routine-body reuse plan");
         assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
         assert_eq!(plan.top_level_nodes.len(), 1);
@@ -700,6 +706,161 @@ mod parse_snapshot_tests {
         assert_eq!(body_plan.original_body_len, 12);
         assert_eq!(body_plan.reused_body_prefix.len(), 7);
         assert_eq!(body_plan.reused_body_suffix.len(), 4);
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_reuses_p55_style_local_assignment_window() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-p55-shape.bsl");
+        let base = r#"Функция ПолучитьПараметрыРаботыПользователяДляИсходящегоЭлектронногоПисьма(УчетнаяЗаписьЭлектроннойПочты, ФорматСообщения,ДляНового) Экспорт
+	СтруктураВозврата = Новый Структура;
+	СтруктураВозврата.Вставить("Подпись", Неопределено);
+	СтруктураВозврата.Вставить("УведомитьОДоставке", Ложь);
+	СтруктураВозврата.Вставить("УведомитьОПрочтении", Ложь);
+	СтруктураВозврата.Вставить("ОтображатьТелоИсходногоПисьма", Ложь);
+	СтруктураВозврата.Вставить("ВключатьТелоИсходногоПисьма", Истина);
+	Подпись = ОтправкаПочтовыхСообщенийПереопределяемый.ПодписьПисьма();
+	ПодписьПростойТекст            = Взаимодействия.ПолучитьОбычныйТекстИзHTML(Подпись);
+	ПодписьФорматированныйДокумент = Новый ФорматированныйДокумент();
+	ПодписьФорматированныйДокумент.УстановитьHTML(Подпись, Новый Структура);
+	Если ФорматСообщения = Перечисления.СпособыРедактированияЭлектронныхПисем.ОбычныйТекст Тогда
+		СтруктураВозврата.Подпись = Символы.ПС + Символы.ПС + ПодписьПростойТекст;
+	Иначе
+		ФорматированныйДокумент = ПодписьФорматированныйДокумент;
+		ФорматированныйДокумент.Вставить(ФорматированныйДокумент.ПолучитьЗакладкуНачала(), , ТипЭлементаФорматированногоДокумента.ПереводСтроки);
+		ФорматированныйДокумент.Вставить(ФорматированныйДокумент.ПолучитьЗакладкуНачала(), , ТипЭлементаФорматированногоДокумента.ПереводСтроки);
+		СтруктураВозврата.Подпись = ФорматированныйДокумент;
+	КонецЕсли;
+	Возврат СтруктураВозврата;
+КонецФункции"#.to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(
+            &base,
+            "СтруктураВозврата = Новый Структура",
+            "СтруктураВозврата = НеобъявленнаяПеременная",
+        );
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        let plan = parser
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
+            .expect("p55-style local assignment must qualify for routine-body reuse");
+        assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
+
+        let LoweringReuseNodePlan::RebuildRoutineBody(body_plan) = &plan.top_level_nodes[0] else {
+            panic!(
+                "expected routine-body reuse plan, got {:?}",
+                plan.top_level_nodes
+            );
+        };
+        assert_eq!(body_plan.reused_body_prefix.len(), 0);
+        assert!(
+            body_plan.reused_body_suffix.len() >= 5,
+            "expected a large unchanged suffix after the first assignment edit"
+        );
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_reuses_callable_body_siblings_around_changed_if_region() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-if-region.bsl");
+        let base = r#"Процедура ПриСозданииНаСервере(Параметры) Экспорт
+	НадписьСчет = НСтр("ru = 'Указывается в табличной части'");
+	ДополнительныеПараметры = Неопределено;
+	СобытияФормИС.ПриСозданииНаСервере(ЭтотОбъект, Отказ, СтандартнаяОбработка, ДополнительныеПараметры);
+	ШтрихкодированиеИС.ИнициализироватьКэшМаркируемойПродукции(ЭтотОбъект);
+	Если Параметры.Свойство("ДобавитьНоменклатуру") Тогда
+		ТаблицаТовары = Новый ТаблицаЗначений;
+		ТаблицаТовары.Колонки.Добавить("Номенклатура");
+		НоваяСтрока = ТаблицаТовары.Добавить();
+		НоваяСтрока.Номенклатура = Параметры.ДобавитьНоменклатуру;
+		СтруктураВозврата = Новый Структура;
+		СтруктураВозврата.Вставить("АдресПодобраннойНоменклатурыВХранилище", ПоместитьВоВременноеХранилище(ТаблицаТовары));
+		ОбработкаВыбораПодборВставкаИзБуфераНаСервере(СтруктураВозврата, "Услуги");
+	КонецЕсли;
+	УправлениеПанельюПодсказки.ПриСозданииНаСервере(ЭтотОбъект);
+	Если ОбщегоНазначения.ПодсистемаСуществует("ИнтеграцияС1СДокументооборотом") Тогда
+		МодульИнтеграцияС1СДокументооборотБазоваяФункциональность = ОбщегоНазначения.ОбщийМодуль("ИнтеграцияС1СДокументооборотБазоваяФункциональность");
+		МодульИнтеграцияС1СДокументооборотБазоваяФункциональность.ПриСозданииНаСервере(ЭтотОбъект, Элементы.ГруппаГлобальныеКоманды);
+	КонецЕсли;
+	МобильныйКлиентАдаптацияФормы();
+КонецПроцедуры"#.to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(
+            &base,
+            "СтруктураВозврата = Новый Структура",
+            "СтруктураВозврата = НеобъявленнаяПеременная",
+        );
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        let plan = parser
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
+            .expect("edit inside a top-level if-region must still qualify for body-local reuse");
+        assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
+
+        let LoweringReuseNodePlan::RebuildRoutineBody(body_plan) = &plan.top_level_nodes[0] else {
+            panic!(
+                "expected routine-body reuse plan, got {:?}",
+                plan.top_level_nodes
+            );
+        };
+        assert!(
+            body_plan.reused_body_prefix.len() >= 4,
+            "expected unchanged statements before the affected if region to stay reusable"
+        );
+        assert!(
+            body_plan.reused_body_suffix.len() >= 3,
+            "expected unchanged statements after the affected if region to stay reusable"
+        );
     }
 
     #[test]
@@ -731,13 +892,137 @@ mod parse_snapshot_tests {
                 &cancellation_flag,
             )
             .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
 
         assert!(
             parser
-                .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+                .build_exact_lowering_reuse_plan(
+                    &old_source,
+                    &new_tree,
+                    &changed_ranges,
+                    &mut lowering_attribution,
+                )
                 .is_none(),
             "var-declaration edit must fail closed instead of reusing lowered body windows"
         );
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_fails_closed_for_edit_inside_try_region() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-try-region.bsl");
+        let base = r#"Процедура Test()
+	Сообщить("before");
+	Попытка
+		Значение = 1;
+	Исключение
+		Сообщить("error");
+	КонецПопытки;
+	Сообщить("after");
+КонецПроцедуры"#
+            .to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(&base, "Значение = 1", "Значение = 2");
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        assert!(
+            parser
+                .build_exact_lowering_reuse_plan(
+                    &old_source,
+                    &new_tree,
+                    &changed_ranges,
+                    &mut lowering_attribution,
+                )
+                .is_none(),
+            "try/except body edit must stay fail-closed until exception-region boundaries are proven sound"
+        );
+    }
+
+    #[test]
+    fn exact_ready_snapshot_reuse_path_matches_full_parse_for_top_level_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-top-level-reuse-parity.bsl");
+        let base = "Процедура Alpha()\n    Сообщить(\"alpha\");\nКонецПроцедуры\n\nПроцедура Beta()\n    Сообщить(\"beta\");\nКонецПроцедуры\n\nПроцедура Gamma()\n    Сообщить(\"gamma\");\nКонецПроцедуры\n"
+            .to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Процедура Beta()", "Процедура BetaRenamed()");
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                updated.clone(),
+                vec![edit],
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path incremental report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert_eq!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::TopLevelReuse
+        );
+        assert_eq!(report.program_lowering_summary.reused_window_count, 2);
+        assert_eq!(report.program_lowering_summary.rebuilt_window_count, 1);
+        assert_eq!(
+            report
+                .program_lowering_summary
+                .fully_reused_top_level_node_count,
+            2
+        );
+        assert_eq!(
+            report
+                .program_lowering_summary
+                .fully_rebuilt_top_level_node_count,
+            1
+        );
+        assert!(report.program_lowering_summary.reused_lowering_units > 0);
+        assert!(report.program_lowering_summary.rebuilt_lowering_units > 0);
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let incremental_json =
+            serde_json::to_string(&report.parse_result).expect("serialize incremental parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(incremental_json, full_json);
     }
 
     #[test]
@@ -764,6 +1049,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: None,
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -808,6 +1095,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: None,
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -830,6 +1119,145 @@ mod parse_snapshot_tests {
                 .largest_rebuilt_window_lowering_units
                 > 0
         );
+    }
+
+    #[test]
+    fn exact_ready_snapshot_reuse_path_matches_full_parse_for_if_region_body_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-if-region-reuse-parity.bsl");
+        let base = r#"Процедура ПриСозданииНаСервере(Параметры) Экспорт
+	НадписьСчет = НСтр("ru = 'Указывается в табличной части'");
+	ДополнительныеПараметры = Неопределено;
+	СобытияФормИС.ПриСозданииНаСервере(ЭтотОбъект, Отказ, СтандартнаяОбработка, ДополнительныеПараметры);
+	ШтрихкодированиеИС.ИнициализироватьКэшМаркируемойПродукции(ЭтотОбъект);
+	Если Параметры.Свойство("ДобавитьНоменклатуру") Тогда
+		ТаблицаТовары = Новый ТаблицаЗначений;
+		ТаблицаТовары.Колонки.Добавить("Номенклатура");
+		НоваяСтрока = ТаблицаТовары.Добавить();
+		НоваяСтрока.Номенклатура = Параметры.ДобавитьНоменклатуру;
+		СтруктураВозврата = Новый Структура;
+		СтруктураВозврата.Вставить("АдресПодобраннойНоменклатурыВХранилище", ПоместитьВоВременноеХранилище(ТаблицаТовары));
+		ОбработкаВыбораПодборВставкаИзБуфераНаСервере(СтруктураВозврата, "Услуги");
+	КонецЕсли;
+	УправлениеПанельюПодсказки.ПриСозданииНаСервере(ЭтотОбъект);
+	Если ОбщегоНазначения.ПодсистемаСуществует("ИнтеграцияС1СДокументооборотом") Тогда
+		МодульИнтеграцияС1СДокументооборотБазоваяФункциональность = ОбщегоНазначения.ОбщийМодуль("ИнтеграцияС1СДокументооборотБазоваяФункциональность");
+		МодульИнтеграцияС1СДокументооборотБазоваяФункциональность.ПриСозданииНаСервере(ЭтотОбъект, Элементы.ГруппаГлобальныеКоманды);
+	КонецЕсли;
+	МобильныйКлиентАдаптацияФормы();
+КонецПроцедуры"#.to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(
+            &base,
+            "СтруктураВозврата = Новый Структура",
+            "СтруктураВозврата = НеобъявленнаяПеременная",
+        );
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                updated.clone(),
+                vec![edit],
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path incremental report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert_eq!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::RoutineBodyReuse
+        );
+        assert!(report.program_lowering_summary.reused_lowering_units > 0);
+        assert!(report.program_lowering_summary.rebuilt_lowering_units > 0);
+        assert!(
+            report
+                .program_lowering_summary
+                .routine_body_reuse_node_count
+                >= 1
+        );
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let incremental_json =
+            serde_json::to_string(&report.parse_result).expect("serialize incremental parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(incremental_json, full_json);
+    }
+
+    #[test]
+    fn exact_ready_snapshot_reuse_path_fails_closed_for_try_region_body_edit() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-try-region-reuse-parity.bsl");
+        let base = r#"Процедура Test()
+	Сообщить("before");
+	Попытка
+		Значение = 1;
+	Исключение
+		Сообщить("error");
+	КонецПопытки;
+	Сообщить("after");
+КонецПроцедуры"#
+            .to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (updated, edit) = replace_first_occurrence_edit(&base, "Значение = 1", "Значение = 2");
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                updated.clone(),
+                vec![edit],
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path incremental report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert_eq!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+        );
+
+        let full = ParserCoordinator::with_fallback()
+            .parse(&updated)
+            .expect("full parse");
+        let incremental_json =
+            serde_json::to_string(&report.parse_result).expect("serialize incremental parse");
+        let full_json = serde_json::to_string(&full).expect("serialize full parse");
+        assert_eq!(incremental_json, full_json);
     }
 
     #[test]
@@ -867,9 +1295,15 @@ mod parse_snapshot_tests {
                     &cancellation_flag,
                 )
                 .expect("incremental tree");
+            let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
             assert!(
                 parser
-                    .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+                    .build_exact_lowering_reuse_plan(
+                        &old_source,
+                        &new_tree,
+                        &changed_ranges,
+                        &mut lowering_attribution,
+                    )
                     .is_none(),
                 "runtime kill switch must disable exact lowering reuse planning"
             );
@@ -885,6 +1319,8 @@ mod parse_snapshot_tests {
                         save_critical_requested: None,
                         reused_program_prefix: None,
                         lowering_reuse_plan: None,
+                        lowering_reuse_summary: None,
+                        lowering_reuse_attribution: None,
                         exact_ready_snapshot_control_callback: None,
                         progress_callback: None,
                         core_build_progress_callback: None,
@@ -939,8 +1375,14 @@ mod parse_snapshot_tests {
                 &cancellation_flag,
             )
             .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
         let lowering_reuse_plan = parser
-            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
             .expect("local edit must produce lowering reuse plan");
         assert_eq!(
             lowering_reuse_plan.outcome,
@@ -975,6 +1417,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: Some(save_critical_requested.as_ref()),
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -1059,8 +1503,14 @@ mod parse_snapshot_tests {
                 &cancellation_flag,
             )
             .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
         let lowering_reuse_plan = parser
-            .build_exact_lowering_reuse_plan(&old_source, &new_tree, &changed_ranges)
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
             .expect("local edit must produce lowering reuse plan");
         assert_eq!(
             lowering_reuse_plan.outcome,
@@ -1102,6 +1552,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: None,
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: Some(&control),
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -1192,6 +1644,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: Some(save_critical_requested.as_ref()),
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: None,
                     progress_callback: None,
                     core_build_progress_callback: None,
@@ -1291,6 +1745,8 @@ mod parse_snapshot_tests {
                     save_critical_requested: None,
                     reused_program_prefix: None,
                     lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
                     exact_ready_snapshot_control_callback: Some(&control),
                     progress_callback: None,
                     core_build_progress_callback: None,

@@ -129,6 +129,7 @@ Expected outcome:
 ./scripts/validate-stabilize-completion-front-edge.sh
 ./scripts/validate-completion-turn-wait-slot-release.sh
 ./scripts/validate-completion-turn-wait-lifecycle.sh
+./scripts/validate-refactor-34-local-function-summaries-scc-fast-path.sh
 CHANGE_ID=refactor-completion-prepare-lightweight-exact-split ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=isolate-completion-pre-dispatch-ingress ./scripts/validate-v2-completion-gates.sh
 CHANGE_ID=refactor-completion-superseded-active-turn-release ./scripts/validate-v2-completion-gates.sh
@@ -175,5 +176,11 @@ Targeted lifecycle safety for this handoff path is covered by the backend tests
 default entry point for the pre-active `turn_wait` lifecycle evidence bundle;
 it wraps the generic readiness script with the correct `CHANGE_ID` and collects
 both change-specific representative profiles (`churn` and `preactive_overlap`).
+`./scripts/validate-refactor-34-local-function-summaries-scc-fast-path.sh` is
+the canonical targeted validation bundle for the local-function-summaries SCC
+fast path; it runs the parity regressions, backend observability export check,
+the representative `conf_big` ready-snapshot leaf live gate, and strict
+OpenSpec validation while writing the live report into the active change's
+`validation/` directory.
 
 Use these only when the task explicitly needs readiness/perf evidence.

@@ -947,10 +947,19 @@ fn self_recursive_singleton_stays_on_convergence_path_and_preserves_local_call_s
     let program = parse(source);
     let index = build_type_index_with_path(&program, "test.bsl", deps);
     let offset = source.find("Сама(Истина)").expect("call") as u32;
+    let result = index.type_at_byte_offset(offset).expect("type at call");
+    assert_eq!(result.type_name(), "Число");
     let target = index
         .call_method_target_at_byte_offset(offset)
         .expect("self-recursive call target");
     assert_eq!(target.method_name, "Сама");
+    assert_eq!(
+        target
+            .signature
+            .as_ref()
+            .and_then(|signature| signature.return_type.as_deref()),
+        Some("Число")
+    );
     assert_eq!(
         target.signature.as_ref().map(|signature| signature.source),
         Some(SignatureSource::UserCode)
@@ -993,10 +1002,19 @@ fn mutually_recursive_local_summaries_reuse_stable_out_of_scc_semantics() {
     let program = parse(source);
     let index = build_type_index_with_path(&program, "test.bsl", deps);
     let offset = source.find("A(Ложь)").expect("call") as u32;
+    let result = index.type_at_byte_offset(offset).expect("type at call");
+    assert_eq!(result.type_name(), "Строка");
     let target = index
         .call_method_target_at_byte_offset(offset)
         .expect("mutually recursive call target");
     assert_eq!(target.method_name, "A");
+    assert_eq!(
+        target
+            .signature
+            .as_ref()
+            .and_then(|signature| signature.return_type.as_deref()),
+        Some("Строка")
+    );
     assert_eq!(
         target.signature.as_ref().map(|signature| signature.source),
         Some(SignatureSource::UserCode)

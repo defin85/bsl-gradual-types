@@ -207,6 +207,9 @@ impl TypeInferencer<'_> {
         struct ReturnTypeSet {
             /// If any return expression is unknown/dynamic, the whole return type degrades to Dynamic.
             has_dynamic: bool,
+            /// Recursive SCC iterations may observe temporarily unresolved in-SCC summaries.
+            /// Keep them distinct from true dynamic evidence so base-case returns can still converge.
+            has_unresolved_recursive_dependency: bool,
             // Key is a stable display name for deterministic ordering.
             concrete_variants: BTreeMap<String, ConcreteType>,
             // If a function returns a non-concrete type (e.g. Generic/Nullable/Intersection), we keep it structurally
@@ -265,8 +268,13 @@ impl TypeInferencer<'_> {
                 }
             }
 
+            fn note_unresolved_recursive_dependency(&mut self) {
+                self.has_unresolved_recursive_dependency = true;
+            }
+
             fn is_empty(&self) -> bool {
                 !self.has_dynamic
+                    && !self.has_unresolved_recursive_dependency
                     && self.concrete_variants.is_empty()
                     && self.non_concrete.is_none()
             }
@@ -321,6 +329,7 @@ impl TypeInferencer<'_> {
             env: &mut TypeEnv,
             facts: &mut SemanticFacts,
             out: &mut ReturnTypeSet,
+            active_recursive_names: &BTreeSet<String>,
         ) {
             for stmt in body {
                 inferencer.cancellation_checkpoint();
@@ -328,6 +337,19 @@ impl TypeInferencer<'_> {
                     Statement::Return { value, .. } => {
                         if let Some(expr) = value {
                             let t = inferencer.infer_expr(expr, env, facts);
+                            if (t.is_unknown() || t.is_dynamic())
+                                && !active_recursive_names.is_empty()
+                            {
+                                let mut called_locals = BTreeSet::new();
+                                collect_called_locals_in_expr(expr, &mut called_locals);
+                                if called_locals
+                                    .iter()
+                                    .any(|name| active_recursive_names.contains(name))
+                                {
+                                    out.note_unresolved_recursive_dependency();
+                                    continue;
+                                }
+                            }
                             out.insert_resolution(&t);
                         } else {
                             out.insert_named("Неопределено");
@@ -341,7 +363,14 @@ impl TypeInferencer<'_> {
                     } => {
                         let _ = inferencer.infer_expr(condition, env, facts);
                         let mut then_env = env.clone();
-                        collect_return_type_names(inferencer, then_body, &mut then_env, facts, out);
+                        collect_return_type_names(
+                            inferencer,
+                            then_body,
+                            &mut then_env,
+                            facts,
+                            out,
+                            active_recursive_names,
+                        );
                         if let Some(else_body) = else_body {
                             let mut else_env = env.clone();
                             collect_return_type_names(
@@ -350,6 +379,7 @@ impl TypeInferencer<'_> {
                                 &mut else_env,
                                 facts,
                                 out,
+                                active_recursive_names,
                             );
                         }
                     }
@@ -358,7 +388,14 @@ impl TypeInferencer<'_> {
                     } => {
                         let _ = inferencer.infer_expr(condition, env, facts);
                         let mut body_env = env.clone();
-                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
+                        collect_return_type_names(
+                            inferencer,
+                            body,
+                            &mut body_env,
+                            facts,
+                            out,
+                            active_recursive_names,
+                        );
                     }
                     Statement::For {
                         variable,
@@ -373,7 +410,14 @@ impl TypeInferencer<'_> {
                         body_env
                             .variables
                             .insert(variable.to_lowercase(), TypeResolution::primitive("Число"));
-                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
+                        collect_return_type_names(
+                            inferencer,
+                            body,
+                            &mut body_env,
+                            facts,
+                            out,
+                            active_recursive_names,
+                        );
                     }
                     Statement::ForEach {
                         variable,
@@ -386,7 +430,14 @@ impl TypeInferencer<'_> {
                         body_env
                             .variables
                             .insert(variable.to_lowercase(), TypeResolution::unknown());
-                        collect_return_type_names(inferencer, body, &mut body_env, facts, out);
+                        collect_return_type_names(
+                            inferencer,
+                            body,
+                            &mut body_env,
+                            facts,
+                            out,
+                            active_recursive_names,
+                        );
                     }
                     Statement::Try {
                         try_body,
@@ -394,7 +445,14 @@ impl TypeInferencer<'_> {
                         ..
                     } => {
                         let mut try_env = env.clone();
-                        collect_return_type_names(inferencer, try_body, &mut try_env, facts, out);
+                        collect_return_type_names(
+                            inferencer,
+                            try_body,
+                            &mut try_env,
+                            facts,
+                            out,
+                            active_recursive_names,
+                        );
                         let mut except_env = env.clone();
                         collect_return_type_names(
                             inferencer,
@@ -402,6 +460,7 @@ impl TypeInferencer<'_> {
                             &mut except_env,
                             facts,
                             out,
+                            active_recursive_names,
                         );
                     }
                     Statement::FunctionDecl { .. } | Statement::ProcedureDecl { .. } => {}
@@ -640,12 +699,14 @@ impl TypeInferencer<'_> {
                 let mut scratch_facts = SemanticFacts::default();
                 let mut return_types = ReturnTypeSet::default();
                 let body_infer_started = Instant::now();
+                let active_recursive_names = BTreeSet::new();
                 collect_return_type_names(
                     self,
                     def.body,
                     &mut fn_env,
                     &mut scratch_facts,
                     &mut return_types,
+                    &active_recursive_names,
                 );
                 body_infer_ms =
                     body_infer_ms.saturating_add(body_infer_started.elapsed().as_millis());
@@ -664,6 +725,10 @@ impl TypeInferencer<'_> {
 
             recursive_scc_count = recursive_scc_count.saturating_add(1);
             let recursive_started = Instant::now();
+            let active_recursive_names: BTreeSet<String> = nodes
+                .iter()
+                .map(|&idx| function_defs[idx].0.clone())
+                .collect();
             loop {
                 fixed_point_iteration_count = fixed_point_iteration_count.saturating_add(1);
                 let mut changed = false;
@@ -702,6 +767,7 @@ impl TypeInferencer<'_> {
                         &mut fn_env,
                         &mut scratch_facts,
                         &mut return_types,
+                        &active_recursive_names,
                     );
                     body_infer_ms =
                         body_infer_ms.saturating_add(body_infer_started.elapsed().as_millis());

@@ -832,6 +832,138 @@ fn incomplete_constructor_call_does_not_materialize_recovery_target_in_canonical
 }
 
 #[test]
+fn diagnostics_only_build_omits_exact_only_and_projection_only_fact_surfaces() {
+    let source = r#"Процедура Тест()
+    М = Новый Массив();
+    М.Количество();
+    Док = FormAttributeToValue("Док1");
+    Ссылка = Док.Ссылка;
+КонецПроцедуры
+"#;
+    let parsed = bsl_syntax::parse(source, &ParseOptions::default()).expect("parse ok");
+    let deps = deps_with_form_attribute_to_value_signature();
+
+    let full = TypeInferencer::new(deps.clone()).build_facts_internal(
+        &parsed.program,
+        "test.bsl",
+        Some(source),
+        None,
+    );
+    assert!(
+        !full.facts.assignment_value_type_by_span.is_empty(),
+        "full semantic build should still materialize assignment hint input facts"
+    );
+    assert!(
+        !full.facts.call_arg_types_by_span.is_empty(),
+        "full semantic build should still materialize call arg hint input facts"
+    );
+    assert!(
+        !full.facts.call_receiver_type_by_span.is_empty(),
+        "full semantic build should still materialize call receiver hint input facts"
+    );
+    assert!(
+        !full.facts.member_access_object_type_by_span.is_empty(),
+        "full semantic build should still materialize member access hint input facts"
+    );
+    assert!(
+        !full.facts.call_method_targets_by_span.is_empty(),
+        "full semantic build should still materialize exact call targets"
+    );
+    assert!(
+        !full.facts.constructor_targets_by_span.is_empty(),
+        "full semantic build should still materialize constructor targets"
+    );
+
+    let diagnostics_only = TypeInferencer::with_materialization_mode_and_checkpoint(
+        deps,
+        SemanticMaterializationMode::DiagnosticsOnly,
+        None,
+    )
+    .build_facts_internal(&parsed.program, "test.bsl", None, None);
+    assert!(
+        diagnostics_only
+            .facts
+            .assignment_value_type_by_span
+            .is_empty(),
+        "diagnostics-only build should not keep legacy assignment hint maps in SemanticFacts"
+    );
+    assert!(
+        diagnostics_only.facts.call_arg_types_by_span.is_empty(),
+        "diagnostics-only build should not keep legacy call arg hint maps in SemanticFacts"
+    );
+    assert!(
+        diagnostics_only.facts.call_receiver_type_by_span.is_empty(),
+        "diagnostics-only build should not keep legacy call receiver hint maps in SemanticFacts"
+    );
+    assert!(
+        diagnostics_only
+            .facts
+            .member_access_object_type_by_span
+            .is_empty(),
+        "diagnostics-only build should not keep legacy member-access hint maps in SemanticFacts"
+    );
+    assert!(
+        diagnostics_only
+            .facts
+            .call_method_targets_by_span
+            .is_empty(),
+        "diagnostics-only build should not materialize exact call targets"
+    );
+    assert!(
+        diagnostics_only
+            .facts
+            .member_method_targets_by_span
+            .is_empty(),
+        "diagnostics-only build should not materialize exact member targets"
+    );
+    assert!(
+        diagnostics_only
+            .facts
+            .constructor_targets_by_span
+            .is_empty(),
+        "diagnostics-only build should not materialize constructor targets"
+    );
+    assert!(
+        diagnostics_only
+            .facts
+            .definition_locations_by_span
+            .is_empty(),
+        "diagnostics-only build should not materialize definition locations"
+    );
+    let diagnostics_hints = diagnostics_only
+        .diagnostics_type_hints
+        .as_ref()
+        .expect("diagnostics-only build should materialize direct type hints");
+    assert!(
+        !diagnostics_hints.assignment_value_type_by_span.is_empty(),
+        "diagnostics-only build should materialize assignment hints directly"
+    );
+    assert!(
+        !diagnostics_hints.call_arg_types_by_span.is_empty(),
+        "diagnostics-only build should materialize call arg hints directly"
+    );
+    assert!(
+        !diagnostics_hints.call_receiver_type_by_span.is_empty(),
+        "diagnostics-only build should materialize call receiver hints directly"
+    );
+    assert!(
+        !diagnostics_hints
+            .member_access_object_type_by_span
+            .is_empty(),
+        "diagnostics-only build should materialize member-access hints directly"
+    );
+    assert!(
+        diagnostics_only.facts.type_entries.is_empty(),
+        "diagnostics-only build should no longer retain projection-only type entries"
+    );
+    assert!(
+        diagnostics_only.profile.index_entry_count as usize
+            >= diagnostics_only.facts.type_entries.len(),
+        "diagnostics-only observability must remain truthful even without retained type entries"
+    );
+}
+
+#[test]
 fn resolves_common_module_method_return_type_from_signature_index() {
     let source = r#"Процедура Тест()
     x = ОбщийМодуль1.Ф1();

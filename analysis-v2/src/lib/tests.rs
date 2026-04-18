@@ -1215,6 +1215,70 @@ fn diagnostics_type_hints_match_program_projection() {
 }
 
 #[test]
+fn diagnostics_type_hints_match_program_projection_for_local_functions() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(318);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-diagnostics-type-hints-local-functions"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Procedure Test()\n\
+                 LocalValue = BuildArray();\n\
+                 EndProcedure\n\
+                 \n\
+                 Function BuildArray()\n\
+                     LocalArray = New Array;\n\
+                     LocalArray.Add(1);\n\
+                     LocalValue = LocalArray.UnknownProperty;\n\
+                     Return LocalArray;\n\
+                 EndFunction",
+        ),
+        version: 1,
+        path: Arc::from("diagnostics-type-hints-local-functions.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let hints = analysis
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints");
+    let program = analysis
+        .ir(file_id)
+        .unwrap()
+        .expect("full semantic program");
+    let expected = semantic_type_hints_from_program(program.as_ref());
+
+    assert_eq!(
+        hints.assignment_value_type_by_span,
+        expected.assignment_value_type_by_span
+    );
+    assert_eq!(
+        hints.call_receiver_type_by_span,
+        expected.call_receiver_type_by_span
+    );
+    assert_eq!(
+        hints.call_arg_types_by_span,
+        expected.call_arg_types_by_span
+    );
+    assert_eq!(
+        hints.member_access_object_type_by_span,
+        expected.member_access_object_type_by_span
+    );
+    assert!(
+        !hints.call_receiver_type_by_span.is_empty(),
+        "local function bodies must still contribute call receiver hints"
+    );
+    assert!(
+        !hints.member_access_object_type_by_span.is_empty(),
+        "local function bodies must still contribute member access hints"
+    );
+}
+
+#[test]
 fn diagnostics_type_hints_skip_when_syntax_errors_present() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(315);

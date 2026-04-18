@@ -1228,17 +1228,15 @@ impl AnalysisV2 {
         let file_path = file.path(&self.db);
         let checkpoint = || cancellation_checkpoint(&self.db);
         let diagnostics_only_profiled = cancellable(|| {
-            type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+            type_inference_v2::build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
+                program.as_ref(),
                 &parsed.program,
                 file_path.as_ref(),
                 deps_data.clone(),
                 &checkpoint,
             )
         })?;
-        let type_hints = Arc::new(semantic_type_hints_from_facts(
-            program.as_ref(),
-            &diagnostics_only_profiled.facts,
-        ));
+        let type_hints = Arc::new(diagnostics_only_profiled.hints);
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();

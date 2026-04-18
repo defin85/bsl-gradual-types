@@ -448,16 +448,14 @@ pub fn diagnostics_type_hints(
     let file_path = file.path(db).to_string();
     let program = diagnostics_program(db, file, deps, settings).0;
     let checkpoint = || cancellation_checkpoint(db);
-    let facts = type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint(
+    let hints = type_inference_v2::build_diagnostics_type_hints_with_path_and_checkpoint(
+        program.as_ref(),
         &parsed.program,
         &file_path,
         deps_data,
         &checkpoint,
     );
-    DiagnosticsTypeHintsSnapshot(Arc::new(semantic_type_hints_from_facts(
-        program.as_ref(),
-        &facts,
-    )))
+    DiagnosticsTypeHintsSnapshot(Arc::new(hints))
 }
 
 fn flow_type_at_byte_offset_impl(

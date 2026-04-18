@@ -1,0 +1,84 @@
+{
+  "baseline": {
+    "captured_at": "2026-04-17T14:06:03Z",
+    "followup_semantic_path_ready_artifacts": 1,
+    "followup_semantic_path_shadow_state": 3
+  },
+  "change_id": "refactor-40-diagnostics-only-semantic-query-bounding",
+  "cycle_count": 4,
+  "cycles": [
+    {
+      "cycle": 1,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle1Stage2;",
+      "followup_publish_elapsed_ms": 1292,
+      "followup_publish_semantic_diagnostics_query_ms": 1109,
+      "followup_publish_semantic_path": "ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 173,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_wait_probe": "ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "ready_artifacts",
+      "requested_version": 3,
+      "save_cycle_sequence": 1,
+      "stage1_version": 2
+    },
+    {
+      "cycle": 2,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle2Stage2;",
+      "followup_publish_elapsed_ms": 1251,
+      "followup_publish_semantic_diagnostics_query_ms": 1075,
+      "followup_publish_semantic_path": "ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 156,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_wait_probe": "ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "ready_artifacts",
+      "requested_version": 5,
+      "save_cycle_sequence": 2,
+      "stage1_version": 4
+    },
+    {
+      "cycle": 3,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle3Stage2;",
+      "followup_publish_elapsed_ms": 1271,
+      "followup_publish_semantic_diagnostics_query_ms": 1109,
+      "followup_publish_semantic_path": "ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 153,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_wait_probe": "ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "ready_artifacts",
+      "requested_version": 7,
+      "save_cycle_sequence": 3,
+      "stage1_version": 6
+    },
+    {
+      "cycle": 4,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle4Stage2;",
+      "followup_publish_elapsed_ms": 1154,
+      "followup_publish_semantic_diagnostics_query_ms": 997,
+      "followup_publish_semantic_path": "ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 136,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_wait_probe": "ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "ready_artifacts",
+      "requested_version": 9,
+      "save_cycle_sequence": 4,
+      "stage1_version": 8
+    }
+  ],
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "profile": "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live",
+  "summary": {
+    "followup_ready_snapshot_wait_probe_ready": 4,
+    "followup_ready_snapshot_zero_probe_not_ready": 4,
+    "followup_semantic_path_ready_artifacts": 4,
+    "followup_semantic_path_shadow_state": 0
+  },
+  "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+}

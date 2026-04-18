@@ -104,15 +104,14 @@ pub(super) struct LocalFunctionSummariesProfiled {
     pub(super) profile: LocalFunctionSummariesProfile,
 }
 
-#[derive(Debug, Clone)]
 struct SemanticFactsBuildProfiled {
     facts: SemanticFacts,
+    diagnostics_type_hints: Option<bsl_diagnostics::SemanticTypeHints>,
     profile: TypeIndexBuildProfile,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct DiagnosticsOnlySemanticFactsBuildProfiled {
-    pub(crate) facts: SemanticFacts,
+pub(crate) struct DiagnosticsOnlyTypeHintsBuildProfiled {
+    pub(crate) hints: bsl_diagnostics::SemanticTypeHints,
     pub(crate) profile: crate::DiagnosticsOnlySemanticFactsBuildProfile,
 }
 
@@ -404,6 +403,7 @@ enum DefinitionLocationCacheKey {
 
 #[derive(Default)]
 struct TypeInferencerStats {
+    type_entry_count: Cell<u64>,
     visit_callable_body_ms: Cell<u128>,
     visit_callable_body_count: Cell<u64>,
     merge_control_flow_env_ms: Cell<u128>,
@@ -426,6 +426,8 @@ struct TypeInferencer<'a> {
     method_target_cache: RefCell<HashMap<MethodTargetCacheKey, Option<SemanticMethodTarget>>>,
     definition_location_cache:
         RefCell<HashMap<DefinitionLocationCacheKey, Option<TypeDefinitionLocation>>>,
+    diagnostics_type_hints: RefCell<bsl_diagnostics::SemanticTypeHints>,
+    direct_diagnostics_hint_recording_enabled: Cell<bool>,
     stats: TypeInferencerStats,
     cancellation_checkpoint: Option<&'a dyn Fn()>,
     materialization_mode: SemanticMaterializationMode,
@@ -480,6 +482,8 @@ impl<'a> TypeInferencer<'a> {
             method_return_cache: RefCell::new(HashMap::new()),
             method_target_cache: RefCell::new(HashMap::new()),
             definition_location_cache: RefCell::new(HashMap::new()),
+            diagnostics_type_hints: RefCell::new(bsl_diagnostics::SemanticTypeHints::default()),
+            direct_diagnostics_hint_recording_enabled: Cell::new(false),
             stats: TypeInferencerStats::default(),
             cancellation_checkpoint,
             materialization_mode,
@@ -488,6 +492,82 @@ impl<'a> TypeInferencer<'a> {
 
     fn materializes_exact_semantic_artifacts(&self) -> bool {
         matches!(self.materialization_mode, SemanticMaterializationMode::Full)
+    }
+
+    fn materializes_diagnostics_type_hints_directly(&self) -> bool {
+        matches!(
+            self.materialization_mode,
+            SemanticMaterializationMode::DiagnosticsOnly
+        )
+    }
+
+    fn set_direct_diagnostics_hint_recording_enabled(&self, enabled: bool) {
+        self.direct_diagnostics_hint_recording_enabled.set(enabled);
+    }
+
+    fn should_record_direct_diagnostics_hints(&self) -> bool {
+        self.materializes_diagnostics_type_hints_directly()
+            && self.direct_diagnostics_hint_recording_enabled.get()
+    }
+
+    fn reset_direct_diagnostics_type_hints(&self) {
+        *self.diagnostics_type_hints.borrow_mut() = bsl_diagnostics::SemanticTypeHints::default();
+        self.set_direct_diagnostics_hint_recording_enabled(false);
+    }
+
+    fn take_direct_diagnostics_type_hints(&self) -> Option<bsl_diagnostics::SemanticTypeHints> {
+        self.materializes_diagnostics_type_hints_directly()
+            .then(|| std::mem::take(&mut *self.diagnostics_type_hints.borrow_mut()))
+    }
+
+    fn record_diagnostics_assignment_value_type(&self, span: Span, resolution: &TypeResolution) {
+        if !self.should_record_direct_diagnostics_hints() {
+            return;
+        }
+        self.diagnostics_type_hints
+            .borrow_mut()
+            .assignment_value_type_by_span
+            .insert(span, resolution.clone());
+    }
+
+    fn record_diagnostics_call_arg_types(&self, span: Span, arg_types: &[TypeResolution]) {
+        if !self.should_record_direct_diagnostics_hints() {
+            return;
+        }
+        self.diagnostics_type_hints
+            .borrow_mut()
+            .call_arg_types_by_span
+            .insert(span, arg_types.to_vec());
+    }
+
+    fn record_diagnostics_call_receiver_type(&self, span: Span, receiver: &TypeResolution) {
+        if !self.should_record_direct_diagnostics_hints() {
+            return;
+        }
+        self.diagnostics_type_hints
+            .borrow_mut()
+            .call_receiver_type_by_span
+            .insert(span, receiver.clone());
+    }
+
+    fn record_diagnostics_member_access_object_type(&self, span: Span, receiver: &TypeResolution) {
+        if !self.should_record_direct_diagnostics_hints() {
+            return;
+        }
+        self.diagnostics_type_hints
+            .borrow_mut()
+            .member_access_object_type_by_span
+            .insert(span, receiver.clone());
+    }
+
+    fn diagnostics_call_hint_span(&self, function: &Expression, call_span: Span) -> Span {
+        match function {
+            Expression::PropertyAccess { object, .. } => match object.as_ref() {
+                Expression::Identifier { span, .. } => Span::new(span.start, call_span.end),
+                _ => call_span,
+            },
+            _ => call_span,
+        }
     }
 
     fn add_u128_stat(stat: &Cell<u128>, value: u128) {
@@ -577,6 +657,7 @@ impl<'a> TypeInferencer<'a> {
         let mut env = TypeEnv::default();
         let mut facts = SemanticFacts::default();
         env.current_file_path = Arc::from(file_path.to_string());
+        self.reset_direct_diagnostics_type_hints();
 
         self.cancellation_checkpoint();
         let seed_started = Instant::now();
@@ -598,6 +679,11 @@ impl<'a> TypeInferencer<'a> {
                 None
             };
 
+        // Local-function summary inference uses scratch passes and must not leak temporary
+        // resolutions into the final diagnostics-only hint surface.
+        self.set_direct_diagnostics_hint_recording_enabled(
+            self.materializes_diagnostics_type_hints_directly(),
+        );
         let visit_statements_started = Instant::now();
         for stmt in &program.statements {
             self.cancellation_checkpoint();
@@ -675,6 +761,7 @@ impl<'a> TypeInferencer<'a> {
                 _ => self.visit_statement(stmt, &mut env, &mut facts),
             }
         }
+        self.set_direct_diagnostics_hint_recording_enabled(false);
         if self.materializes_exact_semantic_artifacts() {
             if let Some(source_text) = source_text {
                 let started = Instant::now();
@@ -731,6 +818,7 @@ impl<'a> TypeInferencer<'a> {
         let visit_callable_body_count = self.stats.visit_callable_body_count.get();
         let merge_control_flow_env_ms = self.stats.merge_control_flow_env_ms.get();
         let merge_control_flow_env_count = self.stats.merge_control_flow_env_count.get();
+        let index_entry_count = self.stats.type_entry_count.get();
         let source_incomplete_member_access_recovery_ms =
             self.stats.source_incomplete_member_access_recovery_ms.get();
         let source_incomplete_member_access_recovery_count = self
@@ -775,11 +863,12 @@ impl<'a> TypeInferencer<'a> {
             incomplete_call_target_recovery_count,
             statement_count = program.statements.len(),
             local_function_summary_count,
-            index_entry_count = facts.type_entries.len(),
+            index_entry_count,
             "semantic_facts: build_facts_internal finished"
         );
 
         SemanticFactsBuildProfiled {
+            diagnostics_type_hints: self.take_direct_diagnostics_type_hints(),
             profile: TypeIndexBuildProfile {
                 seed_module_context_ms,
                 local_function_summaries_ms,
@@ -813,7 +902,7 @@ impl<'a> TypeInferencer<'a> {
                 total_ms: started.elapsed().as_millis(),
                 statement_count: program.statements.len() as u64,
                 local_function_summary_count,
-                index_entry_count: facts.type_entries.len() as u64,
+                index_entry_count,
             },
             facts,
         }
@@ -1255,9 +1344,13 @@ impl<'a> TypeInferencer<'a> {
                 span,
             } => {
                 let value_type = self.infer_expr(value, env, facts);
-                facts
-                    .assignment_value_type_by_span
-                    .insert(*span, value_type.clone());
+                if self.materializes_exact_semantic_artifacts() {
+                    facts
+                        .assignment_value_type_by_span
+                        .insert(*span, value_type.clone());
+                } else {
+                    self.record_diagnostics_assignment_value_type(*span, &value_type);
+                }
                 if let Expression::Identifier { name, .. } = target {
                     let key = name.to_lowercase();
                     let description_type = self.extract_type_from_description_expr(value, env);
@@ -1421,6 +1514,10 @@ impl<'a> TypeInferencer<'a> {
         resolution: TypeResolution,
         facts: &mut SemanticFacts,
     ) {
+        Self::add_u64_stat(&self.stats.type_entry_count, 1);
+        if self.materializes_diagnostics_type_hints_directly() {
+            return;
+        }
         facts
             .type_entries
             .push(SemanticTypeEntry { span, resolution });
@@ -1465,9 +1562,16 @@ impl<'a> TypeInferencer<'a> {
             } => {
                 let object_resolution = self.infer_expr(object, env, facts);
                 let resolution = self.infer_property_access(&object_resolution, property);
-                facts
-                    .member_access_object_type_by_span
-                    .insert(expr_span(expr), object_resolution);
+                if self.materializes_exact_semantic_artifacts() {
+                    facts
+                        .member_access_object_type_by_span
+                        .insert(expr_span(expr), object_resolution);
+                } else {
+                    self.record_diagnostics_member_access_object_type(
+                        expr_span(expr),
+                        &object_resolution,
+                    );
+                }
                 resolution
             }
             Expression::Call { function, args, .. } => {
@@ -1629,13 +1733,18 @@ impl<'a> TypeInferencer<'a> {
         facts: &mut SemanticFacts,
         call_span: bsl_shared::ir::Span,
     ) -> TypeResolution {
+        let diagnostics_call_span = self.diagnostics_call_hint_span(function, call_span);
         let arg_types: Vec<TypeResolution> = args
             .iter()
             .map(|arg| self.infer_expr(arg, env, facts))
             .collect();
-        facts
-            .call_arg_types_by_span
-            .insert(call_span, arg_types.clone());
+        if self.materializes_exact_semantic_artifacts() {
+            facts
+                .call_arg_types_by_span
+                .insert(call_span, arg_types.clone());
+        } else {
+            self.record_diagnostics_call_arg_types(diagnostics_call_span, &arg_types);
+        }
 
         match function {
             Expression::Identifier { name, .. } => {
@@ -1645,7 +1754,9 @@ impl<'a> TypeInferencer<'a> {
                             target.signature.is_some() || target.definition_location.is_some()
                         })
                 {
-                    facts.call_method_targets_by_span.insert(call_span, target);
+                    if self.materializes_exact_semantic_artifacts() {
+                        facts.call_method_targets_by_span.insert(call_span, target);
+                    }
                 }
                 self.infer_global_function_call(name, env)
             }
@@ -1658,9 +1769,13 @@ impl<'a> TypeInferencer<'a> {
                         .filter(|target| {
                             target.signature.is_some() || target.definition_location.is_some()
                         });
-                facts
-                    .call_receiver_type_by_span
-                    .insert(call_span, receiver.clone());
+                if self.materializes_exact_semantic_artifacts() {
+                    facts
+                        .call_receiver_type_by_span
+                        .insert(call_span, receiver.clone());
+                } else {
+                    self.record_diagnostics_call_receiver_type(diagnostics_call_span, &receiver);
+                }
                 if let Some(resolved) = self.try_apply_universal_collection_method(
                     object, property, args, &arg_types, env, facts,
                 ) {
@@ -3671,34 +3786,42 @@ pub(crate) fn materialize_semantic_facts_with_path_profiled(
     profiled.profile
 }
 
-pub(crate) fn build_diagnostics_semantic_facts_with_path_and_checkpoint(
+pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint(
+    program: &SemanticProgram,
     parsed_program: &Program,
     file_path: &str,
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
-) -> SemanticFacts {
-    build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+) -> bsl_diagnostics::SemanticTypeHints {
+    build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
+        program,
         parsed_program,
         file_path,
         deps,
         cancellation_checkpoint,
     )
-    .facts
+    .hints
 }
 
-pub(crate) fn build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
+    program: &SemanticProgram,
     parsed_program: &Program,
     file_path: &str,
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
-) -> DiagnosticsOnlySemanticFactsBuildProfiled {
-    TypeInferencer::with_materialization_mode_and_checkpoint(
+) -> DiagnosticsOnlyTypeHintsBuildProfiled {
+    let inferencer = TypeInferencer::with_materialization_mode_and_checkpoint(
         deps,
         SemanticMaterializationMode::DiagnosticsOnly,
         Some(cancellation_checkpoint),
-    )
-    .build_facts_internal(parsed_program, file_path, None, None)
-    .into()
+    );
+    let profiled = inferencer.build_facts_internal(parsed_program, file_path, None, None);
+    DiagnosticsOnlyTypeHintsBuildProfiled {
+        hints: profiled
+            .diagnostics_type_hints
+            .unwrap_or_else(|| crate::semantic_type_hints_from_facts(program, &profiled.facts)),
+        profile: profiled.profile.into(),
+    }
 }
 
 pub(crate) fn materialize_semantic_facts_with_path_profiled_and_checkpoint(
@@ -3766,15 +3889,6 @@ impl From<TypeIndexBuildProfile> for crate::DiagnosticsOnlySemanticFactsBuildPro
             local_function_summary_count: profile.local_function_summary_count,
             index_entry_count: profile.index_entry_count,
             total_ms: profile.total_ms,
-        }
-    }
-}
-
-impl From<SemanticFactsBuildProfiled> for DiagnosticsOnlySemanticFactsBuildProfiled {
-    fn from(profiled: SemanticFactsBuildProfiled) -> Self {
-        Self {
-            facts: profiled.facts,
-            profile: profiled.profile.into(),
         }
     }
 }

@@ -1226,17 +1226,25 @@ impl AnalysisV2 {
             .expect("file present for semantic diagnostics program");
         let program = program_profiled.program;
         let file_path = file.path(&self.db);
+        let source_text = file.text(&self.db);
         let checkpoint = || cancellation_checkpoint(&self.db);
         let diagnostics_only_profiled = cancellable(|| {
             type_inference_v2::build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
                 program.as_ref(),
                 &parsed.program,
+                source_text.as_ref(),
                 file_path.as_ref(),
                 deps_data.clone(),
                 &checkpoint,
             )
         })?;
         let type_hints = Arc::new(diagnostics_only_profiled.hints);
+        let mut ir_build_profile = Some(program_profiled.profile);
+        if let Some(fallback_ir_build_profile) = diagnostics_only_profiled.fallback_ir_build_profile
+        {
+            ir_build_profile =
+                merge_ir_build_profiles(ir_build_profile, fallback_ir_build_profile);
+        }
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();
@@ -1260,13 +1268,13 @@ impl AnalysisV2 {
                 flow_sensitive_ms: 0,
                 total_ms: started.elapsed().as_millis(),
                 parse_source: Some(parse_source),
-                materialization_path: Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly),
+                materialization_path: Some(diagnostics_only_profiled.materialization_path),
                 ir_source: program_profiled.source,
             },
             diagnostics_only_semantic_facts_build_profile: Some(
-                diagnostics_only_profiled.profile,
+                diagnostics_only_profiled.diagnostics_only_semantic_facts_build_profile,
             ),
-            ir_build_profile: Some(program_profiled.profile),
+            ir_build_profile,
         }))
     }
 

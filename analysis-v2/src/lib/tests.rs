@@ -1660,6 +1660,118 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
 }
 
 #[test]
+fn semantic_diagnostics_profiled_fall_back_to_full_semantic_facts_when_proof_fails() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(320);
+    let text: Arc<str> = Arc::from(
+        "Procedure Test()\n\
+             LocalArray = New Array;\n\
+             LocalArray.UnknownMethod(UnknownVar);\n\
+             EndProcedure",
+    );
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-profiled-full-fallback"),
+        deps: default_semantic_deps(),
+    });
+    host.apply_change(Change::SetFileWithSnapshot {
+        file_id,
+        text: text.clone(),
+        version: 1,
+        path: Arc::from("semantic-profiled-full-fallback.bsl"),
+        parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+    });
+
+    let _fallback_guard =
+        crate::type_inference_v2::ForcedDiagnosticsTypeHintsFallbackGuard::enable();
+    let analysis = host.analysis();
+    let program = analysis
+        .ir(file_id)
+        .unwrap()
+        .expect("full semantic program for fallback parity");
+    let expected_hints = semantic_type_hints_from_program(program.as_ref());
+    let deps_data = analysis.deps.data(&analysis.db).0.clone();
+    let detail_level = analysis.settings.diagnostics_detail_level(&analysis.db);
+    let expected_diagnostics =
+        collect_semantic_diagnostics_from_program(program.clone(), deps_data, detail_level);
+
+    let hints = analysis
+        .diagnostics_type_hints(file_id)
+        .unwrap()
+        .expect("diagnostics type hints");
+    assert_eq!(
+        hints.assignment_value_type_by_span,
+        expected_hints.assignment_value_type_by_span
+    );
+    assert_eq!(
+        hints.call_receiver_type_by_span,
+        expected_hints.call_receiver_type_by_span
+    );
+    assert_eq!(
+        hints.call_arg_types_by_span,
+        expected_hints.call_arg_types_by_span
+    );
+    assert_eq!(
+        hints.member_access_object_type_by_span,
+        expected_hints.member_access_object_type_by_span
+    );
+
+    let profiled = analysis
+        .semantic_diagnostics_profiled(file_id)
+        .unwrap()
+        .expect("profiled semantic diagnostics with forced fallback");
+    assert_eq!(
+        profiled.profile.parse_source,
+        Some(SemanticDiagnosticsParseSource::Snapshot)
+    );
+    assert_eq!(
+        profiled.profile.ir_source,
+        Some(IrArtifactSource::SnapshotBuild)
+    );
+    assert_eq!(
+        profiled.profile.materialization_path,
+        Some(SemanticDiagnosticsMaterializationPath::FullSemanticFactsFallback)
+    );
+    let ir_build = profiled
+        .ir_build_profile
+        .expect("fallback semantic diagnostics must expose IR build profile");
+    assert!(
+        ir_build.semantic_facts_statement_count > 0,
+        "fallback semantic diagnostics must expose full semantic-facts statement coverage"
+    );
+    assert!(
+        ir_build.semantic_facts_index_entry_count > 0,
+        "fallback semantic diagnostics must expose full semantic-facts index-entry coverage"
+    );
+    let diagnostics_only_build = profiled
+        .diagnostics_only_semantic_facts_build_profile
+        .expect("fallback semantic diagnostics must still expose attempted diagnostics-only build");
+    assert!(
+        diagnostics_only_build.statement_count > 0,
+        "fallback semantic diagnostics must preserve truthful diagnostics-only attempt observability"
+    );
+
+    let normalize = |diagnostics: &[TypeDiagnostic]| {
+        diagnostics
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic.span.start,
+                    diagnostic.span.end,
+                    diagnostic.severity,
+                    diagnostic.message.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        normalize(profiled.diagnostics.as_ref()),
+        normalize(expected_diagnostics.as_slice())
+    );
+}
+
+#[test]
 fn semantic_diagnostics_profiled_do_not_publish_completion_head_artifact() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(313);

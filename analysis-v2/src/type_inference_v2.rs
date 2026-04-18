@@ -112,13 +112,39 @@ struct SemanticFactsBuildProfiled {
 
 pub(crate) struct DiagnosticsOnlyTypeHintsBuildProfiled {
     pub(crate) hints: bsl_diagnostics::SemanticTypeHints,
-    pub(crate) profile: crate::DiagnosticsOnlySemanticFactsBuildProfile,
+    pub(crate) diagnostics_only_semantic_facts_build_profile:
+        crate::DiagnosticsOnlySemanticFactsBuildProfile,
+    pub(crate) fallback_ir_build_profile: Option<crate::IrBuildProfile>,
+    pub(crate) materialization_path: crate::SemanticDiagnosticsMaterializationPath,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SemanticMaterializationMode {
     Full,
     DiagnosticsOnly,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    static FORCE_DIAGNOSTICS_TYPE_HINTS_FALLBACK_FOR_TESTS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct ForcedDiagnosticsTypeHintsFallbackGuard;
+
+#[cfg(test)]
+impl ForcedDiagnosticsTypeHintsFallbackGuard {
+    pub(crate) fn enable() -> Self {
+        FORCE_DIAGNOSTICS_TYPE_HINTS_FALLBACK_FOR_TESTS.with(|flag| flag.set(true));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedDiagnosticsTypeHintsFallbackGuard {
+    fn drop(&mut self) {
+        FORCE_DIAGNOSTICS_TYPE_HINTS_FALLBACK_FOR_TESTS.with(|flag| flag.set(false));
+    }
 }
 
 impl TypeIndex {
@@ -3789,6 +3815,7 @@ pub(crate) fn materialize_semantic_facts_with_path_profiled(
 pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint(
     program: &SemanticProgram,
     parsed_program: &Program,
+    source_text: &str,
     file_path: &str,
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
@@ -3796,6 +3823,7 @@ pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint(
     build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
         program,
         parsed_program,
+        source_text,
         file_path,
         deps,
         cancellation_checkpoint,
@@ -3803,24 +3831,137 @@ pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint(
     .hints
 }
 
+fn diagnostics_type_hints_cover_program(
+    program: &SemanticProgram,
+    hints: &bsl_diagnostics::SemanticTypeHints,
+) -> bool {
+    #[cfg(test)]
+    if FORCE_DIAGNOSTICS_TYPE_HINTS_FALLBACK_FOR_TESTS.with(Cell::get) {
+        return false;
+    }
+
+    use bsl_shared::ir::SemanticNodeKind;
+
+    program.nodes.iter().all(|node| match &node.kind {
+        SemanticNodeKind::Assignment { .. } => {
+            hints.assignment_value_type_by_span.contains_key(&node.span)
+        }
+        SemanticNodeKind::FunctionCall {
+            object_name,
+            object_node,
+            ..
+        } => {
+            hints.call_arg_types_by_span.contains_key(&node.span)
+                && (object_name.is_none() && object_node.is_none()
+                    || hints.call_receiver_type_by_span.contains_key(&node.span))
+        }
+        SemanticNodeKind::MemberAccess { .. } => hints
+            .member_access_object_type_by_span
+            .contains_key(&node.span),
+        _ => true,
+    })
+}
+
+fn ir_build_profile_from_semantic_facts_materialization(
+    profile: TypeIndexBuildProfile,
+    semantic_facts_materialize_ms: u128,
+) -> crate::IrBuildProfile {
+    crate::IrBuildProfile {
+        ast_to_ir_convert_ms: 0,
+        semantic_facts_materialize_ms,
+        semantic_facts_seed_module_context_ms: profile.seed_module_context_ms,
+        semantic_facts_local_function_summaries_ms: profile.local_function_summaries_ms,
+        semantic_facts_local_function_summaries_prep_ms: profile.local_function_summaries_prep_ms,
+        semantic_facts_local_function_summaries_fixed_point_ms: profile
+            .local_function_summaries_fixed_point_ms,
+        semantic_facts_local_function_summaries_snapshot_build_ms: profile
+            .local_function_summaries_snapshot_build_ms,
+        semantic_facts_local_function_summaries_body_infer_ms: profile
+            .local_function_summaries_body_infer_ms,
+        semantic_facts_local_function_summaries_function_count: profile
+            .local_function_summaries_function_count,
+        semantic_facts_local_function_summaries_scc_count: profile
+            .local_function_summaries_scc_count,
+        semantic_facts_local_function_summaries_fixed_point_iteration_count: profile
+            .local_function_summaries_fixed_point_iteration_count,
+        semantic_facts_local_function_summaries_singleton_fast_path_count: profile
+            .local_function_summaries_singleton_fast_path_count,
+        semantic_facts_local_function_summaries_recursive_scc_count: profile
+            .local_function_summaries_recursive_scc_count,
+        semantic_facts_visit_statements_ms: profile.visit_statements_ms,
+        semantic_facts_visit_callable_body_ms: profile.visit_callable_body_ms,
+        semantic_facts_visit_callable_body_count: profile.visit_callable_body_count,
+        semantic_facts_merge_control_flow_env_ms: profile.merge_control_flow_env_ms,
+        semantic_facts_merge_control_flow_env_count: profile.merge_control_flow_env_count,
+        semantic_facts_source_incomplete_member_access_recovery_ms: profile
+            .source_incomplete_member_access_recovery_ms,
+        semantic_facts_source_incomplete_member_access_recovery_count: profile
+            .source_incomplete_member_access_recovery_count,
+        semantic_facts_syntax_incomplete_member_access_recovery_ms: profile
+            .syntax_incomplete_member_access_recovery_ms,
+        semantic_facts_syntax_incomplete_member_access_recovery_count: profile
+            .syntax_incomplete_member_access_recovery_count,
+        semantic_facts_incomplete_call_target_recovery_ms: profile
+            .incomplete_call_target_recovery_ms,
+        semantic_facts_incomplete_call_target_recovery_count: profile
+            .incomplete_call_target_recovery_count,
+        semantic_facts_statement_count: profile.statement_count,
+        semantic_facts_local_function_summary_count: profile.local_function_summary_count,
+        semantic_facts_index_entry_count: profile.index_entry_count,
+        total_ms: semantic_facts_materialize_ms,
+    }
+}
+
 pub(crate) fn build_diagnostics_type_hints_with_path_and_checkpoint_profiled(
     program: &SemanticProgram,
     parsed_program: &Program,
+    source_text: &str,
     file_path: &str,
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
 ) -> DiagnosticsOnlyTypeHintsBuildProfiled {
     let inferencer = TypeInferencer::with_materialization_mode_and_checkpoint(
-        deps,
+        deps.clone(),
         SemanticMaterializationMode::DiagnosticsOnly,
         Some(cancellation_checkpoint),
     );
     let profiled = inferencer.build_facts_internal(parsed_program, file_path, None, None);
+    let diagnostics_only_semantic_facts_build_profile = profiled.profile.into();
+    let hints = profiled
+        .diagnostics_type_hints
+        .unwrap_or_else(|| crate::semantic_type_hints_from_facts(program, &profiled.facts));
+    if diagnostics_type_hints_cover_program(program, &hints) {
+        return DiagnosticsOnlyTypeHintsBuildProfiled {
+            hints,
+            diagnostics_only_semantic_facts_build_profile,
+            fallback_ir_build_profile: None,
+            materialization_path: crate::SemanticDiagnosticsMaterializationPath::DiagnosticsOnly,
+        };
+    }
+
+    let materialize_started = Instant::now();
+    let mut fallback_program = program.clone();
+    let fallback_profile = materialize_semantic_facts_with_path_profiled_and_checkpoint(
+        &mut fallback_program,
+        parsed_program,
+        source_text,
+        file_path,
+        deps,
+        cancellation_checkpoint,
+    );
+    let semantic_facts_materialize_ms = materialize_started.elapsed().as_millis();
     DiagnosticsOnlyTypeHintsBuildProfiled {
-        hints: profiled
-            .diagnostics_type_hints
-            .unwrap_or_else(|| crate::semantic_type_hints_from_facts(program, &profiled.facts)),
-        profile: profiled.profile.into(),
+        hints: crate::semantic_type_hints_from_facts(
+            &fallback_program,
+            &fallback_program.semantic_facts,
+        ),
+        diagnostics_only_semantic_facts_build_profile,
+        fallback_ir_build_profile: Some(ir_build_profile_from_semantic_facts_materialization(
+            fallback_profile,
+            semantic_facts_materialize_ms,
+        )),
+        materialization_path:
+            crate::SemanticDiagnosticsMaterializationPath::FullSemanticFactsFallback,
     }
 }
 

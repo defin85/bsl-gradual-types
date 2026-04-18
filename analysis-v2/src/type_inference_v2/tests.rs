@@ -1154,6 +1154,71 @@ fn mutually_recursive_local_summaries_reuse_stable_out_of_scc_semantics() {
 }
 
 #[test]
+fn local_procedure_cycles_do_not_force_local_function_summary_convergence() {
+    let source = r#"Процедура P()
+    F();
+КонецПроцедуры
+
+Функция F()
+    P();
+    Возврат 1;
+КонецФункции
+
+Процедура Тест()
+    x = F();
+КонецПроцедуры
+"#;
+    let deps = deps_with_array_method();
+    let profile = semantic_facts_profile(source, "test.bsl", deps.clone());
+    assert_eq!(profile.local_function_summaries_function_count, 3);
+    assert_eq!(profile.local_function_summaries_scc_count, 3);
+    assert_eq!(
+        profile.local_function_summaries_fixed_point_iteration_count,
+        0
+    );
+    assert_eq!(
+        profile.local_function_summaries_singleton_fast_path_count,
+        3
+    );
+    assert_eq!(profile.local_function_summaries_recursive_scc_count, 0);
+
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+    let function_offset = source.rfind("F()").expect("test call") as u32;
+    let result = index
+        .type_at_byte_offset(function_offset)
+        .expect("type at call");
+    assert_eq!(result.type_name(), "Число");
+
+    let function_target = index
+        .call_method_target_at_byte_offset(function_offset)
+        .expect("function call target");
+    assert_eq!(function_target.method_name, "F");
+    assert_eq!(
+        function_target
+            .signature
+            .as_ref()
+            .and_then(|signature| signature.return_type.as_deref()),
+        Some("Число")
+    );
+    assert!(function_target.definition_location.is_some());
+
+    let procedure_offset = source.find("P();").expect("procedure call") as u32;
+    let procedure_target = index
+        .call_method_target_at_byte_offset(procedure_offset)
+        .expect("procedure call target");
+    assert_eq!(procedure_target.method_name, "P");
+    assert_eq!(
+        procedure_target
+            .signature
+            .as_ref()
+            .and_then(|signature| signature.return_type.as_deref()),
+        None
+    );
+    assert!(procedure_target.definition_location.is_some());
+}
+
+#[test]
 fn substitutes_placeholder_return_type_for_document_method_call() {
     let source = r#"Процедура Тест()
     Док = Документы.РеализацияТоваровУслуг.СоздатьДокумент();

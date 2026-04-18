@@ -447,10 +447,12 @@ pub fn diagnostics_type_hints(
 
     let file_path = file.path(db).to_string();
     let program = diagnostics_program(db, file, deps, settings).0;
+    let source_text = file.text(db);
     let checkpoint = || cancellation_checkpoint(db);
     let hints = type_inference_v2::build_diagnostics_type_hints_with_path_and_checkpoint(
         program.as_ref(),
         &parsed.program,
+        source_text.as_ref(),
         &file_path,
         deps_data,
         &checkpoint,

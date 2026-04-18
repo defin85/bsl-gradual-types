@@ -8731,6 +8731,137 @@ async fn p24d_diagnostics_save_timeline_exports_diagnostics_only_semantic_facts_
 }
 
 #[tokio::test]
+async fn p24e_diagnostics_save_timeline_exports_full_semantic_facts_fallback_materialization_path()
+{
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p24e-full-semantic-facts-fallback-query-breakdown.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(247),
+        diagnostics_generation: 47,
+        save_cycle_sequence: 15,
+        requested_version: 17,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 11,
+                syntax_work_mode: Some("recomputed".to_string()),
+                syntax_diagnostics_query_ms: Some(5),
+                publish_wait_ms: Some(1),
+                ..Default::default()
+            }),
+        },
+    );
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "idle_heavy".to_string(),
+                publish_kind: "full".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 360,
+                syntax_work_mode: Some("reused".to_string()),
+                semantic_path: Some("ready_artifacts".to_string()),
+                semantic_parse_source: Some("snapshot".to_string()),
+                semantic_ir_source: Some("snapshot_build".to_string()),
+                semantic_materialization_path: Some("full_semantic_facts_fallback".to_string()),
+                semantic_diagnostics_query_ms: Some(63),
+                semantic_diagnostics_inputs_ms: Some(4),
+                semantic_diagnostics_parse_result_ms: Some(22),
+                semantic_diagnostics_ir_ms: Some(31),
+                semantic_diagnostics_collect_ms: Some(6),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms: Some(12),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms: Some(
+                    5,
+                ),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count: Some(8),
+                semantic_diagnostics_ir_semantic_facts_materialize_ms: Some(19),
+                semantic_diagnostics_ir_semantic_facts_seed_module_context_ms: Some(3),
+                semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms: Some(7),
+                semantic_diagnostics_ir_semantic_facts_visit_statements_ms: Some(4),
+                semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms: Some(2),
+                semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms: Some(1),
+                semantic_diagnostics_ir_semantic_facts_statement_count: Some(10),
+                semantic_diagnostics_ir_semantic_facts_local_function_summary_count: Some(2),
+                semantic_diagnostics_ir_semantic_facts_index_entry_count: Some(8),
+                publish_wait_ms: Some(2),
+                ..Default::default()
+            }),
+        },
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    let followup_publish = trace
+        .followup_publish
+        .expect("idle_heavy publish must be retained as followup publish");
+    assert_eq!(
+        followup_publish.semantic_materialization_path.as_deref(),
+        Some("full_semantic_facts_fallback")
+    );
+    assert_eq!(
+        trace.followup_semantic_materialization_path.as_deref(),
+        Some("full_semantic_facts_fallback")
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms,
+        Some(12)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_materialize_ms,
+        Some(19)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_seed_module_context_ms,
+        Some(3)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms,
+        Some(7)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_visit_statements_ms,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms,
+        Some(1)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_statement_count,
+        Some(10)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_local_function_summary_count,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_index_entry_count,
+        Some(8)
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_skips_relief_valve_for_non_exact_current_producer() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24-ready-snapshot-relief-skip-non-exact.bsl").expect("uri");

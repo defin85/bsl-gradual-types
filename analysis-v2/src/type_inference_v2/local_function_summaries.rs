@@ -529,13 +529,17 @@ impl TypeInferencer<'_> {
         let mut may_fallthrough: Vec<bool> = Vec::with_capacity(n);
         for (_, def) in &function_defs {
             self.cancellation_checkpoint();
-            may_fallthrough.push(!block_always_exits(def.body));
+            may_fallthrough.push(!def.is_function || !block_always_exits(def.body));
         }
 
-        // Call graph edges: caller -> callee (by index), only for local functions in this file.
+        // Return-type convergence only depends on local functions. Procedures still get summary
+        // entries for targets/signatures, but they do not participate in the return-type graph.
         let mut edges: Vec<Vec<usize>> = vec![Vec::new(); n];
         for (caller_idx, (_, def)) in function_defs.iter().enumerate() {
             self.cancellation_checkpoint();
+            if !def.is_function {
+                continue;
+            }
             let mut called = BTreeSet::<String>::new();
             for stmt in def.body {
                 self.cancellation_checkpoint();
@@ -543,6 +547,9 @@ impl TypeInferencer<'_> {
             }
             for callee in called {
                 if let Some(&callee_idx) = name_to_idx.get(&callee) {
+                    if !function_defs[callee_idx].1.is_function {
+                        continue;
+                    }
                     edges[caller_idx].push(callee_idx);
                 }
             }
@@ -686,6 +693,17 @@ impl TypeInferencer<'_> {
                 singleton_fast_path_count = singleton_fast_path_count.saturating_add(1);
                 let node_idx = nodes[0];
                 let (_name_lower, def) = &function_defs[node_idx];
+
+                if !def.is_function {
+                    let mut return_types = ReturnTypeSet::default();
+                    return_types.insert_named("Неопределено");
+                    states[node_idx].return_types = return_types;
+                    stable_summaries.borrow_mut().insert(
+                        function_defs[node_idx].0.clone(),
+                        summary_for_idx(node_idx, &function_defs, &states, &may_fallthrough),
+                    );
+                    continue;
+                }
 
                 let mut fn_env = base_env.clone();
                 fn_env.local_function_summaries =

@@ -160,9 +160,13 @@ impl ReadySnapshotContinuationReasonV2 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ReadySnapshotContinuationObservationV2 {
     phase: Option<super::super::ReadyParseSnapshotAttributionPhaseV2>,
+    phase_elapsed_ms: Option<u64>,
     parse_exec_subphase: Option<super::super::ReadyParseSnapshotParseExecSubphaseV2>,
+    parse_exec_subphase_elapsed_ms: Option<u64>,
     core_build_checkpoint: Option<super::super::ReadyParseSnapshotCoreBuildCheckpointV2>,
+    core_build_checkpoint_elapsed_ms: Option<u64>,
     assembly_checkpoint: Option<super::super::ReadyParseSnapshotAssemblyCheckpointV2>,
+    assembly_checkpoint_elapsed_ms: Option<u64>,
 }
 
 impl ReadySnapshotContinuationObservationV2 {
@@ -171,9 +175,13 @@ impl ReadySnapshotContinuationObservationV2 {
     ) -> Self {
         Self {
             phase: snapshot.current_phase,
+            phase_elapsed_ms: snapshot.current_phase_elapsed_ms,
             parse_exec_subphase: snapshot.current_parse_exec_subphase,
+            parse_exec_subphase_elapsed_ms: snapshot.current_parse_exec_subphase_elapsed_ms,
             core_build_checkpoint: snapshot.current_core_build_checkpoint,
+            core_build_checkpoint_elapsed_ms: snapshot.current_core_build_checkpoint_elapsed_ms,
             assembly_checkpoint: snapshot.current_assembly_checkpoint,
+            assembly_checkpoint_elapsed_ms: snapshot.current_assembly_checkpoint_elapsed_ms,
         }
     }
 
@@ -190,7 +198,26 @@ impl ReadySnapshotContinuationObservationV2 {
     }
 
     fn progressed_since(self, previous: Self) -> bool {
-        self != previous
+        self.phase != previous.phase
+            || self.parse_exec_subphase != previous.parse_exec_subphase
+            || self.core_build_checkpoint != previous.core_build_checkpoint
+            || self.assembly_checkpoint != previous.assembly_checkpoint
+            || self
+                .phase_elapsed_ms
+                .zip(previous.phase_elapsed_ms)
+                .is_some_and(|(current, prior)| current > prior)
+            || self
+                .parse_exec_subphase_elapsed_ms
+                .zip(previous.parse_exec_subphase_elapsed_ms)
+                .is_some_and(|(current, prior)| current > prior)
+            || self
+                .core_build_checkpoint_elapsed_ms
+                .zip(previous.core_build_checkpoint_elapsed_ms)
+                .is_some_and(|(current, prior)| current > prior)
+            || self
+                .assembly_checkpoint_elapsed_ms
+                .zip(previous.assembly_checkpoint_elapsed_ms)
+                .is_some_and(|(current, prior)| current > prior)
     }
 }
 

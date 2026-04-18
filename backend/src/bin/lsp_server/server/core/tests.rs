@@ -9590,6 +9590,159 @@ async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_afte
 }
 
 #[tokio::test]
+async fn p24_diagnostics_save_timeline_continues_still_current_before_first_parse_exec_subphase() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse(
+        "file:///p24-ready-snapshot-relief-continued-before-first-parse-exec-subphase.bsl",
+    )
+    .expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1462);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 362,
+        save_cycle_sequence: 122,
+        requested_version: 142,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+    let server_for_ready = server.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(550)).await;
+        let parse_snapshot = parse_snapshot_for_test(
+            file_id,
+            key.requested_version,
+            exact_text.as_ref(),
+            Vec::new(),
+            false,
+            None,
+        );
+        let ready_state = ReadyParseSnapshotStateV2 {
+            text: exact_text,
+            parse_snapshot,
+            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+            syntax_errors_complete: true,
+            phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2 {
+                parse_exec_ms: Some(4300),
+                parse_exec_core_parse_build_ms: None,
+                parse_exec_core_build_parser_tree_build_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms:
+                    None,
+                parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms:
+                    None,
+                parse_exec_core_build_tree_cache_install_ms: None,
+                parse_exec_optional_cache_enrichment_ms: None,
+                post_parse_pre_materialization_ms: None,
+                ready_install_ms: Some(1),
+                document_symbol_side_work_ms: None,
+            },
+            program_lowering_summary: None,
+        };
+        server_for_ready
+            .latest_ready_parse_snapshots_v2
+            .write()
+            .await
+            .insert(file_id, ready_state);
+        control.materialized_notify.notify_waiters();
+    });
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        disposition,
+        Some(bsl_runtime::application::DiagnosticsDisposition::Published)
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("continued_still_current")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+}
+
+#[tokio::test]
 async fn p26_diagnostics_save_timeline_records_post_ready_publish_gate_separately_from_apply_lag() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p26-post-ready-publish-gate.bsl").expect("uri");

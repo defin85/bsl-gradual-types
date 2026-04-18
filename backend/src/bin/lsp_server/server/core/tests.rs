@@ -6738,6 +6738,7 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_version_mismatch_on_sta
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -6926,6 +6927,7 @@ async fn p7_diagnostics_save_timeline_records_wait_probe_superseded_when_newer_c
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -8267,6 +8269,7 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -8339,6 +8342,7 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: Some(1),
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: Some(5),
                 publish_wait_ms: Some(2),
+                ..Default::default()
             }),
         },
     );
@@ -8478,6 +8482,247 @@ async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_break
     assert_eq!(
         followup_publish.semantic_diagnostics_ir_semantic_facts_index_entry_count,
         Some(5)
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+}
+
+#[tokio::test]
+async fn p24d_diagnostics_save_timeline_exports_diagnostics_only_semantic_facts_breakdown() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p24d-diagnostics-only-semantic-facts-query-breakdown.bsl")
+        .expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(246),
+        diagnostics_generation: 46,
+        save_cycle_sequence: 14,
+        requested_version: 16,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 12,
+                syntax_work_mode: Some("recomputed".to_string()),
+                syntax_diagnostics_query_ms: Some(6),
+                publish_wait_ms: Some(1),
+                ..Default::default()
+            }),
+        },
+    );
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "idle_heavy".to_string(),
+                publish_kind: "full".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 340,
+                syntax_work_mode: Some("reused".to_string()),
+                semantic_path: Some("ready_artifacts".to_string()),
+                semantic_parse_source: Some("snapshot".to_string()),
+                semantic_ir_source: Some("snapshot_build".to_string()),
+                semantic_materialization_path: Some("diagnostics_only".to_string()),
+                runtime_queue_wait_ms: Some(2),
+                blocking_queue_wait_ms: Some(5),
+                wait_for_file_version_ms: Some(9),
+                snapshot_with_deps_ms: Some(33),
+                semantic_diagnostics_query_ms: Some(47),
+                semantic_diagnostics_inputs_ms: Some(4),
+                semantic_diagnostics_parse_result_ms: Some(21),
+                semantic_diagnostics_ir_ms: Some(29),
+                semantic_diagnostics_collect_ms: Some(7),
+                semantic_diagnostics_ir_ast_to_ir_convert_ms: Some(8),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms: Some(17),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms:
+                    Some(2),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms:
+                    Some(9),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms:
+                    Some(1),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms:
+                    Some(4),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms:
+                    Some(2),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms:
+                    Some(3),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count:
+                    Some(4),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count:
+                    Some(2),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+                    Some(5),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count:
+                    Some(1),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count:
+                    Some(1),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms:
+                    Some(5),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms:
+                    Some(4),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms:
+                    Some(2),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_count:
+                    Some(6),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_count:
+                    Some(7),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_statement_count:
+                    Some(13),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summary_count:
+                    Some(4),
+                semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count:
+                    Some(9),
+                publish_wait_ms: Some(2),
+                ..Default::default()
+            }),
+        },
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    let followup_publish = trace
+        .followup_publish
+        .expect("idle_heavy publish must be retained as followup publish");
+    assert_eq!(
+        followup_publish.semantic_materialization_path.as_deref(),
+        Some("diagnostics_only")
+    );
+    assert_eq!(
+        trace.followup_semantic_materialization_path.as_deref(),
+        Some("diagnostics_only")
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms,
+        Some(17)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms,
+        Some(9)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms,
+        Some(1)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms,
+        Some(3)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count,
+        Some(5)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count,
+        Some(1)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count,
+        Some(1)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms,
+        Some(5)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms,
+        Some(2)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_count,
+        Some(6)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_count,
+        Some(7)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_diagnostics_only_semantic_facts_statement_count,
+        Some(13)
+    );
+    assert_eq!(
+        followup_publish
+            .semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summary_count,
+        Some(4)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count,
+        Some(9)
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_materialize_ms,
+        None
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_seed_module_context_ms,
+        None
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms,
+        None
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_visit_statements_ms,
+        None
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms,
+        None
+    );
+    assert_eq!(
+        followup_publish.semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms,
+        None
     );
     assert_eq!(
         trace.followup_semantic_path.as_deref(),
@@ -9237,6 +9482,7 @@ async fn p26_diagnostics_save_timeline_records_post_ready_publish_gate_separatel
         Some("ready_artifacts"),
         Some("snapshot"),
         Some("snapshot_build"),
+        None,
     );
     server.record_diagnostics_save_timeline_followup_blocker_reason(
         &uri,
@@ -9581,6 +9827,7 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(0),
+                ..Default::default()
             }),
         },
     );
@@ -9651,6 +9898,7 @@ async fn p24_diagnostics_save_timeline_preserves_relief_valve_after_terminal_pub
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(0),
+                ..Default::default()
             }),
         },
     );
@@ -14775,6 +15023,7 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -14853,6 +15102,7 @@ async fn p6_diagnostics_save_timeline_preserves_previous_cycle_when_next_did_sav
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -15059,6 +15309,7 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -15137,6 +15388,7 @@ async fn p6_diagnostics_save_timeline_same_requested_version_uses_save_cycle_seq
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
         },
     );
@@ -15271,6 +15523,7 @@ async fn p6_diagnostics_save_timeline_followup_wait_state_ignores_sub_ms_runtime
         Some(Duration::from_micros(950)),
         Some("reused"),
         Some("generic_pipeline"),
+        None,
         None,
         None,
     );
@@ -55136,6 +55389,19 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_str()),
             Some("snapshot")
         );
+        let followup_semantic_materialization_path = ready_artifacts_publish
+            .get("semantic_materialization_path")
+            .and_then(|value| value.as_str())
+            .or_else(|| {
+                timeline
+                    .get("followup_semantic_materialization_path")
+                    .and_then(|value| value.as_str())
+            });
+        assert_eq!(
+            followup_semantic_materialization_path,
+            Some("diagnostics_only"),
+            "p55 must export the traced diagnostics semantic materialization path directly, trace={timeline:?}"
+        );
         let followup_publish_elapsed_ms = ready_artifacts_publish
             .get("elapsed_ms")
             .and_then(|value| value.as_u64());
@@ -55148,8 +55414,11 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         let semantic_diagnostics_collect_ms = ready_artifacts_publish
             .get("semantic_diagnostics_collect_ms")
             .and_then(|value| value.as_u64());
-        let local_function_summaries_ms = ready_artifacts_publish
-            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms")
+        let diagnostics_only_semantic_facts_ms = ready_artifacts_publish
+            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms")
+            .and_then(|value| value.as_u64());
+        let diagnostics_only_local_function_summaries_ms = ready_artifacts_publish
+            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms")
             .and_then(|value| value.as_u64());
         let ready_snapshot_parse_exec_ms = timeline
             .get("followup_ready_snapshot_parse_exec_ms")
@@ -55212,8 +55481,8 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         assert_optional_u64_budget(
             &timeline,
             "p55",
-            "local_function_summaries_ms",
-            local_function_summaries_ms,
+            "diagnostics_only_local_function_summaries_ms",
+            diagnostics_only_local_function_summaries_ms,
             LOCAL_FUNCTION_SUMMARIES_BUDGET_MS,
         );
         if ready_artifacts_publish
@@ -55228,92 +55497,125 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 Some("snapshot_build"),
                 "p55 must attribute live semantic IR to snapshot_build when exporting IR breakdown, trace={timeline:?}"
             );
+            for key in [
+                "semantic_diagnostics_ir_semantic_facts_materialize_ms",
+                "semantic_diagnostics_ir_semantic_facts_seed_module_context_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count",
+                "semantic_diagnostics_ir_semantic_facts_visit_statements_ms",
+                "semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms",
+                "semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms",
+                "semantic_diagnostics_ir_semantic_facts_visit_callable_body_count",
+                "semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_count",
+                "semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms",
+                "semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_count",
+                "semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms",
+                "semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_count",
+                "semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms",
+                "semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_count",
+                "semantic_diagnostics_ir_semantic_facts_statement_count",
+                "semantic_diagnostics_ir_semantic_facts_local_function_summary_count",
+                "semantic_diagnostics_ir_semantic_facts_index_entry_count",
+            ] {
+                assert_eq!(
+                    ready_artifacts_publish
+                        .get(key)
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    0,
+                    "p55 must keep full-path-only semantic facts fields absent or zero on diagnostics_only materialization, key={key}, trace={timeline:?}"
+                );
+            }
             assert!(
                 ready_artifacts_publish
                     .get("semantic_diagnostics_ir_ast_to_ir_convert_ms")
                     .and_then(|value| value.as_u64())
                     .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_materialize_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_seed_module_context_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_visit_statements_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_visit_callable_body_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                     || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_merge_control_flow_env_ms")
-                        .and_then(|value| value.as_u64())
-                        .is_some()
-                    || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_source_incomplete_member_access_recovery_ms")
-                        .and_then(|value| value.as_u64())
-                        .is_some()
-                    || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_syntax_incomplete_member_access_recovery_ms")
-                        .and_then(|value| value.as_u64())
-                        .is_some()
-                    || ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_incomplete_call_target_recovery_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms")
                         .and_then(|value| value.as_u64())
                         .is_some(),
-                "p55 must export at least one non-zero semantic IR leaf subphase when semantic IR latency is observed, trace={timeline:?}"
+                "p55 must export AST->IR or diagnostics-only semantic facts leaf attribution when semantic IR latency is observed, trace={timeline:?}"
             );
-            if ready_artifacts_publish
-                .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_ms")
-                .and_then(|value| value.as_u64())
-                .is_some()
-            {
+            if diagnostics_only_local_function_summaries_ms.is_some() {
                 assert!(
                     ready_artifacts_publish
-                        .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_prep_ms")
+                        .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms")
                         .and_then(|value| value.as_u64())
                         .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_ms")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_snapshot_build_ms")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_body_infer_ms")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_function_count")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_scc_count")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_fixed_point_iteration_count")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_singleton_fast_path_count")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count")
                             .and_then(|value| value.as_u64())
                             .is_some()
                         && ready_artifacts_publish
-                            .get("semantic_diagnostics_ir_semantic_facts_local_function_summaries_recursive_scc_count")
+                            .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count")
                             .and_then(|value| value.as_u64())
                             .is_some(),
-                    "p55 must export local_function_summaries sub-breakdown when that IR subphase is observed, trace={timeline:?}"
+                    "p55 must export diagnostics-only local_function_summaries sub-breakdown when that IR subphase is observed, trace={timeline:?}"
+                );
+            }
+            if let (Some(ir_ms), Some(ast_to_ir_ms), Some(diag_only_ms)) = (
+                semantic_diagnostics_ir_ms,
+                ready_artifacts_publish
+                    .get("semantic_diagnostics_ir_ast_to_ir_convert_ms")
+                    .and_then(|value| value.as_u64()),
+                diagnostics_only_semantic_facts_ms,
+            ) {
+                assert!(
+                    ir_ms >= ast_to_ir_ms.saturating_add(diag_only_ms),
+                    "p55 diagnostics-only facts attribution must stay bounded by total semantic IR latency, trace={timeline:?}"
                 );
             }
         }
@@ -55571,9 +55873,57 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             );
         }
 
+        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("backend crate must live under the workspace root");
+        let baseline_report_path = workspace_root
+            .join("backend")
+            .join("tests")
+            .join("perf")
+            .join("reports")
+            .join("refactor-36-diagnostics-semantic-hints-split-real-conf-big-diagnostics-ready-snapshot-leaf-live.json");
+        let baseline_report = std::fs::read_to_string(&baseline_report_path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+        let baseline_refactor_36_semantic_ir_ms = baseline_report
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("followup_publish_semantic_diagnostics_ir_ms")
+                    .and_then(|value| value.as_u64())
+            });
+        let baseline_refactor_36_ast_to_ir_convert_ms = baseline_report
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("followup_publish_semantic_diagnostics_ir_ast_to_ir_convert_ms")
+                    .and_then(|value| value.as_u64())
+            });
+        let baseline_refactor_36_unattributed_diagnostics_ir_residual_ms =
+            baseline_refactor_36_semantic_ir_ms.zip(baseline_refactor_36_ast_to_ir_convert_ms).map(
+                |(ir_ms, ast_to_ir_ms)| ir_ms.saturating_sub(ast_to_ir_ms),
+            );
+        let current_diagnostics_ir_residual_after_attribution_ms = semantic_diagnostics_ir_ms
+            .zip(
+                ready_artifacts_publish
+                    .get("semantic_diagnostics_ir_ast_to_ir_convert_ms")
+                    .and_then(|value| value.as_u64()),
+            )
+            .zip(diagnostics_only_semantic_facts_ms)
+            .map(|((ir_ms, ast_to_ir_ms), diag_only_ms)| {
+                ir_ms
+                    .saturating_sub(ast_to_ir_ms)
+                    .saturating_sub(diag_only_ms)
+            });
+        let diagnostics_only_semantic_facts_vs_refactor_36_unattributed_delta_ms =
+            diagnostics_only_semantic_facts_ms
+                .zip(baseline_refactor_36_unattributed_diagnostics_ir_residual_ms)
+                .map(|(current_ms, baseline_ms)| current_ms as i64 - baseline_ms as i64);
+
         let report = serde_json::json!({
             "profile": PROFILE_NAME,
             "change_id": change_id,
+            "baseline_refactor_36_report_path": baseline_report_path.display().to_string(),
             "module_path": module_path.display().to_string(),
             "uri": uri.to_string(),
             "did_change_versions": [2, 3],
@@ -55734,7 +56084,11 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "followup_semantic_path": timeline
                 .get("followup_semantic_path")
                 .and_then(|value| value.as_str()),
+            "followup_semantic_materialization_path": timeline
+                .get("followup_semantic_materialization_path")
+                .and_then(|value| value.as_str()),
             "followup_publish_semantic_path": followup_semantic_path,
+            "followup_publish_semantic_materialization_path": followup_semantic_materialization_path,
             "followup_publish_semantic_parse_source": ready_artifacts_publish
                 .get("semantic_parse_source")
                 .and_then(|value| value.as_str()),
@@ -55758,6 +56112,62 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_ast_to_ir_convert_ms": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_ast_to_ir_convert_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms": diagnostics_only_semantic_facts_ms,
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms": diagnostics_only_local_function_summaries_ms,
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_statement_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_statement_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summary_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summary_count")
+                .and_then(|value| value.as_u64()),
+            "followup_publish_semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count": ready_artifacts_publish
+                .get("semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count")
                 .and_then(|value| value.as_u64()),
             "followup_publish_semantic_diagnostics_ir_semantic_facts_materialize_ms": ready_artifacts_publish
                 .get("semantic_diagnostics_ir_semantic_facts_materialize_ms")
@@ -55843,6 +56253,11 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "followup_publish_semantic_diagnostics_query_ms": ready_artifacts_publish
                 .get("semantic_diagnostics_query_ms")
                 .and_then(|value| value.as_u64()),
+            "current_diagnostics_ir_residual_after_attribution_ms": current_diagnostics_ir_residual_after_attribution_ms,
+            "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ms": baseline_refactor_36_semantic_ir_ms,
+            "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ast_to_ir_convert_ms": baseline_refactor_36_ast_to_ir_convert_ms,
+            "baseline_refactor_36_unattributed_diagnostics_ir_residual_ms": baseline_refactor_36_unattributed_diagnostics_ir_residual_ms,
+            "diagnostics_only_semantic_facts_vs_refactor_36_unattributed_delta_ms": diagnostics_only_semantic_facts_vs_refactor_36_unattributed_delta_ms,
             "program_conversion_coherent_with_program_lowering": program_conversion_ms
                 .zip(program_lowering_ms)
                 .map(|(conversion, lowering)| conversion >= lowering),
@@ -55853,9 +56268,6 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "v3_text_len_bytes": v3_text.len(),
             "final_statement_len_bytes": V3_STATEMENT.len(),
         });
-        let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("backend crate must live under the workspace root");
         let report_path = std::env::var("BSL_V2_REAL_CONF_BIG_READY_SNAPSHOT_LEAF_REPORT")
             .map(std::path::PathBuf::from)
             .map(|path| {

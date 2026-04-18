@@ -110,6 +110,12 @@ struct SemanticFactsBuildProfiled {
     profile: TypeIndexBuildProfile,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DiagnosticsOnlySemanticFactsBuildProfiled {
+    pub(crate) facts: SemanticFacts,
+    pub(crate) profile: crate::DiagnosticsOnlySemanticFactsBuildProfile,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SemanticMaterializationMode {
     Full,
@@ -3671,13 +3677,28 @@ pub(crate) fn build_diagnostics_semantic_facts_with_path_and_checkpoint(
     deps: Arc<SemanticDeps>,
     cancellation_checkpoint: &dyn Fn(),
 ) -> SemanticFacts {
+    build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+        parsed_program,
+        file_path,
+        deps,
+        cancellation_checkpoint,
+    )
+    .facts
+}
+
+pub(crate) fn build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+    parsed_program: &Program,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+    cancellation_checkpoint: &dyn Fn(),
+) -> DiagnosticsOnlySemanticFactsBuildProfiled {
     TypeInferencer::with_materialization_mode_and_checkpoint(
         deps,
         SemanticMaterializationMode::DiagnosticsOnly,
         Some(cancellation_checkpoint),
     )
     .build_facts_internal(parsed_program, file_path, None, None)
-    .facts
+    .into()
 }
 
 pub(crate) fn materialize_semantic_facts_with_path_profiled_and_checkpoint(
@@ -3714,6 +3735,48 @@ pub(crate) fn materialize_semantic_facts_with_recovery_with_path_profiled(
     );
     program.semantic_facts = profiled.facts;
     profiled.profile
+}
+
+impl From<TypeIndexBuildProfile> for crate::DiagnosticsOnlySemanticFactsBuildProfile {
+    fn from(profile: TypeIndexBuildProfile) -> Self {
+        Self {
+            seed_module_context_ms: profile.seed_module_context_ms,
+            local_function_summaries_ms: profile.local_function_summaries_ms,
+            local_function_summaries_prep_ms: profile.local_function_summaries_prep_ms,
+            local_function_summaries_fixed_point_ms: profile
+                .local_function_summaries_fixed_point_ms,
+            local_function_summaries_snapshot_build_ms: profile
+                .local_function_summaries_snapshot_build_ms,
+            local_function_summaries_body_infer_ms: profile.local_function_summaries_body_infer_ms,
+            local_function_summaries_function_count: profile
+                .local_function_summaries_function_count,
+            local_function_summaries_scc_count: profile.local_function_summaries_scc_count,
+            local_function_summaries_fixed_point_iteration_count: profile
+                .local_function_summaries_fixed_point_iteration_count,
+            local_function_summaries_singleton_fast_path_count: profile
+                .local_function_summaries_singleton_fast_path_count,
+            local_function_summaries_recursive_scc_count: profile
+                .local_function_summaries_recursive_scc_count,
+            visit_statements_ms: profile.visit_statements_ms,
+            visit_callable_body_ms: profile.visit_callable_body_ms,
+            visit_callable_body_count: profile.visit_callable_body_count,
+            merge_control_flow_env_ms: profile.merge_control_flow_env_ms,
+            merge_control_flow_env_count: profile.merge_control_flow_env_count,
+            statement_count: profile.statement_count,
+            local_function_summary_count: profile.local_function_summary_count,
+            index_entry_count: profile.index_entry_count,
+            total_ms: profile.total_ms,
+        }
+    }
+}
+
+impl From<SemanticFactsBuildProfiled> for DiagnosticsOnlySemanticFactsBuildProfiled {
+    fn from(profiled: SemanticFactsBuildProfiled) -> Self {
+        Self {
+            facts: profiled.facts,
+            profile: profiled.profile.into(),
+        }
+    }
 }
 
 #[cfg(test)]

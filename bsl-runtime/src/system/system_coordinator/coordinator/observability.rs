@@ -648,6 +648,16 @@ impl SystemCoordinator {
             .record_intellisense_v2_semantic_diagnostics_materialization_path(path);
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
+        &self,
+        profile: bsl_analysis_v2::DiagnosticsOnlySemanticFactsBuildProfile,
+    ) {
+        self.observability
+            .record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
+                profile,
+            );
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: std::time::Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,

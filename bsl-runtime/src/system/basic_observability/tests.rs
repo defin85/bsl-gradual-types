@@ -188,6 +188,31 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
         Some(Duration::from_millis(13)),
     );
     observability
+        .record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
+            bsl_analysis_v2::DiagnosticsOnlySemanticFactsBuildProfile {
+                seed_module_context_ms: 17,
+                local_function_summaries_ms: 19,
+                local_function_summaries_prep_ms: 23,
+                local_function_summaries_fixed_point_ms: 29,
+                local_function_summaries_snapshot_build_ms: 31,
+                local_function_summaries_body_infer_ms: 37,
+                local_function_summaries_function_count: 41,
+                local_function_summaries_scc_count: 43,
+                local_function_summaries_fixed_point_iteration_count: 47,
+                local_function_summaries_singleton_fast_path_count: 53,
+                local_function_summaries_recursive_scc_count: 59,
+                visit_statements_ms: 61,
+                visit_callable_body_ms: 67,
+                visit_callable_body_count: 71,
+                merge_control_flow_env_ms: 73,
+                merge_control_flow_env_count: 79,
+                statement_count: 83,
+                local_function_summary_count: 89,
+                index_entry_count: 97,
+                total_ms: 101,
+            },
+        );
+    observability
         .record_intellisense_v2_semantic_diagnostics_materialization_path("diagnostics_only");
 
     let exported = observability.get_metrics().export_metrics();
@@ -224,10 +249,30 @@ fn completion_exact_wait_and_semantic_breakdown_metrics_are_recorded() {
         "intellisense_v2_semantic_diagnostics_query_ir_ms",
         "intellisense_v2_semantic_diagnostics_query_collect_ms",
         "intellisense_v2_semantic_diagnostics_query_flow_sensitive_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_seed_module_context_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_prep_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_function_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_scc_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_statements_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_callable_body_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_callable_body_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_merge_control_flow_env_ms",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_merge_control_flow_env_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_statement_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summary_count",
+        "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_index_entry_count",
     ] {
         assert!(
-            histograms.contains_key(key),
-            "expected histogram key {key} in observability export"
+            histogram_count(histograms, key) > 0,
+            "expected sampled histogram key {key} in observability export"
         );
     }
 }

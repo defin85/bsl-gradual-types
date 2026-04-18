@@ -553,6 +553,123 @@ impl BasicObservability {
         self.metrics.increment(&key);
     }
 
+    pub fn record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
+        &self,
+        profile: bsl_analysis_v2::DiagnosticsOnlySemanticFactsBuildProfile,
+    ) {
+        let observe_duration_ms = |metrics: &SimpleMetrics, key: &str, value: u128| {
+            if value > 0 {
+                metrics.observe_histogram(key, value.min(u64::MAX as u128) as f64);
+            }
+        };
+        let observe_count = |metrics: &SimpleMetrics, key: &str, value: u64| {
+            if value > 0 {
+                metrics.observe_histogram(key, value as f64);
+            }
+        };
+
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_ms",
+            profile.total_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_seed_module_context_ms",
+            profile.seed_module_context_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_ms",
+            profile.local_function_summaries_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_prep_ms",
+            profile.local_function_summaries_prep_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms",
+            profile.local_function_summaries_fixed_point_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms",
+            profile.local_function_summaries_snapshot_build_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms",
+            profile.local_function_summaries_body_infer_ms,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_function_count",
+            profile.local_function_summaries_function_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_scc_count",
+            profile.local_function_summaries_scc_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count",
+            profile.local_function_summaries_fixed_point_iteration_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count",
+            profile.local_function_summaries_singleton_fast_path_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count",
+            profile.local_function_summaries_recursive_scc_count,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_statements_ms",
+            profile.visit_statements_ms,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_callable_body_ms",
+            profile.visit_callable_body_ms,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_visit_callable_body_count",
+            profile.visit_callable_body_count,
+        );
+        observe_duration_ms(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_merge_control_flow_env_ms",
+            profile.merge_control_flow_env_ms,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_merge_control_flow_env_count",
+            profile.merge_control_flow_env_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_statement_count",
+            profile.statement_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_local_function_summary_count",
+            profile.local_function_summary_count,
+        );
+        observe_count(
+            &self.metrics,
+            "intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_index_entry_count",
+            profile.index_entry_count,
+        );
+    }
+
     pub fn record_intellisense_v2_parse_result_query_latency(&self, duration: Duration) {
         self.record_intellisense_v2_parse_result_query_latency_with_origin_and_operation(
             "runtime", "other", duration,

@@ -61,6 +61,7 @@ test-output/
 backend/tests/perf/reports/*
 !backend/tests/perf/reports/refactor-11-current-context-parse-broker-bounding-burst-smoke.json
 !backend/tests/perf/reports/refactor-11-current-context-parse-broker-bounding-ready-snapshot-smoke.json
+!backend/tests/perf/reports/refactor-38-diagnostics-only-semantic-facts-leaf-profiling-real-conf-big-diagnostics-ready-snapshot-leaf-live.json
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-openspec-validate.log
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.json
 !backend/tests/perf/reports/refactor-completion-prepare-lightweight-exact-split-readiness-gate.md

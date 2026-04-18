@@ -1529,6 +1529,9 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
     let first_ir_build = first
         .ir_build_profile
         .expect("snapshot semantic diagnostics must expose IR build profile");
+    let first_diagnostics_only_build = first.diagnostics_only_semantic_facts_build_profile.expect(
+        "snapshot semantic diagnostics must expose diagnostics-only semantic-facts profile",
+    );
     assert!(
         first_ir_build.total_ms >= first_ir_build.ast_to_ir_convert_ms,
         "snapshot IR build profile total must include AST->IR conversion"
@@ -1536,6 +1539,19 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
     assert_eq!(
         first_ir_build.semantic_facts_materialize_ms, 0,
         "diagnostics-only semantic path must not materialize full semantic facts"
+    );
+    assert!(
+        first_diagnostics_only_build.statement_count > 0,
+        "snapshot diagnostics-only profile must expose visited statement count"
+    );
+    assert!(
+        first_diagnostics_only_build.index_entry_count > 0,
+        "snapshot diagnostics-only profile must expose built index entries"
+    );
+    assert!(
+        first_diagnostics_only_build.total_ms
+            >= first_diagnostics_only_build.local_function_summaries_ms,
+        "snapshot diagnostics-only total must dominate any exported builder leaf"
     );
 
     let second = analysis
@@ -1557,6 +1573,10 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
     let second_ir_build = second
         .ir_build_profile
         .expect("cached semantic diagnostics must still expose IR build profile");
+    let second_diagnostics_only_build =
+        second.diagnostics_only_semantic_facts_build_profile.expect(
+            "cached semantic diagnostics must still expose diagnostics-only semantic-facts profile",
+        );
     assert!(
         second_ir_build.total_ms >= second_ir_build.ast_to_ir_convert_ms,
         "repeated diagnostics-only profile must still expose AST->IR timing"
@@ -1564,6 +1584,14 @@ fn semantic_diagnostics_profiled_report_snapshot_parse_and_ir_sources() {
     assert_eq!(
         second_ir_build.semantic_facts_materialize_ms, 0,
         "repeated diagnostics-only profile must stay off the full semantic-facts path"
+    );
+    assert!(
+        second_diagnostics_only_build.statement_count > 0,
+        "repeated diagnostics-only profile must expose visited statement count"
+    );
+    assert!(
+        second_diagnostics_only_build.index_entry_count > 0,
+        "repeated diagnostics-only profile must expose built index entries"
     );
 }
 
@@ -1609,6 +1637,12 @@ fn semantic_diagnostics_profiled_do_not_publish_completion_head_artifact() {
     assert_eq!(
         profiled.profile.materialization_path,
         Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly)
+    );
+    assert!(
+        profiled
+            .diagnostics_only_semantic_facts_build_profile
+            .is_some(),
+        "profiled diagnostics-only path must expose a dedicated diagnostics-only semantic-facts profile"
     );
     assert!(
         !analysis

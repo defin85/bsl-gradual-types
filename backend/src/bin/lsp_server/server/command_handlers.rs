@@ -1915,6 +1915,7 @@ mod tests {
                 semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                 semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                 publish_wait_ms: Some(1),
+                ..Default::default()
             }),
             followup_publish: None,
             save_fastlane_outcome: Some("published".to_string()),
@@ -1923,6 +1924,7 @@ mod tests {
             followup_semantic_path: Some("generic_pipeline".to_string()),
             followup_semantic_parse_source: Some("salsa".to_string()),
             followup_semantic_ir_source: Some("salsa".to_string()),
+            followup_semantic_materialization_path: None,
             followup_ready_snapshot_zero_probe: Some("not_ready".to_string()),
             followup_ready_snapshot_wait_probe: Some("timeout".to_string()),
             followup_ready_snapshot_task_state: Some("in_flight_same_version".to_string()),
@@ -2247,6 +2249,7 @@ mod tests {
                     semantic_diagnostics_ir_semantic_facts_local_function_summary_count: None,
                     semantic_diagnostics_ir_semantic_facts_index_entry_count: None,
                     publish_wait_ms: Some(1),
+                    ..Default::default()
                 }),
             },
         );

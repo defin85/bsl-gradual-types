@@ -316,6 +316,8 @@ pub struct SemanticDiagnosticsProfile {
 pub struct SemanticDiagnosticsProfiledResult {
     pub diagnostics: Arc<Vec<TypeDiagnostic>>,
     pub profile: SemanticDiagnosticsProfile,
+    pub diagnostics_only_semantic_facts_build_profile:
+        Option<DiagnosticsOnlySemanticFactsBuildProfile>,
     pub ir_build_profile: Option<IrBuildProfile>,
 }
 
@@ -348,6 +350,30 @@ pub struct IrBuildProfile {
     pub semantic_facts_statement_count: u64,
     pub semantic_facts_local_function_summary_count: u64,
     pub semantic_facts_index_entry_count: u64,
+    pub total_ms: u128,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DiagnosticsOnlySemanticFactsBuildProfile {
+    pub seed_module_context_ms: u128,
+    pub local_function_summaries_ms: u128,
+    pub local_function_summaries_prep_ms: u128,
+    pub local_function_summaries_fixed_point_ms: u128,
+    pub local_function_summaries_snapshot_build_ms: u128,
+    pub local_function_summaries_body_infer_ms: u128,
+    pub local_function_summaries_function_count: u64,
+    pub local_function_summaries_scc_count: u64,
+    pub local_function_summaries_fixed_point_iteration_count: u64,
+    pub local_function_summaries_singleton_fast_path_count: u64,
+    pub local_function_summaries_recursive_scc_count: u64,
+    pub visit_statements_ms: u128,
+    pub visit_callable_body_ms: u128,
+    pub visit_callable_body_count: u64,
+    pub merge_control_flow_env_ms: u128,
+    pub merge_control_flow_env_count: u64,
+    pub statement_count: u64,
+    pub local_function_summary_count: u64,
+    pub index_entry_count: u64,
     pub total_ms: u128,
 }
 

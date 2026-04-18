@@ -1215,6 +1215,7 @@ impl AnalysisV2 {
                     materialization_path: None,
                     ..SemanticDiagnosticsProfile::default()
                 },
+                diagnostics_only_semantic_facts_build_profile: None,
                 ir_build_profile: None,
             }));
         }
@@ -1224,25 +1225,20 @@ impl AnalysisV2 {
             .diagnostics_program_profiled(file_id)?
             .expect("file present for semantic diagnostics program");
         let program = program_profiled.program;
-        let type_hints = if let Some(snapshot) = self.parse_snapshot_for_file(file_id, file) {
-            let file_path = file.path(&self.db);
-            let checkpoint = || cancellation_checkpoint(&self.db);
-            let parsed = snapshot.parse_result.clone();
-            let program = program.clone();
-            Arc::new(cancellable(|| {
-                let facts =
-                    type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint(
-                        &parsed.program,
-                        file_path.as_ref(),
-                        deps_data.clone(),
-                        &checkpoint,
-                    );
-                semantic_type_hints_from_facts(program.as_ref(), &facts)
-            })?)
-        } else {
-            self.diagnostics_type_hints(file_id)?
-                .expect("file present for semantic diagnostics type hints")
-        };
+        let file_path = file.path(&self.db);
+        let checkpoint = || cancellation_checkpoint(&self.db);
+        let diagnostics_only_profiled = cancellable(|| {
+            type_inference_v2::build_diagnostics_semantic_facts_with_path_and_checkpoint_profiled(
+                &parsed.program,
+                file_path.as_ref(),
+                deps_data.clone(),
+                &checkpoint,
+            )
+        })?;
+        let type_hints = Arc::new(semantic_type_hints_from_facts(
+            program.as_ref(),
+            &diagnostics_only_profiled.facts,
+        ));
         let ir_ms = ir_started.elapsed().as_millis();
 
         let collect_started = Instant::now();
@@ -1269,6 +1265,9 @@ impl AnalysisV2 {
                 materialization_path: Some(SemanticDiagnosticsMaterializationPath::DiagnosticsOnly),
                 ir_source: program_profiled.source,
             },
+            diagnostics_only_semantic_facts_build_profile: Some(
+                diagnostics_only_profiled.profile,
+            ),
             ir_build_profile: Some(program_profiled.profile),
         }))
     }

@@ -498,6 +498,8 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_ir_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_materialization_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub runtime_queue_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_lag_ms: Option<u64>,
@@ -584,6 +586,60 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub semantic_diagnostics_ir_semantic_facts_index_entry_count: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_seed_module_context_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_prep_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_snapshot_build_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_body_infer_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_function_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_scc_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_fixed_point_iteration_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_singleton_fast_path_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summaries_recursive_scc_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_statements_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_ms:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_visit_callable_body_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_merge_control_flow_env_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_statement_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_local_function_summary_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub semantic_diagnostics_ir_diagnostics_only_semantic_facts_index_entry_count: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub publish_wait_ms: Option<u64>,
 }
 
@@ -612,6 +668,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_semantic_parse_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_semantic_ir_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_semantic_materialization_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_zero_probe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

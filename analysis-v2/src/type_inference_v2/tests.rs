@@ -964,6 +964,40 @@ fn diagnostics_only_build_omits_exact_only_and_projection_only_fact_surfaces() {
 }
 
 #[test]
+fn diagnostics_type_hints_cover_program_requires_receiver_for_object_span_only_method_calls() {
+    let mut program = bsl_shared::ir::SemanticProgram::new();
+    let call_span = bsl_shared::ir::Span::new(10, 40);
+    program.nodes.push(bsl_shared::ir::SemanticNode {
+        kind: bsl_shared::ir::SemanticNodeKind::FunctionCall {
+            function_name: "Метод".to_string(),
+            object_name: None,
+            object_node: None,
+            object_span: Some(bsl_shared::ir::Span::new(10, 24)),
+            arg_nodes: Vec::new(),
+            arg_spans: Vec::new(),
+        },
+        span: call_span,
+        scope_id: program.symbols.root_scope,
+    });
+
+    let mut hints = bsl_diagnostics::SemanticTypeHints::default();
+    hints.call_arg_types_by_span.insert(call_span, Vec::new());
+    assert!(
+        !diagnostics_type_hints_cover_program(&program, &hints),
+        "object_span-only method call must require receiver hint coverage"
+    );
+
+    hints.call_receiver_type_by_span.insert(
+        call_span,
+        bsl_shared::domain::types::TypeResolution::explicit("Массив"),
+    );
+    assert!(
+        diagnostics_type_hints_cover_program(&program, &hints),
+        "object_span-only method call should pass once receiver hint is present"
+    );
+}
+
+#[test]
 fn resolves_common_module_method_return_type_from_signature_index() {
     let source = r#"Процедура Тест()
     x = ОбщийМодуль1.Ф1();

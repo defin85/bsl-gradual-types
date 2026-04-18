@@ -3849,10 +3849,11 @@ fn diagnostics_type_hints_cover_program(
         SemanticNodeKind::FunctionCall {
             object_name,
             object_node,
+            object_span,
             ..
         } => {
             hints.call_arg_types_by_span.contains_key(&node.span)
-                && (object_name.is_none() && object_node.is_none()
+                && (object_name.is_none() && object_node.is_none() && object_span.is_none()
                     || hints.call_receiver_type_by_span.contains_key(&node.span))
         }
         SemanticNodeKind::MemberAccess { .. } => hints

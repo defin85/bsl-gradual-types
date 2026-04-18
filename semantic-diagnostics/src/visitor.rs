@@ -326,6 +326,7 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 function_name,
                 object_name,
                 object_node,
+                object_span,
                 ..
             } => {
                 let arg_types: &[bsl_shared::domain::types::TypeResolution] = self
@@ -347,7 +348,11 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                     }
                 }
 
-                let is_method_call = object_name.is_some() || object_node.is_some();
+                // Some IR producers can retain only receiver span for complex method-call owners.
+                // Treat that as a method call as well so diagnostics do not silently degrade to
+                // the global-function path.
+                let is_method_call =
+                    object_name.is_some() || object_node.is_some() || object_span.is_some();
 
                 if is_method_call {
                     // Check uninitialized variables (Warning, not Error)

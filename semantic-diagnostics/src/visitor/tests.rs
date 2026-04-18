@@ -97,6 +97,56 @@ fn test_visitor_detects_nonexistent_method() {
 }
 
 #[test]
+fn test_visitor_treats_object_span_only_call_as_method_call() {
+    use bsl_shared::domain::types::TypeResolution;
+    use std::sync::Arc;
+
+    let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    let metadata = TypeMetadataLookup::new(repository.clone());
+    let validator = TypeValidator::new(&metadata);
+    let resolver = TypeResolver::new(repository);
+    let signature_index = SignatureIndex::new();
+    let mut program = SemanticProgram::new();
+
+    let call_span = Span::new(10, 40);
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::FunctionCall {
+            function_name: "НесуществующийМетод".to_string(),
+            object_name: None,
+            object_node: None,
+            object_span: Some(Span::new(10, 24)),
+            arg_nodes: Vec::new(),
+            arg_spans: Vec::new(),
+        },
+        span: call_span,
+        scope_id: program.symbols.root_scope,
+    });
+
+    let mut visitor =
+        SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+    let mut hints = SemanticTypeHints::default();
+    hints.call_arg_types_by_span.insert(call_span, Vec::new());
+    hints
+        .call_receiver_type_by_span
+        .insert(call_span, TypeResolution::explicit("Массив"));
+    visitor.set_type_hints(Some(&hints));
+    let mut context = FlowContext::new(program.symbols.root_scope);
+    visitor.visit_node(&program.nodes[0], &mut context);
+
+    let errors = visitor.into_errors();
+    assert!(
+        errors
+            .iter()
+            .any(|diag| diag.message.contains("НесуществующийМетод")),
+        "object_span-only receiver must still validate as method call, got: {:?}",
+        errors
+            .iter()
+            .map(|diag| diag.message.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_visitor_detects_nonexistent_property() {
     use bsl_shared::domain::types::TypeResolution;
     use std::sync::Arc;

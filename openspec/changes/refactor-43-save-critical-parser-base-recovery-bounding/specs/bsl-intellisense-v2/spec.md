@@ -10,10 +10,17 @@ remains `parser_base_recovery`.
 This behavior MUST:
 
 - remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- when `didSave` follow-up observes a matching still-current in-flight same-version producer,
+  promote and wait on that producer rather than bypassing it through a parallel didSave-only
+  semantic branch;
 - keep `parser_base_recovery` focused on bounded work required to prove or install a matching
   parser base for that exact target before later tree-build or exact-artifact work proceeds;
 - preserve the existing bounded wait and relief-valve budgets as the primary latency envelope and
   MUST NOT rely on widening them as the primary remedy;
+- treat exhausted recovery proof as bounded failure to match/install the parser base or to advance
+  the still-current producer beyond `parser_base_recovery` into a later exact checkpoint within the
+  existing envelope, and MUST NOT treat mere continued elapsed time inside the unchanged checkpoint
+  as sufficient proof;
 - preserve exact same-version semantics for any produced ready snapshot;
 - preserve latest-wins supersession and cancellation when a newer same-file revision or newer save
   cycle overtakes the target;
@@ -28,14 +35,20 @@ This behavior MUST:
 - **WHEN** runtime executes save-critical parser-base recovery for the exact target
 - **THEN** the producer prioritizes only the bounded recovery work required to prove or install a
   matching parser base for that target
+- **AND** `didSave` follow-up keeps waiting on that promoted producer rather than switching to a
+  parallel didSave-only semantic branch
 - **AND** the path reaches later exact work or materializes ready artifacts without falling back to
   `shadow_state` solely because `parser_base_recovery` monopolized the same-version exact path
 
 #### Scenario: Exhausted recovery proof preserves truthful fallback
 
 - **GIVEN** `didSave` heavy follow-up is waiting on an exact same-version producer
-- **AND** bounded save-critical parser-base recovery cannot prove or install a matching parser base
+- **AND** bounded save-critical parser-base recovery cannot prove or install a matching parser base,
+  or cannot move the still-current producer beyond `parser_base_recovery` within the existing
+  envelope
 - **WHEN** runtime exhausts that recovery proof
 - **THEN** the system MAY fall back truthfully to the existing degraded path
 - **AND** observability preserves that `parser_base_recovery` was the exhausted blocker rather than
   hiding the incident under a generic parse delay
+- **AND** the fallback is not justified solely by additional wall time spent in the same unchanged
+  `parser_base_recovery` checkpoint

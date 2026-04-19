@@ -57,6 +57,26 @@ pub struct GetSnapshotStatusRequest {
     pub uri: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrimeExactTypeIndexRequest {
+    pub uri: String,
+    #[serde(default)]
+    pub requested_version: Option<i64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrimeExactTypeIndexResponse {
+    pub accepted: bool,
+    pub already_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_version: Option<i64>,
+    pub action: String,
+}
+
 // ============================================================================
 // Custom Request/Response Types (deprecated stubs)
 // ============================================================================

@@ -115,73 +115,77 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let mut observed = self.build_signature_help_observed_snapshot_v2(
-                        &context,
-                        prepared.snapshot.analysis,
-                        file_id,
-                        position,
-                        &uri,
-                    );
-                    if !observed.exact_type_index_available {
-                        if let Some(refreshed_analysis) = self
-                            .wait_for_lsp_exact_type_index_snapshot_v2(file_id, expected_version)
-                            .await
-                        {
-                            observed = self.build_signature_help_observed_snapshot_v2(
-                                &context,
-                                refreshed_analysis,
-                                file_id,
-                                position,
-                                &uri,
-                            );
-                        }
-                    }
+                    if let Some(exact_analysis) = self
+                        .wait_for_lsp_exact_consumer_analysis_v2(
+                            prepared.snapshot.analysis,
+                            file_id,
+                            expected_version,
+                        )
+                        .await
+                    {
+                        let observed = self.build_signature_help_observed_snapshot_v2(
+                            &context,
+                            exact_analysis,
+                            file_id,
+                            position,
+                            &uri,
+                        );
 
-                    let started = Instant::now();
-                    let result = match (observed.file_content, observed.deps, observed.ir_program) {
-                        (Some(file_content), Some(deps), Some(ir_program)) => {
-                            if !observed.exact_type_index_available {
-                                super::helpers::record_lsp_interactive_fail_closed_reason(
-                                    self.coordinator.as_ref(),
-                                    "signature_help",
-                                    "missing_semantic_index",
-                                );
-                                None
-                            } else {
-                                handle_signature_help_v2(
-                                    &observed.analysis,
-                                    file_id,
-                                    file_content,
-                                    position,
-                                    ir_program,
-                                    deps,
-                                    Some(self.coordinator.as_ref()),
-                                )
-                            }
+                        let started = Instant::now();
+                        let result =
+                            match (observed.file_content, observed.deps, observed.ir_program) {
+                                (Some(file_content), Some(deps), Some(ir_program)) => {
+                                    if !observed.exact_type_index_available {
+                                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                                            self.coordinator.as_ref(),
+                                            "signature_help",
+                                            "missing_semantic_index",
+                                        );
+                                        None
+                                    } else {
+                                        handle_signature_help_v2(
+                                            &observed.analysis,
+                                            file_id,
+                                            file_content,
+                                            position,
+                                            ir_program,
+                                            deps,
+                                            Some(self.coordinator.as_ref()),
+                                        )
+                                    }
+                                }
+                                (None, _, _) | (Some(_), None, _) => {
+                                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                                        self.coordinator.as_ref(),
+                                        "signature_help",
+                                        "unavailable_by_contract",
+                                    );
+                                    None
+                                }
+                                (Some(_), Some(_), None) => {
+                                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                                        self.coordinator.as_ref(),
+                                        "signature_help",
+                                        "missing_canonical_ir",
+                                    );
+                                    None
+                                }
+                            };
+                        let elapsed = started.elapsed();
+                        self.coordinator.record_signature_help_latency(elapsed);
+                        if result.is_none() {
+                            self.coordinator.record_signature_help_empty();
                         }
-                        (None, _, _) | (Some(_), None, _) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "signature_help",
-                                "unavailable_by_contract",
-                            );
-                            None
-                        }
-                        (Some(_), Some(_), None) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "signature_help",
-                                "missing_canonical_ir",
-                            );
-                            None
-                        }
-                    };
-                    let elapsed = started.elapsed();
-                    self.coordinator.record_signature_help_latency(elapsed);
-                    if result.is_none() {
+                        Ok(result)
+                    } else {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "signature_help",
+                            "missing_semantic_index",
+                        );
                         self.coordinator.record_signature_help_empty();
+                        Ok(None)
                     }
-                    Ok(result)
                 }
                 Err(outcome) => {
                     super::helpers::record_lsp_interactive_fail_closed_reason(

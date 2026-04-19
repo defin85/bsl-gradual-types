@@ -944,6 +944,15 @@ impl BslLanguageServer {
             TypeIndexPrecomputePhaseV2::WaitingCpuPermit.as_u8(),
             Ordering::Relaxed,
         );
+        let singleflight_context = self
+            .build_execution_context_v2(
+                bsl_runtime::application::SemanticOperation::Completion,
+                key.file_id,
+                Some(key.requested_version),
+                false,
+            )
+            .await;
+        let singleflight_coordinator = self.coordinator.clone();
         let phase_for_compute = Arc::clone(&phase);
         let precompute =
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
@@ -958,11 +967,29 @@ impl BslLanguageServer {
                     if let Some(delay) = test_type_index_precompute_delay() {
                         std::thread::sleep(delay);
                     }
-                    analysis.precompute_type_index_for_file(
-                        key.file_id,
-                        Some(key.requested_version),
-                        queue_wait_ms,
-                    )
+                    let ir_program = bsl_runtime::application::IntellisenseV2Facade::
+                        run_ir_query_singleflight_attach_or_direct(
+                            &singleflight_context,
+                            &analysis,
+                            Some(singleflight_coordinator.as_ref()),
+                            key.file_id,
+                        )
+                        .map_err(|_| bsl_runtime::application::SingleflightQueryError::Cancelled)?;
+                    let Some(ir_program) = ir_program else {
+                        return Ok(bsl_analysis_v2::TypeIndexPrecomputeResult {
+                            reason_code: bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeMissingFile,
+                            file_version: None,
+                            stats: bsl_analysis_v2::TypeIndexPrecomputeStats::default(),
+                        });
+                    };
+                    analysis
+                        .precompute_type_index_for_file_from_program(
+                            key.file_id,
+                            Some(key.requested_version),
+                            queue_wait_ms,
+                            ir_program,
+                        )
+                        .map_err(|_| bsl_runtime::application::SingleflightQueryError::Cancelled)
                 },
             )
             .await;

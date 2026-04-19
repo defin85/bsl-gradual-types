@@ -48,6 +48,14 @@ enum BuildParseSnapshotOutcomeV2 {
     Aborted(BuildParseSnapshotAbortReasonV2),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExactTypeIndexBeforeReadyInstallOutcomeV2 {
+    Ready,
+    Retargeted,
+    Superseded,
+    LatestVersionMismatch,
+}
+
 #[cfg(test)]
 static DID_CHANGE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
@@ -496,6 +504,66 @@ struct BackgroundParseSnapshotApplyArgs {
 }
 
 impl BslLanguageServer {
+    async fn wait_for_exact_type_index_before_ready_install_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        target_epoch_state: &Arc<std::sync::atomic::AtomicU64>,
+        target_epoch: u64,
+        task_control: &Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>,
+    ) -> ExactTypeIndexBeforeReadyInstallOutcomeV2 {
+        let mut promoted = false;
+        loop {
+            if target_epoch_state.load(Ordering::SeqCst) != target_epoch {
+                return ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted;
+            }
+            if task_control.cancel_requested.load(Ordering::SeqCst) {
+                return ExactTypeIndexBeforeReadyInstallOutcomeV2::Superseded;
+            }
+            if self
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                != Some(requested_version)
+            {
+                return ExactTypeIndexBeforeReadyInstallOutcomeV2::LatestVersionMismatch;
+            }
+
+            let analysis = self.analysis_v2.snapshot().await;
+            if analysis.file_version(file_id).ok().flatten() == Some(requested_version)
+                && analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+            {
+                self.cleanup_completed_type_index_precompute_task_v2(
+                    file_id,
+                    Some(requested_version),
+                )
+                .await;
+                return ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready;
+            }
+
+            if !self
+                .has_matching_type_index_precompute_task_v2(file_id, Some(requested_version))
+                .await
+            {
+                self.schedule_type_index_precompute_v2(file_id, requested_version)
+                    .await;
+            }
+            if !promoted {
+                let _ = self
+                    .promote_type_index_precompute_for_waiter_v2(file_id, Some(requested_version))
+                    .await;
+                promoted = true;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
     fn classify_parse_snapshot_cancellation_abort_reason_v2(
         requested_target_epoch_state: Option<&Arc<std::sync::atomic::AtomicU64>>,
         requested_target_epoch: Option<u64>,
@@ -590,6 +658,13 @@ impl BslLanguageServer {
         }
         state.parse_snapshot.parse_result = parse_result;
         state.syntax_errors_complete = true;
+    }
+
+    fn spawn_snapshot_status_refresh_v2(&self, file_id: bsl_analysis_v2::FileId) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            server.refresh_snapshot_status_v2(file_id).await;
+        });
     }
 
     fn spawn_deferred_parse_snapshot_post_publish_enrichment_v2(
@@ -834,12 +909,13 @@ impl BslLanguageServer {
                 if inject_test_delay {
                     maybe_inject_current_revision_head_precompute_delay_for_test();
                 }
-                let _ = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
-                    &context,
-                    &analysis,
-                    Some(coordinator.as_ref()),
-                    file_id,
-                );
+                let _ =
+                    bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight_attach_or_direct(
+                        &context,
+                        &analysis,
+                        Some(coordinator.as_ref()),
+                        file_id,
+                    );
             },
         )
         .await;
@@ -1321,6 +1397,40 @@ impl BslLanguageServer {
             .map(|task| Arc::clone(&task.control))
     }
 
+    pub(crate) async fn current_shadow_text_hash_for_version_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+    ) -> Option<[u8; 32]> {
+        self.latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .filter(|state| state.version == requested_version)
+            .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes())
+    }
+
+    pub(crate) async fn promote_matching_background_parse_snapshot_apply_task_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        expected_text_hash: Option<[u8; 32]>,
+    ) -> bool {
+        let Some(task_control) = self
+            .matching_background_parse_snapshot_task_control_v2(
+                file_id,
+                requested_version,
+                expected_text_hash,
+            )
+            .await
+        else {
+            return false;
+        };
+        task_control.promotion_requested.store(true, Ordering::SeqCst);
+        task_control.control_notify.notify_waiters();
+        true
+    }
+
     pub(crate) async fn background_parse_snapshot_task_retargeted_away_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -1438,7 +1548,7 @@ impl BslLanguageServer {
                 task.control.materialized_notify.notify_waiters();
                 task.control.control_notify.notify_waiters();
                 drop(tasks);
-                self.refresh_snapshot_status_v2(file_id).await;
+                self.spawn_snapshot_status_refresh_v2(file_id);
                 return;
             }
         }
@@ -1479,7 +1589,7 @@ impl BslLanguageServer {
             },
         );
         drop(tasks);
-        self.refresh_snapshot_status_v2(file_id).await;
+        self.spawn_snapshot_status_refresh_v2(file_id);
     }
 
     async fn run_background_parse_snapshot_apply_worker_v2(
@@ -1732,6 +1842,35 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
             );
             self.refresh_snapshot_status_v2(file_id).await;
+            match self
+                .wait_for_exact_type_index_before_ready_install_v2(
+                    file_id,
+                    target.requested_version,
+                    &target_epoch_state,
+                    target.epoch,
+                    &task_control,
+                )
+                .await
+            {
+                ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready => {}
+                ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted => {
+                    lifecycle_guard.set_terminal_reason("retargeted_before_exact_ready_install");
+                    task_control.control_notify.notify_waiters();
+                    continue;
+                }
+                ExactTypeIndexBeforeReadyInstallOutcomeV2::Superseded => {
+                    lifecycle_guard.set_terminal_reason("superseded_before_exact_ready_install");
+                    task_control.control_notify.notify_waiters();
+                    break;
+                }
+                ExactTypeIndexBeforeReadyInstallOutcomeV2::LatestVersionMismatch => {
+                    lifecycle_guard.set_terminal_reason(
+                        "latest_version_mismatch_before_exact_ready_install",
+                    );
+                    task_control.control_notify.notify_waiters();
+                    break;
+                }
+            }
             self.record_ready_parse_snapshot_v2(
                 file_id,
                 target.text.clone(),
@@ -2197,6 +2336,16 @@ impl BslLanguageServer {
             if latest_received_version != requested_version {
                 break;
             }
+            let expected_text_hash = self
+                .current_shadow_text_hash_for_version_v2(file_id, requested_version)
+                .await;
+            let _ = self
+                .promote_matching_background_parse_snapshot_apply_task_v2(
+                    file_id,
+                    requested_version,
+                    expected_text_hash,
+                )
+                .await;
 
             let analysis = self
                 .analysis_v2
@@ -2636,6 +2785,13 @@ impl BslLanguageServer {
             did_change_attribution: None,
         })
         .await;
+        let _ = self
+            .promote_matching_background_parse_snapshot_apply_task_v2(
+                file_id,
+                version,
+                Some(parse_snapshot_text_hash(text.as_ref())),
+            )
+            .await;
         self.schedule_type_index_precompute_v2(file_id, version)
             .await;
 

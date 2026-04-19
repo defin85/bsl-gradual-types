@@ -92,6 +92,12 @@ export interface SnapshotStatusRequest {
     uri: string;
 }
 
+export interface PrimeExactTypeIndexRequest {
+    uri: string;
+    requestedVersion?: number;
+    reason?: string;
+}
+
 export type SnapshotReadinessState =
     | 'idle'
     | 'building'
@@ -139,6 +145,13 @@ export type SnapshotStatusFetchResult =
     | { kind: 'ok'; response: SnapshotStatusResponse }
     | { kind: 'unsupported' }
     | { kind: 'error'; message: string };
+
+export interface PrimeExactTypeIndexResponse {
+    accepted: boolean;
+    alreadyReady: boolean;
+    observedVersion?: number;
+    action: string;
+}
 
 export interface ValidateMethodParams {
     object_type: string;
@@ -314,9 +327,14 @@ export async function getIndexState(
 }
 
 let snapshotStatusUnsupported = false;
+let primeExactTypeIndexUnsupported = false;
 
 export function resetSnapshotStatusCapabilityCacheForTests(): void {
     snapshotStatusUnsupported = false;
+}
+
+export function resetPrimeExactTypeIndexCapabilityCacheForTests(): void {
+    primeExactTypeIndexUnsupported = false;
 }
 
 export async function getSnapshotStatusFetchResult(
@@ -350,6 +368,30 @@ export async function getSnapshotStatus(
 ): Promise<SnapshotStatusResponse | null> {
     const result = await getSnapshotStatusFetchResult(request);
     return result.kind === 'ok' ? result.response : null;
+}
+
+export async function primeExactTypeIndex(
+    request: PrimeExactTypeIndexRequest
+): Promise<PrimeExactTypeIndexResponse | null> {
+    if (primeExactTypeIndexUnsupported) {
+        return null;
+    }
+
+    const { sendCustomRequest } = await import('./client/index');
+    try {
+        return await sendCustomRequest<PrimeExactTypeIndexResponse>(
+            'bsl/primeExactTypeIndex',
+            request
+        );
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            primeExactTypeIndexUnsupported = true;
+            logger.warn('[Exact Warmup] LSP server does not support bsl/primeExactTypeIndex');
+            return null;
+        }
+        logger.error('Failed to prime exact type index', error);
+        return null;
+    }
 }
 
 /**
@@ -1137,6 +1179,7 @@ const OBSERVABILITY_METRICS_TIMEOUT_MS = 1500;
 
 export function resetObservabilityCapabilityCaches(): void {
     snapshotStatusUnsupported = false;
+    primeExactTypeIndexUnsupported = false;
     observabilityMetricsUnsupported = false;
     observabilityMetricsUnsupportedNotified = false;
     completionTimelineUnsupported = false;

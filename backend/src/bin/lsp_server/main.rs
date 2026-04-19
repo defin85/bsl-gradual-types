@@ -125,6 +125,10 @@ async fn main() -> Result<()> {
         BslLanguageServer::handle_get_snapshot_status,
     )
     .custom_method(
+        "bsl/primeExactTypeIndex",
+        BslLanguageServer::handle_prime_exact_type_index,
+    )
+    .custom_method(
         "bsl/incrementalUpdate",
         BslLanguageServer::handle_incremental_update,
     )

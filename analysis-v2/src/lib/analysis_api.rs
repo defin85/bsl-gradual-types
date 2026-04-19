@@ -394,8 +394,6 @@ impl AnalysisV2 {
             .parse_snapshot_for_file(file_id, file)
             .map(|snapshot| TypeIndexParseSnapshotMeta::from_snapshot(Some(snapshot)))
             .unwrap_or_default();
-        let key = self.make_type_index_artifact_key(file_id, initial_version);
-        let exec_started = Instant::now();
         tracing::debug!(
             target: "bsl_backend::analysis_v2",
             file_id = file_id.0,
@@ -407,9 +405,8 @@ impl AnalysisV2 {
             parse_snapshot_serve_only_blocked = parse_snapshot_meta.serve_only_blocked,
             "type_index_precompute: start"
         );
-        let (type_index, build_profile, ir_profile) = if let Some(_snapshot) =
-            self.parse_snapshot_for_file(file_id, file)
-        {
+        let exec_started = Instant::now();
+        if let Some(_snapshot) = self.parse_snapshot_for_file(file_id, file) {
             tracing::debug!(
                 target: "bsl_backend::analysis_v2",
                 file_id = file_id.0,
@@ -460,21 +457,101 @@ impl AnalysisV2 {
                 index_entry_count = profiled.profile.index_entry_count,
                 "type_index_precompute: type_index build ready"
             );
-            (
+            let exec_ms = exec_started.elapsed().as_millis();
+            return self.finish_type_index_precompute_for_program(
+                file_id,
+                file,
+                expected_version,
+                queue_wait_ms,
+                parse_snapshot_meta,
+                exec_ms,
                 Arc::new(profiled.index),
                 profiled.profile,
                 profiled_ir.profile,
-            )
+            );
         } else {
             let index_snapshot =
                 cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
-            (
+            let exec_ms = exec_started.elapsed().as_millis();
+            return self.finish_type_index_precompute_for_program(
+                file_id,
+                file,
+                expected_version,
+                queue_wait_ms,
+                parse_snapshot_meta,
+                exec_ms,
                 index_snapshot.index(),
                 index_snapshot.build_profile(),
                 IrBuildProfile::default(),
-            )
+            );
+        }
+    }
+
+    pub fn precompute_type_index_for_file_from_program(
+        &self,
+        file_id: FileId,
+        expected_version: Option<i32>,
+        queue_wait_ms: u128,
+        program: Arc<SemanticProgram>,
+    ) -> Cancellable<TypeIndexPrecomputeResult> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(TypeIndexPrecomputeResult::with_reason(
+                TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeMissingFile,
+            ));
         };
-        let exec_ms = exec_started.elapsed().as_millis();
+
+        let initial_version = file.version(&self.db);
+        if expected_version.is_some_and(|version| version != initial_version) {
+            return Ok(TypeIndexPrecomputeResult {
+                reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded,
+                file_version: Some(initial_version),
+                stats: TypeIndexPrecomputeStats {
+                    queue_wait_ms,
+                    ..TypeIndexPrecomputeStats::default()
+                },
+            });
+        }
+
+        let parse_snapshot_meta = self
+            .parse_snapshot_for_file(file_id, file)
+            .map(|snapshot| TypeIndexParseSnapshotMeta::from_snapshot(Some(snapshot)))
+            .unwrap_or_default();
+        let deps_data = self.deps.data(&self.db).0.clone();
+        let file_path = file.path(&self.db).clone();
+        let exec_started = Instant::now();
+        let profiled = cancellable(|| {
+            type_inference_v2::build_type_index_from_semantic_program_with_path_profiled(
+                program.as_ref(),
+                file_path.as_ref(),
+                deps_data,
+            )
+        })?;
+        self.finish_type_index_precompute_for_program(
+            file_id,
+            file,
+            expected_version,
+            queue_wait_ms,
+            parse_snapshot_meta,
+            exec_started.elapsed().as_millis(),
+            Arc::new(profiled.index),
+            profiled.profile,
+            IrBuildProfile::default(),
+        )
+    }
+
+    fn finish_type_index_precompute_for_program(
+        &self,
+        file_id: FileId,
+        file: SourceFile,
+        expected_version: Option<i32>,
+        queue_wait_ms: u128,
+        parse_snapshot_meta: TypeIndexParseSnapshotMeta,
+        exec_ms: u128,
+        type_index: Arc<type_inference_v2::TypeIndex>,
+        build_profile: type_inference_v2::TypeIndexBuildProfile,
+        ir_profile: IrBuildProfile,
+    ) -> Cancellable<TypeIndexPrecomputeResult> {
+        let key = self.make_type_index_artifact_key(file_id, file.version(&self.db));
         let latest_version = file.version(&self.db);
         if expected_version.is_some_and(|version| version != latest_version) {
             return Ok(TypeIndexPrecomputeResult {

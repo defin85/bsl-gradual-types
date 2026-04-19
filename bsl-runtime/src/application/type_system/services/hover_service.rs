@@ -12,7 +12,9 @@ use bsl_shared::ir::{SemanticNode, SemanticNodeKind, SemanticProgram, Span};
 use crate::helpers::hover_formatter::{HoverFormatConfig, HoverFormatter};
 use crate::system::LineIndex;
 
-use super::super::extractors::symbol_extractor::{extract_word_at_position, is_identifier_char};
+use super::super::extractors::symbol_extractor::{
+    extract_word_at_position, is_identifier_char,
+};
 use super::super::formatters::format_semantic_node_info;
 use super::super::formatters::hover_formatters::format_expected_type_hover;
 

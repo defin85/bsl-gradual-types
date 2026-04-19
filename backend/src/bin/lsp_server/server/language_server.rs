@@ -34,9 +34,9 @@ use crate::commands::{
 use crate::config::{BslSettings, LspConfig};
 use crate::handlers::{
     apply_text_edit, build_document_symbols, build_workspace_symbols, format_bsl_range_to_edits,
-    format_bsl_to_edits, handle_code_actions_v2, handle_completion_resolve,
-    handle_goto_definition_v2, handle_hover_v2, handle_inlay_hints_v2, handle_prepare_rename,
-    handle_references, handle_rename, handle_signature_help_v2, RenameError,
+    format_bsl_to_edits, handle_code_actions_v2, handle_completion_resolve, handle_goto_definition_v2,
+    handle_hover_v2, handle_inlay_hints_v2, handle_prepare_rename, handle_references,
+    handle_rename, handle_signature_help_v2, RenameError,
 };
 use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};

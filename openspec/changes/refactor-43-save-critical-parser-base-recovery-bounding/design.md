@@ -59,6 +59,11 @@ it is `parser_base_recovery`.
 The change therefore targets the minimum work needed to prove or install a matching parser base for
 the exact target before later tree-build and artifact work proceeds.
 
+The runtime target is the still-current same-version background exact producer that `didSave`
+follow-up promotes and waits on. The change MUST NOT "fix" this incident by building a parallel
+didSave-only semantic branch that merely bypasses the lagging producer while leaving the producer
+stuck in `parser_base_recovery`.
+
 ### 2. Keep the current bounded envelope
 
 The bundle already proves that bounded wait and relief valve both fire truthfully and still time
@@ -126,6 +131,9 @@ redesign is unnecessary for this incident class.
   - `didSave` terminal path incidence (`ready_artifacts` vs `shadow_state`);
   - parser-base recovery timeout dominance;
   - same-family current-context parse source / wall cost.
+- Treat "exhausted recovery proof" as bounded failure to match/install the parser base or to leave
+  `parser_base_recovery` for a later exact checkpoint within the existing envelope, not as mere
+  passage of wall time inside the same checkpoint.
 - Run strict OpenSpec validation before handoff.
 
 ## Quality Gates

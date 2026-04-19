@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::*;
 
 struct HoverObservedSnapshotV2 {
@@ -111,16 +113,39 @@ impl BslLanguageServer {
         }
     }
 
+    fn lsp_interactive_wait_budget_v2() -> Duration {
+        Duration::from_millis(
+            bsl_runtime::system::global_runtime_config()
+                .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+                .unwrap_or(120),
+        )
+    }
+
+    pub(super) async fn wait_for_lsp_exact_consumer_analysis_v2(
+        &self,
+        analysis: bsl_analysis_v2::AnalysisV2,
+        file_id: bsl_analysis_v2::FileId,
+        expected_version: i32,
+    ) -> Option<bsl_analysis_v2::AnalysisV2> {
+        let observed_version = analysis.file_version(file_id).ok().flatten();
+        if observed_version == Some(expected_version)
+            && analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false)
+        {
+            return Some(analysis);
+        }
+        self.wait_for_lsp_exact_type_index_snapshot_v2(file_id, expected_version)
+            .await
+    }
+
     pub(super) async fn wait_for_lsp_exact_type_index_snapshot_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
         expected_version: i32,
     ) -> Option<bsl_analysis_v2::AnalysisV2> {
-        let wait_budget = std::time::Duration::from_millis(
-            bsl_runtime::system::global_runtime_config()
-                .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
-                .unwrap_or(120),
-        );
+        let wait_budget = Self::lsp_interactive_wait_budget_v2();
 
         if !self
             .has_matching_type_index_precompute_task_v2(file_id, Some(expected_version))
@@ -329,47 +354,32 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let mut observed = self.build_hover_observed_snapshot_v2(
-                        &context,
-                        prepared.snapshot.analysis,
-                        file_id,
-                        position,
-                        &uri,
-                        Some(prepared.index_snapshot.id.as_str()),
-                    );
-                    if !observed.exact_type_index_available {
-                        if let Some(refreshed_analysis) = self
-                            .wait_for_lsp_exact_type_index_snapshot_v2(file_id, expected_version)
-                            .await
-                        {
-                            observed = self.build_hover_observed_snapshot_v2(
-                                &context,
-                                refreshed_analysis,
-                                file_id,
-                                position,
-                                &uri,
-                                None,
-                            );
-                        }
-                    }
+                    if let Some(exact_analysis) = self
+                        .wait_for_lsp_exact_consumer_analysis_v2(
+                            prepared.snapshot.analysis,
+                            file_id,
+                            expected_version,
+                        )
+                        .await
+                    {
+                        let observed = self.build_hover_observed_snapshot_v2(
+                            &context,
+                            exact_analysis,
+                            file_id,
+                            position,
+                            &uri,
+                            Some(prepared.index_snapshot.id.as_str()),
+                        );
 
-                    let settings = self.settings.read().await;
-                    let result = match (
-                        observed.file_content,
-                        observed.file_path,
-                        observed.deps,
-                        observed.ir_program,
-                    ) {
-                        (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            if !observed.exact_type_index_available {
-                                super::helpers::record_lsp_interactive_fail_closed_reason(
-                                    self.coordinator.as_ref(),
-                                    "hover",
-                                    "missing_semantic_index",
-                                );
-                                None
-                            } else {
-                                handle_hover_v2(
+                        let settings = self.settings.read().await;
+                        let result = match (
+                            observed.file_content,
+                            observed.file_path,
+                            observed.deps,
+                            observed.ir_program,
+                        ) {
+                            (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                                let result = handle_hover_v2(
                                     &observed.analysis,
                                     file_id,
                                     file_content,
@@ -380,28 +390,45 @@ impl BslLanguageServer {
                                     &uri,
                                     &settings.hover,
                                     include_flow_sensitive,
-                                )
+                                );
+                                if result.is_none() && !observed.exact_type_index_available {
+                                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                                        self.coordinator.as_ref(),
+                                        "hover",
+                                        "missing_semantic_index",
+                                    );
+                                }
+                                result
                             }
-                        }
-                        (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "hover",
-                                "unavailable_by_contract",
-                            );
-                            None
-                        }
-                        (Some(_), Some(_), Some(_), None) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "hover",
-                                "missing_canonical_ir",
-                            );
-                            None
-                        }
-                    };
+                            (None, _, _, _)
+                            | (Some(_), None, _, _)
+                            | (Some(_), Some(_), None, _) => {
+                                super::helpers::record_lsp_interactive_fail_closed_reason(
+                                    self.coordinator.as_ref(),
+                                    "hover",
+                                    "unavailable_by_contract",
+                                );
+                                None
+                            }
+                            (Some(_), Some(_), Some(_), None) => {
+                                super::helpers::record_lsp_interactive_fail_closed_reason(
+                                    self.coordinator.as_ref(),
+                                    "hover",
+                                    "missing_canonical_ir",
+                                );
+                                None
+                            }
+                        };
 
-                    Ok(result)
+                        Ok(result)
+                    } else {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "hover",
+                            "missing_semantic_index",
+                        );
+                        Ok(None)
+                    }
                 }
                 Err(outcome) => {
                     super::helpers::record_lsp_interactive_fail_closed_reason(
@@ -662,79 +689,82 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let mut observed = self.build_definition_observed_snapshot_v2(
-                        &context,
-                        prepared.snapshot.analysis,
-                        file_id,
-                        position,
-                        &uri,
-                        Some(prepared.index_snapshot.id.as_str()),
-                    );
-                    if !observed.exact_type_index_available {
-                        if let Some(refreshed_analysis) = self
-                            .wait_for_lsp_exact_type_index_snapshot_v2(file_id, expected_version)
-                            .await
-                        {
-                            observed = self.build_definition_observed_snapshot_v2(
-                                &context,
-                                refreshed_analysis,
-                                file_id,
-                                position,
-                                &uri,
-                                None,
-                            );
-                        }
-                    }
+                    if let Some(exact_analysis) = self
+                        .wait_for_lsp_exact_consumer_analysis_v2(
+                            prepared.snapshot.analysis,
+                            file_id,
+                            expected_version,
+                        )
+                        .await
+                    {
+                        let observed = self.build_definition_observed_snapshot_v2(
+                            &context,
+                            exact_analysis,
+                            file_id,
+                            position,
+                            &uri,
+                            Some(prepared.index_snapshot.id.as_str()),
+                        );
 
-                    let result = match (
-                        observed.file_content,
-                        observed.file_path,
-                        observed.deps,
-                        observed.ir_program,
-                    ) {
-                        (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
-                            if !observed.exact_type_index_available {
+                        let result = match (
+                            observed.file_content,
+                            observed.file_path,
+                            observed.deps,
+                            observed.ir_program,
+                        ) {
+                            (Some(file_content), Some(file_path), Some(deps), Some(ir_program)) => {
+                                if !observed.exact_type_index_available {
+                                    super::helpers::record_lsp_interactive_fail_closed_reason(
+                                        self.coordinator.as_ref(),
+                                        "definition",
+                                        "missing_semantic_index",
+                                    );
+                                    None
+                                } else {
+                                    handle_goto_definition_v2(
+                                        crate::handlers::definition::GotoDefinitionRequest {
+                                            analysis: &observed.analysis,
+                                            file_id,
+                                            file_path,
+                                            file_content,
+                                            ir_program,
+                                            deps,
+                                            position,
+                                            uri: &uri,
+                                            coordinator: Some(self.coordinator.as_ref()),
+                                        },
+                                    )
+                                }
+                            }
+                            (None, _, _, _)
+                            | (Some(_), None, _, _)
+                            | (Some(_), Some(_), None, _) => {
                                 super::helpers::record_lsp_interactive_fail_closed_reason(
                                     self.coordinator.as_ref(),
                                     "definition",
-                                    "missing_semantic_index",
+                                    "unavailable_by_contract",
                                 );
                                 None
-                            } else {
-                                handle_goto_definition_v2(
-                                    crate::handlers::definition::GotoDefinitionRequest {
-                                        analysis: &observed.analysis,
-                                        file_id,
-                                        file_path,
-                                        file_content,
-                                        ir_program,
-                                        deps,
-                                        position,
-                                        uri: &uri,
-                                        coordinator: Some(self.coordinator.as_ref()),
-                                    },
-                                )
                             }
-                        }
-                        (None, _, _, _) | (Some(_), None, _, _) | (Some(_), Some(_), None, _) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "definition",
-                                "unavailable_by_contract",
-                            );
-                            None
-                        }
-                        (Some(_), Some(_), Some(_), None) => {
-                            super::helpers::record_lsp_interactive_fail_closed_reason(
-                                self.coordinator.as_ref(),
-                                "definition",
-                                "missing_canonical_ir",
-                            );
-                            None
-                        }
-                    };
+                            (Some(_), Some(_), Some(_), None) => {
+                                super::helpers::record_lsp_interactive_fail_closed_reason(
+                                    self.coordinator.as_ref(),
+                                    "definition",
+                                    "missing_canonical_ir",
+                                );
+                                None
+                            }
+                        };
 
-                    Ok(result)
+                        Ok(result)
+                    } else {
+                        super::helpers::record_lsp_interactive_fail_closed_reason(
+                            self.coordinator.as_ref(),
+                            "definition",
+                            "missing_semantic_index",
+                        );
+                        Ok(None)
+                    }
                 }
                 Err(outcome) => {
                     super::helpers::record_lsp_interactive_fail_closed_reason(

@@ -27,6 +27,7 @@ import { initializeStatsProvider } from './lsp/statsProvider';
 // MILESTONE 2.20.3: Server Status Handler (rust-analyzer approach)
 import { initializeServerStatus } from './lsp/serverStatus';
 import { initializeSnapshotStatus } from './lsp/snapshotStatus';
+import { initializeExactIndexWarmup } from './lsp/exactIndexWarmup';
 import {
     getPlatformDocsArchive,
     initializeUtils,
@@ -107,6 +108,7 @@ export async function activate(context: vscode.ExtensionContext) {
         initializeProgress(outputChannel, statusBarItem);
         initializeServerStatus(outputChannel, statusBarItem);
         context.subscriptions.push(initializeSnapshotStatus(outputChannel, snapshotStatusBarItem));
+        context.subscriptions.push(initializeExactIndexWarmup());
         // MILESTONE 2.20.3: Initialize Current Context Provider
         initializeContextProvider(context, statusBarItem);
         // MILESTONE 2.20.4: Initialize Type Repository Stats Provider

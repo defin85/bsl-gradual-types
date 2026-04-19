@@ -29,7 +29,7 @@ use crate::types::{
     DiagnosticsSaveTimelineResponse, GetCurrentContextParams, GetIndexStateParams,
     GetIndexStateResponse, GetSnapshotStatusRequest, IncrementalUpdateParams,
     IncrementalUpdateResponse, ObservabilityMetricsRequest, ObservabilityMetricsResponse,
-    WorkspaceStatsResponse,
+    PrimeExactTypeIndexRequest, PrimeExactTypeIndexResponse, WorkspaceStatsResponse,
 };
 use bsl_shared::api::dtos::SnapshotReadinessDto;
 
@@ -1354,6 +1354,93 @@ impl BslLanguageServer {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid uri: {err}"))
         })?;
         Ok(self.snapshot_status_for_uri_v2(&uri).await)
+    }
+
+    /// Custom request: bsl/primeExactTypeIndex
+    pub(crate) async fn handle_prime_exact_type_index(
+        &self,
+        request: PrimeExactTypeIndexRequest,
+    ) -> JsonRpcResult<PrimeExactTypeIndexResponse> {
+        let uri = Url::parse(request.uri.as_str()).map_err(|err| {
+            tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid uri: {err}"))
+        })?;
+        let Some(file_id) = self.get_file_id_v2(&uri).await else {
+            return Ok(PrimeExactTypeIndexResponse {
+                accepted: false,
+                already_ready: false,
+                observed_version: None,
+                action: "missing_open_document".to_string(),
+            });
+        };
+        let observed_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        let Some(observed_version) = observed_version else {
+            return Ok(PrimeExactTypeIndexResponse {
+                accepted: false,
+                already_ready: false,
+                observed_version: None,
+                action: "missing_received_version".to_string(),
+            });
+        };
+        let requested_version = request
+            .requested_version
+            .and_then(|value| i32::try_from(value).ok());
+        if let Some(requested_version) = requested_version {
+            if requested_version != observed_version {
+                return Ok(PrimeExactTypeIndexResponse {
+                    accepted: false,
+                    already_ready: false,
+                    observed_version: Some(i64::from(observed_version)),
+                    action: "version_mismatch".to_string(),
+                });
+            }
+        }
+
+        let already_ready = {
+            let analysis = self.analysis_v2.snapshot().await;
+            analysis.file_version(file_id).ok().flatten() == Some(observed_version)
+                && analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+        };
+        if already_ready {
+            return Ok(PrimeExactTypeIndexResponse {
+                accepted: true,
+                already_ready: true,
+                observed_version: Some(i64::from(observed_version)),
+                action: "ready".to_string(),
+            });
+        }
+
+        self.schedule_type_index_precompute_v2(file_id, observed_version)
+            .await;
+        let waiter_action = self
+            .promote_type_index_precompute_for_waiter_v2(file_id, Some(observed_version))
+            .await;
+        info!(
+            uri = %uri,
+            file_id = file_id.0,
+            observed_version,
+            reason = request.reason.as_deref().unwrap_or("unspecified"),
+            waiter_action = waiter_action.as_str(),
+            "primed exact type index for active document"
+        );
+
+        let action = match waiter_action.as_str() {
+            "none" => "scheduled",
+            other => other,
+        };
+        Ok(PrimeExactTypeIndexResponse {
+            accepted: true,
+            already_ready: false,
+            observed_version: Some(i64::from(observed_version)),
+            action: action.to_string(),
+        })
     }
 
     /// Custom request: bsl/getObservabilityMetrics

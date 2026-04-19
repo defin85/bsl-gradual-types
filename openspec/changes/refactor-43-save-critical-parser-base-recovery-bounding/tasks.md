@@ -10,15 +10,17 @@
 - [ ] 2.1 Identify why the current same-version exact producer still spends representative
       steady-state latency inside `parser_base_recovery` despite the existing parser-base recovery
       and early-checkpoint refactors.
-- [ ] 2.2 Rework save-critical parser-base recovery so the representative `conf_big` path no longer
-      regresses into multi-second `didChange` materialization lag and `shadow_state` follow-up
-      fallback solely because recovery monopolized the exact path.
+- [ ] 2.2 Rework the promoted same-version exact producer rather than the downstream
+      `shadow_state` semantic branch, so the representative `conf_big` path no longer regresses
+      into multi-second `didChange` materialization lag and `shadow_state` follow-up fallback
+      solely because `parser_base_recovery` monopolized the exact path.
 - [ ] 2.3 Preserve exact same-version semantics, latest-wins supersession, truthful fallback, and
       bounded fail-closed behavior for downstream exact consumers such as `bsl.getCurrentContext`
       when parser-base recovery proof genuinely cannot succeed.
 - [ ] 2.4 Repair incident-bundle derived projection so
       `followup_ready_snapshot_timeout_leaf` and its elapsed fact survive from authoritative
-      diagnostics-save traces into `incident.json` and `summary.md`.
+      diagnostics-save traces into `incident.json` and `summary.md`, including the typed
+      request-surface plumbing consumed by the incident-bundle provider.
 
 ## 3. Regressions and Evidence
 
@@ -28,7 +30,9 @@
       authoritative diagnostics-save timeout-leaf fields when the backend exports them.
 - [ ] 3.3 Refresh representative live evidence against the `2026-04-19T14:34:41.582Z` incident
       bundle, including `didChange` ready-snapshot materialization, `didSave` terminal path,
-      parser-base recovery dominance, and same-family current-context parse source distribution.
+      parser-base recovery dominance, and at least one same-family `bsl.getCurrentContext`
+      request that resolves from `ready_snapshot` rather than defaulting to seconds-scale
+      `parser_coordinator` fallback after same-version readiness becomes visible.
 
 ## 4. Validation
 

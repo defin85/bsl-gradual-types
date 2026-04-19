@@ -9,6 +9,136 @@ import {
     CompletionProbeRecorder,
     getSharedCompletionProbeRecorder,
 } from '../../providers/completionProbeRecorder';
+import { primeExactTypeIndex, SnapshotStatusResponse } from '../customRequests';
+import { getSnapshotStatusForUri, onSnapshotStatusChange } from '../snapshotStatus';
+
+const HOVER_COLD_RETRY_WAIT_MS = 12_000;
+
+function hoverHasVisibleContent(result: vscode.Hover | null | undefined): boolean {
+    if (!result) {
+        return false;
+    }
+    const contents = Array.isArray(result.contents) ? result.contents : [result.contents];
+    return contents.some((content) => {
+        if (typeof content === 'string') {
+            return content.trim().length > 0;
+        }
+        if (content instanceof vscode.MarkdownString) {
+            return content.value.trim().length > 0;
+        }
+        if ('value' in content && typeof content.value === 'string') {
+            return content.value.trim().length > 0;
+        }
+        return true;
+    });
+}
+
+function snapshotStatusNeedsColdHoverRetry(
+    status: SnapshotStatusResponse | undefined,
+    documentVersion: number
+): boolean {
+    if (!status) {
+        return false;
+    }
+    if (
+        typeof status.requestedVersion === 'number' &&
+        status.requestedVersion !== documentVersion
+    ) {
+        return false;
+    }
+    return (
+        status.taskState === 'in_flight_same_revision' ||
+        status.state === 'building' ||
+        status.state === 'shadow_only' ||
+        status.state === 'stale'
+    );
+}
+
+function snapshotStatusReadyForRetry(
+    status: SnapshotStatusResponse | undefined,
+    documentVersion: number
+): boolean {
+    if (!status) {
+        return false;
+    }
+    return (
+        status.state === 'ready' &&
+        status.taskState === 'ready_same_revision' &&
+        (typeof status.requestedVersion !== 'number' ||
+            status.requestedVersion === documentVersion)
+    );
+}
+
+async function waitForColdHoverRetrySnapshot(
+    document: vscode.TextDocument,
+    token: vscode.CancellationToken
+): Promise<SnapshotStatusResponse | null> {
+    const uri = document.uri.toString();
+    const initialStatus = getSnapshotStatusForUri(uri);
+    if (!snapshotStatusNeedsColdHoverRetry(initialStatus, document.version)) {
+        return null;
+    }
+
+    return new Promise((resolve) => {
+        let settled = false;
+        let timeoutHandle: NodeJS.Timeout | undefined;
+        let snapshotSubscription: vscode.Disposable | undefined;
+        let cancellationSubscription: vscode.Disposable | undefined;
+
+        const finish = (status: SnapshotStatusResponse | null): void => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+            snapshotSubscription?.dispose();
+            cancellationSubscription?.dispose();
+            resolve(status);
+        };
+
+        const pollStatus = (): void => {
+            const currentStatus = getSnapshotStatusForUri(uri);
+            if (snapshotStatusReadyForRetry(currentStatus, document.version)) {
+                finish(currentStatus ?? null);
+                return;
+            }
+            if (!snapshotStatusNeedsColdHoverRetry(currentStatus, document.version)) {
+                finish(null);
+            }
+        };
+
+        snapshotSubscription = onSnapshotStatusChange(() => {
+            pollStatus();
+        });
+        cancellationSubscription = token.onCancellationRequested(() => {
+            finish(null);
+        });
+        timeoutHandle = setTimeout(() => {
+            finish(null);
+        }, HOVER_COLD_RETRY_WAIT_MS);
+        pollStatus();
+    });
+}
+
+async function maybePrimeExactIndexForHoverRetry(
+    document: vscode.TextDocument,
+    status: SnapshotStatusResponse
+): Promise<void> {
+    if (typeof status.requestedVersion !== 'number') {
+        return;
+    }
+    try {
+        await primeExactTypeIndex({
+            uri: document.uri.toString(),
+            requestedVersion: status.requestedVersion,
+            reason: 'hover_cold_snapshot_retry',
+        });
+    } catch {
+        // Best-effort only. The second hover must still run even if warmup fails.
+    }
+}
 
 /**
  * Строит LanguageClientOptions для LSP клиента
@@ -116,6 +246,20 @@ export function buildClientOptions(
                     });
                     throw error;
                 }
+            },
+            provideHover: async (document, position, token, next) => {
+                const firstResult = await next(document, position, token);
+                if (hoverHasVisibleContent(firstResult) || token.isCancellationRequested) {
+                    return firstResult;
+                }
+
+                const readyStatus = await waitForColdHoverRetrySnapshot(document, token);
+                if (!readyStatus || token.isCancellationRequested) {
+                    return firstResult;
+                }
+
+                await maybePrimeExactIndexForHoverRetry(document, readyStatus);
+                return next(document, position, token);
             },
         }
     };

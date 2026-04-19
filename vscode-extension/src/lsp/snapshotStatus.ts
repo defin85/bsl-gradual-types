@@ -265,6 +265,10 @@ export function getActiveSnapshotStatusSnapshot(): ActiveSnapshotStatusView {
     return { kind: 'unavailable', message: 'snapshot status is not available yet' };
 }
 
+export function getSnapshotStatusForUri(uri: string): SnapshotStatusResponse | undefined {
+    return snapshotStatusCache.get(uri);
+}
+
 export function resetSnapshotStatusForTests(): void {
     for (const disposable of subscriptions.splice(0, subscriptions.length)) {
         disposable.dispose();

@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::num::ParseIntError;
 use std::str::Utf8Error;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
@@ -132,6 +132,47 @@ impl CompletionHandoffTask {
                     .store(super::unix_timestamp_ms(), Ordering::Relaxed);
             }
         }
+    }
+}
+
+enum CompletionBarrierFirstPoll {
+    Ready(Option<Response>),
+    Pending,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionBarrierGate {
+    inflight: Arc<AtomicUsize>,
+    released: Arc<Notify>,
+}
+
+impl CompletionBarrierGate {
+    fn new() -> Self {
+        Self {
+            inflight: Arc::new(AtomicUsize::new(0)),
+            released: Arc::new(Notify::new()),
+        }
+    }
+
+    fn begin(&self) {
+        self.inflight.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn release(&self) {
+        let previous = self.inflight.fetch_sub(1, Ordering::SeqCst);
+        debug_assert!(previous > 0, "completion barrier inflight count underflow");
+        self.released.notify_waiters();
+    }
+
+    fn is_active(&self) -> bool {
+        self.inflight.load(Ordering::SeqCst) > 0
+    }
+
+    async fn wait_for_release(&self) {
+        if !self.is_active() {
+            return;
+        }
+        self.released.notified().await;
     }
 }
 
@@ -353,17 +394,33 @@ impl AdmissionQueues {
         }
     }
 
-    async fn pop_next(&self) -> Option<ScheduledRequest> {
+    async fn pop_next(
+        &self,
+        completion_barrier_active: bool,
+    ) -> Option<ScheduledRequest> {
         let next = {
             let mut state = self
                 .state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            state
-                .control
-                .pop_front()
-                .or_else(|| state.completion.pop_front())
-                .or_else(|| state.general.pop_front())
+            if let Some(control) = state.control.pop_front() {
+                Some(control)
+            } else {
+                let completion_dispatchable = !completion_barrier_active
+                    || state.completion.front().is_some_and(|scheduled| {
+                        is_completion_supporting_document_sync_notification(
+                            &scheduled.request,
+                        )
+                    });
+                if completion_dispatchable {
+                    state
+                        .completion
+                        .pop_front()
+                        .or_else(|| state.general.pop_front())
+                } else {
+                    state.general.pop_front()
+                }
+            }
         };
         if next.is_some() {
             self.space_notify.notify_waiters();
@@ -497,6 +554,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     let (mut completion_tasks_tx, completion_tasks_rx) =
         mpsc::channel::<CompletionHandoffTask>(MESSAGE_QUEUE_SIZE);
     let transport_shutdown = std::sync::Arc::new(Notify::new());
+    let completion_barrier_gate = CompletionBarrierGate::new();
 
     let responses_tx_for_server_tasks = responses_tx.clone();
     let process_server_tasks = async move {
@@ -521,6 +579,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     let admission_queues_for_scheduler = admission_queues.clone();
     let client_abort_for_scheduler = client_abort.clone();
     let responses_tx_for_scheduler = responses_tx.clone();
+    let completion_barrier_gate_for_scheduler = completion_barrier_gate.clone();
     let process_scheduler = async move {
         let mut responses_tx = responses_tx_for_scheduler;
         loop {
@@ -534,7 +593,14 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                 error!("{}", display_sources(err.into().as_ref()));
                 break;
             }
-            let Some(scheduled_request) = admission_queues_for_scheduler.pop_next().await else {
+            let completion_barrier_active = completion_barrier_gate_for_scheduler.is_active();
+            let Some(scheduled_request) = admission_queues_for_scheduler
+                .pop_next(completion_barrier_active)
+                .await
+            else {
+                if completion_barrier_active {
+                    completion_barrier_gate_for_scheduler.wait_for_release().await;
+                }
                 continue;
             };
 
@@ -566,16 +632,45 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                 .boxed();
 
             if is_completion_handoff_barrier {
-                if let Some(response) = future.await {
-                    if responses_tx
-                        .send(QueuedTransportMessage::response(response))
-                        .await
-                        .is_err()
-                    {
-                        error!(
-                            "failed to forward completion handoff barrier response: transport closed"
-                        );
-                        break;
+                let mut future = future;
+                let first_poll = future::poll_fn(|cx| match future.as_mut().poll(cx) {
+                    std::task::Poll::Ready(response) => {
+                        std::task::Poll::Ready(CompletionBarrierFirstPoll::Ready(response))
+                    }
+                    std::task::Poll::Pending => {
+                        std::task::Poll::Ready(CompletionBarrierFirstPoll::Pending)
+                    }
+                })
+                .await;
+                match first_poll {
+                    CompletionBarrierFirstPoll::Ready(response) => {
+                        if let Some(response) = response {
+                            if responses_tx
+                                .send(QueuedTransportMessage::response(response))
+                                .await
+                                .is_err()
+                            {
+                                error!(
+                                    "failed to forward completion handoff barrier response: transport closed"
+                                );
+                                break;
+                            }
+                        }
+                    }
+                    CompletionBarrierFirstPoll::Pending => {
+                        completion_barrier_gate_for_scheduler.begin();
+                        let barrier_gate = completion_barrier_gate_for_scheduler.clone();
+                        let barrier_future = async move {
+                            let response = future.await;
+                            barrier_gate.release();
+                            response
+                        }
+                        .boxed();
+                        if server_tasks_tx.send(barrier_future).await.is_err() {
+                            completion_barrier_gate_for_scheduler.release();
+                            error!("server task queue closed unexpectedly");
+                            break;
+                        }
                     }
                 }
             } else if is_completion {
@@ -1931,6 +2026,88 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Default)]
+    struct DocumentSyncBarrierBypassState {
+        did_open_started: Notify,
+        did_open_release: Notify,
+        latest_version: Mutex<i64>,
+        call_order: Mutex<Vec<String>>,
+    }
+
+    #[derive(Debug, Clone)]
+    struct DocumentSyncBarrierBypassService {
+        state: Arc<DocumentSyncBarrierBypassState>,
+    }
+
+    impl Service<Request> for DocumentSyncBarrierBypassService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let params = request.params().cloned();
+            let state = self.state.clone();
+            Box::pin(async move {
+                state
+                    .call_order
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .push(method.clone());
+                match method.as_str() {
+                    DID_OPEN_METHOD => {
+                        let version = params
+                            .as_ref()
+                            .and_then(|value| value.get("textDocument"))
+                            .and_then(|value| value.get("version"))
+                            .and_then(|value| value.as_i64())
+                            .expect("didOpen version");
+                        *state
+                            .latest_version
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = version;
+                        state.did_open_started.notify_waiters();
+                        state.did_open_release.notified().await;
+                        Ok(None)
+                    }
+                    "textDocument/hover" => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("hover request id"),
+                        json!({
+                            "contents": {
+                                "kind": "markdown",
+                                "value": "hover-ready"
+                            }
+                        }),
+                    ))),
+                    "textDocument/completion" => {
+                        let latest_version = *state
+                            .latest_version
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        Ok(Some(JsonRpcResponse::from_ok(
+                            request_id.expect("completion request id"),
+                            json!({
+                                "items": [{ "label": format!("version-{latest_version}") }],
+                                "isIncomplete": false,
+                                "version": latest_version,
+                            }),
+                        )))
+                    }
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
+        }
+    }
+
     async fn read_framed_message(
         reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
     ) -> serde_json::Value {
@@ -3147,6 +3324,163 @@ mod tests {
         assert!(
             did_change_position < completion_position,
             "didChange handoff must dispatch before completion on the same backlog-affected transport path, call_order={call_order:?}"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_allows_general_hover_to_bypass_inflight_did_open_barrier_while_completion_waits(
+    ) {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let barrier_state = Arc::new(DocumentSyncBarrierBypassState::default());
+
+        let server_task = tokio::spawn({
+            let barrier_state = barrier_state.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    DocumentSyncBarrierBypassService {
+                        state: barrier_state,
+                    },
+                    2,
+                    AdmissionQueues::new(AdmissionQueueCapacities {
+                        control: 2,
+                        completion: 2,
+                        general: 2,
+                    }),
+                )
+                .await;
+            }
+        });
+
+        for message in [
+            json!({
+                "jsonrpc": "2.0",
+                "method": DID_OPEN_METHOD,
+                "params": {
+                    "textDocument": {
+                        "uri": "file:///hover-bypass-did-open.bsl",
+                        "languageId": "bsl",
+                        "version": 1,
+                        "text": "Перем = 1;"
+                    }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "textDocument/hover",
+                "params": {
+                    "textDocument": { "uri": "file:///hover-bypass-did-open.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": COMPLETION_METHOD,
+                "params": {
+                    "textDocument": { "uri": "file:///hover-bypass-did-open.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&message).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            barrier_state.did_open_started.notified().await;
+        })
+        .await
+        .expect("didOpen barrier must reach service.call()");
+
+        let mut reader = BufReader::new(client_read);
+        let hover_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("general hover must bypass an inflight didOpen barrier");
+        assert_eq!(
+            hover_response.get("id").and_then(|value| value.as_i64()),
+            Some(1),
+            "hover must complete before the didOpen barrier is released, response={hover_response:?}"
+        );
+        assert_eq!(
+            hover_response
+                .get("result")
+                .and_then(|value| value.get("contents"))
+                .and_then(|value| value.get("value"))
+                .and_then(|value| value.as_str()),
+            Some("hover-ready")
+        );
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(50),
+                read_framed_message(&mut reader),
+            )
+            .await
+            .is_err(),
+            "completion must stay gated until the inflight didOpen barrier releases"
+        );
+
+        barrier_state.did_open_release.notify_waiters();
+
+        let completion_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("completion response timeout after releasing didOpen barrier");
+        assert_eq!(
+            completion_response
+                .get("id")
+                .and_then(|value| value.as_i64()),
+            Some(2)
+        );
+        assert_eq!(
+            completion_response
+                .get("result")
+                .and_then(|value| value.get("version"))
+                .and_then(|value| value.as_i64()),
+            Some(1),
+            "completion must still observe the didOpen-applied version after the barrier releases, response={completion_response:?}"
+        );
+
+        let call_order = barrier_state
+            .call_order
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let hover_position = call_order
+            .iter()
+            .position(|method| method == "textDocument/hover")
+            .expect("hover dispatch position");
+        let completion_position = call_order
+            .iter()
+            .position(|method| method == COMPLETION_METHOD)
+            .expect("completion dispatch position");
+        assert!(
+            hover_position < completion_position,
+            "hover must be allowed through while completion remains gated behind the inflight didOpen handoff, call_order={call_order:?}"
         );
 
         drop(client_write);

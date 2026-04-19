@@ -41,11 +41,18 @@ struct TestEnv {
 fn create_test_env() -> TestEnv {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
-        .load_types(vec![RawTypeData {
-            name: "Массив".to_string(),
-            source: RawDataSource::Platform,
-            ..Default::default()
-        }])
+        .load_types(vec![
+            RawTypeData {
+                name: "Массив".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
         .expect("load types");
 
     let mut index = SignatureIndex::new();

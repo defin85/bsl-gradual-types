@@ -31570,6 +31570,12 @@ fn completion_item_labels_from_jsonrpc_response(response: &serde_json::Value) ->
     completion_item_labels(&completion.expect("completion result present"))
 }
 
+fn hover_text_from_jsonrpc_response(response: &serde_json::Value) -> Option<String> {
+    let hover_result = response.get("result").cloned().expect("hover result field");
+    let hover: Option<Hover> = serde_json::from_value(hover_result).expect("parse hover result");
+    hover.and_then(extract_hover_text)
+}
+
 async fn lsp_completion_resolve_item_with_request<S>(
     service: &mut S,
     request_id: i64,
@@ -38793,6 +38799,196 @@ async fn p33_current_revision_exact_prewarm_reuses_request_started_ir_singleflig
 
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
+async fn p33_request_side_ir_singleflight_remains_leader_when_current_revision_prewarm_starts_first(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FIXTURE_V1: &str = "Процедура Тест()\n    Значение = Новый Структура;\nКонецПроцедуры\n";
+    const FIXTURE_V2: &str =
+        "Процедура Тест()\n    Значение = Новый Структура(\"Поле\", 1);\nКонецПроцедуры\n";
+    const LEADER_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_leader_query_kind_ir";
+    const SHARED_IR_METRIC: &str = "intellisense_v2_drilldown_singleflight_effectiveness_total_origin_lsp_outcome_shared_query_kind_ir";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let _ir_build_delay_guard = EnvVarGuard::set("BSL_TEST_ANALYSIS_IR_BUILD_DELAY_MS", "250");
+
+    let (_service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        FIXTURE_V1,
+        "file:///test_p33_prewarm_first_request_leader.bsl",
+    )
+    .await;
+
+    let file_path: Arc<str> = Arc::from(
+        uri.to_file_path()
+            .expect("fixture file path")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let fixture_v2: Arc<str> = Arc::from(FIXTURE_V2);
+    server.analysis_v2.apply_changes_interactive(
+        bsl_runtime::application::ObservabilityOrigin::Lsp,
+        vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
+            file_id,
+            text: fixture_v2.clone(),
+            version: 2,
+            path: file_path,
+            parse_snapshot: parse_snapshot_for_test(
+                file_id,
+                2,
+                fixture_v2.as_ref(),
+                vec![],
+                true,
+                None,
+            ),
+        }],
+    );
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 2);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: 2,
+            text: fixture_v2,
+        },
+    );
+
+    assert!(
+        server
+            .analysis_v2
+            .wait_for_file_version_for_operation(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                bsl_runtime::application::SemanticOperation::Completion,
+                file_id,
+                2,
+            )
+            .await,
+        "runtime must observe current revision before prewarm-first overlap starts"
+    );
+
+    let metrics_before = server.coordinator.observability_metrics();
+    let counters_before = metrics_before
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_before.counters object");
+    let leader_before = read_u64_metric(counters_before.get(LEADER_IR_METRIC));
+    let shared_before = read_u64_metric(counters_before.get(SHARED_IR_METRIC));
+
+    let prewarm_snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            bsl_runtime::application::SemanticOperation::Completion,
+        )
+        .await;
+    let prewarm_server = server.clone();
+    let prewarm_task = tokio::spawn(async move {
+        prewarm_server
+            .run_completion_exact_ir_singleflight_prewarm_v2(
+                prewarm_snapshot.analysis,
+                file_id,
+                bsl_runtime::application::CpuWorkClass::Background,
+                false,
+            )
+            .await;
+    });
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+    let request_snapshot = server
+        .analysis_v2
+        .completion_current_revision_snapshot_for_origin_and_operation(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            bsl_runtime::application::SemanticOperation::Hover,
+        )
+        .await;
+    let analysis = request_snapshot.analysis;
+    let deps_id = request_snapshot.deps_id;
+    let settings_id = analysis.settings_id().expect("settings id");
+    let coordinator = server.coordinator.clone();
+    let request_ir = tokio::task::spawn_blocking(move || {
+        let context = bsl_runtime::application::ExecutionContext {
+            origin: bsl_runtime::application::ObservabilityOrigin::Lsp,
+            operation: bsl_runtime::application::SemanticOperation::Hover,
+            completion_mode: None,
+            completion_large_churn_active: false,
+            file_id,
+            min_file_version: Some(2),
+            expected_deps_id: Some(deps_id),
+            flow_sensitive: false,
+            settings: bsl_runtime::application::ExecutionSettings {
+                settings_id,
+                diagnostics_detail_level: bsl_shared::formatting::DetailLevel::Full,
+            },
+            cancellation: bsl_runtime::application::CancellationPolicy::RespectClientAbort,
+        };
+
+        bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+            &context,
+            &analysis,
+            Some(coordinator.as_ref()),
+            file_id,
+        )
+    });
+
+    let request_ir = request_ir
+        .await
+        .expect("request ir join")
+        .expect("request ir singleflight")
+        .expect("request ir result");
+    prewarm_task.await.expect("prewarm task join");
+    assert!(
+        !request_ir.nodes.is_empty(),
+        "request-side IR query must still return a semantic program when prewarm started first"
+    );
+
+    let metrics_after = server.coordinator.observability_metrics();
+    let counters_after = metrics_after
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics_after.counters object");
+    let leader_delta =
+        read_u64_metric(counters_after.get(LEADER_IR_METRIC)).saturating_sub(leader_before);
+    let shared_delta =
+        read_u64_metric(counters_after.get(SHARED_IR_METRIC)).saturating_sub(shared_before);
+
+    assert_eq!(
+        leader_delta, 1,
+        "request-side IR must remain the singleflight leader when current-revision prewarm starts first, counters={counters_after:?}"
+    );
+    assert_eq!(
+        shared_delta, 0,
+        "passive current-revision prewarm must not capture later interactive IR into a shared follower wait, counters={counters_after:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
 async fn p33_completion_head_and_exact_resolve_keep_candidate_id_stable_for_same_revision() {
     struct EnvVarGuard {
         key: &'static str,
@@ -44536,6 +44732,348 @@ fn p37_real_conf_big_warm_cache_completion_perf_report_live() {
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn p57_real_conf_big_cold_start_hover_on_tablznach1_is_ready_without_completion_live() {
+    init_test_tracing();
+    let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
+
+    let Some(conf_big_root) = conf_big_root_for_tests() else {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping p57 real conf_big cold-start hover reproducer: examples/conf_big fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set"
+            );
+            return;
+        }
+        panic!(
+            "examples/conf_big fixture is missing; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly"
+        );
+    };
+
+    let module_path = conf_big_root
+        .join("Documents")
+        .join("РеализацияТоваровУслуг")
+        .join("Forms")
+        .join("ФормаДокументаОбщая")
+        .join("Ext")
+        .join("Form")
+        .join("Module.bsl");
+    if !module_path.exists() {
+        if allow_fixture_skip {
+            eprintln!(
+                "skipping p57 real conf_big cold-start hover reproducer: module fixture is missing and BSL_TEST_ALLOW_MISSING_CONF_BIG is set: {}",
+                module_path.display()
+            );
+            return;
+        }
+        panic!(
+            "conf_big module fixture is missing: {}; set BSL_TEST_ALLOW_MISSING_CONF_BIG=1 to skip explicitly",
+            module_path.display()
+        );
+    }
+
+    let module_text =
+        std::fs::read_to_string(&module_path).expect("read conf_big module text for p57 hover");
+    let workspace_setup = ScaleAwareWorkspaceSetup {
+        platform_docs_archive: syntax_helper_path_for_tests(),
+        configuration_path: conf_big_root.clone(),
+        platform_version: "8.3.25".to_string(),
+    };
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+    prime_server_with_workspace_setup(&server, &workspace_setup, "p57_real_conf_big_live_setup")
+        .await;
+
+    let uri = Url::from_file_path(&module_path).expect("real conf_big module uri");
+    harness
+        .send_notification(
+            "textDocument/didOpen",
+            DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "bsl".to_string(),
+                    version: 1,
+                    text: module_text.clone(),
+                },
+            },
+        )
+        .await;
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+                == Some(1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must publish latest received version for p57 real conf_big module");
+
+    assert!(
+        server.analysis_v2.wait_for_file_version(file_id, 1).await,
+        "analysis runtime must catch up to the opened real conf_big module before the cold-start hover probe"
+    );
+    let hover_position = find_utf16_position_at_marker_tail(&module_text, "ТаблЗнач1");
+    let ready_status = match tokio::time::timeout(Duration::from_secs(120), async {
+        loop {
+            let status = server.snapshot_status_for_uri_v2(&uri).await;
+            if status.requested_version == Some(1)
+                && status.ready_version == Some(1)
+                && status.state == SnapshotReadinessStateDto::Ready
+                && status.exact
+            {
+                break status;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    {
+        Ok(status) => status,
+        Err(_) => {
+            let status_after_timeout = server.snapshot_status_for_uri_v2(&uri).await;
+            let exact_ready_after_timeout = server
+                .analysis_v2
+                .snapshot()
+                .await
+                .current_type_index_serve_only_ready(file_id)
+                .expect("current_type_index_serve_only_ready after p57 timeout");
+            let background_parse_task_state = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks.get(&file_id).map(|task| {
+                    let target = task
+                        .target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    (
+                        target.requested_version,
+                        target.source,
+                        super::super::BackgroundParseSnapshotApplyTaskPhaseV2::from_raw(
+                            task.control.phase.load(Ordering::SeqCst),
+                        ),
+                        task.control.promotion_requested.load(Ordering::SeqCst),
+                        task.control.materialized.load(Ordering::SeqCst),
+                    )
+                })
+            };
+            let type_index_task_state = {
+                let tasks = server.type_index_precompute_tasks_v2.lock().await;
+                tasks.get(&file_id).map(|task| {
+                    (
+                        task.supersession_key.requested_version,
+                        task.work_class,
+                        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::from_atomic(
+                            task.phase.load(Ordering::Relaxed),
+                        ),
+                        task.active_requested_version.load(Ordering::Relaxed),
+                    )
+                })
+            };
+            panic!(
+                "same-revision ready/exact publish did not complete on real conf_big within timeout; file={}, status_after_timeout={{requested_version={:?}, ready_version={:?}, exact={}, task_state={:?}, state={:?}, phase={:?}, trigger={:?}}}, exact_ready_after_timeout={}, background_parse_task_state={background_parse_task_state:?}, type_index_task_state={type_index_task_state:?}",
+                module_path.display(),
+                status_after_timeout.requested_version,
+                status_after_timeout.ready_version,
+                status_after_timeout.exact,
+                status_after_timeout.task_state,
+                status_after_timeout.state,
+                status_after_timeout.phase,
+                status_after_timeout.trigger,
+                exact_ready_after_timeout,
+            );
+        }
+    };
+
+    let exact_ready_before_hover = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready before hover in p57");
+    assert!(
+        exact_ready_before_hover,
+        "snapshot status must not report ready/exact before the current exact type index is actually published, status={ready_status:?}"
+    );
+
+    let hover_response = tokio::time::timeout(
+        Duration::from_secs(2),
+        harness.send_request(
+            57_100_001,
+            "textDocument/hover",
+            HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: hover_position,
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            },
+        ),
+    )
+    .await
+    .expect("cold-start hover after same-revision ready/exact publish must stay bounded");
+    let first_hover_text =
+        hover_text_from_jsonrpc_response(&hover_response).expect("cold-start hover text");
+    let first_hover_trace = take_test_request_server_edge_trace(57_100_001).await;
+    assert!(
+        first_hover_text.contains("ТаблицаЗначений"),
+        "cold-start hover on real conf_big Module.bsl must expose ТаблицаЗначений for line 37 variable ТаблЗнач1 once same-revision ready/exact publish completes, hover={first_hover_text}, status={ready_status:?}, trace={first_hover_trace:?}",
+    );
+
+    live_transport_close_document(&mut harness, &uri).await;
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn same_revision_ready_snapshot_waits_for_exact_type_index_before_hover() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let _precompute_delay_guard = EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "400");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = concat!(
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+        "    ДляHover = S.Идентификатор;\n",
+        "КонецПроцедуры\n"
+    );
+    let uri =
+        Url::parse("file:///test_same_revision_ready_waits_for_exact_hover.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    assert!(
+        server.analysis_v2.wait_for_file_version(file_id, 1).await,
+        "analysis runtime must catch up to opened file version"
+    );
+
+    let mut saw_building_while_exact_cold = false;
+    let ready_status = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let status = server.snapshot_status_for_uri_v2(&uri).await;
+            let exact_ready = server
+                .analysis_v2
+                .snapshot()
+                .await
+                .current_type_index_serve_only_ready(file_id)
+                .expect("current_type_index_serve_only_ready during ready/exact wait");
+            if status.state == SnapshotReadinessStateDto::Ready || status.exact {
+                assert!(
+                    exact_ready,
+                    "snapshot status must not report ready/exact before the exact artifact is actually published, status={status:?}"
+                );
+                assert_eq!(
+                    status.ready_version,
+                    Some(1),
+                    "ready status must stay pinned to the requested revision, status={status:?}"
+                );
+                break status;
+            }
+            if !exact_ready {
+                saw_building_while_exact_cold = true;
+                assert!(
+                    status.state != SnapshotReadinessStateDto::Ready && !status.exact,
+                    "same-revision status must remain non-ready while exact artifact is still cold, status={status:?}"
+                );
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("same-revision ready/exact publish must complete for small hover fixture");
+    assert!(
+        saw_building_while_exact_cold,
+        "test must observe the transient parse-ready/exact-cold window before the fix closes it, status={ready_status:?}"
+    );
+
+    let hover_position = find_utf16_position_at_marker_tail(fixture, "ДляHover = S.Идентификатор");
+    let hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position)
+        .await
+        .expect("hover should succeed once same-revision ready/exact publish completes");
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must expose typed structure field info after same-revision ready/exact publish, hover={hover_text}, status={ready_status:?}"
+    );
+
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
     let coordinator = Arc::new(SystemCoordinator::new());
@@ -44659,6 +45197,78 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
     assert_eq!(status.phase, Some(SnapshotPhaseDto::Parsing));
 
     harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn prime_exact_type_index_request_schedules_same_revision_exact_warmup_without_completion() {
+    const FIXTURE: &str = "Процедура Тест()\n\
+    S = Новый Структура;\n\
+    S.Вставить(\"Идентификатор\", \"A-01\");\n\
+    ДляHover = S.Идентификатор;\n\
+КонецПроцедуры\n";
+    let (mut service, drain_task, server, uri, file_id) =
+        open_lsp_fixture_with_snapshot(FIXTURE, "file:///prime-exact-type-index-request.bsl").await;
+
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, FIXTURE, 2).await;
+
+    let exact_ready_before = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready before prime request");
+    assert!(
+        !exact_ready_before,
+        "test setup must start with current-revision exact type index unpublished"
+    );
+
+    let response = server
+        .handle_prime_exact_type_index(crate::types::PrimeExactTypeIndexRequest {
+            uri: uri.to_string(),
+            requested_version: Some(2),
+            reason: Some("test_exact_warmup".to_string()),
+        })
+        .await
+        .expect("prime exact type index request");
+    assert!(
+        response.accepted,
+        "prime exact type index request must be accepted for an open current-revision document"
+    );
+    assert!(
+        !response.already_ready,
+        "test setup must exercise the cold exact-index path"
+    );
+    assert_eq!(response.observed_version, Some(2));
+    assert!(
+        matches!(
+            response.action.as_str(),
+            "promoted" | "joined" | "scheduled"
+        ),
+        "prime exact type index request must report a scheduling action, response={response:?}"
+    );
+
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+    let exact_ready_after = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after prime request");
+    assert!(
+        exact_ready_after,
+        "prime exact type index request must publish current-revision exact type index without requiring completion first"
+    );
+
+    let hover_position = find_utf16_position_at_marker_tail(FIXTURE, "ДляHover = S.Идентификатор");
+    let hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position)
+        .await
+        .expect("hover should succeed after explicit exact-index prime");
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must expose typed structure field info after explicit exact-index prime, hover={hover_text}"
+    );
+
+    drain_task.abort();
 }
 
 #[tokio::test]

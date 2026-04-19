@@ -32,9 +32,10 @@ that hides the same leaf from request-centric handoff.
 
 ## What Changes
 
-- Require same-version `didSave` follow-up to keep exact `parser_base_recovery` on the
-  save-critical path, so a still-current exact producer does not spend representative steady-state
-  latency trapped in parser-base recovery before `ready_artifacts` can materialize.
+- Require same-version `didSave` follow-up to promote and keep the still-current same-version
+  exact background producer on the save-critical `parser_base_recovery` path, so the producer
+  does not spend representative steady-state latency trapped in parser-base recovery before
+  `ready_artifacts` can materialize.
 - Require refreshed representative evidence to show that the `conf_big` incident family no longer
   regresses into multi-second `didChange` materialization lag plus `shadow_state` fallback solely
   because `parser_base_recovery` monopolized the same-version exact path.
@@ -56,6 +57,7 @@ that hides the same leaf from request-centric handoff.
   - `backend/src/bin/lsp_server/server/core.rs`
   - `backend/src/bin/lsp_server/server/core/diagnostics_runtime.rs`
   - `bsl-runtime/src/system/parser_coordinator.rs`
+  - `vscode-extension/src/lsp/customRequests.ts`
   - `vscode-extension/src/providers/observabilityIncidentBundleDiagnosticsSave.ts`
   - backend/runtime and extension incident-bundle regression coverage
 - Follow-up relationship:

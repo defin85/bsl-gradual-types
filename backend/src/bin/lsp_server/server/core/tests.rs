@@ -55817,6 +55817,9 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         const SEMANTIC_DIAGNOSTICS_IR_BUDGET_MS: u64 = 1_100;
         const SEMANTIC_DIAGNOSTICS_COLLECT_BUDGET_MS: u64 = 600;
         const LOCAL_FUNCTION_SUMMARIES_BUDGET_MS: u64 = 450;
+        const BASELINE_CAPTURED_AT: &str = "2026-04-18T18:52:50Z";
+        const BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS: f64 = 3_226.0;
+        const BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS: f64 = 3_329.0;
 
         fn utf16_range_for_substring(source: &str, needle: &str) -> Range {
             let start_byte = source
@@ -56644,6 +56647,55 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             );
         }
 
+        let final_metrics = live_transport_get_observability_metrics(&mut harness, 55_100_903).await;
+        let final_histograms = final_metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("final metrics.histograms object");
+        let did_change_materialization_histogram = final_histograms
+            .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
+            .and_then(|value| value.as_object())
+            .expect("p55 did_change materialization histogram");
+        let did_change_materialization_histogram_count = read_u64_metric(
+            did_change_materialization_histogram.get("count"),
+        );
+        let did_change_materialization_p50_ms =
+            read_numeric_metric(did_change_materialization_histogram.get("p50"));
+        let did_change_materialization_p95_ms =
+            read_numeric_metric(did_change_materialization_histogram.get("p95"));
+        assert!(
+            did_change_materialization_histogram_count > 0,
+            "p55 must export did_change ready-snapshot materialization latency, final_histograms={final_histograms:?}"
+        );
+        assert!(
+            did_change_materialization_p50_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+            "p55 did_change materialization p50 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
+            did_change_materialization_p50_ms,
+            BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS
+        );
+        assert!(
+            did_change_materialization_p95_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+            "p55 did_change materialization p95 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
+            did_change_materialization_p95_ms,
+            BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS
+        );
+        let baseline_refactor_41_representative_bundle = serde_json::json!({
+            "captured_at": BASELINE_CAPTURED_AT,
+            "did_change_ready_snapshot_materialization_ms": {
+                "p50": BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+                "p95": BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+            },
+        });
+        let did_change_ready_snapshot_materialization = serde_json::json!({
+            "histogram_count": did_change_materialization_histogram_count,
+            "p50_ms": did_change_materialization_p50_ms,
+            "p95_ms": did_change_materialization_p95_ms,
+            "p50_vs_refactor_41_baseline_delta_ms": did_change_materialization_p50_ms
+                - BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+            "p95_vs_refactor_41_baseline_delta_ms": did_change_materialization_p95_ms
+                - BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+        });
+
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("backend crate must live under the workspace root");
@@ -56701,6 +56753,7 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "apply_delay_ms": APPLY_DELAY_MS,
             "did_change_blocking_parse_delay_ms": DID_CHANGE_BLOCKING_PARSE_DELAY_MS,
             "did_change_evidence_present": observability.is_some(),
+            "baseline_refactor_41_representative_bundle": baseline_refactor_41_representative_bundle,
             "parse_mode": observability.as_ref().and_then(|value| value.get("parseMode")).and_then(|value| value.as_str()),
             "base_text_source": observability.as_ref().and_then(|value| value.get("baseTextSource")).and_then(|value| value.as_str()),
             "change_shape": observability.as_ref().and_then(|value| value.get("changeShape")).and_then(|value| value.as_str()),
@@ -56710,6 +56763,7 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "changed_ranges_count": observability.as_ref().and_then(|value| value.get("changedRangesCount")).and_then(|value| value.as_u64()),
             "fallback_reason": observability.as_ref().and_then(|value| value.get("fallbackReason")).and_then(|value| value.as_str()),
             "parser_base_root_cause": observability.as_ref().and_then(|value| value.get("parserBaseRootCause")).and_then(|value| value.as_str()),
+            "did_change_ready_snapshot_materialization": did_change_ready_snapshot_materialization,
             "save_cycle_sequence": timeline
                 .get("save_cycle_sequence")
                 .and_then(|value| value.as_u64()),
@@ -57168,9 +57222,15 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         const TIMELINE_OBSERVE_BUDGET_MS: u64 = 30_000;
         const SAVE_CYCLE_COUNT: usize = 4;
         const READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS: u64 = 180;
-        const BASELINE_CAPTURED_AT: &str = "2026-04-17T14:06:03Z";
-        const BASELINE_READY_ARTIFACTS_COUNT: u64 = 1;
-        const BASELINE_SHADOW_STATE_COUNT: u64 = 3;
+        const BASELINE_CAPTURED_AT: &str = "2026-04-18T18:52:50Z";
+        const BASELINE_READY_ARTIFACTS_COUNT: u64 = 2;
+        const BASELINE_SHADOW_STATE_COUNT: u64 = 0;
+        const BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS: u64 = 5_052;
+        const BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS: u64 = 5_219;
+        const BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS: u64 = 3_222;
+        const BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS: u64 = 3_327;
+        const BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS: f64 = 3_226.0;
+        const BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS: f64 = 3_329.0;
         const V1_STATEMENT: &str = "СтруктураВозврата = Новый Структура;";
 
         let _env_lock = lock_test_env().await;
@@ -57489,6 +57549,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let followup_ready_snapshot_relief_valve_outcome = timeline
                 .get("followup_ready_snapshot_relief_valve_outcome")
                 .and_then(|value| value.as_str());
+            let followup_ready_snapshot_timeout_leaf = timeline
+                .get("followup_ready_snapshot_timeout_leaf")
+                .and_then(|value| value.as_str());
             let followup_wait_reason = timeline
                 .get("followup_wait_reason")
                 .and_then(|value| value.as_str());
@@ -57521,9 +57584,11 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     );
                     Some(publish)
                 }
-                Some("shadow_state") => None,
+                Some("shadow_state") => panic!(
+                    "p56 representative bundle must not fall back to shadow_state on the still-current path, trace={timeline:?}"
+                ),
                 _ => panic!(
-                    "p56 representative bundle must resolve each cycle to ready_artifacts or shadow_state, trace={timeline:?}"
+                    "p56 representative bundle must resolve each cycle to ready_artifacts, trace={timeline:?}"
                 ),
             };
             let followup_ready_snapshot_parse_exec_ms = timeline
@@ -57595,6 +57660,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_publish_non_query_residual_ms": followup_publish_non_query_residual_ms,
                 "followup_ready_snapshot_continuation_reason": followup_ready_snapshot_continuation_reason,
                 "followup_ready_snapshot_relief_valve_outcome": followup_ready_snapshot_relief_valve_outcome,
+                "followup_ready_snapshot_timeout_leaf": followup_ready_snapshot_timeout_leaf,
                 "followup_wait_reason": followup_wait_reason,
                 "final_statement": stage2_statement,
             }));
@@ -57685,6 +57751,24 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some(true)
             })
             .count() as u64;
+        let continuation_reason_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_continuation_reason")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+            })
+            .count() as u64;
+        let timeout_leaf_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_timeout_leaf")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+            })
+            .count() as u64;
         let max_followup_publish_elapsed_ms = cycles
             .iter()
             .filter_map(|cycle| {
@@ -57710,23 +57794,37 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             })
             .max();
 
+        let final_metrics = live_transport_get_observability_metrics(&mut harness, 56_100_950).await;
+        let final_histograms = final_metrics
+            .get("histograms")
+            .and_then(|value| value.as_object())
+            .expect("final metrics.histograms object");
+        let did_change_materialization_histogram = final_histograms
+            .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
+            .and_then(|value| value.as_object())
+            .expect("p56 did_change materialization histogram");
+        let did_change_materialization_histogram_count = read_u64_metric(
+            did_change_materialization_histogram.get("count"),
+        );
+        let did_change_materialization_p50_ms =
+            read_numeric_metric(did_change_materialization_histogram.get("p50"));
+        let did_change_materialization_p95_ms =
+            read_numeric_metric(did_change_materialization_histogram.get("p95"));
+
         assert_eq!(
             cycles.len(),
             SAVE_CYCLE_COUNT,
             "p56 must record every representative save cycle"
         );
         assert_eq!(
-            ready_artifacts_count + shadow_state_count,
+            ready_artifacts_count,
             SAVE_CYCLE_COUNT as u64,
-            "p56 representative bundle must resolve every cycle to ready_artifacts or shadow_state, cycles={cycles:?}"
+            "p56 representative bundle must keep every still-current cycle on ready_artifacts, cycles={cycles:?}"
         );
-        assert!(
-            ready_artifacts_count > BASELINE_READY_ARTIFACTS_COUNT,
-            "p56 representative bundle must materially improve ready_artifacts incidence beyond the {BASELINE_CAPTURED_AT} baseline, cycles={cycles:?}"
-        );
-        assert!(
-            shadow_state_count < BASELINE_SHADOW_STATE_COUNT,
-            "p56 representative bundle must materially reduce shadow_state incidence versus the {BASELINE_CAPTURED_AT} baseline, cycles={cycles:?}"
+        assert_eq!(
+            shadow_state_count,
+            0,
+            "p56 representative bundle must not report shadow_state on the still-current path, cycles={cycles:?}"
         );
         assert_eq!(
             wait_probe_ready_count,
@@ -57747,6 +57845,44 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             semantic_query_majority_of_followup_publish_count,
             ready_artifacts_count,
             "p56 representative bundle must prove that semantic_diagnostics_query explains the majority of followup publish latency on every ready_artifacts cycle, cycles={cycles:?}"
+        );
+        assert_eq!(
+            continuation_reason_count,
+            0,
+            "p56 representative bundle must not need a follow-up continuation reason after refactor-41, cycles={cycles:?}"
+        );
+        assert_eq!(
+            timeout_leaf_count,
+            0,
+            "p56 representative bundle must not leave a timeout leaf on the still-current path, cycles={cycles:?}"
+        );
+        assert!(
+            max_followup_publish_elapsed_ms
+                .is_some_and(|value| value < BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS),
+            "p56 representative bundle must stay below the {BASELINE_CAPTURED_AT} publish baseline floor of {}ms, observed_max={max_followup_publish_elapsed_ms:?}, cycles={cycles:?}",
+            BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS
+        );
+        assert!(
+            max_followup_ready_snapshot_parse_exec_ms
+                .is_some_and(|value| value < BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS),
+            "p56 representative bundle must stay below the {BASELINE_CAPTURED_AT} parse_exec baseline floor of {}ms, observed_max={max_followup_ready_snapshot_parse_exec_ms:?}, cycles={cycles:?}",
+            BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS
+        );
+        assert!(
+            did_change_materialization_histogram_count > 0,
+            "p56 representative bundle must export did_change ready-snapshot materialization latency, final_histograms={final_histograms:?}"
+        );
+        assert!(
+            did_change_materialization_p50_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+            "p56 representative bundle did_change materialization p50 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
+            did_change_materialization_p50_ms,
+            BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS
+        );
+        assert!(
+            did_change_materialization_p95_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+            "p56 representative bundle did_change materialization p95 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
+            did_change_materialization_p95_ms,
+            BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS
         );
         let representative_cycle = cycles
             .iter()
@@ -57773,6 +57909,12 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "cycle_count": SAVE_CYCLE_COUNT,
             "baseline": {
                 "captured_at": BASELINE_CAPTURED_AT,
+                "followup_publish_elapsed_ms": [BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS, BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS],
+                "followup_ready_snapshot_parse_exec_ms": [BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS, BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS],
+                "did_change_ready_snapshot_materialization_ms": {
+                    "p50": BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+                    "p95": BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+                },
                 "followup_semantic_path_ready_artifacts": BASELINE_READY_ARTIFACTS_COUNT,
                 "followup_semantic_path_shadow_state": BASELINE_SHADOW_STATE_COUNT,
             },
@@ -57781,6 +57923,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path_shadow_state": shadow_state_count,
                 "followup_ready_snapshot_wait_probe_ready": wait_probe_ready_count,
                 "followup_ready_snapshot_zero_probe_not_ready": zero_probe_not_ready_count,
+                "followup_ready_snapshot_continuation_reason_count": continuation_reason_count,
+                "followup_ready_snapshot_timeout_leaf_count": timeout_leaf_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
                 "semantic_query_majority_of_followup_publish_count": semantic_query_majority_of_followup_publish_count,
                 "dominant_later_residual": "semantic_diagnostics_query",
@@ -57789,6 +57933,17 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "max_followup_publish_elapsed_ms": max_followup_publish_elapsed_ms,
                 "max_followup_publish_semantic_diagnostics_query_ms": max_followup_publish_semantic_diagnostics_query_ms,
                 "max_followup_ready_snapshot_parse_exec_ms": max_followup_ready_snapshot_parse_exec_ms,
+                "did_change_ready_snapshot_materialization_histogram_count": did_change_materialization_histogram_count,
+                "did_change_ready_snapshot_materialization_p50_ms": did_change_materialization_p50_ms,
+                "did_change_ready_snapshot_materialization_p95_ms": did_change_materialization_p95_ms,
+            },
+            "comparison": {
+                "max_followup_publish_elapsed_vs_baseline_floor_delta_ms": max_followup_publish_elapsed_ms
+                    .map(|value| value as i64 - BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS as i64),
+                "max_followup_ready_snapshot_parse_exec_vs_baseline_floor_delta_ms": max_followup_ready_snapshot_parse_exec_ms
+                    .map(|value| value as i64 - BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS as i64),
+                "did_change_ready_snapshot_materialization_p50_vs_baseline_delta_ms": did_change_materialization_p50_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+                "did_change_ready_snapshot_materialization_p95_vs_baseline_delta_ms": did_change_materialization_p95_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
             },
             "representative_cycle": representative_cycle,
             "cycles": cycles,

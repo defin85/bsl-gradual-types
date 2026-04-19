@@ -20855,6 +20855,149 @@ async fn p7_hover_timeout_still_seeds_exact_type_index_without_did_save() {
 }
 
 #[tokio::test]
+async fn p7_diagnostics_only_query_keeps_exact_isolation_before_hover_and_definition_recovery() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const HOVER_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_hover_reason_missing_semantic_index";
+    const DEFINITION_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = (wait_budget_ms / 4).max(20);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = concat!(
+        "Процедура Целевой()\n",
+        "КонецПроцедуры\n",
+        "\n",
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+        "    ДляHover = S.Идентификатор;\n",
+        "    Целевой();\n",
+        "КонецПроцедуры\n"
+    );
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_diagnostics_only_exact_recovery_after_runtime_query.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_hover_fail_closed = read_u64_metric(before_counters.get(HOVER_REASON_KEY));
+    let before_definition_fail_closed = read_u64_metric(before_counters.get(DEFINITION_REASON_KEY));
+
+    let exact_ready_before_diagnostics = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready before diagnostics-only query");
+    assert!(
+        !exact_ready_before_diagnostics,
+        "test setup must start with current-revision exact type index unpublished"
+    );
+
+    let diagnostics = snapshot_semantic_diagnostic_messages(&server, file_id).await;
+    assert!(
+        diagnostics.is_empty(),
+        "diagnostics-only query should stay semantically clean for the exact-recovery fixture, diagnostics={diagnostics:?}"
+    );
+
+    let exact_ready_after_diagnostics = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after diagnostics-only query");
+    assert!(
+        !exact_ready_after_diagnostics,
+        "diagnostics-only query must not publish the exact type index before later exact consumers recover"
+    );
+
+    let hover_position = find_utf16_position_at_marker_tail(fixture, "ДляHover = S.Идентификатор");
+    let hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position)
+        .await
+        .expect("hover should recover canonical exact semantics after diagnostics-only query");
+    assert!(
+        hover_text.contains("Идентификатор") && hover_text.contains("Строка"),
+        "hover must recover the typed structure field after diagnostics-only query, hover={hover_text}"
+    );
+
+    let exact_ready_after_hover = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after hover recovery");
+    assert!(
+        exact_ready_after_hover,
+        "later hover recovery must publish the current exact type index instead of treating diagnostics-only artifacts as exact truth"
+    );
+
+    let definition_position =
+        find_utf16_position_after_marker(fixture, "ДляHover = S.Идентификатор;\n    Целевой");
+    let definition_points = lsp_definition_points_at(&mut service, &uri, definition_position).await;
+    let direct_definition_points =
+        snapshot_definition_points_at(&server, file_id, &uri, definition_position).await;
+    assert!(
+        !definition_points.is_empty(),
+        "definition must recover canonical exact target after diagnostics-only query, points={definition_points:?}, direct_points={direct_definition_points:?}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_hover_fail_closed = read_u64_metric(after_counters.get(HOVER_REASON_KEY));
+    let after_definition_fail_closed = read_u64_metric(after_counters.get(DEFINITION_REASON_KEY));
+    assert_eq!(
+        after_hover_fail_closed, before_hover_fail_closed,
+        "successful hover recovery after diagnostics-only query must not emit missing_semantic_index fail-closed attribution"
+    );
+    assert_eq!(
+        after_definition_fail_closed, before_definition_fail_closed,
+        "successful definition recovery after diagnostics-only query must not emit missing_semantic_index fail-closed attribution"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_definition_bootstraps_exact_type_index_without_did_save_when_precompute_fits_budget() {
     struct EnvVarGuard {
         key: &'static str,

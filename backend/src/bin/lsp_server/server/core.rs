@@ -244,19 +244,42 @@ fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inn
     trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
     attribution: diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2,
 ) {
-    trace.followup_ready_snapshot_parse_exec_ms = attribution.parse_exec_ms;
-    trace.followup_ready_snapshot_parse_exec_core_parse_build_ms =
-        attribution.parse_exec_core_parse_build_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms =
-        attribution.parse_exec_core_build_parser_tree_build_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms =
-        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms =
-        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms =
-        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome =
-        attribution.program_lowering_reuse_outcome.map(str::to_string);
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_ms,
+        attribution.parse_exec_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_parse_build_ms,
+        attribution.parse_exec_core_parse_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms,
+        attribution.parse_exec_core_build_pre_parse_setup_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms,
+        attribution.parse_exec_core_build_parser_base_recovery_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms,
+        attribution.parse_exec_core_build_parser_tree_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+    );
+    if let Some(value) = attribution.program_lowering_reuse_outcome {
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome =
+            Some(value.to_string());
+    }
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units =
         attribution.program_lowering_reused_lowering_units;
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units =
@@ -283,88 +306,139 @@ fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inn
         attribution.program_lowering_routine_body_reused_suffix_lowering_units;
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_routine_body_rebuilt_lowering_units =
         attribution.program_lowering_routine_body_rebuilt_lowering_units;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source =
-        attribution
-            .program_lowering_reuse_plan_build_source
-            .map(str::to_string);
+    if let Some(value) = attribution.program_lowering_reuse_plan_build_source {
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source =
+            Some(value.to_string());
+    }
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit =
         attribution.program_lowering_reuse_plan_take_if_unique_hit;
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit =
         attribution.program_lowering_reuse_plan_borrowed_cache_hit;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms =
-        attribution.program_lowering_reuse_plan_build_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms =
-        attribution.program_lowering_reuse_plan_owned_build_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms =
-        attribution.program_lowering_reuse_plan_borrowed_build_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms =
-        attribution.program_lowering_reuse_plan_rebase_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms,
+        attribution.program_lowering_reuse_plan_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_owned_build_ms,
+        attribution.program_lowering_reuse_plan_owned_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_build_ms,
+        attribution.program_lowering_reuse_plan_borrowed_build_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_ms,
+        attribution.program_lowering_reuse_plan_rebase_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_rebase_statement_count =
         attribution.program_lowering_reuse_plan_rebase_statement_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms =
-        attribution.program_lowering_reused_progress_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms,
+        attribution.program_lowering_reused_progress_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_call_count =
         attribution.program_lowering_reused_progress_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms =
-        attribution.program_lowering_rebuild_dispatch_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms,
+        attribution.program_lowering_rebuild_dispatch_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_call_count =
         attribution.program_lowering_rebuild_dispatch_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms =
-        attribution.program_lowering_rebuild_dispatch_callable_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_ms,
+        attribution.program_lowering_rebuild_dispatch_callable_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_call_count =
         attribution.program_lowering_rebuild_dispatch_callable_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms =
-        attribution.program_lowering_rebuild_dispatch_callable_body_dispatch_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_ms,
+        attribution.program_lowering_rebuild_dispatch_callable_body_dispatch_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_body_dispatch_call_count =
         attribution.program_lowering_rebuild_dispatch_callable_body_dispatch_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms =
-        attribution.program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms =
-        attribution.program_lowering_rebuild_dispatch_control_flow_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms,
+        attribution.program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_ms,
+        attribution.program_lowering_rebuild_dispatch_control_flow_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_control_flow_call_count =
         attribution.program_lowering_rebuild_dispatch_control_flow_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms =
-        attribution.program_lowering_rebuild_dispatch_simple_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_ms,
+        attribution.program_lowering_rebuild_dispatch_simple_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_simple_call_count =
         attribution.program_lowering_rebuild_dispatch_simple_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms =
-        attribution.program_lowering_rebuild_dispatch_other_ms;
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_ms,
+        attribution.program_lowering_rebuild_dispatch_other_ms,
+    );
     trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count =
         attribution.program_lowering_rebuild_dispatch_other_call_count;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms =
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
         attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms =
+            .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
         attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
-        attribution
-            .parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
-            .map(|value| value.to_string());
-    trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms =
-        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms =
-        attribution.parse_exec_core_build_tree_cache_install_ms;
-    trace.followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms =
-        attribution.parse_exec_optional_cache_enrichment_ms;
-    trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = attribution
-        .parse_exec_core_build_dominant_checkpoint
-        .map(|value| value.to_string());
-    trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms =
-        attribution.parse_exec_core_build_dominant_checkpoint_ms;
-    trace.followup_ready_snapshot_parse_exec_dominant_subphase = attribution
-        .parse_exec_dominant_subphase
-        .map(|value| value.to_string());
-    trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms =
-        attribution.parse_exec_dominant_subphase_ms;
-    trace.followup_ready_snapshot_post_parse_pre_materialization_ms =
-        attribution.post_parse_pre_materialization_ms;
-    trace.followup_ready_snapshot_ready_install_ms = attribution.ready_install_ms;
-    trace.followup_ready_snapshot_document_symbol_side_work_ms =
-        attribution.document_symbol_side_work_ms;
-    trace.followup_ready_snapshot_dominant_phase =
-        attribution.dominant_phase.map(|value| value.to_string());
-    trace.followup_ready_snapshot_dominant_phase_ms = attribution.dominant_phase_ms;
+            .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
+    );
+    if let Some(value) = attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+    {
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
+            Some(value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms,
+        attribution.parse_exec_core_build_tree_cache_install_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms,
+        attribution.parse_exec_optional_cache_enrichment_ms,
+    );
+    if let Some(value) = attribution.parse_exec_core_build_dominant_checkpoint {
+        trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint =
+            Some(value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms,
+        attribution.parse_exec_core_build_dominant_checkpoint_ms,
+    );
+    if let Some(value) = attribution.parse_exec_dominant_subphase {
+        trace.followup_ready_snapshot_parse_exec_dominant_subphase = Some(value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_parse_exec_dominant_subphase_ms,
+        attribution.parse_exec_dominant_subphase_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_post_parse_pre_materialization_ms,
+        attribution.post_parse_pre_materialization_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_ready_install_ms,
+        attribution.ready_install_ms,
+    );
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_document_symbol_side_work_ms,
+        attribution.document_symbol_side_work_ms,
+    );
+    if let Some(value) = attribution.dominant_phase {
+        trace.followup_ready_snapshot_dominant_phase = Some(value.to_string());
+    }
+    update_followup_timing_max(
+        &mut trace.followup_ready_snapshot_dominant_phase_ms,
+        attribution.dominant_phase_ms,
+    );
 }
 
 fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
@@ -993,6 +1067,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,
@@ -1163,6 +1239,8 @@ impl BslLanguageServer {
                     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms:
                         None,
+                    followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                    followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                     followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                         None,
@@ -1419,6 +1497,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,
@@ -1640,6 +1720,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,
@@ -1813,6 +1895,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,
@@ -1991,6 +2075,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,
@@ -2188,6 +2274,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_parse_exec_core_parse_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: None,
                 followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: None,
+                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: None,
                 followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
                     None,

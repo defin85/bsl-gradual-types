@@ -697,6 +697,10 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,

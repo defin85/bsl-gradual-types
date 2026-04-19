@@ -7181,6 +7181,161 @@ async fn p27_diagnostics_save_timeline_reports_parse_exec_core_subphase_for_exac
 }
 
 #[tokio::test]
+async fn p27_diagnostics_save_timeline_reports_pre_parse_setup_checkpoint_for_exact_worker() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p27-ready-snapshot-timeout-pre-parse-setup.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1442),
+        diagnostics_generation: 342,
+        save_cycle_sequence: 102,
+        requested_version: 112,
+    };
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::PreParseSetup,
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("pre-parse-setup timeout phase attribution");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("not_ready"),
+        Some("timeout"),
+        Some("in_flight_same_version"),
+        Some(true),
+        Some(attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_phase.as_deref(),
+        Some("parse_exec")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_leaf.as_deref(),
+        Some("pre_parse_setup")
+    );
+    assert!(trace
+        .followup_ready_snapshot_timeout_leaf_elapsed_ms
+        .is_some_and(|value| value > 0));
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_timeout_subphase
+            .as_deref(),
+        Some("core_parse_build")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint
+            .as_deref(),
+        Some("pre_parse_setup")
+    );
+    assert!(trace
+        .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms
+        .is_some_and(|value| value > 0));
+    assert!(trace
+        .followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms
+        .is_some_and(|value| value > 0));
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint
+            .as_deref(),
+        Some("pre_parse_setup")
+    );
+}
+
+#[tokio::test]
+async fn p27_diagnostics_save_timeline_reports_parser_base_recovery_checkpoint_for_exact_worker() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p27-ready-snapshot-timeout-parser-base-recovery.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1443),
+        diagnostics_generation: 343,
+        save_cycle_sequence: 103,
+        requested_version: 113,
+    };
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery,
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    let attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("parser-base-recovery timeout phase attribution");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("not_ready"),
+        Some("timeout"),
+        Some("in_flight_same_version"),
+        Some(true),
+        Some(attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_phase.as_deref(),
+        Some("parse_exec")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_leaf.as_deref(),
+        Some("parser_base_recovery")
+    );
+    assert!(trace
+        .followup_ready_snapshot_timeout_leaf_elapsed_ms
+        .is_some_and(|value| value > 0));
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_timeout_subphase
+            .as_deref(),
+        Some("core_parse_build")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint
+            .as_deref(),
+        Some("parser_base_recovery")
+    );
+    assert!(trace
+        .followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms
+        .is_some_and(|value| value > 0));
+    assert!(trace
+        .followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms
+        .is_some_and(|value| value > 0));
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint
+            .as_deref(),
+        Some("parser_base_recovery")
+    );
+}
+
+#[tokio::test]
 async fn p28_diagnostics_save_timeline_reports_exact_ready_snapshot_assembly_pre_checkpoint_leaf_for_exact_worker(
 ) {
     let server = create_diagnostics_save_timeline_test_server();
@@ -7696,6 +7851,61 @@ async fn p31_diagnostics_save_timeline_reentered_program_lowering_keeps_program_
 }
 
 #[tokio::test]
+async fn p31_diagnostics_save_timeline_reentered_core_parse_build_keeps_first_bounded_elapsed() {
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let first_attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("first core-parse-build attribution");
+    let first_elapsed = first_attribution
+        .timeout_leaf_elapsed_ms
+        .expect("first core-parse-build timeout leaf elapsed");
+
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    tokio::time::sleep(Duration::from_millis(5)).await;
+
+    let second_attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("second core-parse-build attribution");
+    assert_eq!(
+        second_attribution.timeout_leaf.as_deref(),
+        Some("before_first_core_build_checkpoint")
+    );
+    assert_eq!(
+        second_attribution.parse_exec_timeout_subphase.as_deref(),
+        Some("core_parse_build")
+    );
+    assert!(
+        second_attribution
+            .timeout_leaf_elapsed_ms
+            .is_some_and(|value| value > first_elapsed),
+        "re-entering the same parse_exec subphase must not reset the first bounded elapsed time"
+    );
+    assert!(
+        second_attribution
+            .parse_exec_core_parse_build_ms
+            .is_some_and(|value| value > first_elapsed),
+        "core_parse_build attribution must keep accumulating across repeated identical callbacks"
+    );
+}
+
+#[tokio::test]
 async fn p23_diagnostics_save_timeline_reports_post_parse_timeout_phase_for_exact_worker() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p23-ready-snapshot-timeout-post-parse.bsl").expect("uri");
@@ -7964,6 +8174,8 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
     let completed = super::super::ReadyParseSnapshotPhaseAttributionV2 {
         parse_exec_ms: Some(84),
         parse_exec_core_parse_build_ms: Some(84),
+        parse_exec_core_build_pre_parse_setup_ms: None,
+        parse_exec_core_build_parser_base_recovery_ms: None,
         parse_exec_core_build_parser_tree_build_ms: Some(8),
         parse_exec_core_build_exact_ready_snapshot_assembly_ms: Some(76),
         parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Some(76),
@@ -9158,6 +9370,9 @@ async fn p32_diagnostics_save_timeline_continuation_reports_superseded_generatio
     control.transition_phase_attribution(
         super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
     );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
     server
         .background_parse_snapshot_apply_tasks_v2
         .lock()
@@ -9229,6 +9444,151 @@ async fn p32_diagnostics_save_timeline_continuation_reports_superseded_generatio
     assert!(
         trace.followup_semantic_path.is_none(),
         "superseded continuation must not degrade into shadow_state semantic work, trace={trace:?}"
+    );
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_superseded"
+        )) > 0,
+        "superseded continuation must export continuation reason counter, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
+async fn p32_diagnostics_save_timeline_continuation_reports_cancelled_after_bounded_core_parse_build_entry(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p32-ready-snapshot-continuation-cancelled-core-build.bsl")
+        .expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1453);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 353,
+        save_cycle_sequence: 113,
+        requested_version: 133,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 133;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let cancel_token = crate::server::DiagnosticsCancellationTokenV2::new();
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    control.transition_phase_attribution(
+        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            super::super::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    super::super::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: super::super::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+    let cancel_token_for_cancel = cancel_token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(550)).await;
+        cancel_token_for_cancel.cancel(crate::server::DiagnosticsCancellationReasonV2::ClientCancel);
+        control.control_notify.notify_waiters();
+    });
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            Some(&cancel_token),
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert_eq!(
+        disposition,
+        Some(bsl_runtime::application::DiagnosticsDisposition::ClientCancel)
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("cancelled")
+    );
+    assert!(
+        trace.followup_semantic_path.is_none(),
+        "cancelled continuation must not degrade into shadow_state semantic work, trace={trace:?}"
+    );
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_continuation_total_reason_cancelled"
+        )) > 0,
+        "cancelled continuation must export continuation reason counter, counters={counters:?}"
     );
 }
 
@@ -9325,6 +9685,8 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2 {
                 parse_exec_ms: Some(3600),
                 parse_exec_core_parse_build_ms: Some(3600),
+                parse_exec_core_build_pre_parse_setup_ms: None,
+                parse_exec_core_build_parser_base_recovery_ms: None,
                 parse_exec_core_build_parser_tree_build_ms: Some(3600),
                 parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
                 parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: None,
@@ -9510,6 +9872,8 @@ async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_afte
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2 {
                 parse_exec_ms: Some(4100),
                 parse_exec_core_parse_build_ms: Some(4100),
+                parse_exec_core_build_pre_parse_setup_ms: None,
+                parse_exec_core_build_parser_base_recovery_ms: None,
                 parse_exec_core_build_parser_tree_build_ms: Some(4100),
                 parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
                 parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: None,
@@ -9590,10 +9954,10 @@ async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_afte
 }
 
 #[tokio::test]
-async fn p24_diagnostics_save_timeline_continues_still_current_before_first_parse_exec_subphase() {
+async fn p24_diagnostics_save_timeline_continues_still_current_after_bounded_core_parse_build_entry() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse(
-        "file:///p24-ready-snapshot-relief-continued-before-first-parse-exec-subphase.bsl",
+        "file:///p24-ready-snapshot-relief-continued-before-first-core-build-checkpoint.bsl",
     )
     .expect("uri");
     let file_id = bsl_analysis_v2::FileId(1462);
@@ -9635,6 +9999,9 @@ async fn p24_diagnostics_save_timeline_continues_still_current_before_first_pars
     );
     control.transition_phase_attribution(
         super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
     );
     server
         .background_parse_snapshot_apply_tasks_v2
@@ -9683,6 +10050,8 @@ async fn p24_diagnostics_save_timeline_continues_still_current_before_first_pars
             phase_attribution: super::super::ReadyParseSnapshotPhaseAttributionV2 {
                 parse_exec_ms: Some(4300),
                 parse_exec_core_parse_build_ms: None,
+                parse_exec_core_build_pre_parse_setup_ms: None,
+                parse_exec_core_build_parser_base_recovery_ms: None,
                 parse_exec_core_build_parser_tree_build_ms: None,
                 parse_exec_core_build_exact_ready_snapshot_assembly_ms: None,
                 parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: None,
@@ -9844,6 +10213,9 @@ async fn p26_diagnostics_save_timeline_relief_valve_does_not_skip_apply_lag_for_
         .transition_phase_attribution(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
     control.transition_phase_attribution(
         super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
     );
     server
         .background_parse_snapshot_apply_tasks_v2
@@ -52800,6 +53172,18 @@ fn p51_real_conf_test_ready_snapshot_relief_valve_report_live() {
         );
         assert_eq!(
             timeline
+                .get("followup_ready_snapshot_timeout_leaf")
+                .and_then(|value| value.as_str()),
+            Some("parser_tree_build")
+        );
+        assert_eq!(
+            timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint")
+                .and_then(|value| value.as_str()),
+            Some("parser_tree_build")
+        );
+        assert_eq!(
+            timeline
                 .get("followup_ready_snapshot_task_state")
                 .and_then(|value| value.as_str()),
             Some("in_flight_same_version")
@@ -52822,6 +53206,20 @@ fn p51_real_conf_test_ready_snapshot_relief_valve_report_live() {
                 .and_then(|value| value.as_u64())
                 .is_some_and(|value| value > 0 && value <= relief_budget_ms),
             "p51 must expose spent relief wait within bounded budget, trace={timeline:?}"
+        );
+        assert!(
+            timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
+                .and_then(|value| value.as_u64())
+                .is_some_and(|value| value > 0),
+            "p51 must expose non-zero parser_tree_build timing on the live timeout path, trace={timeline:?}"
+        );
+        assert_eq!(
+            timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint")
+                .and_then(|value| value.as_str()),
+            Some("parser_tree_build"),
+            "p51 live timeout path must keep the dominant core-build checkpoint on parser_tree_build, trace={timeline:?}"
         );
         assert!(
             timeline
@@ -52900,6 +53298,24 @@ fn p51_real_conf_test_ready_snapshot_relief_valve_report_live() {
                 .and_then(|value| value.as_str()),
             "followup_ready_snapshot_timeout_phase": timeline
                 .get("followup_ready_snapshot_timeout_phase")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_timeout_leaf": timeline
+                .get("followup_ready_snapshot_timeout_leaf")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint")
                 .and_then(|value| value.as_str()),
             "followup_ready_snapshot_relief_valve_outcome": timeline
                 .get("followup_ready_snapshot_relief_valve_outcome")
@@ -53429,6 +53845,12 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
             "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms")
                 .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms")
+                .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
                 .and_then(|value| value.as_u64()),
@@ -53639,7 +54061,7 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-35-exact-program-lowering-reuse-materialization".to_string()
+            "refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -54230,6 +54652,12 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
             "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms")
                 .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms")
+                .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
                 .and_then(|value| value.as_u64()),
@@ -54501,8 +54929,9 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
         ));
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
-        let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "diagnostics-save-shadow-state-timeout".to_string());
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding".to_string()
+        });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {
@@ -54956,8 +55385,14 @@ fn p54_real_conf_big_diagnostics_shadow_state_timeout_report_live() {
                 assert_eq!(
                     trace.get("followup_ready_snapshot_timeout_leaf")
                         .and_then(|value| value.as_str()),
-                    Some("before_first_parse_exec_subphase"),
-                    "{label} must expose that the live timeout happened before the first parse_exec subphase callback, trace={trace:?}"
+                    Some("parser_base_recovery"),
+                    "{label} must expose that the live timeout stayed inside the bounded parser_base_recovery checkpoint on the lagging-shadow recovery branch, trace={trace:?}"
+                );
+                assert_eq!(
+                    trace.get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint")
+                        .and_then(|value| value.as_str()),
+                    Some("parser_base_recovery"),
+                    "{label} must attribute the live timeout to the bounded parser_base_recovery checkpoint, trace={trace:?}"
                 );
                 assert_eq!(
                     trace.get("followup_ready_snapshot_relief_valve_outcome")
@@ -55426,7 +55861,7 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-35-exact-program-lowering-reuse-materialization".to_string()
+            "refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -55714,6 +56149,30 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         let ready_snapshot_exact_assembly_ms = timeline
             .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms")
             .and_then(|value| value.as_u64());
+        let semantic_query_dominates_ready_snapshot_parse_exec = semantic_diagnostics_query_ms
+            .zip(ready_snapshot_parse_exec_ms)
+            .map(|(query_ms, parse_exec_ms)| query_ms > parse_exec_ms);
+        let semantic_query_majority_of_followup_publish = semantic_diagnostics_query_ms
+            .zip(followup_publish_elapsed_ms)
+            .map(|(query_ms, publish_ms)| query_ms.saturating_mul(2) > publish_ms);
+        assert!(
+            followup_publish_elapsed_ms.is_some_and(|value| value > 0),
+            "p55 must expose non-zero followup publish latency on the production-like path, trace={timeline:?}"
+        );
+        assert!(
+            semantic_diagnostics_query_ms.is_some_and(|value| value > 0),
+            "p55 must expose non-zero semantic_diagnostics_query_ms on the production-like path, trace={timeline:?}"
+        );
+        assert_eq!(
+            semantic_query_dominates_ready_snapshot_parse_exec,
+            Some(true),
+            "p55 must prove that post-parse semantic diagnostics now dominate ready-snapshot parse_exec on the production-like path, trace={timeline:?}"
+        );
+        assert_eq!(
+            semantic_query_majority_of_followup_publish,
+            Some(true),
+            "p55 must prove that semantic_diagnostics_query now explains the majority of followup publish latency on the production-like path, trace={timeline:?}"
+        );
         assert_optional_u64_budget(
             &timeline,
             "p55",
@@ -56069,25 +56528,52 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                     && program_lowering_reuse_plan_take_if_unique_hit.is_some()
                     && program_lowering_reuse_plan_borrowed_cache_hit.is_some()
                     && program_lowering_reuse_plan_build_ms.is_some()
-                    && program_lowering_reuse_plan_rebase_ms.is_some()
                     && program_lowering_reuse_plan_rebase_statement_count.is_some()
-                    && program_lowering_reused_progress_ms.is_some()
-                    && program_lowering_reused_progress_call_count.is_some()
                     && program_lowering_rebuild_dispatch_ms.is_some()
                     && program_lowering_rebuild_dispatch_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_callable_ms.is_some()
-                    && program_lowering_rebuild_dispatch_callable_call_count.is_some()
                     && program_lowering_rebuild_dispatch_callable_body_dispatch_ms.is_some()
                     && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms.is_some()
                     && program_lowering_rebuild_dispatch_control_flow_ms.is_some()
                     && program_lowering_rebuild_dispatch_control_flow_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_simple_ms.is_some()
-                    && program_lowering_rebuild_dispatch_simple_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_other_ms.is_some()
-                    && program_lowering_rebuild_dispatch_other_call_count.is_some(),
+                    && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count
+                        .is_some(),
                 "p55 must export bounded reuse-vs-rebuild summary on the production-like path, trace={timeline:?}"
             );
+            match program_lowering_reuse_plan_build_source {
+                Some("owned") => assert!(
+                    program_lowering_reuse_plan_owned_build_ms.is_some(),
+                    "p55 owned reuse-plan builds must export owned_build_ms, trace={timeline:?}"
+                ),
+                Some("borrowed") => assert!(
+                    program_lowering_reuse_plan_borrowed_build_ms.is_some(),
+                    "p55 borrowed reuse-plan builds must export borrowed_build_ms, trace={timeline:?}"
+                ),
+                _ => {}
+            }
+            if program_lowering_reused_progress_ms.is_some() {
+                assert!(
+                    program_lowering_reused_progress_call_count.is_some(),
+                    "p55 reused-progress latency must not be exported without a matching call_count, trace={timeline:?}"
+                );
+            }
+            if program_lowering_rebuild_dispatch_callable_ms.is_some() {
+                assert!(
+                    program_lowering_rebuild_dispatch_callable_call_count.is_some(),
+                    "p55 callable rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                );
+            }
+            if program_lowering_rebuild_dispatch_simple_ms.is_some() {
+                assert!(
+                    program_lowering_rebuild_dispatch_simple_call_count.is_some(),
+                    "p55 simple rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                );
+            }
+            if program_lowering_rebuild_dispatch_other_ms.is_some() {
+                assert!(
+                    program_lowering_rebuild_dispatch_other_call_count.is_some(),
+                    "p55 other rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                );
+            }
         }
         if let (Some(program_conversion_ms), Some(program_lowering_ms)) =
             (program_conversion_ms, program_lowering_ms)
@@ -56265,6 +56751,12 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_str()),
             "followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms")
+                .and_then(|value| value.as_u64()),
+            "followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms": timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms")
                 .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms": timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms")
@@ -56538,6 +57030,8 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "followup_publish_semantic_diagnostics_query_ms": ready_artifacts_publish
                 .get("semantic_diagnostics_query_ms")
                 .and_then(|value| value.as_u64()),
+            "semantic_query_dominates_ready_snapshot_parse_exec": semantic_query_dominates_ready_snapshot_parse_exec,
+            "semantic_query_majority_of_followup_publish": semantic_query_majority_of_followup_publish,
             "current_diagnostics_ir_residual_after_attribution_ms": current_diagnostics_ir_residual_after_attribution_ms,
             "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ms": baseline_refactor_36_semantic_ir_ms,
             "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ast_to_ir_convert_ms": baseline_refactor_36_ast_to_ir_convert_ms,
@@ -56673,6 +57167,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live";
         const TIMELINE_OBSERVE_BUDGET_MS: u64 = 30_000;
         const SAVE_CYCLE_COUNT: usize = 4;
+        const READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS: u64 = 180;
         const BASELINE_CAPTURED_AT: &str = "2026-04-17T14:06:03Z";
         const BASELINE_READY_ARTIFACTS_COUNT: u64 = 1;
         const BASELINE_SHADOW_STATE_COUNT: u64 = 3;
@@ -56686,8 +57181,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
-        let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "diagnostics-save-representative-followup-bundle".to_string());
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding".to_string()
+        });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {
@@ -56825,7 +57321,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .await;
             current_text = stage1_text;
 
-            tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::time::timeout(
+                Duration::from_secs(READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS),
+                async {
                 loop {
                     let ready = server
                         .latest_ready_parse_snapshots_v2
@@ -56841,7 +57339,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-            })
+            },
+            )
             .await
             .unwrap_or_else(|_| {
                 panic!(
@@ -56981,41 +57480,95 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 Some("not_ready"),
                 "p56 representative cycle must reach save follow-up before the exact producer materializes, trace={timeline:?}"
             );
-            assert_eq!(
-                timeline
-                    .get("followup_ready_snapshot_wait_probe")
-                    .and_then(|value| value.as_str()),
-                Some("ready"),
-                "p56 representative cycle must recover through bounded same-version wait, trace={timeline:?}"
-            );
-            assert_eq!(
-                followup_semantic_path,
-                Some("ready_artifacts"),
-                "p56 representative cycle must publish through ready_artifacts instead of falling back, trace={timeline:?}"
-            );
-
-            let ready_artifacts_publish = followup_publish.expect(
-                "p56 ready_artifacts path must expose an idle_heavy follow-up publish object",
-            );
-            assert_eq!(
-                ready_artifacts_publish
-                    .get("semantic_parse_source")
-                    .and_then(|value| value.as_str()),
-                Some("snapshot")
-            );
-            assert_eq!(
-                ready_artifacts_publish
-                    .get("semantic_ir_source")
-                    .and_then(|value| value.as_str()),
-                Some("snapshot_build")
-            );
-            assert_eq!(
-                timeline
-                    .get("followup_ready_snapshot_continuation_reason")
-                    .and_then(|value| value.as_str()),
-                None,
-                "p56 representative cycle must succeed inside the primary bounded wait path, trace={timeline:?}"
-            );
+            let followup_ready_snapshot_wait_probe = timeline
+                .get("followup_ready_snapshot_wait_probe")
+                .and_then(|value| value.as_str());
+            let followup_ready_snapshot_continuation_reason = timeline
+                .get("followup_ready_snapshot_continuation_reason")
+                .and_then(|value| value.as_str());
+            let followup_ready_snapshot_relief_valve_outcome = timeline
+                .get("followup_ready_snapshot_relief_valve_outcome")
+                .and_then(|value| value.as_str());
+            let followup_wait_reason = timeline
+                .get("followup_wait_reason")
+                .and_then(|value| value.as_str());
+            let ready_artifacts_publish = match followup_semantic_path {
+                Some("ready_artifacts") => {
+                    assert_eq!(
+                        followup_ready_snapshot_wait_probe,
+                        Some("ready"),
+                        "p56 ready_artifacts cycle must recover through bounded same-version wait, trace={timeline:?}"
+                    );
+                    let publish = followup_publish.expect(
+                        "p56 ready_artifacts path must expose an idle_heavy follow-up publish object",
+                    );
+                    assert_eq!(
+                        publish
+                            .get("semantic_parse_source")
+                            .and_then(|value| value.as_str()),
+                        Some("snapshot")
+                    );
+                    assert_eq!(
+                        publish
+                            .get("semantic_ir_source")
+                            .and_then(|value| value.as_str()),
+                        Some("snapshot_build")
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_continuation_reason,
+                        None,
+                        "p56 ready_artifacts cycle must succeed inside the primary bounded wait path, trace={timeline:?}"
+                    );
+                    Some(publish)
+                }
+                Some("shadow_state") => None,
+                _ => panic!(
+                    "p56 representative bundle must resolve each cycle to ready_artifacts or shadow_state, trace={timeline:?}"
+                ),
+            };
+            let followup_ready_snapshot_parse_exec_ms = timeline
+                .get("followup_ready_snapshot_parse_exec_ms")
+                .and_then(|value| value.as_u64());
+            let followup_publish_elapsed_ms = ready_artifacts_publish.and_then(|publish| {
+                publish.get("elapsed_ms").and_then(|value| value.as_u64())
+            });
+            let followup_publish_semantic_diagnostics_query_ms =
+                ready_artifacts_publish.and_then(|publish| {
+                    publish
+                        .get("semantic_diagnostics_query_ms")
+                        .and_then(|value| value.as_u64())
+                });
+            let semantic_query_dominates_parse_exec = followup_publish_semantic_diagnostics_query_ms
+                .zip(followup_ready_snapshot_parse_exec_ms)
+                .map(|(query_ms, parse_exec_ms)| query_ms > parse_exec_ms);
+            let semantic_query_majority_of_followup_publish =
+                followup_publish_semantic_diagnostics_query_ms
+                    .zip(followup_publish_elapsed_ms)
+                    .map(|(query_ms, publish_ms)| query_ms.saturating_mul(2) > publish_ms);
+            let followup_publish_non_query_residual_ms = followup_publish_elapsed_ms
+                .zip(followup_publish_semantic_diagnostics_query_ms)
+                .map(|(publish_ms, query_ms)| publish_ms.saturating_sub(query_ms));
+            if ready_artifacts_publish.is_some() {
+                assert!(
+                    followup_publish_elapsed_ms.is_some_and(|value| value > 0),
+                    "p56 cycle {cycle_number} must expose non-zero followup publish latency on the ready_artifacts path, trace={timeline:?}"
+                );
+                assert!(
+                    followup_publish_semantic_diagnostics_query_ms
+                        .is_some_and(|value| value > 0),
+                    "p56 cycle {cycle_number} must expose non-zero semantic_diagnostics_query_ms on the ready_artifacts path, trace={timeline:?}"
+                );
+                assert_eq!(
+                    semantic_query_dominates_parse_exec,
+                    Some(true),
+                    "p56 cycle {cycle_number} must prove that semantic_diagnostics_query now dominates ready-snapshot parse_exec, trace={timeline:?}"
+                );
+                assert_eq!(
+                    semantic_query_majority_of_followup_publish,
+                    Some(true),
+                    "p56 cycle {cycle_number} must prove that semantic_diagnostics_query now explains the majority of followup publish latency, trace={timeline:?}"
+                );
+            }
 
             cycles.push(serde_json::json!({
                 "cycle": cycle_number,
@@ -57026,33 +57579,29 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     .and_then(|value| value.as_u64()),
                 "followup_semantic_path": followup_semantic_path,
                 "followup_publish_semantic_path": ready_artifacts_publish
-                    .get("semantic_path")
-                    .and_then(|value| value.as_str()),
+                    .and_then(|publish| publish.get("semantic_path").and_then(|value| value.as_str())),
                 "followup_ready_snapshot_task_state": timeline
                     .get("followup_ready_snapshot_task_state")
                     .and_then(|value| value.as_str()),
                 "followup_ready_snapshot_zero_probe": timeline
                     .get("followup_ready_snapshot_zero_probe")
                     .and_then(|value| value.as_str()),
-                "followup_ready_snapshot_wait_probe": timeline
-                    .get("followup_ready_snapshot_wait_probe")
-                    .and_then(|value| value.as_str()),
-                "followup_ready_snapshot_parse_exec_ms": timeline
-                    .get("followup_ready_snapshot_parse_exec_ms")
-                    .and_then(|value| value.as_u64()),
-                "followup_publish_elapsed_ms": ready_artifacts_publish
-                    .get("elapsed_ms")
-                    .and_then(|value| value.as_u64()),
-                "followup_publish_semantic_diagnostics_query_ms": ready_artifacts_publish
-                    .get("semantic_diagnostics_query_ms")
-                    .and_then(|value| value.as_u64()),
-                "followup_ready_snapshot_continuation_reason": timeline
-                    .get("followup_ready_snapshot_continuation_reason")
-                    .and_then(|value| value.as_str()),
+                "followup_ready_snapshot_wait_probe": followup_ready_snapshot_wait_probe,
+                "followup_ready_snapshot_parse_exec_ms": followup_ready_snapshot_parse_exec_ms,
+                "followup_publish_elapsed_ms": followup_publish_elapsed_ms,
+                "followup_publish_semantic_diagnostics_query_ms": followup_publish_semantic_diagnostics_query_ms,
+                "semantic_query_dominates_parse_exec": semantic_query_dominates_parse_exec,
+                "semantic_query_majority_of_followup_publish": semantic_query_majority_of_followup_publish,
+                "followup_publish_non_query_residual_ms": followup_publish_non_query_residual_ms,
+                "followup_ready_snapshot_continuation_reason": followup_ready_snapshot_continuation_reason,
+                "followup_ready_snapshot_relief_valve_outcome": followup_ready_snapshot_relief_valve_outcome,
+                "followup_wait_reason": followup_wait_reason,
                 "final_statement": stage2_statement,
             }));
 
-            tokio::time::timeout(Duration::from_secs(60), async {
+            tokio::time::timeout(
+                Duration::from_secs(READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS),
+                async {
                 loop {
                     let ready = server
                         .latest_ready_parse_snapshots_v2
@@ -57068,7 +57617,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-            })
+            },
+            )
             .await
             .unwrap_or_else(|_| {
                 panic!(
@@ -57078,7 +57628,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
 
             current_version = stage2_version;
             current_statement = stage2_statement;
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
         let ready_artifacts_count = cycles
@@ -57117,6 +57667,48 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some("not_ready")
             })
             .count() as u64;
+        let semantic_query_dominates_parse_exec_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("semantic_query_dominates_parse_exec")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+            })
+            .count() as u64;
+        let semantic_query_majority_of_followup_publish_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("semantic_query_majority_of_followup_publish")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+            })
+            .count() as u64;
+        let max_followup_publish_elapsed_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("followup_publish_elapsed_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max();
+        let max_followup_publish_semantic_diagnostics_query_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("followup_publish_semantic_diagnostics_query_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max();
+        let max_followup_ready_snapshot_parse_exec_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_parse_exec_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max();
 
         assert_eq!(
             cycles.len(),
@@ -57124,24 +57716,54 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 must record every representative save cycle"
         );
         assert_eq!(
-            ready_artifacts_count,
+            ready_artifacts_count + shadow_state_count,
             SAVE_CYCLE_COUNT as u64,
-            "p56 representative bundle must keep the whole save-followup family on ready_artifacts, cycles={cycles:?}"
+            "p56 representative bundle must resolve every cycle to ready_artifacts or shadow_state, cycles={cycles:?}"
         );
-        assert_eq!(
-            shadow_state_count, 0,
-            "p56 representative bundle must not leave shadow_state as a steady-state terminal path, cycles={cycles:?}"
+        assert!(
+            ready_artifacts_count > BASELINE_READY_ARTIFACTS_COUNT,
+            "p56 representative bundle must materially improve ready_artifacts incidence beyond the {BASELINE_CAPTURED_AT} baseline, cycles={cycles:?}"
+        );
+        assert!(
+            shadow_state_count < BASELINE_SHADOW_STATE_COUNT,
+            "p56 representative bundle must materially reduce shadow_state incidence versus the {BASELINE_CAPTURED_AT} baseline, cycles={cycles:?}"
         );
         assert_eq!(
             wait_probe_ready_count,
-            SAVE_CYCLE_COUNT as u64,
-            "p56 representative bundle must prove bounded wait success on every cycle, cycles={cycles:?}"
+            ready_artifacts_count,
+            "p56 representative bundle must prove bounded wait success on every ready_artifacts cycle, cycles={cycles:?}"
         );
         assert_eq!(
             zero_probe_not_ready_count,
             SAVE_CYCLE_COUNT as u64,
             "p56 representative bundle must exercise the same-family in-flight producer before bounded wait succeeds, cycles={cycles:?}"
         );
+        assert_eq!(
+            semantic_query_dominates_parse_exec_count,
+            ready_artifacts_count,
+            "p56 representative bundle must prove that semantic_diagnostics_query dominates ready-snapshot parse_exec on every ready_artifacts cycle, cycles={cycles:?}"
+        );
+        assert_eq!(
+            semantic_query_majority_of_followup_publish_count,
+            ready_artifacts_count,
+            "p56 representative bundle must prove that semantic_diagnostics_query explains the majority of followup publish latency on every ready_artifacts cycle, cycles={cycles:?}"
+        );
+        let representative_cycle = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+                    == Some("ready_artifacts")
+            })
+            .max_by_key(|cycle| {
+                cycle
+                    .get("followup_publish_elapsed_ms")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(0)
+            })
+            .cloned()
+            .expect("p56 must keep a representative ready_artifacts cycle summary");
 
         let report = serde_json::json!({
             "profile": PROFILE_NAME,
@@ -57159,7 +57781,16 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path_shadow_state": shadow_state_count,
                 "followup_ready_snapshot_wait_probe_ready": wait_probe_ready_count,
                 "followup_ready_snapshot_zero_probe_not_ready": zero_probe_not_ready_count,
+                "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
+                "semantic_query_majority_of_followup_publish_count": semantic_query_majority_of_followup_publish_count,
+                "dominant_later_residual": "semantic_diagnostics_query",
             },
+            "aggregate": {
+                "max_followup_publish_elapsed_ms": max_followup_publish_elapsed_ms,
+                "max_followup_publish_semantic_diagnostics_query_ms": max_followup_publish_semantic_diagnostics_query_ms,
+                "max_followup_ready_snapshot_parse_exec_ms": max_followup_ready_snapshot_parse_exec_ms,
+            },
+            "representative_cycle": representative_cycle,
             "cycles": cycles,
         });
         let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

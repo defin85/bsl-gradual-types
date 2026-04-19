@@ -242,6 +242,8 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) parse_exec_core_parse_build_ms: Option<u64>,
     pub(crate) parse_exec_core_build_timeout_checkpoint: Option<&'static str>,
     pub(crate) parse_exec_core_build_timeout_checkpoint_elapsed_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_pre_parse_setup_ms: Option<u64>,
+    pub(crate) parse_exec_core_build_parser_base_recovery_ms: Option<u64>,
     pub(crate) parse_exec_core_build_parser_tree_build_ms: Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
     pub(crate) parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint:
@@ -329,6 +331,12 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
         let has_any = attribution.parse_exec_ms.is_some()
             || attribution.parse_exec_core_parse_build_ms.is_some()
             || attribution
+                .parse_exec_core_build_pre_parse_setup_ms
+                .is_some()
+            || attribution
+                .parse_exec_core_build_parser_base_recovery_ms
+                .is_some()
+            || attribution
                 .parse_exec_core_build_parser_tree_build_ms
                 .is_some()
             || attribution
@@ -366,6 +374,10 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
             parse_exec_core_parse_build_ms: attribution.parse_exec_core_parse_build_ms,
             parse_exec_core_build_timeout_checkpoint: None,
             parse_exec_core_build_timeout_checkpoint_elapsed_ms: None,
+            parse_exec_core_build_pre_parse_setup_ms: attribution
+                .parse_exec_core_build_pre_parse_setup_ms,
+            parse_exec_core_build_parser_base_recovery_ms: attribution
+                .parse_exec_core_build_parser_base_recovery_ms,
             parse_exec_core_build_parser_tree_build_ms: attribution
                 .parse_exec_core_build_parser_tree_build_ms,
             parse_exec_core_build_exact_ready_snapshot_assembly_ms: attribution
@@ -565,6 +577,18 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                                 snapshot.current_parse_exec_subphase_elapsed_ms,
                             ),
                             Some(
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::PreParseSetup,
+                            ) => (
+                                "pre_parse_setup",
+                                snapshot.current_core_build_checkpoint_elapsed_ms,
+                            ),
+                            Some(
+                                super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery,
+                            ) => (
+                                "parser_base_recovery",
+                                snapshot.current_core_build_checkpoint_elapsed_ms,
+                            ),
+                            Some(
                                 super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
                             ) => match snapshot.current_assembly_checkpoint {
                                 None => (
@@ -660,6 +684,32 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 && core_build_checkpoint_active)
                 .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
                 .flatten(),
+            parse_exec_core_build_pre_parse_setup_ms: snapshot
+                .completed
+                .parse_exec_core_build_pre_parse_setup_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_core_build_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotCoreBuildCheckpointV2::PreParseSetup
+                        )
+                    )
+                    .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
+            parse_exec_core_build_parser_base_recovery_ms: snapshot
+                .completed
+                .parse_exec_core_build_parser_base_recovery_ms
+                .or_else(|| {
+                    matches!(
+                        snapshot.current_core_build_checkpoint,
+                        Some(
+                            super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery
+                        )
+                    )
+                    .then_some(snapshot.current_core_build_checkpoint_elapsed_ms)
+                    .flatten()
+                }),
             parse_exec_core_build_parser_tree_build_ms: snapshot
                 .completed
                 .parse_exec_core_build_parser_tree_build_ms

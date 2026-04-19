@@ -895,9 +895,15 @@ impl BslLanguageServer {
                                 )
                         })
                     };
-                    if let Some(env_key) = blocking_delay_env_key_for_parse {
-                        maybe_inject_blocking_parse_delay_for_test(env_key);
-                    }
+                    let progress_control = task_control_for_exec
+                        .as_ref()
+                        .expect("task control for parse progress");
+                    progress_control.transition_parse_exec_subphase_attribution(
+                        super::super::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+                    );
+                    progress_control.transition_core_build_checkpoint_attribution(
+                        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::PreParseSetup,
+                    );
                     if requested_target_epoch_state_for_parse
                         .as_ref()
                         .zip(requested_target_epoch_for_parse)
@@ -919,9 +925,6 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
-                    let progress_control = task_control_for_exec
-                        .as_ref()
-                        .expect("task control for parse progress");
                     let parse_exec_progress = |subphase: bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase| {
                         let mapped = match subphase {
                             bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase::CoreParseBuild => {
@@ -1001,6 +1004,18 @@ impl BslLanguageServer {
                     parse_options.progress_callback = Some(&parse_exec_progress);
                     parse_options.core_build_progress_callback = Some(&core_build_progress);
                     parse_options.assembly_progress_callback = Some(&assembly_progress);
+                    let mut blocking_delay_injected = false;
+                    let mut inject_blocking_delay_at_checkpoint = |
+                        checkpoint: super::super::ReadyParseSnapshotCoreBuildCheckpointV2| {
+                        progress_control.transition_core_build_checkpoint_attribution(checkpoint);
+                        if blocking_delay_injected {
+                            return;
+                        }
+                        if let Some(env_key) = blocking_delay_env_key_for_parse {
+                            maybe_inject_blocking_parse_delay_for_test(env_key);
+                        }
+                        blocking_delay_injected = true;
+                    };
                     let mut effective_forced_full_parse_reason = forced_full_parse_reason;
                     if effective_forced_full_parse_reason
                         == Some(
@@ -1015,6 +1030,9 @@ impl BslLanguageServer {
                             ) {
                                 true
                             } else {
+                                inject_blocking_delay_at_checkpoint(
+                                    super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery,
+                                );
                                 match parser.prime_tree_cache_from_source_with_cancellation(
                                     recovery_path.clone(),
                                     recovery_text.to_string(),
@@ -1059,6 +1077,9 @@ impl BslLanguageServer {
                             }
                         }
                     }
+                    inject_blocking_delay_at_checkpoint(
+                        super::super::ReadyParseSnapshotCoreBuildCheckpointV2::ParserTreeBuild,
+                    );
                     let parse_result = if let Some(reason) = effective_forced_full_parse_reason {
                         parser.parse_full_with_report_with_cancellation_and_options(
                             PathBuf::from(path_for_parse.as_ref()),

@@ -454,14 +454,18 @@ impl ReadyParseSnapshotParseExecSubphaseV2 {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadyParseSnapshotCoreBuildCheckpointV2 {
-    ParserTreeBuild = 1,
-    ExactReadySnapshotAssembly = 2,
-    TreeCacheInstall = 3,
+    PreParseSetup = 1,
+    ParserBaseRecovery = 2,
+    ParserTreeBuild = 3,
+    ExactReadySnapshotAssembly = 4,
+    TreeCacheInstall = 5,
 }
 
 impl ReadyParseSnapshotCoreBuildCheckpointV2 {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::PreParseSetup => "pre_parse_setup",
+            Self::ParserBaseRecovery => "parser_base_recovery",
             Self::ParserTreeBuild => "parser_tree_build",
             Self::ExactReadySnapshotAssembly => "exact_ready_snapshot_assembly",
             Self::TreeCacheInstall => "tree_cache_install",
@@ -490,6 +494,8 @@ impl ReadyParseSnapshotAssemblyCheckpointV2 {
 pub(crate) struct ReadyParseSnapshotPhaseAttributionV2 {
     pub parse_exec_ms: Option<u64>,
     pub parse_exec_core_parse_build_ms: Option<u64>,
+    pub parse_exec_core_build_pre_parse_setup_ms: Option<u64>,
+    pub parse_exec_core_build_parser_base_recovery_ms: Option<u64>,
     pub parse_exec_core_build_parser_tree_build_ms: Option<u64>,
     pub parse_exec_core_build_exact_ready_snapshot_assembly_ms: Option<u64>,
     pub parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Option<u64>,
@@ -538,6 +544,14 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
 
     pub(crate) fn dominant_core_build_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
         [
+            (
+                "pre_parse_setup",
+                self.parse_exec_core_build_pre_parse_setup_ms,
+            ),
+            (
+                "parser_base_recovery",
+                self.parse_exec_core_build_parser_base_recovery_ms,
+            ),
             (
                 "parser_tree_build",
                 self.parse_exec_core_build_parser_tree_build_ms,
@@ -771,6 +785,9 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
         if self.current_phase != Some(ReadyParseSnapshotAttributionPhaseV2::ParseExec) {
             return;
         }
+        if self.current_parse_exec_subphase == Some(subphase) {
+            return;
+        }
         self.finish_current_parse_exec_subphase(now);
         self.current_parse_exec_subphase = Some(subphase);
         self.current_parse_exec_subphase_started_at = Some(now);
@@ -901,6 +918,12 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
             .take()
             .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at)));
         match checkpoint {
+            ReadyParseSnapshotCoreBuildCheckpointV2::PreParseSetup => {
+                self.completed.parse_exec_core_build_pre_parse_setup_ms = elapsed_ms;
+            }
+            ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery => {
+                self.completed.parse_exec_core_build_parser_base_recovery_ms = elapsed_ms;
+            }
             ReadyParseSnapshotCoreBuildCheckpointV2::ParserTreeBuild => {
                 self.completed.parse_exec_core_build_parser_tree_build_ms = elapsed_ms;
             }

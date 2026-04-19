@@ -36,11 +36,14 @@ LSP regressions.
 ## What Changes
 
 - Require LSP exact consumers (`hover`, `definition`, and the same exact-only request family that
-  shares their runtime path) to keep reading or building canonical current-revision exact
-  semantics after diagnostics-only simplification.
+  shares their runtime path) to keep reaching canonical current-revision exact semantics after
+  diagnostics-only simplification through the existing bounded exact-consumer policy.
 - Require diagnostics-only simplification to remain non-substitutable for exact LSP consumers:
   restoring hover/F12 MUST happen by preserving or repairing the exact path, not by widening the
   diagnostics-only artifact until it silently becomes the new exact contract.
+- Require the fix to preserve the existing LSP serve-only / fail-closed contract for exact type
+  index readiness: the change MUST NOT reintroduce hidden on-demand exact materialization on the
+  LSP request path as the rescue mechanism.
 - Require direct backend/LSP regressions for same-revision hover and goto-definition after a
   diagnostics-only query or equivalent narrowed-path setup, because current analysis-only
   isolation tests are insufficient acceptance for this user-facing regression.

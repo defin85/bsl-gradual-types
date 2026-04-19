@@ -9540,7 +9540,8 @@ async fn p32_diagnostics_save_timeline_continuation_reports_cancelled_after_boun
     let cancel_token_for_cancel = cancel_token.clone();
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(550)).await;
-        cancel_token_for_cancel.cancel(crate::server::DiagnosticsCancellationReasonV2::ClientCancel);
+        cancel_token_for_cancel
+            .cancel(crate::server::DiagnosticsCancellationReasonV2::ClientCancel);
         control.control_notify.notify_waiters();
     });
 
@@ -9954,7 +9955,8 @@ async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_afte
 }
 
 #[tokio::test]
-async fn p24_diagnostics_save_timeline_continues_still_current_after_bounded_core_parse_build_entry() {
+async fn p24_diagnostics_save_timeline_continues_still_current_after_bounded_core_parse_build_entry(
+) {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse(
         "file:///p24-ready-snapshot-relief-continued-before-first-core-build-checkpoint.bsl",
@@ -20853,6 +20855,434 @@ async fn p7_hover_timeout_still_seeds_exact_type_index_without_did_save() {
 }
 
 #[tokio::test]
+async fn p7_definition_bootstraps_exact_type_index_without_did_save_when_precompute_fits_budget() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = (wait_budget_ms / 4).max(20);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = "Процедура Целевой()\n\
+КонецПроцедуры\n\
+\n\
+Процедура Тест()\n\
+    Целевой();\n\
+КонецПроцедуры\n";
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_definition_bootstraps_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+
+    let definition_position =
+        find_utf16_position_after_marker(fixture, "Процедура Тест()\nЦелевой");
+    let started = Instant::now();
+    let definition_points = lsp_definition_points_at(&mut service, &uri, definition_position).await;
+    let elapsed = started.elapsed();
+    let direct_definition_points =
+        snapshot_definition_points_at(&server, file_id, &uri, definition_position).await;
+    let exact_ready = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after definition bootstrap");
+
+    assert!(
+        !definition_points.is_empty(),
+        "definition should bootstrap exact type index without didSave once same-version precompute fits the wait budget, points={definition_points:?}, direct_points={direct_definition_points:?}, exact_ready={exact_ready}"
+    );
+    assert!(
+        elapsed <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "definition bootstrap should stay bounded by the interactive wait budget, elapsed={elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    assert_eq!(
+        after_fail_closed, before_fail_closed,
+        "successful definition bootstrap must not emit missing_semantic_index fail-closed attribution"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_definition_timeout_still_seeds_exact_type_index_without_did_save() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_definition_reason_missing_semantic_index";
+    const WAIT_BUDGET_EXHAUSTED_KEY: &str =
+        "intellisense_v2_interactive_wait_budget_exhausted_total";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = "Процедура Целевой()\n\
+КонецПроцедуры\n\
+\n\
+Процедура Тест()\n\
+    Целевой();\n\
+КонецПроцедуры\n";
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_definition_timeout_still_seeds_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+    let before_wait_budget_exhausted =
+        read_u64_metric(before_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+
+    let definition_position =
+        find_utf16_position_after_marker(fixture, "Процедура Тест()\nЦелевой");
+    let started = Instant::now();
+    let first_definition_points =
+        lsp_definition_points_at(&mut service, &uri, definition_position).await;
+    let first_elapsed = started.elapsed();
+    assert!(
+        first_definition_points.is_empty(),
+        "definition must remain fail-closed on the first request when same-version exact precompute exceeds the interactive budget, points={first_definition_points:?}"
+    );
+    assert!(
+        first_elapsed
+            <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "definition timeout must stay bounded by the interactive wait budget, elapsed={first_elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let second_definition_points =
+        lsp_definition_points_at(&mut service, &uri, definition_position).await;
+    let second_direct_definition_points =
+        snapshot_definition_points_at(&server, file_id, &uri, definition_position).await;
+    let exact_ready_after_wait = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after timeout definition wait");
+    assert!(
+        !second_definition_points.is_empty(),
+        "definition should succeed after same-version exact precompute finishes without didSave, points={second_definition_points:?}, direct_points={second_direct_definition_points:?}, exact_ready={exact_ready_after_wait}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    let after_wait_budget_exhausted =
+        read_u64_metric(after_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+    assert!(
+        after_fail_closed > before_fail_closed,
+        "timed-out definition must still expose bounded missing_semantic_index attribution"
+    );
+    assert!(
+        after_wait_budget_exhausted > before_wait_budget_exhausted,
+        "timed-out definition bootstrap must attribute the bounded wait budget exhaustion"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_signature_help_bootstraps_exact_type_index_without_did_save_when_precompute_fits_budget(
+) {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = (wait_budget_ms / 4).max(20);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = concat!(
+        "Процедура Тест()\n",
+        "    МойМассив = Новый Массив();\n",
+        "    МойМассив.Добавить(1, 2);\n",
+        "КонецПроцедуры\n"
+    );
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_signature_help_bootstraps_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+
+    let signature_position = find_utf16_position_after_marker(fixture, "МойМассив.Добавить(1, ");
+    let started = Instant::now();
+    let signature_help = lsp_signature_help_at(&mut service, &uri, signature_position)
+        .await
+        .expect("signatureHelp should bootstrap exact type index without didSave");
+    let elapsed = started.elapsed();
+    let signature_label = signature_help
+        .signatures
+        .first()
+        .map(|signature| signature.label.as_str())
+        .unwrap_or("");
+    assert!(
+        signature_label.contains("Добавить("),
+        "signatureHelp must expose exact method signature after same-version bootstrap, label={signature_label}"
+    );
+    assert_eq!(signature_help.active_parameter, Some(1));
+    assert!(
+        elapsed <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "signatureHelp bootstrap should stay bounded by the interactive wait budget, elapsed={elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    assert_eq!(
+        after_fail_closed, before_fail_closed,
+        "successful signatureHelp bootstrap must not emit missing_semantic_index fail-closed attribution"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_signature_help_timeout_still_seeds_exact_type_index_without_did_save() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const FALLBACK_REASON_KEY: &str =
+        "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_signature_help_reason_missing_semantic_index";
+    const WAIT_BUDGET_EXHAUSTED_KEY: &str =
+        "intellisense_v2_interactive_wait_budget_exhausted_total";
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let wait_budget_ms = bsl_runtime::system::global_runtime_config()
+        .get_u64(bsl_runtime::system::RuntimeKey::IntellisenseV2InteractiveWaitBudgetMs)
+        .unwrap_or(120);
+    let precompute_delay_ms = wait_budget_ms.saturating_add(500).max(400);
+    let _precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &precompute_delay_ms.to_string(),
+    );
+
+    let fixture = concat!(
+        "Процедура Тест()\n",
+        "    МойМассив = Новый Массив();\n",
+        "    МойМассив.Добавить(1, 2);\n",
+        "КонецПроцедуры\n"
+    );
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///test_p7_signature_help_timeout_still_seeds_exact_without_did_save.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let before_metrics = server.coordinator.observability_metrics();
+    let before_counters = before_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let before_fail_closed = read_u64_metric(before_counters.get(FALLBACK_REASON_KEY));
+    let before_wait_budget_exhausted =
+        read_u64_metric(before_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+
+    let signature_position = find_utf16_position_after_marker(fixture, "МойМассив.Добавить(1, ");
+    let started = Instant::now();
+    let first_signature_help = lsp_signature_help_at(&mut service, &uri, signature_position).await;
+    let first_elapsed = started.elapsed();
+    assert!(
+        first_signature_help.is_none(),
+        "signatureHelp must remain fail-closed on the first request when same-version exact precompute exceeds the interactive budget"
+    );
+    assert!(
+        first_elapsed
+            <= std::time::Duration::from_millis(wait_budget_ms.saturating_add(250).max(250)),
+        "signatureHelp timeout must stay bounded by the interactive wait budget, elapsed={first_elapsed:?}, wait_budget_ms={wait_budget_ms}"
+    );
+
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        super::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+    wait_for_type_index_precompute_completion(&server, file_id).await;
+
+    let second_signature_help = lsp_signature_help_at(&mut service, &uri, signature_position)
+        .await
+        .expect("signatureHelp should succeed after same-version exact precompute finishes");
+    let second_signature_label = second_signature_help
+        .signatures
+        .first()
+        .map(|signature| signature.label.as_str())
+        .unwrap_or("");
+    assert!(
+        second_signature_label.contains("Добавить("),
+        "signatureHelp must expose exact method signature once same-version exact precompute finishes, label={second_signature_label}"
+    );
+    assert_eq!(second_signature_help.active_parameter, Some(1));
+
+    let after_metrics = server.coordinator.observability_metrics();
+    let after_counters = after_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    let after_fail_closed = read_u64_metric(after_counters.get(FALLBACK_REASON_KEY));
+    let after_wait_budget_exhausted =
+        read_u64_metric(after_counters.get(WAIT_BUDGET_EXHAUSTED_KEY));
+    assert!(
+        after_fail_closed > before_fail_closed,
+        "timed-out signatureHelp must still expose bounded missing_semantic_index attribution"
+    );
+    assert!(
+        after_wait_budget_exhausted > before_wait_budget_exhausted,
+        "timed-out signatureHelp bootstrap must attribute the bounded wait budget exhaustion"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_hover_cache_miss_on_map_index_access_does_not_use_legacy_word_fallback() {
     struct EnvVarGuard {
         key: &'static str,
@@ -31248,6 +31678,78 @@ async fn lsp_definition_points_at(
     normalize_lsp_definition(definition)
 }
 
+async fn snapshot_definition_points_at(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    uri: &Url,
+    position: Position,
+) -> Vec<NormalizedPoint> {
+    let analysis = server.analysis_v2.snapshot().await;
+    let Some(file_content) = analysis.file_text(file_id).ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(file_path) = analysis.file_path(file_id).ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(deps) = analysis.deps_data().ok() else {
+        return Vec::new();
+    };
+    let Some(ir_program) = analysis.ir(file_id).ok().flatten() else {
+        return Vec::new();
+    };
+
+    normalize_lsp_definition(crate::handlers::definition::handle_goto_definition_v2(
+        crate::handlers::definition::GotoDefinitionRequest {
+            analysis: &analysis,
+            file_id,
+            file_path,
+            file_content,
+            ir_program,
+            deps,
+            position,
+            uri,
+            coordinator: Some(server.coordinator.as_ref()),
+        },
+    ))
+}
+
+async fn lsp_signature_help_at(
+    service: &mut LspService<BslLanguageServer>,
+    uri: &Url,
+    position: Position,
+) -> Option<tower_lsp::lsp_types::SignatureHelp> {
+    let signature_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/signatureHelp")
+                .id(12004)
+                .params(
+                    serde_json::to_value(tower_lsp::lsp_types::SignatureHelpParams {
+                        text_document_position_params: TextDocumentPositionParams {
+                            text_document: TextDocumentIdentifier { uri: uri.clone() },
+                            position,
+                        },
+                        work_done_progress_params: WorkDoneProgressParams::default(),
+                        context: None,
+                    })
+                    .expect("SignatureHelpParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("signatureHelp request")
+        .expect("signatureHelp response");
+    let signature_value =
+        serde_json::to_value(&signature_response).expect("serialize signatureHelp response");
+    let signature_result = signature_value
+        .get("result")
+        .cloned()
+        .expect("signatureHelp result field");
+    serde_json::from_value(signature_result).expect("parse signatureHelp result")
+}
+
 async fn snapshot_type_name_at_marker(
     server: &BslLanguageServer,
     file_id: bsl_analysis_v2::FileId,
@@ -31906,19 +32408,42 @@ async fn force_current_revision_without_exact_type_index(
         .ok()
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| uri.to_string());
-    server.analysis_v2.apply_changes(vec![
-        bsl_analysis_v2::Change::RemoveFile { file_id },
-        bsl_analysis_v2::Change::SetFile {
-            file_id,
-            text: Arc::from(content.to_string()),
-            version,
-            path: Arc::from(path),
-        },
-    ]);
+    let text: Arc<str> = Arc::from(content.to_string());
+    let path: Arc<str> = Arc::from(path);
+    server.analysis_v2.apply_changes_interactive(
+        bsl_runtime::application::ObservabilityOrigin::Lsp,
+        vec![
+            bsl_analysis_v2::Change::RemoveFile { file_id },
+            bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: text.clone(),
+                version,
+                path: path.clone(),
+            },
+        ],
+    );
+    let handoff_registered_at = Instant::now();
     {
         let mut versions = server.latest_received_file_versions_v2.write().await;
         versions.insert(file_id, version);
     }
+    server
+        .latest_current_revision_handoff_versions_v2
+        .write()
+        .await
+        .insert(file_id, version);
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, handoff_registered_at);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version,
+            text: text.clone(),
+        },
+    );
     server.cancel_type_index_precompute_v2(file_id).await;
     let exact_ready = server
         .analysis_v2

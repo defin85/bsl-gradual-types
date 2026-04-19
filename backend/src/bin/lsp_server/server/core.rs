@@ -388,7 +388,8 @@ fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inn
         attribution
             .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms,
     );
-    if let Some(value) = attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+    if let Some(value) =
+        attribution.parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
     {
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint =
             Some(value.to_string());

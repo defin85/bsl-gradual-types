@@ -60,6 +60,11 @@ So the correct fix is not "put more exact data back into diagnostics-only until 
 to work again". The correct fix is to ensure exact LSP consumers still reach the canonical exact
 artifact path when they need it.
 
+That exact path must remain consistent with the current main-spec serve-only policy for LSP exact
+consumers. If the exact artifact is not ready within the existing bounded policy, the request
+should still fail closed rather than silently cold-build the exact type index on the LSP request
+path.
+
 ### 2. Treat this as an end-to-end LSP/runtime contract regression
 
 Analysis-layer isolation tests are necessary, but they are not sufficient.
@@ -67,6 +72,10 @@ Analysis-layer isolation tests are necessary, but they are not sufficient.
 The regression is user-facing and LSP-specific, so acceptance must include the LSP request path
 itself: current revision state, narrowed diagnostics-only work, later hover/F12 request, and the
 expected exact response.
+
+That means helper-level `AnalysisV2` or type-system service tests are supporting evidence only.
+Acceptance must exercise the server path that performs current-revision prepare, exact-readiness
+observation, and fail-closed reason plumbing.
 
 ### 3. Preserve fail-closed semantics for genuine misses
 

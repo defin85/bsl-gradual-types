@@ -1,6 +1,63 @@
 use super::*;
 
+struct SignatureHelpObservedSnapshotV2 {
+    analysis: bsl_analysis_v2::AnalysisV2,
+    file_content: Option<Arc<str>>,
+    deps: Option<Arc<bsl_analysis_v2::SemanticDeps>>,
+    ir_program: Option<Arc<bsl_shared::ir::SemanticProgram>>,
+    exact_type_index_available: bool,
+}
+
 impl BslLanguageServer {
+    fn build_signature_help_observed_snapshot_v2(
+        &self,
+        context: &bsl_runtime::application::ExecutionContext,
+        analysis: bsl_analysis_v2::AnalysisV2,
+        file_id: bsl_analysis_v2::FileId,
+        position: Position,
+        uri: &Url,
+    ) -> SignatureHelpObservedSnapshotV2 {
+        let observed_file_version = analysis.file_version(file_id).ok().flatten();
+        let observed_deps_id = analysis.deps_id().ok();
+        let observed_settings_id = analysis.settings_id().ok();
+        debug!(
+            "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
+            uri,
+            file_id.0,
+            observed_file_version,
+            observed_deps_id.as_ref().map(|value| value.as_str()),
+            observed_settings_id.as_ref().map(|value| value.as_str()),
+        );
+
+        let file_content = analysis.file_text(file_id).ok().flatten();
+        let deps = analysis.deps_data().ok();
+        let ir_program = bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+            context,
+            &analysis,
+            Some(self.coordinator.as_ref()),
+            file_id,
+        )
+        .ok()
+        .flatten();
+        let exact_type_index_available = file_content.as_ref().is_some_and(|file_content| {
+            bsl_runtime::application::type_system::signature_help_exact_type_index_available_at_position(
+                file_content.as_ref(),
+                position.line,
+                position.character,
+                &analysis,
+                file_id,
+            )
+        });
+
+        SignatureHelpObservedSnapshotV2 {
+            analysis,
+            file_content,
+            deps,
+            ir_program,
+            exact_type_index_available,
+        }
+    }
+
     pub(super) async fn lsp_signature_help(
         &self,
         params: SignatureHelpParams,
@@ -58,53 +115,32 @@ impl BslLanguageServer {
                         }
                     }
 
-                    let (analysis, file_content, deps, ir_program) = {
-                        let analysis = prepared.snapshot.analysis;
-                        let observed_file_version = analysis.file_version(file_id).ok().flatten();
-                        let observed_deps_id = Some(prepared.snapshot.deps_id);
-                        let observed_settings_id = analysis.settings_id().ok();
-                        debug!(
-                            "SignatureHelp v2 observed: uri={}, file_id={}, file_version={:?}, deps_id={:?}, settings_id={:?}",
-                            uri,
-                            file_id.0,
-                            observed_file_version,
-                            observed_deps_id.as_ref().map(|v| v.as_str()),
-                            observed_settings_id.as_ref().map(|v| v.as_str()),
-                        );
-
-                        let file_content = analysis.file_text(file_id).ok().flatten();
-                        let deps = analysis.deps_data().ok();
-                        let ir_program =
-                            bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight(
+                    let mut observed = self.build_signature_help_observed_snapshot_v2(
+                        &context,
+                        prepared.snapshot.analysis,
+                        file_id,
+                        position,
+                        &uri,
+                    );
+                    if !observed.exact_type_index_available {
+                        if let Some(refreshed_analysis) = self
+                            .wait_for_lsp_exact_type_index_snapshot_v2(file_id, expected_version)
+                            .await
+                        {
+                            observed = self.build_signature_help_observed_snapshot_v2(
                                 &context,
-                                &analysis,
-                                Some(self.coordinator.as_ref()),
+                                refreshed_analysis,
                                 file_id,
-                            )
-                            .ok()
-                            .flatten();
-
-                        (analysis, file_content, deps, ir_program)
-                    };
+                                position,
+                                &uri,
+                            );
+                        }
+                    }
 
                     let started = Instant::now();
-                    let result = match (file_content, deps, ir_program) {
+                    let result = match (observed.file_content, observed.deps, observed.ir_program) {
                         (Some(file_content), Some(deps), Some(ir_program)) => {
-                            let exact_type_index_available = bsl_runtime::application::type_system::signature_help_exact_type_index_available_at_position(
-                                file_content.as_ref(),
-                                position.line,
-                                position.character,
-                                &analysis,
-                                file_id,
-                            );
-                            if !exact_type_index_available
-                                && !self
-                                    .has_matching_type_index_precompute_task_v2(
-                                        file_id,
-                                        Some(expected_version),
-                                    )
-                                    .await
-                            {
+                            if !observed.exact_type_index_available {
                                 super::helpers::record_lsp_interactive_fail_closed_reason(
                                     self.coordinator.as_ref(),
                                     "signature_help",
@@ -113,7 +149,7 @@ impl BslLanguageServer {
                                 None
                             } else {
                                 handle_signature_help_v2(
-                                    &analysis,
+                                    &observed.analysis,
                                     file_id,
                                     file_content,
                                     position,

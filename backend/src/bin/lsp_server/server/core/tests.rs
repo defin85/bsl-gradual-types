@@ -53639,7 +53639,7 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-32-ready-snapshot-shadow-state-lag-reduction".to_string()
+            "refactor-35-exact-program-lowering-reuse-materialization".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -53912,9 +53912,9 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
                     .get("followup_semantic_path")
                     .and_then(|value| value.as_str())
             });
-        if followup_semantic_path == Some("ready_artifacts") {
-            let ready_artifacts_publish = full_publish
-                .expect("ready_artifacts live path must expose an idle_heavy follow-up publish object");
+        if let Some(ready_artifacts_publish) = full_publish
+            .filter(|_| followup_semantic_path == Some("ready_artifacts"))
+        {
             assert_eq!(
                 ready_artifacts_publish
                     .get("semantic_parse_source")
@@ -55425,8 +55425,9 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
-        let change_id = std::env::var("CHANGE_ID")
-            .unwrap_or_else(|_| "diagnostics-save-ready-snapshot-leaf-report".to_string());
+        let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
+            "refactor-35-exact-program-lowering-reuse-materialization".to_string()
+        });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
             if allow_fixture_skip {

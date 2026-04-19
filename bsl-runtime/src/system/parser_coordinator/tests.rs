@@ -785,6 +785,79 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn exact_lowering_reuse_plan_uses_borrowed_ast_cache_branch_when_cached_parse_result_is_shared()
+    {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-borrowed-cache-branch.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let cache_key = ast_cache_key(&old_source);
+        let shared_cached_parse_result = parser
+            .ast_cache
+            .get(cache_key)
+            .expect("seeded ast cache entry");
+        assert_eq!(
+            Arc::strong_count(&shared_cached_parse_result),
+            2,
+            "cache entry must be shared so take_if_unique falls back to borrowed planning"
+        );
+
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        let plan = parser
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
+            .expect("shared cached parse result must still allow borrowed reuse planning");
+
+        assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
+        assert_eq!(
+            lowering_attribution.reuse_plan_build_source,
+            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_take_if_unique_hit,
+            Some(false)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_borrowed_cache_hit,
+            Some(true)
+        );
+        assert!(lowering_attribution.reuse_plan_build_ms.is_some());
+        assert_eq!(lowering_attribution.reuse_plan_owned_build_ms, None);
+        assert!(lowering_attribution.reuse_plan_borrowed_build_ms.is_some());
+        assert!(
+            parser.ast_cache.get(cache_key).is_some(),
+            "borrowed planning must preserve the shared cache entry"
+        );
+    }
+
+    #[test]
     fn exact_lowering_reuse_plan_reuses_callable_body_siblings_around_changed_if_region() {
         let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();

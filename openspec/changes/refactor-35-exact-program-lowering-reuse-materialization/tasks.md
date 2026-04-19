@@ -16,12 +16,12 @@
 
 - [x] 3.1 Add targeted regressions proving exact same-version semantic parity for reused top-level
       units and reused callable-body windows after ownership-based materialization.
-- [ ] 3.2 Refresh representative `p53` / `p55` live evidence and compare exact
+- [x] 3.2 Refresh representative `p53` / `p55` live evidence and compare exact
       `program_lowering_ms` against the `2026-04-17` baseline.
 
 ## 4. Validation
 
-- [ ] 4.1 Run targeted parser/runtime/backend tests covering ownership-based reuse materialization,
+- [x] 4.1 Run targeted parser/runtime/backend tests covering ownership-based reuse materialization,
       fail-closed rebuild fallback, and save-follow-up exact-path behavior.
-- [ ] 4.2 Run `openspec validate refactor-35-exact-program-lowering-reuse-materialization --strict
+- [x] 4.2 Run `openspec validate refactor-35-exact-program-lowering-reuse-materialization --strict
       --no-interactive`.

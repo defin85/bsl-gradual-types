@@ -57,6 +57,7 @@ fn normalize_ready_parse_snapshot_probe_outcome_label(outcome: &str) -> &'static
 fn normalize_diagnostics_save_followup_semantic_path_label(path: &str) -> &'static str {
     match path {
         "ready_artifacts" => "ready_artifacts",
+        "detached_ready_artifacts" => "detached_ready_artifacts",
         "shadow_state" => "shadow_state",
         "generic_pipeline" => "generic_pipeline",
         _ => "other",

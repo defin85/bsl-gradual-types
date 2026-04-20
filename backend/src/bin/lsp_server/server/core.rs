@@ -888,6 +888,7 @@ impl BslLanguageServer {
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_detached_diagnostics_ready_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_snapshot_failures_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_snapshot_status_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_save_fastlane_syntax_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),

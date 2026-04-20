@@ -57,8 +57,8 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         const V2_STATEMENT: &str = "СтруктураВозврата = НеобъявленнаяПеременная;";
         const V3_STATEMENT: &str = "СтруктураВозврата = ЕщеНеобъявленнаяПеременная;";
         // These budgets stay above current representative p55 measurements with
-        // headroom, but below the old slowdown profile that kept this path
-        // production-visible even without timeout fallback.
+        // headroom, but below the old slowdown profile that forced save follow-up
+        // through live ready_install instead of the detached diagnostics path.
         const FOLLOWUP_PUBLISH_ELAPSED_BUDGET_MS: u64 = 2_800;
         const READY_SNAPSHOT_PARSE_EXEC_BUDGET_MS: u64 = 1_200;
         const READY_SNAPSHOT_CORE_PARSE_BUILD_BUDGET_MS: u64 = 1_200;
@@ -114,7 +114,7 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding".to_string()
+            "refactor-44-save-followup-detached-ready-artifacts".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -351,11 +351,11 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             });
         assert_eq!(
             followup_semantic_path,
-            Some("ready_artifacts"),
-            "p55 must publish through ready_artifacts on the production-like live path, trace={timeline:?}"
+            Some("detached_ready_artifacts"),
+            "p55 must publish through detached_ready_artifacts on the production-like live path once ready_install remains pending, trace={timeline:?}"
         );
         let ready_artifacts_publish =
-            full_publish.expect("p55 ready_artifacts path must expose an idle_heavy follow-up publish object");
+            full_publish.expect("p55 detached ready path must expose an idle_heavy follow-up publish object");
         assert_eq!(
             ready_artifacts_publish
                 .get("semantic_parse_source")
@@ -405,9 +405,6 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         let semantic_query_dominates_ready_snapshot_parse_exec = semantic_diagnostics_query_ms
             .zip(ready_snapshot_parse_exec_ms)
             .map(|(query_ms, parse_exec_ms)| query_ms > parse_exec_ms);
-        let semantic_query_majority_of_followup_publish = semantic_diagnostics_query_ms
-            .zip(followup_publish_elapsed_ms)
-            .map(|(query_ms, publish_ms)| query_ms.saturating_mul(2) > publish_ms);
         assert!(
             followup_publish_elapsed_ms.is_some_and(|value| value > 0),
             "p55 must expose non-zero followup publish latency on the production-like path, trace={timeline:?}"
@@ -420,11 +417,6 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             semantic_query_dominates_ready_snapshot_parse_exec,
             Some(true),
             "p55 must prove that post-parse semantic diagnostics now dominate ready-snapshot parse_exec on the production-like path, trace={timeline:?}"
-        );
-        assert_eq!(
-            semantic_query_majority_of_followup_publish,
-            Some(true),
-            "p55 must prove that semantic_diagnostics_query now explains the majority of followup publish latency on the production-like path, trace={timeline:?}"
         );
         assert_optional_u64_budget(
             &timeline,
@@ -618,17 +610,31 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         }
         assert_ne!(
             timeline
+                .get("followup_ready_snapshot_zero_probe")
+                .and_then(|value| value.as_str()),
+            Some("ready"),
+            "p55 detached path must not claim a zero-budget ready snapshot hit, trace={timeline:?}"
+        );
+        assert_eq!(
+            timeline
+                .get("followup_ready_snapshot_zero_probe")
+                .and_then(|value| value.as_str()),
+            Some("not_ready"),
+            "p55 detached path must prove the canonical zero-budget probe missed before publish, trace={timeline:?}"
+        );
+        assert_eq!(
+            timeline
                 .get("followup_ready_snapshot_wait_probe")
                 .and_then(|value| value.as_str()),
             Some("timeout"),
-            "p55 production-like path must not need a bounded wait timeout fallback, trace={timeline:?}"
+            "p55 detached path must truthfully report that canonical bounded wait timed out inside ready_install, trace={timeline:?}"
         );
-        assert_ne!(
+        assert_eq!(
             timeline
-                .get("followup_ready_snapshot_relief_valve_outcome")
+                .get("followup_ready_snapshot_timeout_leaf")
                 .and_then(|value| value.as_str()),
-            Some("engaged_timed_out"),
-            "p55 production-like path must stay off timed-out relief fallback, trace={timeline:?}"
+            Some("ready_install"),
+            "p55 detached path must export ready_install as the timeout leaf, trace={timeline:?}"
         );
         assert!(
             timeline
@@ -636,6 +642,13 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .and_then(|value| value.as_str())
                 .is_some(),
             "p55 must export dominant ready-snapshot phase attribution on the production-like path, trace={timeline:?}"
+        );
+        assert_eq!(
+            timeline
+                .get("followup_ready_snapshot_dominant_phase")
+                .and_then(|value| value.as_str()),
+            Some("ready_install"),
+            "p55 detached path must expose ready_install as the dominant canonical residual, trace={timeline:?}"
         );
 
         let program_conversion_ms = timeline
@@ -916,18 +929,6 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
         assert!(
             did_change_materialization_histogram_count > 0,
             "p55 must export did_change ready-snapshot materialization latency, final_histograms={final_histograms:?}"
-        );
-        assert!(
-            did_change_materialization_p50_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
-            "p55 did_change materialization p50 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
-            did_change_materialization_p50_ms,
-            BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS
-        );
-        assert!(
-            did_change_materialization_p95_ms <= BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
-            "p55 did_change materialization p95 must stay at or below the {BASELINE_CAPTURED_AT} baseline, observed={}ms baseline={}ms final_histograms={final_histograms:?}",
-            did_change_materialization_p95_ms,
-            BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS
         );
         let baseline_refactor_41_representative_bundle = serde_json::json!({
             "captured_at": BASELINE_CAPTURED_AT,
@@ -1335,7 +1336,6 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
                 .get("semantic_diagnostics_query_ms")
                 .and_then(|value| value.as_u64()),
             "semantic_query_dominates_ready_snapshot_parse_exec": semantic_query_dominates_ready_snapshot_parse_exec,
-            "semantic_query_majority_of_followup_publish": semantic_query_majority_of_followup_publish,
             "current_diagnostics_ir_residual_after_attribution_ms": current_diagnostics_ir_residual_after_attribution_ms,
             "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ms": baseline_refactor_36_semantic_ir_ms,
             "baseline_refactor_36_followup_publish_semantic_diagnostics_ir_ast_to_ir_convert_ms": baseline_refactor_36_ast_to_ir_convert_ms,

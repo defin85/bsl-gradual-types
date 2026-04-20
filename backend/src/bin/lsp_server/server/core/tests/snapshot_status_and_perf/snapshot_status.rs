@@ -139,6 +139,99 @@ async fn same_revision_ready_snapshot_waits_for_exact_type_index_before_hover() 
 }
 
 #[tokio::test]
+async fn detached_ready_artifact_does_not_weaken_hover_fail_closed_gate() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    let _env_lock = lock_test_env_mutex(&PRECOMPUTE_DELAY_ENV_LOCK).await;
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "400");
+
+    let fixture = concat!(
+        "Процедура Тест()\n",
+        "    S = Новый Структура;\n",
+        "    S.Вставить(\"Идентификатор\", \"A-01\");\n",
+        "    ДляHover = S.Идентификатор;\n",
+        "КонецПроцедуры\n"
+    );
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        fixture,
+        "file:///detached-ready-artifact-hover-fail-closed.bsl",
+    )
+    .await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 1).await;
+
+    let exact_ready_before_hover = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready before detached hover probe");
+    assert!(
+        !exact_ready_before_hover,
+        "test setup must keep the current exact type index unpublished before hover"
+    );
+
+    let text: Arc<str> = Arc::from(fixture.to_string());
+    let text_hash = *blake3::hash(text.as_bytes()).as_bytes();
+    server
+        .latest_detached_diagnostics_ready_artifacts_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                requested_version: 1,
+                text_hash,
+                save_cycle_sequence: 1,
+                text: text.clone(),
+                parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+                syntax_errors_complete: true,
+            },
+        );
+
+    let hover_position = find_utf16_position_at_marker_tail(fixture, "ДляHover = S.Идентификатор");
+    let hover_text = lsp_hover_text_optional_at(&mut service, &uri, hover_position).await;
+    assert!(
+        hover_text.is_none(),
+        "hover must remain fail-closed while only detached diagnostics-ready artifacts exist"
+    );
+
+    let exact_ready_after_hover = server
+        .analysis_v2
+        .snapshot()
+        .await
+        .current_type_index_serve_only_ready(file_id)
+        .expect("current_type_index_serve_only_ready after detached hover probe");
+    assert!(
+        !exact_ready_after_hover,
+        "detached diagnostics-ready artifacts must not mark canonical hover exact readiness"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
     let coordinator = Arc::new(SystemCoordinator::new());
     let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
@@ -231,11 +324,11 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: 3,
                         text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::from(uri.path().to_string()),
                         text: text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -368,11 +461,11 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: 11,
                         text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                        save_cycle_sequence: Some(7),
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
                         path: Arc::from(uri.path().to_string()),
                         text: text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -462,11 +555,11 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: 21,
                         text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::from(uri.path().to_string()),
                         text: text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,

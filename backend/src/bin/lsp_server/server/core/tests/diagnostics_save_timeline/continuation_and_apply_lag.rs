@@ -50,11 +50,11 @@ async fn p24_diagnostics_save_timeline_skips_relief_valve_for_non_exact_current_
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version + 1,
                         text_hash: *blake3::hash(newer_text.as_bytes()).as_bytes(),
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: newer_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -184,11 +184,11 @@ async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -312,11 +312,11 @@ async fn p32_diagnostics_save_timeline_continuation_reports_superseded_generatio
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -449,11 +449,11 @@ async fn p32_diagnostics_save_timeline_continuation_reports_cancelled_after_boun
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -580,11 +580,11 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -709,6 +709,154 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_help_for_exact_worke
 }
 
 #[tokio::test]
+async fn p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_shadow_fallback() {
+    let server = create_diagnostics_save_timeline_test_server();
+    prime_server_with_syntax_helper_deps(&server).await;
+    let uri = Url::parse("file:///p24b-detached-ready-artifacts-before-shadow-fallback.bsl")
+        .expect("uri");
+    let file_id = bsl_analysis_v2::FileId(1460);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 360,
+        save_cycle_sequence: 120,
+        requested_version: 140,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    control.transition_phase_attribution(crate::server::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+    server
+        .latest_detached_diagnostics_ready_artifacts_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                requested_version: key.requested_version,
+                text_hash: exact_text_hash,
+                save_cycle_sequence: key.save_cycle_sequence,
+                text: exact_text.clone(),
+                parse_snapshot: parse_snapshot_for_test(
+                    file_id,
+                    key.requested_version,
+                    exact_text.as_ref(),
+                    Vec::new(),
+                    true,
+                    None,
+                ),
+                syntax_errors_complete: true,
+            },
+        );
+
+    let disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::ZeroBudget,
+            Duration::ZERO,
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::Executed(
+            bsl_runtime::application::DiagnosticsDisposition::Published
+        )
+    ));
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_zero_probe.as_deref(),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_task_state.as_deref(),
+        Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("detached_ready_artifacts")
+    );
+    let metrics = server.coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_detached_ready_artifacts"
+        )) > 0,
+        "detached ready-artifacts path must export an explicit semantic-path counter, counters={counters:?}"
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_after_relief_timeout() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri =
@@ -765,11 +913,11 @@ async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_afte
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -948,11 +1096,11 @@ async fn p24_diagnostics_save_timeline_continues_still_current_after_bounded_cor
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text.clone(),
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -1163,11 +1311,11 @@ async fn p26_diagnostics_save_timeline_relief_valve_does_not_skip_apply_lag_for_
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
@@ -1295,11 +1443,11 @@ async fn p26_diagnostics_save_timeline_keeps_skipped_apply_lag_for_waiting_exact
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
                         requested_version: key.requested_version,
                         text_hash: exact_text_hash,
+                        save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
-                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,

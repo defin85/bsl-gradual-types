@@ -366,6 +366,7 @@ fn background_parse_snapshot_apply_target_from_args(
     super::super::BackgroundParseSnapshotApplyTargetV2 {
         requested_version: args.requested_version,
         text_hash,
+        save_cycle_sequence: args.save_cycle_sequence,
         source: args.source,
         path: args.path.clone(),
         text: args.text.clone(),
@@ -491,6 +492,7 @@ impl Drop for ReadyParseSnapshotWorkerLifecycleGuard {
 struct BackgroundParseSnapshotApplyArgs {
     file_id: bsl_analysis_v2::FileId,
     requested_version: i32,
+    save_cycle_sequence: Option<u64>,
     path: Arc<str>,
     text: Arc<str>,
     parser_base_recovery_text: Option<Arc<str>>,
@@ -606,6 +608,35 @@ impl BslLanguageServer {
             },
         );
         self.refresh_snapshot_status_v2(file_id).await;
+    }
+
+    async fn record_detached_diagnostics_ready_artifact_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        text_hash: [u8; 32],
+        save_cycle_sequence: Option<u64>,
+        text: Arc<str>,
+        parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
+        syntax_errors_complete: bool,
+    ) {
+        let Some(save_cycle_sequence) = save_cycle_sequence else {
+            return;
+        };
+        self.latest_detached_diagnostics_ready_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                super::super::DetachedDiagnosticsReadyArtifactV2 {
+                    requested_version,
+                    text_hash,
+                    save_cycle_sequence,
+                    text,
+                    parse_snapshot: parse_snapshot.clone(),
+                    syntax_errors_complete,
+                },
+            );
     }
 
     async fn update_ready_parse_snapshot_phase_attribution_v2(
@@ -1495,14 +1526,20 @@ impl BslLanguageServer {
                 if matches!(
                     args.source,
                     super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
-                ) && !matches!(
-                    current_target.source,
-                    super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
                 ) {
-                    task.control
-                        .promotion_requested
-                        .store(true, Ordering::SeqCst);
-                    task.control.control_notify.notify_waiters();
+                    task.target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .save_cycle_sequence = args.save_cycle_sequence;
+                    if !matches!(
+                        current_target.source,
+                        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                    ) {
+                        task.control
+                            .promotion_requested
+                            .store(true, Ordering::SeqCst);
+                        task.control.control_notify.notify_waiters();
+                    }
                 }
                 return;
             }
@@ -1842,6 +1879,20 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
             );
             self.refresh_snapshot_status_v2(file_id).await;
+            let detached_save_cycle_sequence = target_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .save_cycle_sequence;
+            self.record_detached_diagnostics_ready_artifact_v2(
+                file_id,
+                target.requested_version,
+                target.text_hash,
+                detached_save_cycle_sequence,
+                target.text.clone(),
+                &parse_snapshot,
+                !deferred_work.syntax_error_assembly,
+            )
+            .await;
             match self
                 .wait_for_exact_type_index_before_ready_install_v2(
                     file_id,
@@ -2773,6 +2824,7 @@ impl BslLanguageServer {
         self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
             file_id,
             requested_version: version,
+            save_cycle_sequence: None,
             path: path.clone(),
             text: text.clone(),
             parser_base_recovery_text: None,
@@ -3184,6 +3236,7 @@ impl BslLanguageServer {
             self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
                 file_id,
                 requested_version: version,
+                save_cycle_sequence: None,
                 path: path.clone(),
                 text: updated_text.clone(),
                 parser_base_recovery_text,
@@ -3310,6 +3363,8 @@ impl BslLanguageServer {
             }
             _ => save_text,
         };
+        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
+        let save_cycle_sequence = self.bump_diagnostics_save_cycle_sequence_v2(file_id).await;
         if let Some(text) = save_text {
             self.latest_document_shadow_state_v2.write().await.insert(
                 file_id,
@@ -3328,6 +3383,7 @@ impl BslLanguageServer {
             self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
                 file_id,
                 requested_version: version,
+                save_cycle_sequence: Some(save_cycle_sequence),
                 path: Arc::from(path),
                 text,
                 parser_base_recovery_text: None,
@@ -3346,8 +3402,6 @@ impl BslLanguageServer {
             let settings = self.settings.read().await;
             settings.enable_flow_sensitive
         };
-        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
-        let save_cycle_sequence = self.bump_diagnostics_save_cycle_sequence_v2(file_id).await;
         self.begin_diagnostics_save_timeline_cycle(
             &uri,
             super::super::DiagnosticsSaveTimelineCycleKey {
@@ -3435,6 +3489,10 @@ impl BslLanguageServer {
                 .await
                 .remove(&file_id);
             self.latest_ready_parse_snapshots_v2
+                .write()
+                .await
+                .remove(&file_id);
+            self.latest_detached_diagnostics_ready_artifacts_v2
                 .write()
                 .await
                 .remove(&file_id);

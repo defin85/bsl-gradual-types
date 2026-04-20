@@ -330,12 +330,20 @@ fn p52_real_conf_big_lagging_shadow_recovery_save_followup_report_live() {
                     .and_then(|value| value.as_str())
             });
         assert!(
-            matches!(followup_semantic_path, Some("ready_artifacts") | Some("shadow_state")),
-            "p52 must expose whether save follow-up returned to ready_artifacts or still fell back, trace={timeline:?}"
+            matches!(
+                followup_semantic_path,
+                Some("ready_artifacts")
+                    | Some("detached_ready_artifacts")
+                    | Some("shadow_state")
+            ),
+            "p52 must expose whether save follow-up resolved through ready_artifacts, detached_ready_artifacts, or still fell back, trace={timeline:?}"
         );
-        if followup_semantic_path == Some("ready_artifacts") {
+        if matches!(
+            followup_semantic_path,
+            Some("ready_artifacts") | Some("detached_ready_artifacts")
+        ) {
             let full_publish = full_publish.expect(
-                "ready_artifacts live path must expose an idle_heavy follow-up publish object",
+                "non-shadow live path must expose an idle_heavy follow-up publish object",
             );
             assert_eq!(
                 full_publish
@@ -965,8 +973,12 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
                     .get("followup_semantic_path")
                     .and_then(|value| value.as_str())
             });
-        if let Some(ready_artifacts_publish) = full_publish
-            .filter(|_| followup_semantic_path == Some("ready_artifacts"))
+        if let Some(ready_artifacts_publish) = full_publish.filter(|_| {
+            matches!(
+                followup_semantic_path,
+                Some("ready_artifacts") | Some("detached_ready_artifacts")
+            )
+        })
         {
             assert_eq!(
                 ready_artifacts_publish
@@ -1231,7 +1243,7 @@ fn p53_real_conf_big_exact_program_lowering_report_live() {
             );
         } else {
             panic!(
-                "p53 must retain didChange observability evidence after publishing through ready_artifacts, trace={timeline:?}"
+                "p53 must retain didChange observability evidence after publishing through snapshot-backed follow-up paths, trace={timeline:?}"
             );
         }
 

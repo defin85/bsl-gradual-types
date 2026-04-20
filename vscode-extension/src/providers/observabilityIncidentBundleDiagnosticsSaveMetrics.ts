@@ -109,6 +109,7 @@ const FOLLOWUP_WAIT_STATE_ORDER = [
 ];
 const FOLLOWUP_SEMANTIC_PATH_ORDER = [
     'ready_artifacts',
+    'detached_ready_artifacts',
     'shadow_state',
     'generic_pipeline',
     'other',

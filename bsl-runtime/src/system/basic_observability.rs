@@ -212,6 +212,7 @@ const UNIFIED_INTELLISENSE_V2_COUNTER_KEYS: &[&str] = &[
     "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag",
     "intellisense_v2_diagnostics_save_followup_wait_state_total_reason_other",
     "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts",
+    "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_detached_ready_artifacts",
     "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state",
     "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_generic_pipeline",
     "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_other",

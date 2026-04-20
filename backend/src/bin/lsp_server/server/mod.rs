@@ -311,6 +311,8 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_ready_parse_snapshots_v2:
         Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
+    pub(crate) latest_detached_diagnostics_ready_artifacts_v2:
+        Arc<RwLock<HashMap<V2FileId, DetachedDiagnosticsReadyArtifactV2>>>,
     pub(crate) latest_snapshot_failures_v2:
         Arc<RwLock<HashMap<V2FileId, SnapshotBuildFailureStateV2>>>,
     pub(crate) latest_snapshot_status_v2: Arc<RwLock<HashMap<V2FileId, SnapshotReadinessDto>>>,
@@ -1009,6 +1011,16 @@ pub(crate) struct ReadyParseSnapshotStateV2 {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct DetachedDiagnosticsReadyArtifactV2 {
+    pub requested_version: i32,
+    pub text_hash: [u8; 32],
+    pub save_cycle_sequence: u64,
+    pub text: Arc<str>,
+    pub parse_snapshot: bsl_analysis_v2::ParseSnapshot,
+    pub syntax_errors_complete: bool,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct SnapshotBuildFailureStateV2 {
     pub requested_version: i32,
     pub reason: Arc<str>,
@@ -1189,6 +1201,7 @@ pub(crate) struct DidChangeParseSnapshotAttributionV2 {
 pub(crate) struct BackgroundParseSnapshotApplyTargetV2 {
     pub requested_version: i32,
     pub text_hash: [u8; 32],
+    pub save_cycle_sequence: Option<u64>,
     pub source: BackgroundParseSnapshotApplyTaskSourceV2,
     pub path: Arc<str>,
     pub text: Arc<str>,

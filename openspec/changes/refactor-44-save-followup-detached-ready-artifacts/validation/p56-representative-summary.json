@@ -1,0 +1,123 @@
+{
+  "source_probe": "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live",
+  "change_id": "refactor-44-save-followup-detached-ready-artifacts",
+  "cycle_count": 4,
+  "baseline_captured_at": "2026-04-18T18:52:50Z",
+  "aggregate": {
+    "did_change_ready_snapshot_materialization_histogram_count": 8,
+    "did_change_ready_snapshot_materialization_p50_ms": 41704.0,
+    "did_change_ready_snapshot_materialization_p95_ms": 43220.0,
+    "max_followup_publish_elapsed_ms": 4855,
+    "max_followup_publish_semantic_diagnostics_query_ms": 1240,
+    "max_followup_ready_snapshot_parse_exec_ms": 171
+  },
+  "comparison": {
+    "did_change_ready_snapshot_materialization_p50_vs_baseline_delta_ms": 38478.0,
+    "did_change_ready_snapshot_materialization_p95_vs_baseline_delta_ms": 39891.0,
+    "max_followup_publish_elapsed_vs_baseline_ceiling_delta_ms": -364,
+    "max_followup_ready_snapshot_parse_exec_vs_baseline_ceiling_delta_ms": -3156
+  },
+  "representative_cycles": [
+    {
+      "cycle": 1,
+      "requested_version": 3,
+      "save_cycle_sequence": 1,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_ready_snapshot_wait_probe": "timeout",
+      "followup_ready_snapshot_timeout_leaf": "ready_install",
+      "followup_publish_elapsed_ms": 4846,
+      "followup_publish_semantic_diagnostics_query_ms": 1227,
+      "followup_publish_semantic_diagnostics_ir_ms": 751,
+      "followup_publish_semantic_diagnostics_collect_ms": 470,
+      "semantic_query_dominates_parse_exec": true,
+      "exact_ready_after_timeout": false,
+      "completion_head_ready_after_timeout": false,
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 3,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 3,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "cycle": 2,
+      "requested_version": 5,
+      "save_cycle_sequence": 2,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_ready_snapshot_wait_probe": "timeout",
+      "followup_ready_snapshot_timeout_leaf": "ready_install",
+      "followup_publish_elapsed_ms": 4806,
+      "followup_publish_semantic_diagnostics_query_ms": 1189,
+      "followup_publish_semantic_diagnostics_ir_ms": 685,
+      "followup_publish_semantic_diagnostics_collect_ms": 499,
+      "semantic_query_dominates_parse_exec": true,
+      "exact_ready_after_timeout": false,
+      "completion_head_ready_after_timeout": false,
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 5,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 5,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "cycle": 3,
+      "requested_version": 7,
+      "save_cycle_sequence": 3,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_ready_snapshot_wait_probe": "timeout",
+      "followup_ready_snapshot_timeout_leaf": "ready_install",
+      "followup_publish_elapsed_ms": 4855,
+      "followup_publish_semantic_diagnostics_query_ms": 1240,
+      "followup_publish_semantic_diagnostics_ir_ms": 790,
+      "followup_publish_semantic_diagnostics_collect_ms": 444,
+      "semantic_query_dominates_parse_exec": true,
+      "exact_ready_after_timeout": false,
+      "completion_head_ready_after_timeout": false,
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 7,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 7,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "cycle": 4,
+      "requested_version": 9,
+      "save_cycle_sequence": 4,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_ready_snapshot_wait_probe": "timeout",
+      "followup_ready_snapshot_timeout_leaf": "ready_install",
+      "followup_publish_elapsed_ms": 4583,
+      "followup_publish_semantic_diagnostics_query_ms": 970,
+      "followup_publish_semantic_diagnostics_ir_ms": 595,
+      "followup_publish_semantic_diagnostics_collect_ms": 369,
+      "semantic_query_dominates_parse_exec": true,
+      "exact_ready_after_timeout": false,
+      "completion_head_ready_after_timeout": false,
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 9,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 9,
+        "work_class": "Interactive"
+      }
+    }
+  ],
+  "notes": {
+    "followup_semantic_path_detached_ready_artifacts": 4,
+    "followup_semantic_path_ready_artifacts": 0,
+    "followup_semantic_path_shadow_state": 0
+  }
+}

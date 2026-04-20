@@ -6,6 +6,7 @@
 
 - `cargo test -p bsl-backend --bin bsl-lsp-server --no-run`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_shadow_fallback -- --nocapture`
+- `cargo test -p bsl-backend --bin bsl-lsp-server p24b_diagnostics_save_timeline_ignores_detached_ready_artifacts_from_older_save_cycle -- --nocapture`
 - `cargo test -p bsl-backend --bin bsl-lsp-server detached_ready_artifact_does_not_weaken_hover_fail_closed_gate -- --nocapture`
 - `cargo test -p bsl-backend --bin bsl-lsp-server same_revision_ready_snapshot_waits_for_exact_type_index_before_hover -- --nocapture`
 - `target/debug/deps/bsl_lsp_server-1c1a12b3b7313479 server::core::tests::interactive_completion::p7_definition_timeout_still_seeds_exact_type_index_without_did_save --exact --nocapture`
@@ -24,6 +25,9 @@
   `shadow_state` fallback when canonical ready artifacts are still pending.
 - The hover-specific fail-closed regression passed and proved that inserting a matching detached
   diagnostics-ready artifact does not weaken the canonical live exact gate.
+- The new stale-artifact regression passed and proved that an older detached artifact with the
+  same version and text hash but an older `save_cycle_sequence` is not consumed for the newer
+  still-current target.
 - The existing same-revision hover wait regression still passed, preserving the live exact wait
   path for interactive exact consumers.
 - The existing definition and signature-help regressions still passed through the direct test
@@ -37,27 +41,41 @@
 
 ## Representative Live Notes
 
-The new detached branch is real and observable on the representative live family:
+The repo-auditable checked-in representative summary for this change is:
 
-- `p56_real_conf_big_diagnostics_representative_save_followup_bundle_live_path=/home/egor/code/bsl-gradual-types/backend/tests/perf/reports/refactor-44-save-followup-detached-ready-artifacts-real-conf-big-diagnostics-representative-save-followup-bundle-live.json`
+- `openspec/changes/refactor-44-save-followup-detached-ready-artifacts/validation/p56-representative-summary.json`
+
+That tracked summary captures four representative late-family cycles, and all four keep:
+
 - `followup_semantic_path=detached_ready_artifacts`
-- `followup_publish.semantic_path=detached_ready_artifacts`
+- `followup_publish_semantic_path=detached_ready_artifacts`
 - `followup_ready_snapshot_zero_probe=not_ready`
-- `followup_semantic_parse_source=snapshot`
-- `followup_semantic_ir_source=snapshot_build`
-- `followup_semantic_materialization_path=diagnostics_only`
+- `followup_ready_snapshot_wait_probe=timeout`
+- `followup_ready_snapshot_timeout_leaf=ready_install`
+- `semantic_query_dominates_parse_exec=true`
+- `exact_ready_after_timeout=false`
+- `completion_head_ready_after_timeout=false`
 
-The representative late family does not justify overclaiming a single canonical sub-shape.
-Observed live cycles showed both of these detached cases:
+The current checked-in summary therefore proves the timeout-shaped detached branch truthfully.
+The acceptance contract for `refactor-44` remains narrower than a fixed sub-shape claim:
+it requires truthful detached-path labeling plus preserved interactive fail-closed behavior,
+not a promise that every future detached publish must keep the exact same mix of timeout subcases.
 
-- detached publish after truthful bounded-wait timeout with
-  `followup_ready_snapshot_wait_probe=timeout` and
-  `followup_ready_snapshot_timeout_leaf=ready_install`
-- detached publish after the zero-budget miss without claiming a bounded-wait `ready` outcome
+## Requirement -> Code -> Test
 
-That means `refactor-44` acceptance should require truthful detached-path labeling and preserved
-interactive fail-closed behavior, not an overfit assumption that every detached publish must have
-the exact same canonical timeout sub-shape.
+- Detached `didSave` follow-up prefers diagnostics-only detached artifacts for the exact same-save
+  target -> `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs`,
+  `backend/src/bin/lsp_server/server/core/diagnostics_runtime.rs` -> `p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_shadow_fallback`,
+  `validation/p56-representative-summary.json`
+- Interactive exact consumers stay on the canonical live exact gate -> `backend/src/bin/lsp_server/server/language_server/impl_features_b.rs`,
+  `backend/src/bin/lsp_server/server/language_server/impl_features_c.rs`,
+  `backend/src/bin/lsp_server/server/language_server/impl_completion.rs` ->
+  `detached_ready_artifact_does_not_weaken_hover_fail_closed_gate`,
+  `same_revision_ready_snapshot_waits_for_exact_type_index_before_hover`,
+  `p7_definition_timeout_still_seeds_exact_type_index_without_did_save`,
+  `p7_signature_help_bootstraps_exact_type_index_without_did_save_when_precompute_fits_budget`
+- Older same-file detached artifacts do not leak across save cycles -> `backend/src/bin/lsp_server/server/core/diagnostics_runtime.rs` ->
+  `p24b_diagnostics_save_timeline_ignores_detached_ready_artifacts_from_older_save_cycle`
 
 ## Long / Flaky Probes
 

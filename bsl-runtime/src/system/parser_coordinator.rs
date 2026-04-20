@@ -468,6 +468,21 @@ pub struct ParseSnapshotExecutionOptions<'a> {
         Option<&'a (dyn Fn(ParseSnapshotAssemblyCheckpoint) + Send + Sync)>,
 }
 
+#[derive(Clone, Copy, Default)]
+pub struct PrimeTreeCacheFromSourceOptions<'a> {
+    pub skip_optional_ast_priming_initial: bool,
+    pub skip_optional_ast_priming_requested: Option<&'a AtomicBool>,
+}
+
+impl PrimeTreeCacheFromSourceOptions<'_> {
+    fn skip_optional_ast_priming(self) -> bool {
+        self.skip_optional_ast_priming_initial
+            || self
+                .skip_optional_ast_priming_requested
+                .is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+}
+
 enum ParseSnapshotTreeCacheInstallOp {
     Set {
         file_path: PathBuf,
@@ -616,6 +631,14 @@ impl ParserCoordinator {
 
     pub fn clear_ast_cache(&self) {
         self.ast_cache.clear();
+    }
+
+    pub fn prime_ast_cache_for_source(
+        &self,
+        source: &str,
+        parse_result: Arc<bsl_syntax::ast::ParseResult>,
+    ) {
+        self.ast_cache.put(ast_cache_key(source), parse_result);
     }
 
     pub fn ast_cache_stats(&self) -> crate::system::ast_cache::AstCacheStats {
@@ -1316,6 +1339,21 @@ impl ParserCoordinator {
         source: String,
         cancellation_flag: &AtomicBool,
     ) -> Result<(), String> {
+        self.prime_tree_cache_from_source_with_cancellation_and_options(
+            file_path,
+            source,
+            cancellation_flag,
+            PrimeTreeCacheFromSourceOptions::default(),
+        )
+    }
+
+    pub fn prime_tree_cache_from_source_with_cancellation_and_options(
+        &self,
+        file_path: PathBuf,
+        source: String,
+        cancellation_flag: &AtomicBool,
+        options: PrimeTreeCacheFromSourceOptions<'_>,
+    ) -> Result<(), String> {
         if cancellation_flag.load(Ordering::SeqCst) {
             return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
         }
@@ -1336,7 +1374,10 @@ impl ParserCoordinator {
             .parse_tree_only_with_cancellation(&source, None, cancellation_flag)
         {
             Ok(tree) => {
-                if exact_program_lowering_reuse_enabled() {
+                if cancellation_flag.load(Ordering::SeqCst) {
+                    return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
+                }
+                if exact_program_lowering_reuse_enabled() && !options.skip_optional_ast_priming() {
                     match TreeSitterAdapter::convert_tree_fast(&tree, &source) {
                         Ok(parse_result) => {
                             self.store_ast_memory(ast_cache_key(&source), &parse_result);

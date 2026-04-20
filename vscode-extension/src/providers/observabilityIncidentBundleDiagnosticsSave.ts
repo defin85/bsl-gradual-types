@@ -24,12 +24,16 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_ready_snapshot_task_state?: string;
     followup_ready_snapshot_timeout_phase?: string;
     followup_ready_snapshot_timeout_phase_elapsed_ms?: number;
+    followup_ready_snapshot_timeout_leaf?: string;
+    followup_ready_snapshot_timeout_leaf_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_ms?: number;
     followup_ready_snapshot_parse_exec_timeout_subphase?: string;
     followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_core_parse_build_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint?: string;
     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint?: string;
@@ -57,6 +61,7 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_shadow_state_available?: boolean;
     followup_ready_snapshot_attribution_note?: string;
     followup_ready_snapshot_phase_attribution_note?: string;
+    followup_ready_snapshot_timeout_leaf_note?: string;
     followup_ready_snapshot_parse_exec_subphase_note?: string;
     followup_ready_snapshot_core_build_checkpoint_note?: string;
     followup_ready_snapshot_exact_ready_snapshot_assembly_checkpoint_note?: string;
@@ -104,6 +109,10 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline.response.version < 11
             ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
             : undefined;
+    const timeoutLeafNote =
+        diagnosticsSaveTimeline.response.version < 21
+            ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
+            : undefined;
     const blockerNote =
         diagnosticsSaveTimeline.response.version < 12
             ? `unavailable_by_design(version=${diagnosticsSaveTimeline.response.version})`
@@ -139,6 +148,11 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
     if (diagnosticsSaveTimeline.response.version < 11) {
         gaps.push(
             `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose ready-snapshot relief-valve attribution by design.`
+        );
+    }
+    if (diagnosticsSaveTimeline.response.version < 21) {
+        gaps.push(
+            `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose diagnostics-save timeout-leaf fidelity in derived request summaries by design.`
         );
     }
     if (diagnosticsSaveTimeline.response.version < 12) {
@@ -186,6 +200,14 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_ready_snapshot_timeout_phase: trace.followup_ready_snapshot_timeout_phase,
             followup_ready_snapshot_timeout_phase_elapsed_ms:
                 trace.followup_ready_snapshot_timeout_phase_elapsed_ms,
+            followup_ready_snapshot_timeout_leaf:
+                diagnosticsSaveTimeline.response.version >= 21
+                    ? trace.followup_ready_snapshot_timeout_leaf
+                    : undefined,
+            followup_ready_snapshot_timeout_leaf_elapsed_ms:
+                diagnosticsSaveTimeline.response.version >= 21
+                    ? trace.followup_ready_snapshot_timeout_leaf_elapsed_ms
+                    : undefined,
             followup_ready_snapshot_parse_exec_ms:
                 trace.followup_ready_snapshot_parse_exec_ms,
             followup_ready_snapshot_parse_exec_timeout_subphase:
@@ -194,10 +216,14 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
                 trace.followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms,
             followup_ready_snapshot_parse_exec_core_parse_build_ms:
                 trace.followup_ready_snapshot_parse_exec_core_parse_build_ms,
+            followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms:
+                trace.followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms,
             followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint:
                 trace.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint,
             followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms:
                 trace.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms,
+            followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms:
+                trace.followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms,
             followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms:
                 trace.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms:
@@ -258,6 +284,7 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
                 exactReadySnapshotAssemblyCheckpointNote,
             followup_ready_snapshot_relief_valve_note:
                 readySnapshotReliefValveNote,
+            followup_ready_snapshot_timeout_leaf_note: timeoutLeafNote,
             followup_wait_reason: trace.followup_wait_reason,
             followup_blocker_reason: trace.followup_blocker_reason,
             followup_blocker_note: blockerNote,
@@ -455,17 +482,22 @@ function formatFollowupReadySnapshotAttribution(
 
 function formatFollowupReadySnapshotPhases(
     attributionNote: string | undefined,
+    timeoutLeafNote: string | undefined,
     parseExecSubphaseNote: string | undefined,
     coreBuildCheckpointNote: string | undefined,
     exactReadySnapshotAssemblyCheckpointNote: string | undefined,
     timeoutPhase: string | undefined,
     timeoutPhaseElapsedMs: number | undefined,
+    timeoutLeaf: string | undefined,
+    timeoutLeafElapsedMs: number | undefined,
     parseExecMs: number | undefined,
     parseExecTimeoutSubphase: string | undefined,
     parseExecTimeoutSubphaseElapsedMs: number | undefined,
     parseExecCoreParseBuildMs: number | undefined,
+    parseExecCoreBuildPreParseSetupMs: number | undefined,
     parseExecCoreBuildTimeoutCheckpoint: string | undefined,
     parseExecCoreBuildTimeoutCheckpointElapsedMs: number | undefined,
+    parseExecCoreBuildParserBaseRecoveryMs: number | undefined,
     parseExecCoreBuildParserTreeBuildMs: number | undefined,
     parseExecCoreBuildExactReadySnapshotAssemblyMs: number | undefined,
     parseExecCoreBuildExactReadySnapshotAssemblyTimeoutCheckpoint: string | undefined,
@@ -501,12 +533,16 @@ function formatFollowupReadySnapshotPhases(
     if (
         !timeoutPhase
         && !isPositiveTimingValue(timeoutPhaseElapsedMs)
+        && !timeoutLeaf
+        && !isPositiveTimingValue(timeoutLeafElapsedMs)
         && !isPositiveTimingValue(parseExecMs)
         && !parseExecTimeoutSubphase
         && !isPositiveTimingValue(parseExecTimeoutSubphaseElapsedMs)
         && !isPositiveTimingValue(parseExecCoreParseBuildMs)
+        && !isPositiveTimingValue(parseExecCoreBuildPreParseSetupMs)
         && !parseExecCoreBuildTimeoutCheckpoint
         && !isPositiveTimingValue(parseExecCoreBuildTimeoutCheckpointElapsedMs)
+        && !isPositiveTimingValue(parseExecCoreBuildParserBaseRecoveryMs)
         && !isPositiveTimingValue(parseExecCoreBuildParserTreeBuildMs)
         && !isPositiveTimingValue(parseExecCoreBuildExactReadySnapshotAssemblyMs)
         && !parseExecCoreBuildExactReadySnapshotAssemblyTimeoutCheckpoint
@@ -540,6 +576,7 @@ function formatFollowupReadySnapshotPhases(
         && !isPositiveTimingValue(documentSymbolSideWorkMs)
         && !dominantPhase
         && !isPositiveTimingValue(dominantPhaseMs)
+        && !timeoutLeafNote
         && !parseExecSubphaseNote
         && !coreBuildCheckpointNote
         && !exactReadySnapshotAssemblyCheckpointNote
@@ -554,6 +591,16 @@ function formatFollowupReadySnapshotPhases(
     if (isPositiveTimingValue(timeoutPhaseElapsedMs)) {
         parts.push(
             `followup_ready_snapshot_timeout_phase_elapsed_ms=${timeoutPhaseElapsedMs}`
+        );
+    }
+    if (timeoutLeaf) {
+        parts.push(`followup_ready_snapshot_timeout_leaf=${timeoutLeaf}`);
+    } else if (timeoutLeafNote) {
+        parts.push(`followup_ready_snapshot_timeout_leaf=${timeoutLeafNote}`);
+    }
+    if (isPositiveTimingValue(timeoutLeafElapsedMs)) {
+        parts.push(
+            `followup_ready_snapshot_timeout_leaf_elapsed_ms=${timeoutLeafElapsedMs}`
         );
     }
     if (isPositiveTimingValue(parseExecMs)) {
@@ -574,6 +621,11 @@ function formatFollowupReadySnapshotPhases(
             `followup_ready_snapshot_parse_exec_core_parse_build_ms=${parseExecCoreParseBuildMs}`
         );
     }
+    if (isPositiveTimingValue(parseExecCoreBuildPreParseSetupMs)) {
+        parts.push(
+            `followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms=${parseExecCoreBuildPreParseSetupMs}`
+        );
+    }
     if (parseExecCoreBuildTimeoutCheckpoint) {
         parts.push(
             `followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint=${parseExecCoreBuildTimeoutCheckpoint}`
@@ -582,6 +634,11 @@ function formatFollowupReadySnapshotPhases(
     if (isPositiveTimingValue(parseExecCoreBuildTimeoutCheckpointElapsedMs)) {
         parts.push(
             `followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms=${parseExecCoreBuildTimeoutCheckpointElapsedMs}`
+        );
+    }
+    if (isPositiveTimingValue(parseExecCoreBuildParserBaseRecoveryMs)) {
+        parts.push(
+            `followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms=${parseExecCoreBuildParserBaseRecoveryMs}`
         );
     }
     if (isPositiveTimingValue(parseExecCoreBuildParserTreeBuildMs)) {
@@ -777,17 +834,22 @@ export function renderDiagnosticsSaveSummaryLines(
         ),
         formatFollowupReadySnapshotPhases(
             request.followup_ready_snapshot_phase_attribution_note,
+            request.followup_ready_snapshot_timeout_leaf_note,
             request.followup_ready_snapshot_parse_exec_subphase_note,
             request.followup_ready_snapshot_core_build_checkpoint_note,
             request.followup_ready_snapshot_exact_ready_snapshot_assembly_checkpoint_note,
             request.followup_ready_snapshot_timeout_phase,
             request.followup_ready_snapshot_timeout_phase_elapsed_ms,
+            request.followup_ready_snapshot_timeout_leaf,
+            request.followup_ready_snapshot_timeout_leaf_elapsed_ms,
             request.followup_ready_snapshot_parse_exec_ms,
             request.followup_ready_snapshot_parse_exec_timeout_subphase,
             request.followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms,
             request.followup_ready_snapshot_parse_exec_core_parse_build_ms,
+            request.followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms,
             request.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint,
             request.followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms,
+            request.followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms,
             request.followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms,
             request.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint,

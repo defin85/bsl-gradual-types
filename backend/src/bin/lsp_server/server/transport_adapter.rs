@@ -394,10 +394,7 @@ impl AdmissionQueues {
         }
     }
 
-    async fn pop_next(
-        &self,
-        completion_barrier_active: bool,
-    ) -> Option<ScheduledRequest> {
+    async fn pop_next(&self, completion_barrier_active: bool) -> Option<ScheduledRequest> {
         let next = {
             let mut state = self
                 .state
@@ -408,9 +405,7 @@ impl AdmissionQueues {
             } else {
                 let completion_dispatchable = !completion_barrier_active
                     || state.completion.front().is_some_and(|scheduled| {
-                        is_completion_supporting_document_sync_notification(
-                            &scheduled.request,
-                        )
+                        is_completion_supporting_document_sync_notification(&scheduled.request)
                     });
                 if completion_dispatchable {
                     state
@@ -599,7 +594,9 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                 .await
             else {
                 if completion_barrier_active {
-                    completion_barrier_gate_for_scheduler.wait_for_release().await;
+                    completion_barrier_gate_for_scheduler
+                        .wait_for_release()
+                        .await;
                 }
                 continue;
             };

@@ -323,7 +323,7 @@ suite('LSP Custom Requests Test Suite', () => {
 
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 15,
+                        version: 21,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -369,6 +369,30 @@ suite('LSP Custom Requests Test Suite', () => {
                                 followup_ready_snapshot_zero_probe: 'not_ready',
                                 followup_ready_snapshot_wait_probe: 'timeout',
                                 followup_ready_snapshot_task_state: 'in_flight_same_version',
+                                followup_ready_snapshot_timeout_phase: 'parse_exec',
+                                followup_ready_snapshot_timeout_phase_elapsed_ms: 3021,
+                                followup_ready_snapshot_timeout_leaf: 'parser_base_recovery',
+                                followup_ready_snapshot_timeout_leaf_elapsed_ms: 3012,
+                                followup_ready_snapshot_parse_exec_ms: 3021,
+                                followup_ready_snapshot_parse_exec_timeout_subphase: 'core_parse_build',
+                                followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: 3021,
+                                followup_ready_snapshot_parse_exec_core_parse_build_ms: 3021,
+                                followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: 9,
+                                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint:
+                                    'parser_base_recovery',
+                                followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms:
+                                    3012,
+                                followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms:
+                                    3012,
+                                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint:
+                                    'parser_base_recovery',
+                                followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms:
+                                    3012,
+                                followup_ready_snapshot_parse_exec_dominant_subphase:
+                                    'core_parse_build',
+                                followup_ready_snapshot_parse_exec_dominant_subphase_ms: 3021,
+                                followup_ready_snapshot_dominant_phase: 'parse_exec',
+                                followup_ready_snapshot_dominant_phase_ms: 3021,
                                 followup_shadow_state_available: false,
                                 followup_wait_reason: 'pending_publish',
                                 followup_blocker_reason: 'post_ready_publish_gate',
@@ -721,7 +745,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 15);
+        assert.strictEqual(result.response.version, 21);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
@@ -741,6 +765,27 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(result.response.traces[0].followup_ready_snapshot_zero_probe, 'not_ready');
         assert.strictEqual(result.response.traces[0].followup_ready_snapshot_wait_probe, 'timeout');
         assert.strictEqual(result.response.traces[0].followup_ready_snapshot_task_state, 'in_flight_same_version');
+        assert.strictEqual(result.response.traces[0].followup_ready_snapshot_timeout_phase, 'parse_exec');
+        assert.strictEqual(
+            result.response.traces[0].followup_ready_snapshot_timeout_leaf,
+            'parser_base_recovery'
+        );
+        assert.strictEqual(
+            result.response.traces[0].followup_ready_snapshot_timeout_leaf_elapsed_ms,
+            3012
+        );
+        assert.strictEqual(
+            result.response.traces[0].followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms,
+            9
+        );
+        assert.strictEqual(
+            result.response.traces[0].followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint,
+            'parser_base_recovery'
+        );
+        assert.strictEqual(
+            result.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms,
+            3012
+        );
         assert.strictEqual(result.response.traces[0].followup_shadow_state_available, false);
         assert.strictEqual(result.response.traces[0].followup_wait_reason, 'pending_publish');
         assert.strictEqual(

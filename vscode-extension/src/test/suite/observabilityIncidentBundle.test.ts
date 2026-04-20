@@ -359,7 +359,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -444,7 +444,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -470,15 +470,21 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_task_state: 'in_flight_same_version',
                         followup_ready_snapshot_timeout_phase: 'parse_exec',
                         followup_ready_snapshot_timeout_phase_elapsed_ms: 3501,
+                        followup_ready_snapshot_timeout_leaf: 'parser_base_recovery',
+                        followup_ready_snapshot_timeout_leaf_elapsed_ms: 3492,
                         followup_ready_snapshot_parse_exec_ms: 3501,
                         followup_ready_snapshot_parse_exec_timeout_subphase: 'core_parse_build',
                         followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms: 3501,
                         followup_ready_snapshot_parse_exec_core_parse_build_ms: 3501,
-                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint: 'parser_tree_build',
-                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms: 3501,
-                        followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms: 3501,
-                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint: 'parser_tree_build',
-                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: 3501,
+                        followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms: 9,
+                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint:
+                            'parser_base_recovery',
+                        followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms:
+                            3492,
+                        followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms: 3492,
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint:
+                            'parser_base_recovery',
+                        followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms: 3492,
                         followup_ready_snapshot_parse_exec_dominant_subphase: 'core_parse_build',
                         followup_ready_snapshot_parse_exec_dominant_subphase_ms: 3501,
                         followup_ready_snapshot_dominant_phase: 'parse_exec',
@@ -499,7 +505,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -537,7 +543,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -595,7 +601,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 16,
+                version: 21,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -731,9 +737,15 @@ suite('Observability Incident Bundle Test Suite', () => {
             throw new Error('expected ok diagnostics save timeline fixture');
         }
         timeline.response.version = 12;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf_elapsed_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_timeout_subphase = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_parse_build_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms =
+            undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms =
+            undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_dominant_subphase = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_dominant_subphase_ms = undefined;
@@ -746,13 +758,34 @@ suite('Observability Incident Bundle Test Suite', () => {
             throw new Error('expected ok diagnostics save timeline fixture');
         }
         timeline.response.version = 13;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms =
+            undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms =
+            undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint = undefined;
         timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint_ms = undefined;
+        return timeline;
+    }
+
+    function sampleV20DiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
+        const timeline = sampleInFlightDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        timeline.response.version = 20;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_timeout_leaf_elapsed_ms = undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms =
+            undefined;
+        timeline.response.traces[0].followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms =
+            undefined;
         return timeline;
     }
 
@@ -822,7 +855,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 16);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 21);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -1284,12 +1317,32 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_timeout_phase=parse_exec'));
         assert.ok(
             bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_timeout_leaf=parser_base_recovery'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_timeout_leaf_elapsed_ms=3492'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_parse_exec_timeout_subphase=core_parse_build'
             )
         );
         assert.ok(
             bundle.summaryMarkdown.includes(
-                'followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint=parser_tree_build'
+                'followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms=9'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint=parser_base_recovery'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms=3492'
             )
         );
         assert.ok(
@@ -1299,7 +1352,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(
             bundle.summaryMarkdown.includes(
-                'followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint=parser_tree_build'
+                'followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint=parser_base_recovery'
             )
         );
         assert.ok(bundle.summaryMarkdown.includes('followup_ready_snapshot_dominant_phase=parse_exec'));
@@ -1582,6 +1635,28 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_exact_ready_snapshot_assembly_checkpoint_attribution=unavailable_by_design(version=14)'
+            )
+        );
+    });
+
+    test('v20 diagnostics save timeline should mark timeout-leaf fidelity as unavailable by design', () => {
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: sampleV20DiagnosticsSaveTimeline(),
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('does not expose diagnostics-save timeout-leaf fidelity in derived request summaries by design')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_timeout_leaf=unavailable_by_design(version=20)'
             )
         );
     });

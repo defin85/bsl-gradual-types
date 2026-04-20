@@ -423,7 +423,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let completion_head_ready_after_timeout = analysis_after_timeout
                 .current_completion_head_ready(file_id)
                 .expect("current_completion_head_ready after p56 timeout");
-            let type_index_parse_snapshot_meta_after_timeout = Option::<(bool, usize, bool)>::None;
+            let type_index_parse_snapshot_meta_after_timeout = analysis_after_timeout
+                .current_type_index_parse_snapshot_meta(file_id)
+                .expect("current_type_index_parse_snapshot_meta after p56 timeout");
             let observed_version_after_timeout = analysis_after_timeout
                 .file_version(file_id)
                 .expect("file_version after p56 timeout");

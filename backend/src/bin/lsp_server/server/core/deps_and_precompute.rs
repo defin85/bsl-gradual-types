@@ -208,6 +208,19 @@ impl BslLanguageServer {
             .analysis
     }
 
+    async fn current_exact_type_index_ready_for_version_v2(
+        &self,
+        file_id: V2FileId,
+        expected_version: i32,
+    ) -> bool {
+        let analysis = self.snapshot_for_completion_wait_v2().await;
+        analysis.file_version(file_id).ok().flatten() == Some(expected_version)
+            && analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false)
+    }
+
     fn spawn_type_index_precompute_task_v2(
         &self,
         supersession_key: super::super::TypeIndexPrecomputeSupersessionKeyV2,
@@ -687,7 +700,7 @@ impl BslLanguageServer {
             return TypeIndexPrecomputeWaiterActionV2::None;
         };
 
-        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        let tasks = self.type_index_precompute_tasks_v2.lock().await;
         let Some(task) = tasks.get(&file_id) else {
             return TypeIndexPrecomputeWaiterActionV2::None;
         };
@@ -702,13 +715,47 @@ impl BslLanguageServer {
         }
         let phase = TypeIndexPrecomputePhaseV2::from_atomic(task.phase.load(Ordering::Relaxed));
         let active_requested_version = task.active_requested_version.load(Ordering::Relaxed);
-        if matches!(
-            phase,
-            TypeIndexPrecomputePhaseV2::Computing | TypeIndexPrecomputePhaseV2::Completed
-        ) && (active_requested_version == expected_version || active_requested_version == 0)
-        {
-            return TypeIndexPrecomputeWaiterActionV2::Joined;
+        let completed_same_version = matches!(phase, TypeIndexPrecomputePhaseV2::Completed)
+            && (active_requested_version == expected_version || active_requested_version == 0);
+        let completed_task_id = completed_same_version.then_some(task.task_id);
+        drop(tasks);
+
+        if let Some(task_id) = completed_task_id {
+            if self
+                .current_exact_type_index_ready_for_version_v2(file_id, expected_version)
+                .await
+            {
+                return TypeIndexPrecomputeWaiterActionV2::Joined;
+            }
+            let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+            let Some(task) = tasks.get(&file_id) else {
+                return TypeIndexPrecomputeWaiterActionV2::None;
+            };
+            if task.task_id != task_id
+                || task.supersession_key.requested_version != expected_version
+                || matches!(
+                    task.work_class,
+                    bsl_runtime::application::CpuWorkClass::Interactive
+                )
+            {
+                return TypeIndexPrecomputeWaiterActionV2::Joined;
+            }
+            let previous = tasks
+                .remove(&file_id)
+                .expect("matching completed retained type-index precompute task must exist");
+            previous.handle.abort();
+            tasks.insert(
+                file_id,
+                self.spawn_type_index_precompute_task_v2(
+                    previous.supersession_key,
+                    bsl_runtime::application::CpuWorkClass::Interactive,
+                    previous.scheduled_at,
+                ),
+            );
+            return TypeIndexPrecomputeWaiterActionV2::Promoted;
         }
+
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
 
         let previous = tasks
             .remove(&file_id)

@@ -758,6 +758,30 @@ impl AnalysisV2 {
             .is_some_and(|artifact| !artifact.parse_snapshot_meta.serve_only_blocked))
     }
 
+    pub fn current_type_index_parse_snapshot_meta(
+        &self,
+        file_id: FileId,
+    ) -> Cancellable<Option<(bool, usize, bool)>> {
+        let Some(&file) = self.files.get(&file_id) else {
+            return Ok(None);
+        };
+
+        let file_version = file.version(&self.db);
+        let key = self.make_type_index_artifact_key(file_id, file_version);
+        let cache = self
+            .derived_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        Ok(cache.get_type_index_exact(&key).map(|artifact| {
+            (
+                artifact.parse_snapshot_meta.incremental,
+                artifact.parse_snapshot_meta.changed_ranges_count,
+                artifact.parse_snapshot_meta.serve_only_blocked,
+            )
+        }))
+    }
+
     pub fn current_completion_head_ready(&self, file_id: FileId) -> Cancellable<bool> {
         let Some(&file) = self.files.get(&file_id) else {
             return Ok(false);

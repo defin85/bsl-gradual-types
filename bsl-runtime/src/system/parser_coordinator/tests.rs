@@ -1415,6 +1415,57 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn tree_cache_prime_options_can_skip_optional_ast_priming_when_reuse_ast_is_preseeded() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let source = build_large_ascii_callable_fixture(32);
+        let file_path = PathBuf::from("snapshot-save-critical-tree-cache-prime.bsl");
+        let cancellation_flag = AtomicBool::new(false);
+        let preseeded_parse_result =
+            Arc::new(bsl_syntax::parse_fast(&source).expect("preseeded parse result"));
+
+        let preseeded_parser = ParserCoordinator::with_fallback();
+        preseeded_parser.prime_ast_cache_for_source(&source, Arc::clone(&preseeded_parse_result));
+        preseeded_parser
+            .prime_tree_cache_from_source_with_cancellation_and_options(
+                file_path.clone(),
+                source.clone(),
+                &cancellation_flag,
+                PrimeTreeCacheFromSourceOptions {
+                    skip_optional_ast_priming_initial: true,
+                    skip_optional_ast_priming_requested: None,
+                },
+            )
+            .expect("preseeded tree-cache prime");
+        assert!(
+            preseeded_parser.tree_cache_matches_source_for_file(file_path.as_path(), &source),
+            "tree-cache recovery must still install the matching parser base"
+        );
+        assert!(
+            preseeded_parser
+                .ast_cache
+                .get(ast_cache_key(&source))
+                .is_some(),
+            "preseeded parser-base recovery must preserve the supplied reuse AST"
+        );
+
+        let default_parser = ParserCoordinator::with_fallback();
+        default_parser
+            .prime_tree_cache_from_source_with_cancellation(
+                file_path,
+                source.clone(),
+                &cancellation_flag,
+            )
+            .expect("default tree-cache prime");
+        assert!(
+            default_parser
+                .ast_cache
+                .get(ast_cache_key(&source))
+                .is_some(),
+            "non-save-critical tree-cache prime must preserve default AST priming"
+        );
+    }
+
+    #[test]
     fn save_critical_requested_during_reused_program_lowering_returns_before_packaging_checkpoint()
     {
         let _env_lock = lock_parse_snapshot_test_env();

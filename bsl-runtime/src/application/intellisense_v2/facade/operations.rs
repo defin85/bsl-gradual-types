@@ -1037,7 +1037,11 @@ impl IntellisenseV2Facade {
                         SingleflightQueryKind::Ir,
                         observability,
                         None,
-                        || analysis.ir(file_id).map_err(|_| SingleflightQueryError::Cancelled),
+                        || {
+                            analysis
+                                .ir(file_id)
+                                .map_err(|_| SingleflightQueryError::Cancelled)
+                        },
                     )
                 } else {
                     if let Some(coordinator) = observability {

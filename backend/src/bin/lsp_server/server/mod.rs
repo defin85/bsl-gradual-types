@@ -1206,6 +1206,7 @@ pub(crate) struct BackgroundParseSnapshotApplyTargetV2 {
     pub path: Arc<str>,
     pub text: Arc<str>,
     pub parser_base_recovery_text: Option<Arc<str>>,
+    pub parser_base_recovery_reuse_parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     pub parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
     pub forced_full_parse_reason: Option<&'static str>,
     pub async_delay_mode: ParseSnapshotAsyncDelayMode,

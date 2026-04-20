@@ -60,6 +60,7 @@ async fn p24_diagnostics_save_timeline_reports_relief_valve_timeout_for_exact_wo
                         path: Arc::<str>::from(uri.path().to_string()),
                         text: exact_text,
                         parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
                         parser_edits: Vec::new(),
                         forced_full_parse_reason: None,
                         async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,

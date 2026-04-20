@@ -953,17 +953,39 @@ export interface DiagnosticsSaveTimelineTrace {
         | 'ready_install'
         | 'document_symbol_side_work';
     followup_ready_snapshot_timeout_phase_elapsed_ms?: number;
+    followup_ready_snapshot_timeout_leaf?:
+        | 'waiting'
+        | 'before_first_parse_exec_subphase'
+        | 'before_first_core_build_checkpoint'
+        | 'pre_parse_setup'
+        | 'parser_base_recovery'
+        | 'parser_tree_build'
+        | 'exact_ready_snapshot_assembly'
+        | 'before_first_exact_ready_snapshot_assembly_checkpoint'
+        | 'program_lowering'
+        | 'publishable_artifact_packaging'
+        | 'syntax_error_collection'
+        | 'tree_cache_install'
+        | 'optional_cache_enrichment'
+        | 'post_parse_pre_materialization'
+        | 'ready_install'
+        | 'document_symbol_side_work';
+    followup_ready_snapshot_timeout_leaf_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_ms?: number;
     followup_ready_snapshot_parse_exec_timeout_subphase?:
         | 'core_parse_build'
         | 'optional_cache_enrichment';
     followup_ready_snapshot_parse_exec_timeout_subphase_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_core_parse_build_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_pre_parse_setup_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint?:
+        | 'pre_parse_setup'
+        | 'parser_base_recovery'
         | 'parser_tree_build'
         | 'exact_ready_snapshot_assembly'
         | 'tree_cache_install';
     followup_ready_snapshot_parse_exec_core_build_timeout_checkpoint_elapsed_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_parser_base_recovery_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_parser_tree_build_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint?:
@@ -983,6 +1005,8 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_ready_snapshot_parse_exec_core_build_tree_cache_install_ms?: number;
     followup_ready_snapshot_parse_exec_optional_cache_enrichment_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_dominant_checkpoint?:
+        | 'pre_parse_setup'
+        | 'parser_base_recovery'
         | 'parser_tree_build'
         | 'exact_ready_snapshot_assembly'
         | 'tree_cache_install';

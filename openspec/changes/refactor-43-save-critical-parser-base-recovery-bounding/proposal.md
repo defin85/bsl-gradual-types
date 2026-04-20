@@ -45,6 +45,9 @@ that hides the same leaf from request-centric handoff.
 - Require observability incident bundle projection to preserve low-cardinality diagnostics-save
   timeout-leaf facts from the authoritative raw trace into derived `incident.json` and
   human-readable `summary.md`.
+- If representative evidence later shows that `parser_base_recovery` is no longer the dominant
+  residual, track any subsequent `ready_install` / type-index publication remediation as a
+  separate follow-up rather than broadening this change in place.
 
 ## Impact
 
@@ -65,6 +68,9 @@ that hides the same leaf from request-centric handoff.
   - builds on `refactor-41-ready-snapshot-before-first-parse-exec-subphase-bounding`
   - is intentionally separate from
     `refactor-42-restore-lsp-exact-consumers-after-diagnostics-only-simplification`
+  - hands off the later `ready_install` / detached diagnostics-ready branch to
+    `refactor-44-save-followup-detached-ready-artifacts` once `parser_base_recovery` stops being
+    the dominant representative blocker
   - does not reopen VS Code UI / extension pre-send latency unless fresh contradictory evidence
     appears
 
@@ -75,3 +81,6 @@ that hides the same leaf from request-centric handoff.
   same-version exact readiness removes the downstream parser-coordinator pressure.
 - Do not ship a bundle-only cosmetics fix without addressing the runtime `parser_base_recovery`
   regression that produced this incident class.
+- Do not solve the later `ready_install` residual by introducing detached diagnostics-ready
+  artifacts inside this change; that belongs to
+  `refactor-44-save-followup-detached-ready-artifacts`.

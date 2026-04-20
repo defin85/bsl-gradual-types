@@ -2711,5 +2711,5 @@ fn compute_settings_id_v2(settings: &BslSettings) -> SettingsId {
 }
 
 #[cfg(test)]
-#[path = "core/tests.rs"]
+#[path = "core/tests/mod.rs"]
 mod tests;

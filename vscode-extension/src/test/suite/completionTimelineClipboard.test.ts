@@ -9,7 +9,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
     function buildReadyState(): CompletionTimelinePanelState {
         return {
             kind: 'ready',
-            version: 24,
+            version: 25,
             updated_at_ms: 1_700_000_000_100,
             client_probe_feed: {
                 updated_at_ms: 1_700_000_000_100,
@@ -276,7 +276,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
         assert.ok(text!.includes('Completion Timeline | mode=all'));
         assert.ok(text!.includes('Server Timeline'));
         assert.ok(text!.includes('trace-1 (invoked)'));
-        assert.ok(text!.includes('contract=v24'));
+        assert.ok(text!.includes('contract=v25'));
         assert.ok(text!.includes('Client Probe Feed | local-only debug data'));
         assert.ok(text!.includes('probe-1 (trigger_character)'));
         assert.ok(text!.includes('transport_received_at_ms=1699999999960'));
@@ -438,7 +438,7 @@ suite('Completion Timeline Clipboard Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, v24 truthful pre-enqueue handoff split, and v25 completion pre-dispatch decomposition are unavailable by design.'
                     )
             )
         );
@@ -462,6 +462,23 @@ suite('Completion Timeline Clipboard Test Suite', () => {
             )
         );
         assert.ok(!text!.includes('response_output_handoff_started_at_ms=1700000000030'));
+    });
+
+    test('formatVisibleCompletionTimelineForClipboard should mark v24 payload as missing v25 pre-dispatch decomposition by design', () => {
+        const state = buildReadyState();
+        if (state.kind !== 'ready') {
+            throw new Error('expected ready state fixture');
+        }
+        state.version = 24;
+
+        const text = formatVisibleCompletionTimelineForClipboard(state, 'all');
+        assert.ok(text);
+        assert.ok(text!.includes('contract=v24'));
+        assert.ok(
+            text!.includes(
+                'v25 completion pre-dispatch decomposition is unavailable by design on this payload.'
+            )
+        );
     });
 
     test('formatVisibleCompletionTimelineForClipboard should mark v11 payload as missing v12 contention attribution by design', () => {

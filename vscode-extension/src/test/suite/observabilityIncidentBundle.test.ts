@@ -43,7 +43,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 24,
+                version: 25,
                 traces: [
                     {
                         trace_id: 'trace-1',
@@ -854,7 +854,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
-        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 24);
+        assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 25);
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 21);
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
@@ -2082,6 +2082,34 @@ suite('Observability Incident Bundle Test Suite', () => {
             bundle.incidentReport.findings.some((finding) => finding.includes('truthful v24 pre-enqueue handoff split'))
         );
         assert.ok(bundle.summaryMarkdown.includes('truthful v24 pre-enqueue handoff split'));
+    });
+
+    test('v24 completion timeline should mark truthful v25 pre-dispatch decomposition as unavailable by design', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.version = 24;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('truthful v25 completion pre-dispatch decomposition')
+            )
+        );
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('truthful v25 completion pre-dispatch decomposition')
+            )
+        );
+        assert.ok(bundle.summaryMarkdown.includes('truthful v25 completion pre-dispatch decomposition'));
     });
 
     test('correlated request should expose client-before-transport verdict when client wait dominates', () => {

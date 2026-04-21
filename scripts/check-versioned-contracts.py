@@ -20,7 +20,7 @@ REQUIRED_SURFACES = {
 }
 
 REQUIRED_LATEST_MAJORS = {
-    "lsp-completion-timeline": 21,
+    "lsp-completion-timeline": 22,
     "intellisense-perf-gate": 2,
     "observability-completion-v2": 4,
 }
@@ -363,6 +363,50 @@ REQUIRED_V21_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
         "response_ready_to_output_handoff_wait_ms",
         "response_output_handoff_send_wait_ms",
         "response_output_handoff_to_writer_wait_ms",
+    }
+)
+
+REQUIRED_V22_TIMELINE_SERVER_EDGE_DETAILS_FIELDS = (
+    REQUIRED_V21_TIMELINE_SERVER_EDGE_DETAILS_FIELDS
+    | {
+        "adapter_read_started_at_ms",
+        "adapter_parse_completed_at_ms",
+        "read_loop_wait_reason",
+        "read_loop_wait_ms",
+        "pending_completion_spillover_depth",
+        "pending_general_request_staged",
+        "admission_try_enqueue_at_ms",
+        "admission_lane",
+        "admission_lane_depth_before",
+        "admission_lane_depth_after",
+        "admission_enqueue_outcome",
+        "admission_spillover_outcome",
+        "admission_enqueued_at_ms",
+        "scheduler_woke_at_ms",
+        "scheduler_poll_ready_entered_at_ms",
+        "scheduler_poll_ready_resolved_at_ms",
+        "scheduler_dequeued_at_ms",
+        "completion_barrier_active_at_dequeue",
+        "completion_barrier_generation",
+        "completion_barrier_owner_method",
+        "completion_barrier_owner_uri",
+        "completion_barrier_owner_version",
+        "completion_barrier_wait_ms",
+        "doc_sync_first_poll_exec_ms",
+        "doc_sync_first_poll_outcome",
+        "doc_sync_first_poll_method",
+        "doc_sync_first_poll_uri",
+        "doc_sync_first_poll_version",
+        "same_file_ingress_token_required_version",
+        "same_file_ingress_token_published_at_ms",
+        "same_file_ingress_token_source",
+        "same_file_ingress_token_wait_ms",
+        "scheduler_service_call_started_at_ms",
+        "scheduler_service_call_returned_at_ms",
+        "admission_queue_wait_ms",
+        "scheduler_poll_ready_wait_ms",
+        "scheduler_service_call_sync_exec_ms",
+        "scheduler_ready_to_dispatch_wait_ms",
     }
 )
 
@@ -2440,6 +2484,17 @@ def validate_surface_contract(surface_dir: Path) -> None:
                 response,
                 expected_version=24,
                 expected_server_edge_details_fields=REQUIRED_V21_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
+                expected_query_bundle_stage_names=REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
+            )
+
+        if surface_dir.name == "lsp-completion-timeline" and major == 22:
+            response = contract.get("response")
+            ensure(isinstance(response, dict), f"{contract_path}: response must be object")
+            validate_lsp_completion_timeline_response_fields(
+                contract_path,
+                response,
+                expected_version=25,
+                expected_server_edge_details_fields=REQUIRED_V22_TIMELINE_SERVER_EDGE_DETAILS_FIELDS,
                 expected_query_bundle_stage_names=REQUIRED_V17_TIMELINE_QUERY_BUNDLE_STAGE_NAMES,
             )
 

@@ -706,7 +706,7 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
                         'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, and v11 first-poll / first-wake split are unavailable by design.'
                     .replace(
                         'and v11 first-poll / first-wake split are unavailable by design.',
-                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.'
+                        'v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, v24 truthful pre-enqueue handoff split, and v25 completion pre-dispatch decomposition are unavailable by design.'
                     )
             )
         );
@@ -1105,6 +1105,54 @@ suite('Completion Timeline Webview Provider Test Suite', () => {
             )
         );
         assert.ok(!rendered.serverHtml.includes('response_output_handoff_started='));
+
+        onDidDisposeEmitter.dispose();
+        onDidReceiveMessageEmitter.dispose();
+        onDidChangeVisibilityEmitter.dispose();
+    });
+
+    test('inline webview script should mark v24 payload as missing v25 pre-dispatch decomposition by design', async () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        provider = new CompletionTimelineWebviewProvider(outputChannel);
+
+        const onDidReceiveMessageEmitter = new vscode.EventEmitter<unknown>();
+        const onDidChangeVisibilityEmitter = new vscode.EventEmitter<void>();
+        const onDidDisposeEmitter = new vscode.EventEmitter<void>();
+        const webview = {
+            options: {},
+            html: '',
+            cspSource: 'vscode-webview://test',
+            onDidReceiveMessage: onDidReceiveMessageEmitter.event,
+            postMessage: sinon.stub().resolves(true),
+        } as unknown as vscode.Webview;
+        const webviewView = {
+            webview,
+            visible: false,
+            onDidChangeVisibility: onDidChangeVisibilityEmitter.event,
+            onDidDispose: onDidDisposeEmitter.event,
+        } as unknown as vscode.WebviewView;
+
+        provider.resolveWebviewView(webviewView);
+
+        const rendered = renderTimelineStateInInlineWebview(webview.html, {
+            kind: 'ready',
+            version: 24,
+            updated_at_ms: 1_700_000_000_100,
+            traces: [],
+            average_trace: null,
+            client_probe_feed: {
+                updated_at_ms: 1_700_000_000_100,
+                probes: [],
+            },
+        });
+
+        assert.ok(
+            rendered.serverHtml.includes(
+                'v25 completion pre-dispatch decomposition is unavailable by design on this payload.'
+            )
+        );
 
         onDidDisposeEmitter.dispose();
         onDidReceiveMessageEmitter.dispose();

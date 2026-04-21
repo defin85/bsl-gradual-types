@@ -1029,7 +1029,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
             / "lsp_server"
             / "server"
             / "core"
-            / "tests.rs"
+            / "tests"
+            / "snapshot_status_and_perf"
+            / "completion_perf_front_half.rs"
         ).read_text(encoding="utf-8")
         p38_pattern = re.compile(
             r'PROFILE_NAME:\s*&str\s*=\s*"p38_real_conf_big_post_handoff_readiness_completion_perf_report_live";'
@@ -1161,9 +1163,9 @@ class IntellisenseReadinessAssetsTest(unittest.TestCase):
     def test_front_edge_docs_reference_current_contract_versions(self) -> None:
         manual = (self.REPO_ROOT / "vscode-extension" / "manual-lsp-test.md").read_text(encoding="utf-8")
         test_readme = (self.REPO_ROOT / "vscode-extension" / "src" / "test" / "README.md").read_text(encoding="utf-8")
-        self.assertIn("payload `version=21`", manual)
+        self.assertIn("payload `version=25`", manual)
         self.assertNotIn("payload `version=12`", manual)
-        self.assertIn("`response.version=21`", test_readme)
+        self.assertIn("`response.version=25`", test_readme)
         self.assertNotIn("`response.version=20`", test_readme)
 
     def test_front_edge_ci_watches_wrapper(self) -> None:

@@ -19,7 +19,13 @@
 ### Extension projections
 
 - `npm run compile:fast` (from `vscode-extension/`)
-- `BSL_TEST_GREP='Completion Timeline Drilldown Test Suite|Observability Incident Bundle Test Suite' node scripts/run-vscode-extension-tests.js`
+- `BSL_TEST_GREP='Completion Timeline (Clipboard|Model|Webview Provider) Test Suite|Observability Incident Bundle Test Suite|getCompletionTimeline should work via executeCommand|getCompletionTimeline should fail-closed on Method not found' node scripts/run-vscode-extension-tests.js`
+
+### Contract and readiness guards
+
+- `python scripts/check-versioned-contracts.py`
+- `python scripts/test-versioned-contracts.py`
+- `python scripts/test-intellisense-readiness-assets.py`
 
 ### Spec validation
 
@@ -37,6 +43,10 @@
 - The VS Code projection tests passed and kept the human-readable verdicts fail-closed:
   `reader_backpressure_dominant` stays distinct from `client_before_transport_dominant`, and the
   new server-side split suppresses false client blame.
+- The checked-in `contracts/lsp-completion-timeline/v22` baseline now matches authoritative
+  `response.version=25`, the repo-level policy guard enforces the new field set, and the
+  smoke/readiness docs plus extension-facing degradations no longer advertise `v21`/`v24` as the
+  latest completion timeline contract surface.
 - The accepted representative live rerun (`p39`) passed and wrote:
   `openspec/changes/refactor-47-completion-transport-runtime-isolation/validation/refactor-47-completion-transport-runtime-isolation-real-conf-big-document-symbol-mixed-load-live.json`
 - In the accepted live report, the new `truthful_pre_dispatch_split` class passed with bounded

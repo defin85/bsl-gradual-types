@@ -562,7 +562,10 @@ function formatServerTimelineSectionForClipboard(
     if (state.version < 24) {
         lines.push('v24 truthful pre-enqueue handoff split is unavailable by design on this payload.');
     } else {
-        lines.push('response_output_enqueue_completed_at_ms remains a legacy writer-selection compatibility boundary on v24 payloads.');
+        lines.push('response_output_enqueue_completed_at_ms remains a legacy writer-selection compatibility boundary on v24+ payloads.');
+    }
+    if (state.version < 25) {
+        lines.push('v25 completion pre-dispatch decomposition is unavailable by design on this payload.');
     }
     const traces = mode === 'average'
         ? (state.average_trace

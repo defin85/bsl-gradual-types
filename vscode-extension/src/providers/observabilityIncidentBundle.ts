@@ -244,8 +244,13 @@ function buildCompletionTimelineSource(
     rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
     gaps: string[],
     files: ObservabilityIncidentBundleFile[]
-): ObservabilityIncidentBundleSource {
+    ): ObservabilityIncidentBundleSource {
         if (completionTimeline.kind === 'ok') {
+        if (completionTimeline.response.version < 25) {
+            gaps.push(
+                `Completion timeline contract v${completionTimeline.response.version} does not include truthful v25 completion pre-dispatch decomposition; reader wait, admission, barrier, same-file token, and residual post-ready split are unavailable by design.`
+            );
+        }
         if (completionTimeline.response.version < 24) {
             gaps.push(
                 `Completion timeline contract v${completionTimeline.response.version} does not include truthful v24 pre-enqueue handoff split; handoff-start / handoff-enqueued / writer-selection separation is unavailable by design.`
@@ -479,6 +484,11 @@ function deriveFindings(
     const findings: string[] = [];
     if (input.completionTimeline.kind === 'ok') {
         const traces = input.completionTimeline.response.traces;
+        if (input.completionTimeline.response.version < 25) {
+            findings.push(
+                `Completion timeline contract v${input.completionTimeline.response.version} is available, but truthful v25 completion pre-dispatch decomposition is unavailable by design.`
+            );
+        }
         if (input.completionTimeline.response.version < 24) {
             findings.push(
                 `Completion timeline contract v${input.completionTimeline.response.version} is available, but truthful v24 pre-enqueue handoff split is unavailable by design.`

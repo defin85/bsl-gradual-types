@@ -44,7 +44,7 @@ function buildClientProbe(probeId: string, version: number, startedAtMs: number)
 suite('Completion Timeline Model Test Suite', () => {
     test('Mapping LSP timeline payload -> UI model', () => {
         const payload: CompletionTimelineResponse = {
-            version: 24,
+            version: 25,
             traces: [
                 {
                     trace_id: 'trace-42',
@@ -199,7 +199,7 @@ suite('Completion Timeline Model Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(state.version, 24);
+        assert.strictEqual(state.version, 25);
         assert.strictEqual(state.traces.length, 1);
         assert.strictEqual(state.traces[0].trace_id, 'trace-42');
         assert.strictEqual(state.traces[0].client_probe_id, 'probe-1');
@@ -938,7 +938,7 @@ suite('Completion Timeline Model Test Suite', () => {
                 trace_id: 'average(2)',
                 trigger_mode: 'averaged',
             } as never),
-            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.'
+            'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, v24 truthful pre-enqueue handoff split, and v25 completion pre-dispatch decomposition are unavailable by design.'
         );
         assert.strictEqual(
             getAverageTraceProvenanceNotice({

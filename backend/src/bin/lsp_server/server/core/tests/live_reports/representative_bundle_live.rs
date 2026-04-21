@@ -103,7 +103,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-44-save-followup-detached-ready-artifacts".to_string()
+            "refactor-46-save-followup-dual-artifact-wait".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -404,6 +404,12 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let followup_ready_snapshot_wait_probe = timeline
                 .get("followup_ready_snapshot_wait_probe")
                 .and_then(|value| value.as_str());
+            let followup_ready_snapshot_bounded_wait_winner = timeline
+                .get("followup_ready_snapshot_bounded_wait_winner")
+                .and_then(|value| value.as_str());
+            let followup_ready_snapshot_bounded_wait_elapsed_ms = timeline
+                .get("followup_ready_snapshot_bounded_wait_elapsed_ms")
+                .and_then(|value| value.as_u64());
             let followup_ready_snapshot_continuation_reason = timeline
                 .get("followup_ready_snapshot_continuation_reason")
                 .and_then(|value| value.as_str());
@@ -543,23 +549,25 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             });
             let ready_artifacts_publish = match followup_semantic_path {
                 Some("detached_ready_artifacts") => {
-                    assert_ne!(
+                    assert_eq!(
                         followup_ready_snapshot_wait_probe,
-                        Some("ready"),
-                        "p56 detached cycle must not claim a canonical bounded-wait ready hit, trace={timeline:?}"
+                        Some("not_ready"),
+                        "p56 detached cycle must keep the canonical bounded wait probe in not_ready while the detached winner is still-current, trace={timeline:?}"
                     );
-                    if followup_ready_snapshot_wait_probe == Some("timeout") {
-                        assert_eq!(
-                            followup_ready_snapshot_timeout_leaf,
-                            Some("ready_install"),
-                            "p56 detached timeout cycle must expose ready_install as the timeout leaf, trace={timeline:?}"
-                        );
-                    } else {
-                        assert!(
-                            followup_ready_snapshot_timeout_leaf.is_none(),
-                            "p56 detached non-timeout cycle must not fabricate a timeout leaf, trace={timeline:?}"
-                        );
-                    }
+                    assert_eq!(
+                        followup_ready_snapshot_bounded_wait_winner,
+                        Some("detached_ready_artifacts"),
+                        "p56 detached cycle must attribute bounded wait completion to detached_ready_artifacts, trace={timeline:?}"
+                    );
+                    assert!(
+                        followup_ready_snapshot_bounded_wait_elapsed_ms
+                            .is_some(),
+                        "p56 detached cycle must export bounded wait elapsed attribution even when the detached wakeup rounds down to 0ms, trace={timeline:?}"
+                    );
+                    assert!(
+                        followup_ready_snapshot_timeout_leaf.is_none(),
+                        "p56 detached bounded-wait winner must not fabricate a timeout leaf, trace={timeline:?}"
+                    );
                     let publish = followup_publish.expect(
                         "p56 detached path must expose an idle_heavy follow-up publish object",
                     );
@@ -656,6 +664,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     .get("followup_ready_snapshot_zero_probe")
                     .and_then(|value| value.as_str()),
                 "followup_ready_snapshot_wait_probe": followup_ready_snapshot_wait_probe,
+                "followup_ready_snapshot_bounded_wait_winner": followup_ready_snapshot_bounded_wait_winner,
+                "followup_ready_snapshot_bounded_wait_elapsed_ms": followup_ready_snapshot_bounded_wait_elapsed_ms,
                 "followup_ready_snapshot_parse_exec_ms": followup_ready_snapshot_parse_exec_ms,
                 "followup_publish_elapsed_ms": followup_publish_elapsed_ms,
                 "followup_publish_semantic_diagnostics_query_ms": followup_publish_semantic_diagnostics_query_ms,
@@ -774,13 +784,13 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some("shadow_state")
             })
             .count() as u64;
-        let wait_probe_timeout_count = cycles
+        let bounded_wait_winner_detached_ready_artifacts_count = cycles
             .iter()
             .filter(|cycle| {
                 cycle
-                    .get("followup_ready_snapshot_wait_probe")
+                    .get("followup_ready_snapshot_bounded_wait_winner")
                     .and_then(|value| value.as_str())
-                    == Some("timeout")
+                    == Some("detached_ready_artifacts")
             })
             .count() as u64;
         let zero_probe_not_ready_count = cycles
@@ -788,6 +798,15 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .filter(|cycle| {
                 cycle
                     .get("followup_ready_snapshot_zero_probe")
+                    .and_then(|value| value.as_str())
+                    == Some("not_ready")
+            })
+            .count() as u64;
+        let wait_probe_not_ready_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_wait_probe")
                     .and_then(|value| value.as_str())
                     == Some("not_ready")
             })
@@ -819,6 +838,14 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some("ready_install")
             })
             .count() as u64;
+        let max_followup_ready_snapshot_bounded_wait_elapsed_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_bounded_wait_elapsed_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max();
         let max_followup_publish_elapsed_ms = cycles
             .iter()
             .filter_map(|cycle| {
@@ -882,18 +909,19 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 representative bundle must not report shadow_state on the still-current path, cycles={cycles:?}"
         );
         assert_eq!(
-            wait_probe_timeout_count,
-            timeout_leaf_ready_install_count,
-            "p56 representative bundle must keep timeout-leaf fidelity aligned with timeouted detached cycles, cycles={cycles:?}"
-        );
-        assert!(
-            wait_probe_timeout_count > 0,
-            "p56 representative bundle must retain at least one canonical bounded-wait timeout cycle in the representative late family, cycles={cycles:?}"
+            bounded_wait_winner_detached_ready_artifacts_count,
+            detached_ready_artifacts_count,
+            "p56 representative bundle must attribute bounded wait completion to detached_ready_artifacts on every still-current detached cycle, cycles={cycles:?}"
         );
         assert_eq!(
             zero_probe_not_ready_count,
             SAVE_CYCLE_COUNT as u64,
             "p56 representative bundle must exercise the same-family in-flight producer before bounded wait succeeds, cycles={cycles:?}"
+        );
+        assert_eq!(
+            wait_probe_not_ready_count,
+            detached_ready_artifacts_count,
+            "p56 representative bundle must keep the bounded wait probe in not_ready on every detached winner cycle, cycles={cycles:?}"
         );
         assert_eq!(
             semantic_query_dominates_parse_exec_count,
@@ -903,12 +931,17 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         assert_eq!(
             continuation_reason_count,
             0,
-            "p56 representative bundle must not need a follow-up continuation reason after refactor-44, cycles={cycles:?}"
+            "p56 representative bundle must not need a follow-up continuation reason after refactor-46, cycles={cycles:?}"
         );
         assert_eq!(
             timeout_leaf_ready_install_count,
-            wait_probe_timeout_count,
-            "p56 representative bundle must expose ready_install exactly on detached timeout cycles, cycles={cycles:?}"
+            0,
+            "p56 representative bundle must not export a timeout leaf when detached_ready_artifacts wins the bounded wait, cycles={cycles:?}"
+        );
+        assert!(
+            max_followup_ready_snapshot_bounded_wait_elapsed_ms
+                .is_some(),
+            "p56 representative bundle must export bounded wait elapsed samples, observed_max={max_followup_ready_snapshot_bounded_wait_elapsed_ms:?}, cycles={cycles:?}"
         );
         assert!(
             max_followup_publish_elapsed_ms
@@ -965,15 +998,18 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path_detached_ready_artifacts": detached_ready_artifacts_count,
                 "followup_semantic_path_ready_artifacts": ready_artifacts_count,
                 "followup_semantic_path_shadow_state": shadow_state_count,
-                "followup_ready_snapshot_wait_probe_timeout": wait_probe_timeout_count,
+                "followup_ready_snapshot_bounded_wait_winner_detached_ready_artifacts": bounded_wait_winner_detached_ready_artifacts_count,
                 "followup_ready_snapshot_zero_probe_not_ready": zero_probe_not_ready_count,
+                "followup_ready_snapshot_wait_probe_not_ready": wait_probe_not_ready_count,
                 "followup_ready_snapshot_continuation_reason_count": continuation_reason_count,
                 "followup_ready_snapshot_timeout_leaf_ready_install_count": timeout_leaf_ready_install_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
-                "representative_canonical_residual_mix": "parse_exec_or_ready_install_before_detached_publish",
+                "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
+                "representative_canonical_residual_mix": "in_flight_same_version_without_timeout_leaf",
                 "post_detached_publish_shape": "semantic_query_dominates_parse_exec_with_additional_publish_tail",
             },
             "aggregate": {
+                "max_followup_ready_snapshot_bounded_wait_elapsed_ms": max_followup_ready_snapshot_bounded_wait_elapsed_ms,
                 "max_followup_publish_elapsed_ms": max_followup_publish_elapsed_ms,
                 "max_followup_publish_semantic_diagnostics_query_ms": max_followup_publish_semantic_diagnostics_query_ms,
                 "max_followup_ready_snapshot_parse_exec_ms": max_followup_ready_snapshot_parse_exec_ms,

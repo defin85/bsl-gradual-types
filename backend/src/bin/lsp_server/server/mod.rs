@@ -1239,9 +1239,11 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub retarget_requested: AtomicBool,
     pub promotion_requested: AtomicBool,
     pub materialized: AtomicBool,
+    detached_ready_artifact_publication_epoch: AtomicU64,
     pub phase: AtomicU8,
     phase_attribution: StdMutex<ReadyParseSnapshotPhaseAttributionStateV2>,
     pub control_notify: Notify,
+    pub detached_ready_artifact_notify: Notify,
     pub materialized_notify: Notify,
 }
 
@@ -1252,11 +1254,24 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             retarget_requested: AtomicBool::new(false),
             promotion_requested: AtomicBool::new(false),
             materialized: AtomicBool::new(false),
+            detached_ready_artifact_publication_epoch: AtomicU64::new(0),
             phase: AtomicU8::new(0),
             phase_attribution: StdMutex::new(ReadyParseSnapshotPhaseAttributionStateV2::default()),
             control_notify: Notify::new(),
+            detached_ready_artifact_notify: Notify::new(),
             materialized_notify: Notify::new(),
         }
+    }
+
+    pub(crate) fn note_detached_ready_artifact_published(&self) {
+        self.detached_ready_artifact_publication_epoch
+            .fetch_add(1, Ordering::SeqCst);
+        self.detached_ready_artifact_notify.notify_waiters();
+    }
+
+    pub(crate) fn current_detached_ready_artifact_publication_epoch(&self) -> u64 {
+        self.detached_ready_artifact_publication_epoch
+            .load(Ordering::SeqCst)
     }
 
     pub(crate) fn reset_phase_attribution(&self) {

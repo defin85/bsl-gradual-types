@@ -695,6 +695,10 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_wait_probe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_bounded_wait_winner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_bounded_wait_elapsed_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_task_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_timeout_phase: Option<String>,

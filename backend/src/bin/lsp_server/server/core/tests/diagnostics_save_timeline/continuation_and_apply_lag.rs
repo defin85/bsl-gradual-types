@@ -1016,6 +1016,488 @@ async fn p24b_diagnostics_save_timeline_ignores_detached_ready_artifacts_from_ol
 }
 
 #[tokio::test]
+async fn p24c_diagnostics_save_timeline_bounded_wait_wakes_on_detached_ready_artifact_publication()
+{
+    let server = create_diagnostics_save_timeline_test_server();
+    prime_server_with_syntax_helper_deps(&server).await;
+    let uri = Url::parse("file:///p24c-bounded-wait-detached-publication.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(14602);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 3602,
+        save_cycle_sequence: 1202,
+        requested_version: 1402,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let wait_budget = Duration::from_millis(250);
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    control
+        .transition_phase_attribution(crate::server::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let server_for_detached = server.clone();
+    let control_for_detached = control.clone();
+    let detached_text = exact_text.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        server_for_detached
+            .latest_detached_diagnostics_ready_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                    requested_version: key.requested_version,
+                    text_hash: exact_text_hash,
+                    save_cycle_sequence: key.save_cycle_sequence,
+                    text: detached_text.clone(),
+                    parse_snapshot: parse_snapshot_for_test(
+                        file_id,
+                        key.requested_version,
+                        detached_text.as_ref(),
+                        Vec::new(),
+                        true,
+                        None,
+                    ),
+                    syntax_errors_complete: true,
+                },
+            );
+        control_for_detached.note_detached_ready_artifact_published();
+    });
+
+    let disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            wait_budget,
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::Executed(
+            bsl_runtime::application::DiagnosticsDisposition::Published
+        )
+    ));
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_bounded_wait_winner
+            .as_deref(),
+        Some("detached_ready_artifacts")
+    );
+    assert!(
+        trace
+            .followup_ready_snapshot_bounded_wait_elapsed_ms
+            .is_some_and(|elapsed_ms| elapsed_ms > 0 && elapsed_ms < wait_budget.as_millis() as u64),
+        "detached bounded-wait wake must complete before timeout budget exhaustion, trace={trace:?}"
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("detached_ready_artifacts")
+    );
+}
+
+#[tokio::test]
+async fn p24c_diagnostics_save_timeline_bounded_wait_prefers_ready_artifacts_when_canonical_materializes_first(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    prime_server_with_syntax_helper_deps(&server).await;
+    let uri = Url::parse("file:///p24c-bounded-wait-ready-artifacts-first.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(14603);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 3603,
+        save_cycle_sequence: 1203,
+        requested_version: 1403,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    control
+        .transition_phase_attribution(crate::server::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let server_for_ready = server.clone();
+    let control_for_ready = control.clone();
+    let ready_text = exact_text.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(35)).await;
+        server_for_ready
+            .latest_ready_parse_snapshots_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                ReadyParseSnapshotStateV2 {
+                    text: ready_text.clone(),
+                    parse_snapshot: parse_snapshot_for_test(
+                        file_id,
+                        key.requested_version,
+                        ready_text.as_ref(),
+                        Vec::new(),
+                        true,
+                        None,
+                    ),
+                    source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                    syntax_errors_complete: true,
+                    phase_attribution: crate::server::ReadyParseSnapshotPhaseAttributionV2::default(
+                    ),
+                    program_lowering_summary: None,
+                },
+            );
+        control_for_ready.materialized_notify.notify_waiters();
+    });
+
+    let server_for_detached = server.clone();
+    let control_for_detached = control.clone();
+    let detached_text = exact_text.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(110)).await;
+        server_for_detached
+            .latest_detached_diagnostics_ready_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                    requested_version: key.requested_version,
+                    text_hash: exact_text_hash,
+                    save_cycle_sequence: key.save_cycle_sequence,
+                    text: detached_text.clone(),
+                    parse_snapshot: parse_snapshot_for_test(
+                        file_id,
+                        key.requested_version,
+                        detached_text.as_ref(),
+                        Vec::new(),
+                        true,
+                        None,
+                    ),
+                    syntax_errors_complete: true,
+                },
+            );
+        control_for_detached.note_detached_ready_artifact_published();
+    });
+
+    let disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            Duration::from_millis(250),
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::Executed(
+            bsl_runtime::application::DiagnosticsDisposition::Published
+        )
+    ));
+    tokio::time::sleep(Duration::from_millis(140)).await;
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("ready")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_bounded_wait_winner
+            .as_deref(),
+        Some("ready_artifacts")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("ready_artifacts")
+    );
+}
+
+#[tokio::test]
+async fn p24c_diagnostics_save_timeline_bounded_wait_ignores_stale_detached_publication_for_newer_target(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p24c-bounded-wait-stale-detached-publication.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(14604);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 3604,
+        save_cycle_sequence: 1204,
+        requested_version: 1404,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let older_save_cycle_sequence = key.save_cycle_sequence - 1;
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let wait_budget = Duration::from_millis(120);
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    control
+        .transition_phase_attribution(crate::server::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
+    );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text.clone(),
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let server_for_detached = server.clone();
+    let control_for_detached = control.clone();
+    let detached_text = exact_text.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(35)).await;
+        server_for_detached
+            .latest_detached_diagnostics_ready_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                    requested_version: key.requested_version,
+                    text_hash: exact_text_hash,
+                    save_cycle_sequence: older_save_cycle_sequence,
+                    text: detached_text.clone(),
+                    parse_snapshot: parse_snapshot_for_test(
+                        file_id,
+                        key.requested_version,
+                        detached_text.as_ref(),
+                        Vec::new(),
+                        true,
+                        None,
+                    ),
+                    syntax_errors_complete: true,
+                },
+            );
+        control_for_detached.note_detached_ready_artifact_published();
+    });
+
+    let disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            wait_budget,
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Timeout
+        )
+    ));
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_bounded_wait_winner
+            .as_deref(),
+        Some("timeout")
+    );
+    assert!(
+        trace.followup_semantic_path.is_none(),
+        "stale detached publication must not wake the newer still-current target, trace={trace:?}"
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_continues_still_current_exact_worker_after_relief_timeout() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri =

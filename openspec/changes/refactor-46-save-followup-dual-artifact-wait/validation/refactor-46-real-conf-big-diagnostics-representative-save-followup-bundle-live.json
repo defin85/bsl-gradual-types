@@ -1,0 +1,486 @@
+{
+  "aggregate": {
+    "did_change_ready_snapshot_materialization_histogram_count": 8,
+    "did_change_ready_snapshot_materialization_p50_ms": 42346.0,
+    "did_change_ready_snapshot_materialization_p95_ms": 43187.0,
+    "max_followup_publish_elapsed_ms": 1390,
+    "max_followup_publish_semantic_diagnostics_query_ms": 1125,
+    "max_followup_ready_snapshot_bounded_wait_elapsed_ms": 58,
+    "max_followup_ready_snapshot_parse_exec_ms": 205
+  },
+  "baseline": {
+    "captured_at": "2026-04-18T18:52:50Z",
+    "did_change_ready_snapshot_materialization_ms": {
+      "p50": 3226.0,
+      "p95": 3329.0
+    },
+    "followup_publish_elapsed_ms": [
+      5052,
+      5219
+    ],
+    "followup_ready_snapshot_parse_exec_ms": [
+      3222,
+      3327
+    ],
+    "followup_semantic_path_detached_ready_artifacts": 4,
+    "followup_semantic_path_ready_artifacts": 0,
+    "followup_semantic_path_shadow_state": 0
+  },
+  "change_id": "refactor-46-save-followup-dual-artifact-wait",
+  "comparison": {
+    "did_change_ready_snapshot_materialization_p50_vs_baseline_delta_ms": 39120.0,
+    "did_change_ready_snapshot_materialization_p95_vs_baseline_delta_ms": 39858.0,
+    "max_followup_publish_elapsed_vs_baseline_ceiling_delta_ms": -3829,
+    "max_followup_ready_snapshot_parse_exec_vs_baseline_ceiling_delta_ms": -3122
+  },
+  "cycle_count": 4,
+  "cycles": [
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": true
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": {
+        "finished": false,
+        "requested_version": 3
+      },
+      "cycle": 1,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle1Stage2;",
+      "followup_publish_elapsed_ms": 1197,
+      "followup_publish_non_query_residual_ms": 174,
+      "followup_publish_semantic_diagnostics_collect_ms": 373,
+      "followup_publish_semantic_diagnostics_ir_ms": 644,
+      "followup_publish_semantic_diagnostics_query_ms": 1023,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 58,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 164,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 3,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 2,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 3,
+      "save_cycle_sequence": 1,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 2,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 2,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 97.0,
+        "p95": 97.0,
+        "p99": 97.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 3,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 3,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": true
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": {
+        "finished": false,
+        "requested_version": 5
+      },
+      "cycle": 2,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle2Stage2;",
+      "followup_publish_elapsed_ms": 1205,
+      "followup_publish_non_query_residual_ms": 156,
+      "followup_publish_semantic_diagnostics_collect_ms": 431,
+      "followup_publish_semantic_diagnostics_ir_ms": 613,
+      "followup_publish_semantic_diagnostics_query_ms": 1049,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 43,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 148,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 5,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 4,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 5,
+      "save_cycle_sequence": 2,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 4,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 4,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 93.0,
+        "p95": 97.0,
+        "p99": 97.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 5,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 5,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": true
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": {
+        "finished": false,
+        "requested_version": 7
+      },
+      "cycle": 3,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle3Stage2;",
+      "followup_publish_elapsed_ms": 1174,
+      "followup_publish_non_query_residual_ms": 165,
+      "followup_publish_semantic_diagnostics_collect_ms": 424,
+      "followup_publish_semantic_diagnostics_ir_ms": 579,
+      "followup_publish_semantic_diagnostics_query_ms": 1009,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 51,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 139,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 7,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 6,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 7,
+      "save_cycle_sequence": 3,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 6,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 6,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 88.0,
+        "p95": 97.0,
+        "p99": 97.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 7,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 7,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": true
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": {
+        "finished": false,
+        "requested_version": 9
+      },
+      "cycle": 4,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle4Stage2;",
+      "followup_publish_elapsed_ms": 1390,
+      "followup_publish_non_query_residual_ms": 265,
+      "followup_publish_semantic_diagnostics_collect_ms": 471,
+      "followup_publish_semantic_diagnostics_ir_ms": 648,
+      "followup_publish_semantic_diagnostics_query_ms": 1125,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 1,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 205,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 9,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 8,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 9,
+      "save_cycle_sequence": 4,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 8,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 8,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 88.0,
+        "p95": 116.0,
+        "p99": 116.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 9,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 9,
+        "work_class": "Interactive"
+      }
+    }
+  ],
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "profile": "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live",
+  "representative_cycle": {
+    "background_parse_task_state_after_timeout": {
+      "materialized": false,
+      "phase": "Some(Materializing)",
+      "promotion_requested": true
+    },
+    "completion_head_ready_after_timeout": false,
+    "current_revision_head_precompute_task_state_after_timeout": {
+      "finished": false,
+      "requested_version": 9
+    },
+    "cycle": 4,
+    "exact_ready_after_timeout": false,
+    "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle4Stage2;",
+    "followup_publish_elapsed_ms": 1390,
+    "followup_publish_non_query_residual_ms": 265,
+    "followup_publish_semantic_diagnostics_collect_ms": 471,
+    "followup_publish_semantic_diagnostics_ir_ms": 648,
+    "followup_publish_semantic_diagnostics_query_ms": 1125,
+    "followup_publish_semantic_path": "detached_ready_artifacts",
+    "followup_ready_snapshot_bounded_wait_elapsed_ms": 1,
+    "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+    "followup_ready_snapshot_continuation_reason": null,
+    "followup_ready_snapshot_parse_exec_ms": 205,
+    "followup_ready_snapshot_relief_valve_outcome": null,
+    "followup_ready_snapshot_task_state": "in_flight_same_version",
+    "followup_ready_snapshot_timeout_leaf": null,
+    "followup_ready_snapshot_wait_probe": "not_ready",
+    "followup_ready_snapshot_zero_probe": "not_ready",
+    "followup_semantic_path": "detached_ready_artifacts",
+    "followup_wait_reason": null,
+    "ir_singleflight_counters_after_timeout": {
+      "key_unavailable_total": 0,
+      "leader_total": 0,
+      "shared_total": 0
+    },
+    "ir_singleflight_wait_histogram_after_timeout": {
+      "count": 0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "observed_version_after_timeout": 9,
+    "ready_snapshot_state_after_timeout": {
+      "file_version": 8,
+      "source": "DidChange",
+      "syntax_errors_complete": true
+    },
+    "requested_version": 9,
+    "save_cycle_sequence": 4,
+    "semantic_query_dominates_parse_exec": true,
+    "stage1_version": 8,
+    "type_index_counters_after_timeout": {
+      "cancelled_total": 0,
+      "exact_stored_total": 8,
+      "exact_wait_deadline_total": 0,
+      "exact_wait_ready_total": 0,
+      "superseded_total": 0
+    },
+    "type_index_parse_snapshot_meta_after_timeout": null,
+    "type_index_precompute_exec_histogram_after_timeout": {
+      "count": 8,
+      "p50": 88.0,
+      "p95": 116.0,
+      "p99": 116.0
+    },
+    "type_index_precompute_ir_exec_histogram_after_timeout": {
+      "count": 8,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+      "count": 8,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "type_index_task_state_after_timeout": {
+      "active_requested_version": 9,
+      "finished": false,
+      "phase": "computing",
+      "requested_version": 9,
+      "work_class": "Interactive"
+    }
+  },
+  "summary": {
+    "followup_ready_snapshot_bounded_wait_winner_detached_ready_artifacts": 4,
+    "followup_ready_snapshot_continuation_reason_count": 0,
+    "followup_ready_snapshot_timeout_leaf_ready_install_count": 0,
+    "followup_ready_snapshot_wait_probe_not_ready": 4,
+    "followup_ready_snapshot_zero_probe_not_ready": 4,
+    "followup_semantic_path_detached_ready_artifacts": 4,
+    "followup_semantic_path_ready_artifacts": 0,
+    "followup_semantic_path_shadow_state": 0,
+    "post_detached_publish_shape": "semantic_query_dominates_parse_exec_with_additional_publish_tail",
+    "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
+    "representative_canonical_residual_mix": "in_flight_same_version_without_timeout_leaf",
+    "semantic_query_dominates_parse_exec_count": 4
+  },
+  "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+}

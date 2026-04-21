@@ -637,6 +637,7 @@ impl BslLanguageServer {
         requested_version: i32,
         text_hash: [u8; 32],
         save_cycle_sequence: Option<u64>,
+        task_control: Option<&super::super::BackgroundParseSnapshotApplyTaskControlV2>,
         text: Arc<str>,
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
         syntax_errors_complete: bool,
@@ -658,6 +659,9 @@ impl BslLanguageServer {
                     syntax_errors_complete,
                 },
             );
+        if let Some(task_control) = task_control {
+            task_control.note_detached_ready_artifact_published();
+        }
     }
 
     async fn update_ready_parse_snapshot_phase_attribution_v2(
@@ -1950,6 +1954,7 @@ impl BslLanguageServer {
                 target.requested_version,
                 target.text_hash,
                 detached_save_cycle_sequence,
+                Some(task_control.as_ref()),
                 target.text.clone(),
                 &parse_snapshot,
                 !deferred_work.syntax_error_assembly,
@@ -2149,15 +2154,14 @@ impl BslLanguageServer {
             // Snapshot-backed apply is enrichment for the already published current revision.
             // Keep it off the interactive writer queue so completion wait_for_file_version
             // is not blocked by slow snapshot installs on large modules.
-            self.analysis_v2.apply_changes(vec![
-                bsl_analysis_v2::Change::SetFileWithSnapshot {
+            self.analysis_v2
+                .apply_changes(vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
                     file_id,
                     text: target.text.clone(),
                     version: target.requested_version,
                     path: target.path.clone(),
                     parse_snapshot,
-                },
-            ]);
+                }]);
             self.spawn_completion_head_precompute_from_snapshot_v2(
                 file_id,
                 target.requested_version,

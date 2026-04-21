@@ -114,7 +114,7 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-44-save-followup-detached-ready-artifacts".to_string()
+            "refactor-46-save-followup-dual-artifact-wait".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -626,15 +626,29 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             timeline
                 .get("followup_ready_snapshot_wait_probe")
                 .and_then(|value| value.as_str()),
-            Some("timeout"),
-            "p55 detached path must truthfully report that canonical bounded wait timed out inside ready_install, trace={timeline:?}"
+            Some("not_ready"),
+            "p55 detached path must keep the canonical bounded wait probe in not_ready while the detached winner is still-current, trace={timeline:?}"
+        );
+        assert_eq!(
+            timeline
+                .get("followup_ready_snapshot_bounded_wait_winner")
+                .and_then(|value| value.as_str()),
+            Some("detached_ready_artifacts"),
+            "p55 detached path must attribute bounded wait completion to detached_ready_artifacts, trace={timeline:?}"
+        );
+        assert!(
+            timeline
+                .get("followup_ready_snapshot_bounded_wait_elapsed_ms")
+                .and_then(|value| value.as_u64())
+                .is_some(),
+            "p55 detached path must export bounded wait elapsed attribution even when the detached wakeup rounds down to 0ms, trace={timeline:?}"
         );
         assert_eq!(
             timeline
                 .get("followup_ready_snapshot_timeout_leaf")
                 .and_then(|value| value.as_str()),
-            Some("ready_install"),
-            "p55 detached path must export ready_install as the timeout leaf, trace={timeline:?}"
+            None,
+            "p55 detached bounded-wait winner must not fabricate a timeout leaf, trace={timeline:?}"
         );
         assert!(
             timeline
@@ -647,8 +661,8 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             timeline
                 .get("followup_ready_snapshot_dominant_phase")
                 .and_then(|value| value.as_str()),
-            Some("ready_install"),
-            "p55 detached path must expose ready_install as the dominant canonical residual, trace={timeline:?}"
+            Some("parse_exec"),
+            "p55 detached bounded-wait winner must now expose parse_exec as the dominant canonical residual before timeout-sized ready_install can dominate, trace={timeline:?}"
         );
 
         let program_conversion_ms = timeline
@@ -772,73 +786,75 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_other_call_count")
             .and_then(|value| value.as_u64());
         if program_lowering_ms.is_some() {
-            assert!(
-                program_lowering_reuse_outcome.is_some(),
-                "p55 must export program-lowering reuse outcome when exact program_lowering is observed, trace={timeline:?}"
-            );
-            assert!(
-                program_lowering_reused_lowering_units.is_some()
-                    && program_lowering_rebuilt_lowering_units.is_some()
-                    && program_lowering_reused_window_count.is_some()
-                    && program_lowering_rebuilt_window_count.is_some()
-                    && program_lowering_largest_rebuilt_window_lowering_units.is_some()
-                    && program_lowering_fully_reused_top_level_node_count.is_some()
-                    && program_lowering_fully_rebuilt_top_level_node_count.is_some()
-                    && program_lowering_routine_body_reuse_node_count.is_some()
-                    && program_lowering_fully_reused_top_level_lowering_units.is_some()
-                    && program_lowering_fully_rebuilt_top_level_lowering_units.is_some()
-                    && program_lowering_routine_body_reused_prefix_lowering_units.is_some()
-                    && program_lowering_routine_body_reused_suffix_lowering_units.is_some()
-                    && program_lowering_routine_body_rebuilt_lowering_units.is_some()
-                    && program_lowering_reuse_plan_build_source.is_some()
-                    && program_lowering_reuse_plan_take_if_unique_hit.is_some()
-                    && program_lowering_reuse_plan_borrowed_cache_hit.is_some()
-                    && program_lowering_reuse_plan_build_ms.is_some()
-                    && program_lowering_reuse_plan_rebase_statement_count.is_some()
-                    && program_lowering_rebuild_dispatch_ms.is_some()
-                    && program_lowering_rebuild_dispatch_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_callable_body_dispatch_ms.is_some()
-                    && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_control_flow_ms.is_some()
-                    && program_lowering_rebuild_dispatch_control_flow_call_count.is_some()
-                    && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count
-                        .is_some(),
-                "p55 must export bounded reuse-vs-rebuild summary on the production-like path, trace={timeline:?}"
-            );
-            match program_lowering_reuse_plan_build_source {
-                Some("owned") => assert!(
-                    program_lowering_reuse_plan_owned_build_ms.is_some(),
-                    "p55 owned reuse-plan builds must export owned_build_ms, trace={timeline:?}"
-                ),
-                Some("borrowed") => assert!(
-                    program_lowering_reuse_plan_borrowed_build_ms.is_some(),
-                    "p55 borrowed reuse-plan builds must export borrowed_build_ms, trace={timeline:?}"
-                ),
-                _ => {}
-            }
-            if program_lowering_reused_progress_ms.is_some() {
+            let program_lowering_reuse_summary_present = program_lowering_reuse_outcome.is_some()
+                || program_lowering_reused_lowering_units.is_some()
+                || program_lowering_rebuilt_lowering_units.is_some()
+                || program_lowering_reuse_plan_build_source.is_some();
+            if program_lowering_reuse_summary_present {
                 assert!(
-                    program_lowering_reused_progress_call_count.is_some(),
-                    "p55 reused-progress latency must not be exported without a matching call_count, trace={timeline:?}"
+                    program_lowering_reuse_outcome.is_some()
+                        && program_lowering_reused_lowering_units.is_some()
+                        && program_lowering_rebuilt_lowering_units.is_some()
+                        && program_lowering_reused_window_count.is_some()
+                        && program_lowering_rebuilt_window_count.is_some()
+                        && program_lowering_largest_rebuilt_window_lowering_units.is_some()
+                        && program_lowering_fully_reused_top_level_node_count.is_some()
+                        && program_lowering_fully_rebuilt_top_level_node_count.is_some()
+                        && program_lowering_routine_body_reuse_node_count.is_some()
+                        && program_lowering_fully_reused_top_level_lowering_units.is_some()
+                        && program_lowering_fully_rebuilt_top_level_lowering_units.is_some()
+                        && program_lowering_routine_body_reused_prefix_lowering_units.is_some()
+                        && program_lowering_routine_body_reused_suffix_lowering_units.is_some()
+                        && program_lowering_routine_body_rebuilt_lowering_units.is_some()
+                        && program_lowering_reuse_plan_build_source.is_some()
+                        && program_lowering_reuse_plan_take_if_unique_hit.is_some()
+                        && program_lowering_reuse_plan_borrowed_cache_hit.is_some()
+                        && program_lowering_reuse_plan_build_ms.is_some()
+                        && program_lowering_reuse_plan_rebase_statement_count.is_some()
+                        && program_lowering_rebuild_dispatch_ms.is_some()
+                        && program_lowering_rebuild_dispatch_call_count.is_some()
+                        && program_lowering_rebuild_dispatch_callable_body_dispatch_ms.is_some()
+                        && program_lowering_rebuild_dispatch_callable_body_dispatch_call_count
+                            .is_some()
+                        && program_lowering_rebuild_dispatch_control_flow_ms.is_some()
+                        && program_lowering_rebuild_dispatch_control_flow_call_count.is_some(),
+                    "p55 must export a complete bounded reuse-vs-rebuild summary when program-lowering reuse metadata is present, trace={timeline:?}"
                 );
-            }
-            if program_lowering_rebuild_dispatch_callable_ms.is_some() {
-                assert!(
-                    program_lowering_rebuild_dispatch_callable_call_count.is_some(),
-                    "p55 callable rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
-                );
-            }
-            if program_lowering_rebuild_dispatch_simple_ms.is_some() {
-                assert!(
-                    program_lowering_rebuild_dispatch_simple_call_count.is_some(),
-                    "p55 simple rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
-                );
-            }
-            if program_lowering_rebuild_dispatch_other_ms.is_some() {
-                assert!(
-                    program_lowering_rebuild_dispatch_other_call_count.is_some(),
-                    "p55 other rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
-                );
+                match program_lowering_reuse_plan_build_source {
+                    Some("owned") => assert!(
+                        program_lowering_reuse_plan_owned_build_ms.is_some(),
+                        "p55 owned reuse-plan builds must export owned_build_ms, trace={timeline:?}"
+                    ),
+                    Some("borrowed") => assert!(
+                        program_lowering_reuse_plan_borrowed_build_ms.is_some(),
+                        "p55 borrowed reuse-plan builds must export borrowed_build_ms, trace={timeline:?}"
+                    ),
+                    _ => {}
+                }
+                if program_lowering_reused_progress_ms.is_some() {
+                    assert!(
+                        program_lowering_reused_progress_call_count.is_some(),
+                        "p55 reused-progress latency must not be exported without a matching call_count, trace={timeline:?}"
+                    );
+                }
+                if program_lowering_rebuild_dispatch_callable_ms.is_some() {
+                    assert!(
+                        program_lowering_rebuild_dispatch_callable_call_count.is_some(),
+                        "p55 callable rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                    );
+                }
+                if program_lowering_rebuild_dispatch_simple_ms.is_some() {
+                    assert!(
+                        program_lowering_rebuild_dispatch_simple_call_count.is_some(),
+                        "p55 simple rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                    );
+                }
+                if program_lowering_rebuild_dispatch_other_ms.is_some() {
+                    assert!(
+                        program_lowering_rebuild_dispatch_other_call_count.is_some(),
+                        "p55 other rebuild dispatch latency must not be exported without a matching call_count, trace={timeline:?}"
+                    );
+                }
             }
         }
         if let (Some(program_conversion_ms), Some(program_lowering_ms)) =
@@ -1027,6 +1043,12 @@ fn p55_real_conf_big_diagnostics_ready_snapshot_leaf_report_live() {
             "followup_ready_snapshot_wait_probe": timeline
                 .get("followup_ready_snapshot_wait_probe")
                 .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_bounded_wait_winner": timeline
+                .get("followup_ready_snapshot_bounded_wait_winner")
+                .and_then(|value| value.as_str()),
+            "followup_ready_snapshot_bounded_wait_elapsed_ms": timeline
+                .get("followup_ready_snapshot_bounded_wait_elapsed_ms")
+                .and_then(|value| value.as_u64()),
             "followup_ready_snapshot_task_state": timeline
                 .get("followup_ready_snapshot_task_state")
                 .and_then(|value| value.as_str()),

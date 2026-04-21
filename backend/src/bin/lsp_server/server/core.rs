@@ -519,6 +519,16 @@ fn set_diagnostics_save_timeline_followup_relief_valve_inner(
         elapsed.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
 }
 
+fn set_diagnostics_save_timeline_followup_bounded_wait_result_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+    winner: &'static str,
+    elapsed: Duration,
+) {
+    trace.followup_ready_snapshot_bounded_wait_winner = Some(winner.to_string());
+    trace.followup_ready_snapshot_bounded_wait_elapsed_ms =
+        Some(elapsed.as_millis().min(u64::MAX as u128) as u64);
+}
+
 fn set_diagnostics_save_timeline_followup_ready_snapshot_continuation_inner(
     trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
     reason: &'static str,
@@ -1058,6 +1068,8 @@ impl BslLanguageServer {
                 followup_semantic_materialization_path: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -1229,6 +1241,8 @@ impl BslLanguageServer {
                     followup_semantic_materialization_path: None,
                     followup_ready_snapshot_zero_probe: None,
                     followup_ready_snapshot_wait_probe: None,
+                    followup_ready_snapshot_bounded_wait_winner: None,
+                    followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                     followup_ready_snapshot_task_state: None,
                     followup_ready_snapshot_timeout_phase: None,
                     followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -1488,6 +1502,8 @@ impl BslLanguageServer {
                     followup_semantic_materialization_path: None,
                     followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -1666,6 +1682,26 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) fn record_diagnostics_save_timeline_followup_bounded_wait_result(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        winner: &'static str,
+        elapsed: Duration,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) else {
+            return;
+        };
+        set_diagnostics_save_timeline_followup_bounded_wait_result_inner(trace, winner, elapsed);
+    }
+
     pub(crate) fn record_diagnostics_save_timeline_followup_relief_valve(
         &self,
         uri: &Url,
@@ -1711,6 +1747,8 @@ impl BslLanguageServer {
                 followup_semantic_materialization_path: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -1886,6 +1924,8 @@ impl BslLanguageServer {
                 followup_semantic_materialization_path: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -2066,6 +2106,8 @@ impl BslLanguageServer {
                 followup_semantic_materialization_path: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
@@ -2265,6 +2307,8 @@ impl BslLanguageServer {
                 followup_semantic_materialization_path: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
+                followup_ready_snapshot_bounded_wait_winner: None,
+                followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,

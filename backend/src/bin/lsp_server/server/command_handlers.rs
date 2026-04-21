@@ -2014,6 +2014,8 @@ mod tests {
             followup_semantic_materialization_path: None,
             followup_ready_snapshot_zero_probe: Some("not_ready".to_string()),
             followup_ready_snapshot_wait_probe: Some("timeout".to_string()),
+            followup_ready_snapshot_bounded_wait_winner: Some("timeout".to_string()),
+            followup_ready_snapshot_bounded_wait_elapsed_ms: Some(3500),
             followup_ready_snapshot_task_state: Some("in_flight_same_version".to_string()),
             followup_ready_snapshot_timeout_phase: Some("parse_exec".to_string()),
             followup_ready_snapshot_timeout_phase_elapsed_ms: Some(3500),

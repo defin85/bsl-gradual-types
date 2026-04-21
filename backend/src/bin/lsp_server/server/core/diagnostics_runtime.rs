@@ -70,10 +70,52 @@ impl ReadyParseSnapshotProbeOutcomeV2 {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReadyParseSnapshotBoundedWaitWinnerV2 {
+    ReadyArtifacts,
+    DetachedReadyArtifacts,
+    NotReady,
+    GenerationMismatch,
+    VersionMismatch,
+    Timeout,
+    Cancelled,
+    Superseded,
+}
+
+impl ReadyParseSnapshotBoundedWaitWinnerV2 {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::ReadyArtifacts => "ready_artifacts",
+            Self::DetachedReadyArtifacts => "detached_ready_artifacts",
+            Self::NotReady => "not_ready",
+            Self::GenerationMismatch => "generation_mismatch",
+            Self::VersionMismatch => "version_mismatch",
+            Self::Timeout => "timeout",
+            Self::Cancelled => "cancelled",
+            Self::Superseded => "superseded",
+        }
+    }
+
+    fn from_probe_outcome(outcome: ReadyParseSnapshotProbeOutcomeV2) -> Self {
+        match outcome {
+            ReadyParseSnapshotProbeOutcomeV2::Ready => Self::ReadyArtifacts,
+            ReadyParseSnapshotProbeOutcomeV2::NotReady => Self::NotReady,
+            ReadyParseSnapshotProbeOutcomeV2::GenerationMismatch => Self::GenerationMismatch,
+            ReadyParseSnapshotProbeOutcomeV2::VersionMismatch => Self::VersionMismatch,
+            ReadyParseSnapshotProbeOutcomeV2::Timeout => Self::Timeout,
+            ReadyParseSnapshotProbeOutcomeV2::Cancelled => Self::Cancelled,
+            ReadyParseSnapshotProbeOutcomeV2::Superseded => Self::Superseded,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ReadyParseSnapshotProbeResultV2 {
     outcome: ReadyParseSnapshotProbeOutcomeV2,
     state: Option<super::super::ReadyParseSnapshotStateV2>,
+    detached_artifact: Option<super::super::DetachedDiagnosticsReadyArtifactV2>,
+    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2,
+    elapsed: Duration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2466,6 +2508,15 @@ impl BslLanguageServer {
         expected_text_hash: Option<[u8; 32]>,
     ) -> ReadyParseSnapshotProbeResultV2 {
         let wait_started = Instant::now();
+        let mut observed_detached_publication_epoch = self
+            .matching_background_parse_snapshot_task_control_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+                expected_text_hash,
+            )
+            .await
+            .map(|task_control| task_control.current_detached_ready_artifact_publication_epoch())
+            .unwrap_or_default();
         loop {
             if let Some(state) = self
                 .ready_parse_snapshot_state_for_target_v2(
@@ -2478,6 +2529,26 @@ impl BslLanguageServer {
                 return ReadyParseSnapshotProbeResultV2 {
                     outcome: ReadyParseSnapshotProbeOutcomeV2::Ready,
                     state: Some(state),
+                    detached_artifact: None,
+                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::ReadyArtifacts,
+                    elapsed: wait_started.elapsed(),
+                };
+            }
+            if let Some(detached_artifact) = self
+                .detached_diagnostics_ready_artifact_for_target_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                    supersession_key.save_cycle_sequence,
+                    expected_text_hash,
+                )
+                .await
+            {
+                return ReadyParseSnapshotProbeResultV2 {
+                    outcome: ReadyParseSnapshotProbeOutcomeV2::NotReady,
+                    state: None,
+                    detached_artifact: Some(detached_artifact),
+                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::DetachedReadyArtifacts,
+                    elapsed: wait_started.elapsed(),
                 };
             }
             let cancel_reason = cancel_token
@@ -2503,6 +2574,9 @@ impl BslLanguageServer {
                 return ReadyParseSnapshotProbeResultV2 {
                     outcome,
                     state: None,
+                    detached_artifact: None,
+                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::from_probe_outcome(outcome),
+                    elapsed: wait_started.elapsed(),
                 };
             }
             let remaining_budget = wait_budget.saturating_sub(wait_started.elapsed());
@@ -2511,19 +2585,30 @@ impl BslLanguageServer {
                 .matching_background_parse_snapshot_task_control_v2(
                     supersession_key.file_id,
                     supersession_key.requested_version,
-                    None,
+                    expected_text_hash,
                 )
                 .await
             {
+                let current_detached_publication_epoch =
+                    task_control.current_detached_ready_artifact_publication_epoch();
+                if current_detached_publication_epoch != observed_detached_publication_epoch {
+                    observed_detached_publication_epoch = current_detached_publication_epoch;
+                    continue;
+                }
                 let materialized = task_control.materialized_notify.notified();
                 let control = task_control.control_notify.notified();
+                let detached = task_control.detached_ready_artifact_notify.notified();
                 tokio::pin!(materialized);
                 tokio::pin!(control);
+                tokio::pin!(detached);
                 tokio::select! {
                     _ = tokio::time::sleep(poll_sleep) => {}
                     _ = &mut materialized => {}
                     _ = &mut control => {}
+                    _ = &mut detached => {}
                 }
+                observed_detached_publication_epoch =
+                    task_control.current_detached_ready_artifact_publication_epoch();
             } else if self
                 .background_parse_snapshot_task_retargeted_away_v2(
                     supersession_key.file_id,
@@ -2535,6 +2620,9 @@ impl BslLanguageServer {
                 return ReadyParseSnapshotProbeResultV2 {
                     outcome: ReadyParseSnapshotProbeOutcomeV2::VersionMismatch,
                     state: None,
+                    detached_artifact: None,
+                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::VersionMismatch,
+                    elapsed: wait_started.elapsed(),
                 };
             } else {
                 tokio::time::sleep(poll_sleep).await;
@@ -2738,6 +2826,26 @@ impl BslLanguageServer {
             ready_snapshot_task_state.map(ReadySnapshotTaskStateV2::as_str),
             shadow_state_available,
             ready_snapshot_phase_attribution,
+        );
+    }
+
+    fn record_diagnostics_save_followup_bounded_wait_result_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        winner: ReadyParseSnapshotBoundedWaitWinnerV2,
+        elapsed: Duration,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_bounded_wait_result(
+            uri,
+            cycle_key,
+            winner.as_str(),
+            elapsed,
         );
     }
 
@@ -3917,7 +4025,6 @@ impl BslLanguageServer {
             .get(&supersession_key.file_id)
             .filter(|state| state.version == supersession_key.requested_version)
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
-        let probe_started = Instant::now();
         let probe = self
             .wait_for_ready_parse_snapshot_probe_v2(
                 supersession_key,
@@ -3926,12 +4033,21 @@ impl BslLanguageServer {
                 expected_text_hash,
             )
             .await;
+        let probe_outcome = probe.outcome;
         self.coordinator
             .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
                 probe_slot.as_str(),
-                probe.outcome.as_str(),
-                probe_started.elapsed(),
+                probe_outcome.as_str(),
+                probe.elapsed,
             );
+        if matches!(probe_slot, ReadyParseSnapshotProbeSlotV2::BoundedWait) {
+            self.record_diagnostics_save_followup_bounded_wait_result_v2(
+                uri,
+                supersession_key,
+                probe.wait_winner,
+                probe.elapsed,
+            );
+        }
         let branch_context = self
             .diagnostics_save_followup_branch_context_v2(supersession_key)
             .await;
@@ -3950,7 +4066,7 @@ impl BslLanguageServer {
                 expected_text_hash,
                 None,
                 matches!(
-                    (probe_slot, probe.outcome),
+                    (probe_slot, probe_outcome),
                     (
                         ReadyParseSnapshotProbeSlotV2::BoundedWait,
                         ReadyParseSnapshotProbeOutcomeV2::Timeout
@@ -3964,13 +4080,13 @@ impl BslLanguageServer {
             uri,
             supersession_key,
             match probe_slot {
-                ReadyParseSnapshotProbeSlotV2::ZeroBudget => Some(probe.outcome),
+                ReadyParseSnapshotProbeSlotV2::ZeroBudget => Some(probe_outcome),
                 ReadyParseSnapshotProbeSlotV2::BoundedWait
                 | ReadyParseSnapshotProbeSlotV2::ReliefValve => None,
             },
             match probe_slot {
                 ReadyParseSnapshotProbeSlotV2::ZeroBudget => None,
-                ReadyParseSnapshotProbeSlotV2::BoundedWait => Some(probe.outcome),
+                ReadyParseSnapshotProbeSlotV2::BoundedWait => Some(probe_outcome),
                 ReadyParseSnapshotProbeSlotV2::ReliefValve => None,
             },
             Some(branch_context.ready_snapshot_task_state),
@@ -3998,41 +4114,28 @@ impl BslLanguageServer {
                 .await,
             );
         }
-        if matches!(
-            probe.outcome,
-            ReadyParseSnapshotProbeOutcomeV2::NotReady | ReadyParseSnapshotProbeOutcomeV2::Timeout
-        ) {
-            if let Some(detached_artifact) = self
-                .detached_diagnostics_ready_artifact_for_target_v2(
-                    supersession_key.file_id,
-                    supersession_key.requested_version,
-                    supersession_key.save_cycle_sequence,
-                    expected_text_hash,
+        if let Some(detached_artifact) = probe.detached_artifact {
+            return SaveFollowupReadyArtifactsAttemptV2::Executed(
+                self.execute_save_followup_from_parse_snapshot_artifact_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    cancel_token,
+                    pipeline_started,
+                    show_hints,
+                    flow_sensitive_semantic,
+                    followup_lane_guard,
+                    SaveFollowupParseSnapshotExecutionInputV2 {
+                        text: detached_artifact.text,
+                        parse_snapshot: detached_artifact.parse_snapshot,
+                        syntax_errors_complete: detached_artifact.syntax_errors_complete,
+                        semantic_path: "detached_ready_artifacts",
+                    },
                 )
-                .await
-            {
-                return SaveFollowupReadyArtifactsAttemptV2::Executed(
-                    self.execute_save_followup_from_parse_snapshot_artifact_v2(
-                        uri,
-                        supersession_key,
-                        trigger,
-                        cancel_token,
-                        pipeline_started,
-                        show_hints,
-                        flow_sensitive_semantic,
-                        followup_lane_guard,
-                        SaveFollowupParseSnapshotExecutionInputV2 {
-                            text: detached_artifact.text,
-                            parse_snapshot: detached_artifact.parse_snapshot,
-                            syntax_errors_complete: detached_artifact.syntax_errors_complete,
-                            semantic_path: "detached_ready_artifacts",
-                        },
-                    )
-                    .await,
-                );
-            }
+                .await,
+            );
         }
-        SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(probe.outcome)
+        SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(probe_outcome)
     }
 
     pub(crate) async fn maybe_execute_save_followup_ready_snapshot_relief_valve_v2(

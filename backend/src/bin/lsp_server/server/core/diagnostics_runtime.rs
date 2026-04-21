@@ -43,6 +43,10 @@ impl ReadyParseSnapshotProbeSlotV2 {
             Self::ReliefValve => "relief_valve",
         }
     }
+
+    fn allows_detached_ready_artifact(self) -> bool {
+        matches!(self, Self::BoundedWait)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2502,6 +2506,7 @@ impl BslLanguageServer {
 
     async fn wait_for_ready_parse_snapshot_probe_v2(
         &self,
+        probe_slot: ReadyParseSnapshotProbeSlotV2,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
         wait_budget: Duration,
@@ -2534,22 +2539,24 @@ impl BslLanguageServer {
                     elapsed: wait_started.elapsed(),
                 };
             }
-            if let Some(detached_artifact) = self
-                .detached_diagnostics_ready_artifact_for_target_v2(
-                    supersession_key.file_id,
-                    supersession_key.requested_version,
-                    supersession_key.save_cycle_sequence,
-                    expected_text_hash,
-                )
-                .await
-            {
-                return ReadyParseSnapshotProbeResultV2 {
-                    outcome: ReadyParseSnapshotProbeOutcomeV2::NotReady,
-                    state: None,
-                    detached_artifact: Some(detached_artifact),
-                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::DetachedReadyArtifacts,
-                    elapsed: wait_started.elapsed(),
-                };
+            if probe_slot.allows_detached_ready_artifact() {
+                if let Some(detached_artifact) = self
+                    .detached_diagnostics_ready_artifact_for_target_v2(
+                        supersession_key.file_id,
+                        supersession_key.requested_version,
+                        supersession_key.save_cycle_sequence,
+                        expected_text_hash,
+                    )
+                    .await
+                {
+                    return ReadyParseSnapshotProbeResultV2 {
+                        outcome: ReadyParseSnapshotProbeOutcomeV2::NotReady,
+                        state: None,
+                        detached_artifact: Some(detached_artifact),
+                        wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::DetachedReadyArtifacts,
+                        elapsed: wait_started.elapsed(),
+                    };
+                }
             }
             let cancel_reason = cancel_token
                 .filter(|token| token.is_cancelled())
@@ -2639,6 +2646,7 @@ impl BslLanguageServer {
         expected_text_hash: Option<[u8; 32]>,
     ) -> ReadyParseSnapshotProbeOutcomeV2 {
         self.wait_for_ready_parse_snapshot_probe_v2(
+            ReadyParseSnapshotProbeSlotV2::BoundedWait,
             supersession_key,
             cancel_token,
             wait_budget,
@@ -4027,6 +4035,7 @@ impl BslLanguageServer {
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
         let probe = self
             .wait_for_ready_parse_snapshot_probe_v2(
+                probe_slot,
                 supersession_key,
                 cancel_token,
                 wait_budget,

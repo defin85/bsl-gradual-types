@@ -234,7 +234,7 @@ fn emit_diagnostics_save_coherence_debug(message: String) {
 }
 
 fn update_followup_timing_max(slot: &mut Option<u64>, candidate: Option<u64>) {
-    let Some(candidate) = candidate.filter(|value| *value > 0) else {
+    let Some(candidate) = candidate else {
         return;
     };
     *slot = Some(slot.unwrap_or(0).max(candidate));

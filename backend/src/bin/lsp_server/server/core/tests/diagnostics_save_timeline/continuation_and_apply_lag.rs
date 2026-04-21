@@ -816,7 +816,7 @@ async fn p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_
             },
         );
 
-    let disposition = server
+    let zero_budget_disposition = server
         .try_execute_save_followup_from_ready_artifacts_v2(
             &uri,
             &supersession_key,
@@ -831,7 +831,28 @@ async fn p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_
         )
         .await;
     assert!(matches!(
-        disposition,
+        zero_budget_disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::NotReady
+        )
+    ));
+
+    let bounded_wait_disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            Duration::from_millis(250),
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        bounded_wait_disposition,
         crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::Executed(
             bsl_runtime::application::DiagnosticsDisposition::Published
         )
@@ -845,6 +866,18 @@ async fn p24b_diagnostics_save_timeline_prefers_detached_ready_artifacts_before_
     assert_eq!(
         trace.followup_ready_snapshot_task_state.as_deref(),
         Some("in_flight_same_version")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_bounded_wait_winner.as_deref(),
+        Some("detached_ready_artifacts")
+    );
+    assert!(
+        trace.followup_ready_snapshot_bounded_wait_elapsed_ms.is_some(),
+        "bounded wait must attribute the detached winner even when the artifact is already published, trace={trace:?}"
     );
     assert_eq!(
         trace.followup_semantic_path.as_deref(),

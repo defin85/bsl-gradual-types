@@ -2300,6 +2300,67 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('reader backpressure dominance should stay server-side and suppress client-ingress finding', () => {
+        const timeline = sampleTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok timeline fixture');
+        }
+        timeline.response.traces = [
+            {
+                ...timeline.response.traces[0],
+                server_edge_details: {
+                    adapter_read_started_at_ms: 1_700_000_000_180,
+                    adapter_read_at_ms: 1_700_000_000_220,
+                    adapter_parse_completed_at_ms: 1_700_000_000_220,
+                    transport_received_at_ms: 1_700_000_000_300,
+                    transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                    jsonrpc_dispatch_received_at_ms: 1_700_000_000_300,
+                    read_loop_wait_reason: 'completion_lane_space',
+                    read_loop_wait_ms: 40,
+                    admission_lane: 'interactive_completion',
+                    admission_enqueued_at_ms: 1_700_000_000_221,
+                    admission_queue_wait_ms: 12,
+                    scheduler_poll_ready_wait_ms: 8,
+                    adapter_to_dispatch_wait_ms: 80,
+                    method_entered_at_ms: 1_700_000_000_320,
+                    handler_entered_at_ms: 1_700_000_000_322,
+                    response_sent_at_ms: 1_700_000_000_360,
+                    transport_to_method_wait_ms: 20,
+                    method_prelude_exec_ms: 2,
+                    transport_to_handler_wait_ms: 22,
+                    server_handler_exec_ms: 38,
+                },
+            },
+        ];
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-04-21T09:41:02.000Z'),
+            completionTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [
+                sampleProbe({
+                    probe_id: 'probe-reader-backpressure',
+                    trigger_mode: 'invoked',
+                    request_started_at_ms: 1_700_000_000_100,
+                    lsp_request_started_at_ms: 1_700_000_000_110,
+                    transport_request_written_at_ms: 1_700_000_000_130,
+                    lsp_response_received_at_ms: 1_700_000_000_361,
+                    request_completed_at_ms: 1_700_000_000_362,
+                    client_duration_ms: 262,
+                }),
+            ],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(bundle.incidentReport.requests[0].bottleneck_verdicts.includes('reader_backpressure_dominant'));
+        assert.ok(!bundle.incidentReport.requests[0].bottleneck_verdicts.includes('client_before_transport_dominant'));
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('reader-side local backpressure before adapter_read dominated 1 completion trace(s)')
+            )
+        );
+    });
+
     test('best-effort pre-method provenance should stay visible but not aggregate as strong ingress finding', () => {
         const timeline = sampleTimeline();
         if (timeline.kind !== 'ok') {

@@ -375,7 +375,11 @@ pub struct CompletionTimelineCollectBreakdownTrace {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter_read_started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub adapter_read_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub adapter_parse_completed_at_ms: Option<u64>,
     pub transport_received_at_ms: u64,
     pub transport_received_at_ms_provenance: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -414,9 +418,81 @@ pub struct CompletionTimelineServerEdgeDetailsTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cancel_observed_at_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_loop_wait_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_loop_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_completion_spillover_depth: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_general_request_staged: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_try_enqueue_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_lane_depth_before: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_lane_depth_after: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_enqueue_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_spillover_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_enqueued_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_woke_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_poll_ready_entered_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_poll_ready_resolved_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_dequeued_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_active_at_dequeue: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_generation: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_owner_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_owner_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_owner_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_barrier_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_sync_first_poll_exec_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_sync_first_poll_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_sync_first_poll_method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_sync_first_poll_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_sync_first_poll_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_file_ingress_token_required_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_file_ingress_token_published_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_file_ingress_token_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub same_file_ingress_token_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_service_call_started_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_service_call_returned_at_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub dispatch_to_request_context_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub adapter_to_dispatch_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admission_queue_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_poll_ready_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_service_call_sync_exec_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduler_ready_to_dispatch_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport_to_slot_release_wait_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]

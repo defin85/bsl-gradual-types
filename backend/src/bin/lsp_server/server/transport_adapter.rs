@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::num::ParseIntError;
 use std::str::Utf8Error;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::channel::mpsc;
@@ -141,31 +141,107 @@ enum CompletionBarrierFirstPoll {
 }
 
 #[derive(Debug, Clone)]
+struct CompletionBarrierOwnerMetadata {
+    generation: u64,
+    method: String,
+    uri: Option<String>,
+    version: Option<i32>,
+    first_poll_exec_ms: u64,
+    first_poll_outcome: String,
+}
+
+#[derive(Debug, Clone)]
+struct CompletionBarrierSnapshot {
+    generation: u64,
+    owner_method: String,
+    owner_uri: Option<String>,
+    owner_version: Option<i32>,
+    doc_sync_first_poll_exec_ms: u64,
+    doc_sync_first_poll_outcome: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CompletionBarrierTicket {
+    entry_id: u64,
+}
+
+#[derive(Debug, Default)]
+struct CompletionBarrierGateState {
+    next_entry_id: u64,
+    next_generation: u64,
+    active: std::collections::VecDeque<(CompletionBarrierTicket, CompletionBarrierOwnerMetadata)>,
+}
+
+#[derive(Debug, Clone)]
 struct CompletionBarrierGate {
-    inflight: Arc<AtomicUsize>,
+    state: Arc<Mutex<CompletionBarrierGateState>>,
     released: Arc<Notify>,
 }
 
 impl CompletionBarrierGate {
     fn new() -> Self {
         Self {
-            inflight: Arc::new(AtomicUsize::new(0)),
+            state: Arc::new(Mutex::new(CompletionBarrierGateState::default())),
             released: Arc::new(Notify::new()),
         }
     }
 
-    fn begin(&self) {
-        self.inflight.fetch_add(1, Ordering::SeqCst);
+    fn begin(&self, mut owner: CompletionBarrierOwnerMetadata) -> CompletionBarrierTicket {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.next_entry_id = state.next_entry_id.saturating_add(1);
+        state.next_generation = state.next_generation.saturating_add(1);
+        owner.generation = state.next_generation;
+        let ticket = CompletionBarrierTicket {
+            entry_id: state.next_entry_id,
+        };
+        state.active.push_back((ticket, owner));
+        ticket
     }
 
-    fn release(&self) {
-        let previous = self.inflight.fetch_sub(1, Ordering::SeqCst);
-        debug_assert!(previous > 0, "completion barrier inflight count underflow");
+    fn release(&self, ticket: CompletionBarrierTicket) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let position = state
+            .active
+            .iter()
+            .position(|(active_ticket, _)| active_ticket.entry_id == ticket.entry_id);
+        debug_assert!(
+            position.is_some(),
+            "completion barrier inflight count underflow"
+        );
+        if let Some(position) = position {
+            let _ = state.active.remove(position);
+        }
         self.released.notify_waiters();
     }
 
     fn is_active(&self) -> bool {
-        self.inflight.load(Ordering::SeqCst) > 0
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        !state.active.is_empty()
+    }
+
+    fn snapshot(&self) -> Option<CompletionBarrierSnapshot> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let (_, owner) = state.active.front()?;
+        Some(CompletionBarrierSnapshot {
+            generation: owner.generation,
+            owner_method: owner.method.clone(),
+            owner_uri: owner.uri.clone(),
+            owner_version: owner.version,
+            doc_sync_first_poll_exec_ms: owner.first_poll_exec_ms,
+            doc_sync_first_poll_outcome: owner.first_poll_outcome.clone(),
+        })
     }
 
     async fn wait_for_release(&self) {
@@ -230,6 +306,12 @@ struct TransportMessageWriteMilestones {
     flush_completed_at_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct TransportMessageReadMilestones {
+    read_started_at_ms: u64,
+    parse_completed_at_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AdmissionLane {
     Control,
@@ -242,6 +324,20 @@ struct ScheduledRequest {
     lane: AdmissionLane,
     request_id: Option<String>,
     request: Request,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct AdmissionEnqueueMetadata {
+    lane_depth_before: usize,
+    lane_depth_after: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ReadLoopWaitObservation {
+    reason: &'static str,
+    started_at_ms: u64,
+    pending_completion_spillover_depth: u64,
+    pending_general_request_staged: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -325,9 +421,12 @@ impl AdmissionQueues {
         let mut scheduled_request = Some(scheduled_request);
         loop {
             match self.try_enqueue(scheduled_request.take().expect("scheduled request")) {
-                Ok(()) => return true,
+                Ok(_) => return true,
                 Err(TryEnqueueError::Closed) => return false,
-                Err(TryEnqueueError::Full(request)) => {
+                Err(TryEnqueueError::Full {
+                    request,
+                    lane_depth_before: _,
+                }) => {
                     scheduled_request = Some(request);
                     let notified = self.space_notify.notified();
                     notified.await;
@@ -336,7 +435,10 @@ impl AdmissionQueues {
         }
     }
 
-    fn try_enqueue(&self, scheduled_request: ScheduledRequest) -> Result<(), TryEnqueueError> {
+    fn try_enqueue(
+        &self,
+        scheduled_request: ScheduledRequest,
+    ) -> Result<AdmissionEnqueueMetadata, TryEnqueueError> {
         let lane = scheduled_request.lane;
         let mut state = self
             .state
@@ -347,12 +449,28 @@ impl AdmissionQueues {
         }
         let lane_capacity = self.lane_capacity(lane);
         let queue = Self::queue_for_lane_mut(&mut state, lane);
-        if queue.len() < lane_capacity {
-            queue.push_back(scheduled_request);
+        let lane_depth_before = queue.len();
+        if lane_depth_before < lane_capacity {
+            if matches!(lane, AdmissionLane::Completion) {
+                if let Some(position) = completion_queue_insert_position(queue, &scheduled_request)
+                {
+                    queue.insert(position, scheduled_request);
+                } else {
+                    queue.push_back(scheduled_request);
+                }
+            } else {
+                queue.push_back(scheduled_request);
+            }
             self.item_notify.notify_waiters();
-            Ok(())
+            Ok(AdmissionEnqueueMetadata {
+                lane_depth_before,
+                lane_depth_after: queue.len(),
+            })
         } else {
-            Err(TryEnqueueError::Full(scheduled_request))
+            Err(TryEnqueueError::Full {
+                request: scheduled_request,
+                lane_depth_before,
+            })
         }
     }
 
@@ -408,10 +526,24 @@ impl AdmissionQueues {
                         is_completion_supporting_document_sync_notification(&scheduled.request)
                     });
                 if completion_dispatchable {
-                    state
-                        .completion
-                        .pop_front()
-                        .or_else(|| state.general.pop_front())
+                    if !completion_barrier_active {
+                        if let Some(position) = token_ready_completion_position(&state.completion) {
+                            state
+                                .completion
+                                .remove(position)
+                                .or_else(|| state.general.pop_front())
+                        } else {
+                            state
+                                .completion
+                                .pop_front()
+                                .or_else(|| state.general.pop_front())
+                        }
+                    } else {
+                        state
+                            .completion
+                            .pop_front()
+                            .or_else(|| state.general.pop_front())
+                    }
                 } else {
                     state.general.pop_front()
                 }
@@ -456,7 +588,6 @@ impl AdmissionQueues {
         self.space_notify.notify_waiters();
     }
 
-    #[cfg(test)]
     fn lane_depth(&self, lane: AdmissionLane) -> usize {
         let state = self
             .state
@@ -464,11 +595,26 @@ impl AdmissionQueues {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self::queue_for_lane(&state, lane).len()
     }
+
+    fn queued_completion_request_ids(&self) -> Vec<String> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state
+            .completion
+            .iter()
+            .filter_map(|scheduled| scheduled.request_id.clone())
+            .collect()
+    }
 }
 
 enum TryEnqueueError {
     Closed,
-    Full(ScheduledRequest),
+    Full {
+        request: ScheduledRequest,
+        lane_depth_before: usize,
+    },
 }
 
 pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
@@ -478,9 +624,11 @@ pub(crate) async fn serve_with_completion_handoff<I, O, L, S>(
     service: S,
     concurrency_level: usize,
 ) where
-    I: AsyncRead + Unpin,
-    O: AsyncWrite + Unpin,
-    L: Loopback,
+    I: AsyncRead + Send + Unpin + 'static,
+    O: AsyncWrite + Send + Unpin + 'static,
+    L: Loopback + Send + 'static,
+    L::RequestStream: Send + 'static,
+    L::ResponseSink: Send + 'static,
     <L::ResponseSink as Sink<Response>>::Error: std::error::Error + Send + Sync + 'static,
     S: Service<Request, Response = Option<Response>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -505,9 +653,11 @@ async fn serve_with_completion_handoff_with_capacities<I, O, L, S>(
     concurrency_level: usize,
     admission_queue_capacities: AdmissionQueueCapacities,
 ) where
-    I: AsyncRead + Unpin,
-    O: AsyncWrite + Unpin,
-    L: Loopback,
+    I: AsyncRead + Send + Unpin + 'static,
+    O: AsyncWrite + Send + Unpin + 'static,
+    L: Loopback + Send + 'static,
+    L::RequestStream: Send + 'static,
+    L::ResponseSink: Send + 'static,
     <L::ResponseSink as Sink<Response>>::Error: std::error::Error + Send + Sync + 'static,
     S: Service<Request, Response = Option<Response>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -533,9 +683,11 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     concurrency_level: usize,
     admission_queues: AdmissionQueues,
 ) where
-    I: AsyncRead + Unpin,
-    O: AsyncWrite + Unpin,
-    L: Loopback,
+    I: AsyncRead + Send + Unpin + 'static,
+    O: AsyncWrite + Send + Unpin + 'static,
+    L: Loopback + Send + 'static,
+    L::RequestStream: Send + 'static,
+    L::ResponseSink: Send + 'static,
     <L::ResponseSink as Sink<Response>>::Error: std::error::Error + Send + Sync + 'static,
     S: Service<Request, Response = Option<Response>> + Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -550,6 +702,9 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
         mpsc::channel::<CompletionHandoffTask>(MESSAGE_QUEUE_SIZE);
     let transport_shutdown = std::sync::Arc::new(Notify::new());
     let completion_barrier_gate = CompletionBarrierGate::new();
+    let transport_shutdown_for_supervisor = transport_shutdown.clone();
+    let admission_queues_for_supervisor = admission_queues.clone();
+    let client_abort_for_supervisor = client_abort.clone();
 
     let responses_tx_for_server_tasks = responses_tx.clone();
     let process_server_tasks = async move {
@@ -584,22 +739,55 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
             {
                 break;
             }
+            let scheduler_woke_at_ms = super::unix_timestamp_ms();
+            let scheduler_poll_ready_entered_at_ms = super::unix_timestamp_ms();
             if let Err(err) = future::poll_fn(|cx| service.poll_ready(cx)).await {
                 error!("{}", display_sources(err.into().as_ref()));
                 break;
             }
+            let scheduler_poll_ready_resolved_at_ms = super::unix_timestamp_ms();
             let completion_barrier_active = completion_barrier_gate_for_scheduler.is_active();
             let Some(scheduled_request) = admission_queues_for_scheduler
                 .pop_next(completion_barrier_active)
                 .await
             else {
                 if completion_barrier_active {
+                    let barrier_wait_started_at_ms = super::unix_timestamp_ms();
+                    if let Some(snapshot) = completion_barrier_gate_for_scheduler.snapshot() {
+                        for request_id in
+                            admission_queues_for_scheduler.queued_completion_request_ids()
+                        {
+                            patch_completion_pre_dispatch_barrier_snapshot(
+                                &request_id,
+                                &snapshot,
+                                Some(barrier_wait_started_at_ms),
+                            );
+                        }
+                    }
                     completion_barrier_gate_for_scheduler
                         .wait_for_release()
                         .await;
                 }
                 continue;
             };
+            let scheduler_dequeued_at_ms = super::unix_timestamp_ms();
+            if let Some(request_id) = scheduled_request.request_id.as_deref() {
+                super::request_context::patch_pending_completion_pre_dispatch_trace(
+                    request_id,
+                    super::request_context::CompletionPreDispatchTracePatch {
+                        scheduler_woke_at_ms: Some(scheduler_woke_at_ms),
+                        scheduler_poll_ready_entered_at_ms: Some(
+                            scheduler_poll_ready_entered_at_ms,
+                        ),
+                        scheduler_poll_ready_resolved_at_ms: Some(
+                            scheduler_poll_ready_resolved_at_ms,
+                        ),
+                        scheduler_dequeued_at_ms: Some(scheduler_dequeued_at_ms),
+                        completion_barrier_active_at_dequeue: Some(completion_barrier_active),
+                        ..Default::default()
+                    },
+                );
+            }
 
             if let Some(cancelled_request_id) =
                 cancelled_request_id_from_request(&scheduled_request.request)
@@ -620,6 +808,17 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
             let is_completion = matches!(scheduled_request.lane, AdmissionLane::Completion);
             let is_completion_handoff_barrier =
                 is_completion_supporting_document_sync_notification(&scheduled_request.request);
+            let completion_barrier_owner_method = is_completion_handoff_barrier
+                .then(|| scheduled_request.request.method().to_string());
+            let completion_barrier_owner_uri = is_completion_handoff_barrier
+                .then(|| {
+                    request_text_document_uri(&scheduled_request.request).map(ToString::to_string)
+                })
+                .flatten();
+            let completion_barrier_owner_version = is_completion_handoff_barrier
+                .then(|| request_text_document_version(&scheduled_request.request))
+                .flatten();
+            let scheduler_service_call_started_at_ms = super::unix_timestamp_ms();
             let future = service
                 .call(scheduled_request.request)
                 .unwrap_or_else(|err| {
@@ -627,9 +826,25 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                     None
                 })
                 .boxed();
+            let scheduler_service_call_returned_at_ms = super::unix_timestamp_ms();
+            if let Some(request_id) = request_id.as_deref() {
+                super::request_context::patch_pending_completion_pre_dispatch_trace(
+                    request_id,
+                    super::request_context::CompletionPreDispatchTracePatch {
+                        scheduler_service_call_started_at_ms: Some(
+                            scheduler_service_call_started_at_ms,
+                        ),
+                        scheduler_service_call_returned_at_ms: Some(
+                            scheduler_service_call_returned_at_ms,
+                        ),
+                        ..Default::default()
+                    },
+                );
+            }
 
             if is_completion_handoff_barrier {
                 let mut future = future;
+                let first_poll_started_at_ms = super::unix_timestamp_ms();
                 let first_poll = future::poll_fn(|cx| match future.as_mut().poll(cx) {
                     std::task::Poll::Ready(response) => {
                         std::task::Poll::Ready(CompletionBarrierFirstPoll::Ready(response))
@@ -639,6 +854,9 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                     }
                 })
                 .await;
+                let first_poll_completed_at_ms = super::unix_timestamp_ms();
+                let first_poll_exec_ms =
+                    first_poll_completed_at_ms.saturating_sub(first_poll_started_at_ms);
                 match first_poll {
                     CompletionBarrierFirstPoll::Ready(response) => {
                         if let Some(response) = response {
@@ -655,16 +873,26 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                         }
                     }
                     CompletionBarrierFirstPoll::Pending => {
-                        completion_barrier_gate_for_scheduler.begin();
+                        let barrier_owner = completion_barrier_owner_metadata(
+                            completion_barrier_owner_method
+                                .clone()
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            completion_barrier_owner_uri.clone(),
+                            completion_barrier_owner_version,
+                            first_poll_exec_ms,
+                            "pending",
+                        );
+                        let barrier_ticket =
+                            completion_barrier_gate_for_scheduler.begin(barrier_owner);
                         let barrier_gate = completion_barrier_gate_for_scheduler.clone();
                         let barrier_future = async move {
                             let response = future.await;
-                            barrier_gate.release();
+                            barrier_gate.release(barrier_ticket);
                             response
                         }
                         .boxed();
                         if server_tasks_tx.send(barrier_future).await.is_err() {
-                            completion_barrier_gate_for_scheduler.release();
+                            completion_barrier_gate_for_scheduler.release(barrier_ticket);
                             error!("server task queue closed unexpectedly");
                             break;
                         }
@@ -790,22 +1018,67 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
     let transport_shutdown_for_input = transport_shutdown.clone();
     let admission_queues_for_input = admission_queues.clone();
     let client_abort_for_input = client_abort;
+    let completion_barrier_gate_for_input = completion_barrier_gate.clone();
     let read_input = async move {
         let mut stdin = BufReader::new(stdin);
         let completion_spillover_capacity =
             admission_queues_for_input.lane_capacity(AdmissionLane::Completion);
-        let mut pending_completion_requests = std::collections::VecDeque::new();
+        let mut pending_completion_requests = std::collections::VecDeque::<ScheduledRequest>::new();
         let mut pending_general_request = None;
+        let mut next_read_wait_observation: Option<ReadLoopWaitObservation> = None;
 
         'read_input: loop {
             while let Some(staged_completion_request) = pending_completion_requests.pop_front() {
+                let request_id = staged_completion_request.request_id.clone();
                 match admission_queues_for_input.try_enqueue(staged_completion_request) {
-                    Ok(()) => {}
+                    Ok(metadata) => {
+                        if let Some(request_id) = request_id.as_deref() {
+                            super::request_context::patch_pending_completion_pre_dispatch_trace(
+                                request_id,
+                                super::request_context::CompletionPreDispatchTracePatch {
+                                    admission_lane: Some("interactive_completion".to_string()),
+                                    admission_lane_depth_before: Some(
+                                        metadata.lane_depth_before as u64,
+                                    ),
+                                    admission_lane_depth_after: Some(
+                                        metadata.lane_depth_after as u64,
+                                    ),
+                                    admission_enqueue_outcome: Some("enqueued".to_string()),
+                                    admission_enqueued_at_ms: Some(super::unix_timestamp_ms()),
+                                    ..Default::default()
+                                },
+                            );
+                            if let Some(snapshot) = completion_barrier_gate_for_input.snapshot() {
+                                patch_completion_pre_dispatch_barrier_snapshot(
+                                    request_id,
+                                    &snapshot,
+                                    Some(super::unix_timestamp_ms()),
+                                );
+                            }
+                        }
+                    }
                     Err(TryEnqueueError::Closed) => {
                         error!("transport admission queue closed unexpectedly");
                         break 'read_input;
                     }
-                    Err(TryEnqueueError::Full(request)) => {
+                    Err(TryEnqueueError::Full {
+                        request,
+                        lane_depth_before,
+                    }) => {
+                        if let Some(request_id) = request_id.as_deref() {
+                            super::request_context::patch_pending_completion_pre_dispatch_trace(
+                                request_id,
+                                super::request_context::CompletionPreDispatchTracePatch {
+                                    admission_lane: Some("interactive_completion".to_string()),
+                                    admission_lane_depth_before: Some(lane_depth_before as u64),
+                                    admission_lane_depth_after: Some(lane_depth_before as u64),
+                                    admission_enqueue_outcome: Some(
+                                        "lane_full_deferred".to_string(),
+                                    ),
+                                    ..Default::default()
+                                },
+                            );
+                        }
                         pending_completion_requests.push_front(request);
                         break;
                     }
@@ -814,12 +1087,15 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
 
             if let Some(staged_general_request) = pending_general_request.take() {
                 match admission_queues_for_input.try_enqueue(staged_general_request) {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     Err(TryEnqueueError::Closed) => {
                         error!("transport admission queue closed unexpectedly");
                         break;
                     }
-                    Err(TryEnqueueError::Full(request)) => {
+                    Err(TryEnqueueError::Full {
+                        request,
+                        lane_depth_before: _,
+                    }) => {
                         pending_general_request = Some(request);
                     }
                 }
@@ -827,31 +1103,95 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
 
             let read_result = tokio::select! {
                 _ = transport_shutdown_for_input.notified() => break,
-                lane_has_space = admission_queues_for_input.wait_for_space_in_lane_or_closed(AdmissionLane::Completion), if !pending_completion_requests.is_empty() => {
+                completion_wait = async {
+                    let wait_started_at_ms = super::unix_timestamp_ms();
+                    let lane_has_space = admission_queues_for_input
+                        .wait_for_space_in_lane_or_closed(AdmissionLane::Completion)
+                        .await;
+                    (wait_started_at_ms, lane_has_space)
+                }, if !pending_completion_requests.is_empty() => {
+                    let (wait_started_at_ms, lane_has_space) = completion_wait;
                     if !lane_has_space {
                         error!("transport admission queue closed unexpectedly");
                         break;
                     }
+                    next_read_wait_observation.get_or_insert(ReadLoopWaitObservation {
+                        reason: "completion_lane_space",
+                        started_at_ms: wait_started_at_ms,
+                        pending_completion_spillover_depth: pending_completion_requests.len() as u64,
+                        pending_general_request_staged: pending_general_request.is_some(),
+                    });
                     continue;
                 }
-                lane_has_space = admission_queues_for_input.wait_for_space_in_lane_or_closed(AdmissionLane::General), if pending_general_request.is_some() => {
+                general_wait = async {
+                    let wait_started_at_ms = super::unix_timestamp_ms();
+                    let lane_has_space = admission_queues_for_input
+                        .wait_for_space_in_lane_or_closed(AdmissionLane::General)
+                        .await;
+                    (wait_started_at_ms, lane_has_space)
+                }, if pending_general_request.is_some() => {
+                    let (wait_started_at_ms, lane_has_space) = general_wait;
                     if !lane_has_space {
                         error!("transport admission queue closed unexpectedly");
                         break;
                     }
+                    next_read_wait_observation.get_or_insert(ReadLoopWaitObservation {
+                        reason: "general_lane_space",
+                        started_at_ms: wait_started_at_ms,
+                        pending_completion_spillover_depth: pending_completion_requests.len() as u64,
+                        pending_general_request_staged: pending_general_request.is_some(),
+                    });
                     continue;
                 }
                 read_result = read_transport_message(&mut stdin) => read_result,
             };
+            let read_wait_observation = match &read_result {
+                Ok(Some(_)) => next_read_wait_observation.take(),
+                _ => None,
+            };
             match read_result {
-                Ok(Some(TransportMessage::Request(request))) => {
-                    let adapter_read_at_ms = super::unix_timestamp_ms();
+                Ok(Some((TransportMessage::Request(request), read_milestones))) => {
+                    let adapter_read_at_ms = read_milestones.parse_completed_at_ms;
                     let request_id = request.id().map(ToString::to_string);
                     if let Some(request_id) = request_id.as_deref() {
                         super::request_context::record_pending_completion_adapter_read_at_ms(
                             &request,
                             request_id,
                             Some(adapter_read_at_ms),
+                        );
+                        let read_wait_patch = read_wait_observation
+                            .map(|observation| {
+                                super::request_context::CompletionPreDispatchTracePatch {
+                                    adapter_read_started_at_ms: Some(
+                                        read_milestones.read_started_at_ms,
+                                    ),
+                                    adapter_parse_completed_at_ms: Some(adapter_read_at_ms),
+                                    read_loop_wait_reason: Some(observation.reason.to_string()),
+                                    read_loop_wait_ms: Some(
+                                        adapter_read_at_ms
+                                            .saturating_sub(observation.started_at_ms),
+                                    ),
+                                    pending_completion_spillover_depth: Some(
+                                        observation.pending_completion_spillover_depth,
+                                    ),
+                                    pending_general_request_staged: Some(
+                                        observation.pending_general_request_staged,
+                                    ),
+                                    ..Default::default()
+                                }
+                            })
+                            .unwrap_or_else(|| {
+                                super::request_context::CompletionPreDispatchTracePatch {
+                                    adapter_read_started_at_ms: Some(
+                                        read_milestones.read_started_at_ms,
+                                    ),
+                                    adapter_parse_completed_at_ms: Some(adapter_read_at_ms),
+                                    ..Default::default()
+                                }
+                            });
+                        super::request_context::patch_pending_completion_pre_dispatch_trace(
+                            request_id,
+                            read_wait_patch,
                         );
                     }
                     let scheduled_request = ScheduledRequest {
@@ -900,23 +1240,70 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                             continue;
                         }
                         match admission_queues_for_input.try_enqueue(scheduled_request) {
-                            Ok(()) => {}
+                            Ok(_) => {}
                             Err(TryEnqueueError::Closed) => {
                                 error!("transport admission queue closed unexpectedly");
                                 break;
                             }
-                            Err(TryEnqueueError::Full(request)) => {
+                            Err(TryEnqueueError::Full {
+                                request,
+                                lane_depth_before: _,
+                            }) => {
                                 pending_general_request = Some(request);
                             }
                         }
                     } else if matches!(scheduled_request.lane, AdmissionLane::Completion) {
+                        let request_id = scheduled_request.request_id.clone();
+                        let admission_try_enqueue_at_ms = super::unix_timestamp_ms();
+                        if let Some(request_id) = request_id.as_deref() {
+                            super::request_context::patch_pending_completion_pre_dispatch_trace(
+                                request_id,
+                                super::request_context::CompletionPreDispatchTracePatch {
+                                    admission_try_enqueue_at_ms: Some(admission_try_enqueue_at_ms),
+                                    admission_lane: Some("interactive_completion".to_string()),
+                                    ..Default::default()
+                                },
+                            );
+                        }
                         match admission_queues_for_input.try_enqueue(scheduled_request) {
-                            Ok(()) => {}
+                            Ok(metadata) => {
+                                if let Some(request_id) = request_id.as_deref() {
+                                    super::request_context::patch_pending_completion_pre_dispatch_trace(
+                                        request_id,
+                                        super::request_context::CompletionPreDispatchTracePatch {
+                                            admission_lane_depth_before: Some(
+                                                metadata.lane_depth_before as u64,
+                                            ),
+                                            admission_lane_depth_after: Some(
+                                                metadata.lane_depth_after as u64,
+                                            ),
+                                            admission_enqueue_outcome: Some("enqueued".to_string()),
+                                            admission_enqueued_at_ms: Some(
+                                                super::unix_timestamp_ms(),
+                                            ),
+                                            ..Default::default()
+                                        },
+                                    );
+                                    if let Some(snapshot) =
+                                        completion_barrier_gate_for_input.snapshot()
+                                    {
+                                        patch_completion_pre_dispatch_barrier_snapshot(
+                                            request_id,
+                                            &snapshot,
+                                            Some(super::unix_timestamp_ms()),
+                                        );
+                                    }
+                                }
+                            }
                             Err(TryEnqueueError::Closed) => {
                                 error!("transport admission queue closed unexpectedly");
                                 break;
                             }
-                            Err(TryEnqueueError::Full(request)) => {
+                            Err(TryEnqueueError::Full {
+                                request,
+                                lane_depth_before,
+                            }) => {
+                                let request_id = request.request_id.clone();
                                 if stage_completion_request_with_overflow_policy(
                                     &mut pending_completion_requests,
                                     completion_spillover_capacity,
@@ -928,6 +1315,29 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                                 {
                                     break;
                                 }
+                                if let Some(request_id) = request_id.as_deref() {
+                                    super::request_context::patch_pending_completion_pre_dispatch_trace(
+                                        request_id,
+                                        super::request_context::CompletionPreDispatchTracePatch {
+                                            admission_lane_depth_before: Some(
+                                                lane_depth_before as u64,
+                                            ),
+                                            admission_lane_depth_after: Some(
+                                                lane_depth_before as u64,
+                                            ),
+                                            admission_enqueue_outcome: Some(
+                                                "lane_full_deferred".to_string(),
+                                            ),
+                                            admission_spillover_outcome: Some(
+                                                "staged_completion_spillover".to_string(),
+                                            ),
+                                            pending_completion_spillover_depth: Some(
+                                                pending_completion_requests.len() as u64,
+                                            ),
+                                            ..Default::default()
+                                        },
+                                    );
+                                }
                             }
                         }
                     } else if !admission_queues_for_input.enqueue(scheduled_request).await {
@@ -935,7 +1345,7 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
                         break;
                     }
                 }
-                Ok(Some(TransportMessage::Response(response))) => {
+                Ok(Some((TransportMessage::Response(response), _read_milestones))) => {
                     if let Err(err) = client_responses.send(response).await {
                         error!("{}", display_sources(&err));
                         break;
@@ -961,13 +1371,38 @@ async fn serve_with_completion_handoff_with_admission_queues<I, O, L, S>(
         client_abort_for_input.abort();
     };
 
-    futures::join!(
-        print_output,
-        read_input,
-        process_scheduler,
-        process_server_tasks,
-        process_completion_tasks
-    );
+    let mut transport_tasks = JoinSet::new();
+    transport_tasks.spawn(async move {
+        process_server_tasks.await;
+    });
+    transport_tasks.spawn(async move {
+        process_scheduler.await;
+    });
+    transport_tasks.spawn(async move {
+        process_completion_tasks.await;
+    });
+    transport_tasks.spawn(async move {
+        print_output.await;
+    });
+    transport_tasks.spawn(async move {
+        read_input.await;
+    });
+
+    let mut abort_requested = false;
+    while let Some(join_result) = transport_tasks.join_next().await {
+        if let Err(err) = join_result {
+            if !err.is_cancelled() {
+                error!("transport runtime task failed: {err}");
+            }
+            if !abort_requested {
+                abort_requested = true;
+                admission_queues_for_supervisor.close();
+                transport_shutdown_for_supervisor.notify_waiters();
+                client_abort_for_supervisor.abort();
+                transport_tasks.abort_all();
+            }
+        }
+    }
 }
 
 fn classify_admission_lane(request: &Request) -> AdmissionLane {
@@ -1017,6 +1452,100 @@ fn cancelled_request_id_from_request(request: &Request) -> Option<String> {
 
 fn request_text_document_uri(request: &Request) -> Option<&str> {
     request.params()?.get("textDocument")?.get("uri")?.as_str()
+}
+
+fn completion_queue_insert_position(
+    queued_requests: &std::collections::VecDeque<ScheduledRequest>,
+    scheduled_request: &ScheduledRequest,
+) -> Option<usize> {
+    if scheduled_request.request.method() != COMPLETION_METHOD {
+        return None;
+    }
+    let uri = request_text_document_uri(&scheduled_request.request)?;
+    if super::request_context::same_file_ingress_token_publication_for_uri(uri).is_none() {
+        return None;
+    }
+    Some(
+        queued_requests
+            .iter()
+            .rposition(|queued| request_text_document_uri(&queued.request) == Some(uri))
+            .map_or(0, |position| position + 1),
+    )
+}
+
+fn token_ready_completion_position(
+    queued_requests: &std::collections::VecDeque<ScheduledRequest>,
+) -> Option<usize> {
+    queued_requests
+        .iter()
+        .enumerate()
+        .find_map(|(position, scheduled)| {
+            if scheduled.request.method() != COMPLETION_METHOD {
+                return None;
+            }
+            let uri = request_text_document_uri(&scheduled.request)?;
+            if super::request_context::same_file_ingress_token_publication_for_uri(uri).is_none() {
+                return None;
+            }
+            let has_earlier_related_work = queued_requests
+                .iter()
+                .take(position)
+                .any(|earlier| request_text_document_uri(&earlier.request) == Some(uri));
+            if has_earlier_related_work {
+                None
+            } else {
+                Some(position)
+            }
+        })
+}
+
+fn request_text_document_version(request: &Request) -> Option<i32> {
+    request
+        .params()?
+        .get("textDocument")?
+        .get("version")?
+        .as_i64()
+        .and_then(|value| i32::try_from(value).ok())
+}
+
+fn completion_barrier_owner_metadata(
+    method: String,
+    uri: Option<String>,
+    version: Option<i32>,
+    first_poll_exec_ms: u64,
+    first_poll_outcome: &str,
+) -> CompletionBarrierOwnerMetadata {
+    CompletionBarrierOwnerMetadata {
+        generation: 0,
+        method,
+        uri,
+        version,
+        first_poll_exec_ms,
+        first_poll_outcome: first_poll_outcome.to_string(),
+    }
+}
+
+fn patch_completion_pre_dispatch_barrier_snapshot(
+    request_id: &str,
+    snapshot: &CompletionBarrierSnapshot,
+    completion_barrier_wait_started_at_ms: Option<u64>,
+) {
+    super::request_context::patch_pending_completion_pre_dispatch_trace(
+        request_id,
+        super::request_context::CompletionPreDispatchTracePatch {
+            completion_barrier_generation: Some(snapshot.generation),
+            completion_barrier_owner_method: Some(snapshot.owner_method.clone()),
+            completion_barrier_owner_uri: snapshot.owner_uri.clone(),
+            completion_barrier_owner_version: snapshot.owner_version,
+            completion_barrier_wait_started_at_ms,
+            doc_sync_first_poll_exec_ms: Some(snapshot.doc_sync_first_poll_exec_ms),
+            doc_sync_first_poll_outcome: Some(snapshot.doc_sync_first_poll_outcome.clone()),
+            doc_sync_first_poll_method: Some(snapshot.owner_method.clone()),
+            doc_sync_first_poll_uri: snapshot.owner_uri.clone(),
+            doc_sync_first_poll_version: snapshot.owner_version,
+            ..Default::default()
+        },
+    );
 }
 
 fn oldest_pending_completion_position(
@@ -1272,10 +1801,11 @@ async fn reject_saturated_general_request(
 
 async fn read_transport_message<I>(
     reader: &mut BufReader<I>,
-) -> Result<Option<TransportMessage>, TransportCodecError>
+) -> Result<Option<(TransportMessage, TransportMessageReadMilestones)>, TransportCodecError>
 where
     I: AsyncRead + Unpin,
 {
+    let read_started_at_ms = super::unix_timestamp_ms();
     let mut content_length = None;
 
     loop {
@@ -1309,7 +1839,13 @@ where
     let mut body = vec![0; body_len];
     reader.read_exact(&mut body).await?;
     let message = serde_json::from_slice(&body).map_err(TransportCodecError::Json)?;
-    Ok(Some(message))
+    Ok(Some((
+        message,
+        TransportMessageReadMilestones {
+            read_started_at_ms,
+            parse_completed_at_ms: super::unix_timestamp_ms(),
+        },
+    )))
 }
 
 async fn resolve_completion_handoff_enqueued_at_ms(
@@ -1930,6 +2466,142 @@ mod tests {
                             }),
                         )))
                     }
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct SameFileTokenPriorityState {
+        ready_release: AtomicBool,
+        ready_blocked: Notify,
+        ready_waker: Mutex<Option<std::task::Waker>>,
+        did_change_started: AtomicBool,
+        did_change_started_notify: Notify,
+        did_change_release: AtomicBool,
+        did_change_release_notify: Notify,
+    }
+
+    #[derive(Debug, Clone)]
+    struct SameFileTokenPriorityService {
+        state: Arc<SameFileTokenPriorityState>,
+    }
+
+    impl Service<Request> for SameFileTokenPriorityService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.state.ready_release.load(Ordering::SeqCst) {
+                Poll::Ready(Ok(()))
+            } else {
+                let mut ready_waker = self
+                    .state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *ready_waker = Some(cx.waker().clone());
+                self.state.ready_blocked.notify_waiters();
+                Poll::Pending
+            }
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let state = self.state.clone();
+            Box::pin(async move {
+                match method.as_str() {
+                    "textDocument/didChange" => {
+                        state.did_change_started.store(true, Ordering::SeqCst);
+                        state.did_change_started_notify.notify_waiters();
+                        while !state.did_change_release.load(Ordering::SeqCst) {
+                            state.did_change_release_notify.notified().await;
+                        }
+                        Ok(None)
+                    }
+                    "textDocument/didSave" => Ok(None),
+                    COMPLETION_METHOD => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("completion request id"),
+                        json!({
+                            "items": [{ "label": "token-ready" }],
+                            "isIncomplete": false,
+                        }),
+                    ))),
+                    _ => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("request id"),
+                        json!({ "capabilities": {} }),
+                    ))),
+                }
+            })
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct SchedulerIsolationState {
+        scheduler_release: AtomicBool,
+        scheduler_blocked: Notify,
+        ready_waker: Mutex<Option<std::task::Waker>>,
+        first_dispatch_completed: AtomicBool,
+        completion_call_count: AtomicUsize,
+    }
+
+    #[derive(Debug, Clone)]
+    struct SchedulerIsolationService {
+        state: Arc<SchedulerIsolationState>,
+    }
+
+    impl Service<Request> for SchedulerIsolationService {
+        type Response = Option<Response>;
+        type Error = std::convert::Infallible;
+        type Future =
+            Pin<Box<dyn std::future::Future<Output = Result<Self::Response, Self::Error>> + Send>>;
+
+        fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            if self.state.first_dispatch_completed.load(Ordering::SeqCst)
+                && !self.state.scheduler_release.load(Ordering::SeqCst)
+            {
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                let mut ready_waker = self
+                    .state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *ready_waker = Some(cx.waker().clone());
+                self.state.scheduler_blocked.notify_waiters();
+                Poll::Pending
+            } else {
+                Poll::Ready(Ok(()))
+            }
+        }
+
+        fn call(&mut self, request: Request) -> Self::Future {
+            let request_id = request.id().cloned();
+            let method = request.method().to_string();
+            let state = self.state.clone();
+            if method == "textDocument/documentSymbol" {
+                state.first_dispatch_completed.store(true, Ordering::SeqCst);
+            }
+            Box::pin(async move {
+                match method.as_str() {
+                    "textDocument/documentSymbol" => Ok(Some(JsonRpcResponse::from_ok(
+                        request_id.expect("documentSymbol request id"),
+                        json!({ "kind": "general" }),
+                    ))),
+                    "textDocument/completion" => {
+                        state.completion_call_count.fetch_add(1, Ordering::SeqCst);
+                        Ok(Some(JsonRpcResponse::from_ok(
+                            request_id.expect("completion request id"),
+                            json!({ "items": [{ "label": "unexpected" }], "isIncomplete": false }),
+                        )))
+                    }
+                    CANCEL_REQUEST_METHOD => Ok(None),
                     _ => Ok(Some(JsonRpcResponse::from_ok(
                         request_id.expect("request id"),
                         json!({ "capabilities": {} }),
@@ -3329,6 +4001,361 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn transport_adapter_prefers_token_ready_completion_over_unrelated_same_priority_fifo() {
+        let target_uri = "file:///token-ready-completion.bsl";
+        let unrelated_uri = "file:///unrelated-same-priority-change.bsl";
+        crate::server::request_context::clear_same_file_ingress_token_publication_for_uri(
+            target_uri,
+        );
+        crate::server::request_context::record_same_file_ingress_token_publication_for_uri(
+            target_uri,
+            7,
+            1_700_000_000_007,
+            "did_change",
+        );
+
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let priority_state = Arc::new(SameFileTokenPriorityState::default());
+        let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities {
+            control: 2,
+            completion: 4,
+            general: 1,
+        });
+
+        let server_task = tokio::spawn({
+            let priority_state = priority_state.clone();
+            let admission_queues = admission_queues.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    SameFileTokenPriorityService {
+                        state: priority_state,
+                    },
+                    1,
+                    admission_queues,
+                )
+                .await;
+            }
+        });
+
+        for message in [
+            json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/didChange",
+                "params": {
+                    "textDocument": { "uri": unrelated_uri, "version": 3 },
+                    "contentChanges": [{ "text": "// unrelated" }]
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": COMPLETION_METHOD,
+                "params": {
+                    "textDocument": { "uri": target_uri },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&message).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while priority_state
+                .ready_waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+            {
+                priority_state.ready_blocked.notified().await;
+            }
+        })
+        .await
+        .expect("scheduler must block before dequeueing queued completion-priority work");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while admission_queues.lane_depth(AdmissionLane::Completion) < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("both completion-priority items must be enqueued before the ready gate releases");
+
+        let token_ready_position = {
+            let state = admission_queues
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            token_ready_completion_position(&state.completion)
+        };
+        assert_eq!(
+            token_ready_position,
+            Some(0),
+            "completion queue must surface the token-ready completion ahead of unrelated queued work before scheduler release"
+        );
+
+        priority_state.ready_release.store(true, Ordering::SeqCst);
+        if let Some(waker) = priority_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        let mut reader = BufReader::new(client_read);
+        let completion_response = tokio::time::timeout(
+            std::time::Duration::from_millis(150),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("completion response timeout");
+        assert_eq!(
+            completion_response.get("id").and_then(|value| value.as_i64()),
+            Some(2),
+            "token-ready completion must bypass unrelated queued same-priority work once its file token is already published"
+        );
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while !priority_state.did_change_started.load(Ordering::SeqCst) {
+                priority_state.did_change_started_notify.notified().await;
+            }
+        })
+        .await
+        .expect(
+            "queued didChange should still begin polling after the bypassed completion responds",
+        );
+
+        priority_state
+            .did_change_release
+            .store(true, Ordering::SeqCst);
+        priority_state.did_change_release_notify.notify_waiters();
+
+        let completion_context =
+            crate::server::request_context::take_completion_request_context_by_request_id("2")
+                .expect("queued completion request context");
+        assert_eq!(completion_context.uri, target_uri);
+        assert_eq!(
+            completion_context.same_file_ingress_token_required_version,
+            Some(7)
+        );
+        assert_eq!(
+            completion_context.same_file_ingress_token_published_at_ms,
+            Some(1_700_000_000_007)
+        );
+        assert_eq!(
+            completion_context.same_file_ingress_token_source.as_deref(),
+            Some("did_change")
+        );
+        assert_eq!(completion_context.same_file_ingress_token_wait_ms, Some(0));
+
+        crate::server::request_context::clear_same_file_ingress_token_publication_for_uri(
+            target_uri,
+        );
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn transport_adapter_task_isolation_keeps_ready_output_and_late_cancel_progress_while_scheduler_stalls(
+    ) {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let isolation_state = Arc::new(SchedulerIsolationState::default());
+        let admission_queues = AdmissionQueues::new(AdmissionQueueCapacities {
+            control: 2,
+            completion: 1,
+            general: 1,
+        });
+
+        let server_task = tokio::spawn({
+            let isolation_state = isolation_state.clone();
+            let admission_queues = admission_queues.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    SchedulerIsolationService {
+                        state: isolation_state,
+                    },
+                    1,
+                    admission_queues,
+                )
+                .await;
+            }
+        });
+
+        let initial_general_request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "textDocument/documentSymbol",
+            "params": {
+                "textDocument": { "uri": "file:///task-isolation-general.bsl" }
+            }
+        });
+        let initial_general_body = serde_json::to_vec(&initial_general_request)
+            .expect("serialize initial general request");
+        let initial_general_header =
+            format!("Content-Length: {}\r\n\r\n", initial_general_body.len());
+        client_write
+            .write_all(initial_general_header.as_bytes())
+            .await
+            .expect("write initial general request header");
+        client_write
+            .write_all(&initial_general_body)
+            .await
+            .expect("write initial general request body");
+        client_write
+            .flush()
+            .await
+            .expect("flush initial general request");
+
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            while !isolation_state
+                .first_dispatch_completed
+                .load(Ordering::SeqCst)
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("initial general request must dispatch before the scheduler stall scenario starts");
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///task-isolation-queued-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///task-isolation-spillover-completion.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "method": "$/cancelRequest",
+                "params": { "id": 3 }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write.flush().await.expect("flush requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(500), async {
+            loop {
+                if isolation_state
+                    .ready_waker
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .is_some()
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("scheduler must enter the blocking second poll_ready branch");
+
+        let mut reader = BufReader::new(client_read);
+        let first_response = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("ready output must flush while scheduler remains stalled");
+        let second_response = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            read_framed_message(&mut reader),
+        )
+        .await
+        .expect("late cancel must still be classified while scheduler remains stalled");
+        let responses = [&first_response, &second_response];
+
+        let general_response = responses
+            .iter()
+            .find(|response| response.get("id").and_then(|value| value.as_i64()) == Some(1))
+            .expect("general response must flush before scheduler release");
+        assert_eq!(
+            general_response
+                .get("result")
+                .and_then(|value| value.get("kind"))
+                .and_then(|value| value.as_str()),
+            Some("general")
+        );
+
+        let cancel_response = responses
+            .iter()
+            .find(|response| response.get("id").and_then(|value| value.as_i64()) == Some(3))
+            .expect("spillover completion cancel response");
+        assert_eq!(
+            cancel_response
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_i64()),
+            Some(ErrorCode::RequestCancelled.code()),
+            "reader-side spillover cancel must still classify while the scheduler stall lives, responses={responses:?}"
+        );
+        assert_eq!(
+            isolation_state.completion_call_count.load(Ordering::SeqCst),
+            0,
+            "scheduler stall must not force queued completion dispatch before the spillover cancel is classified"
+        );
+
+        isolation_state
+            .scheduler_release
+            .store(true, Ordering::SeqCst);
+        if let Some(waker) = isolation_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
     async fn transport_adapter_allows_general_hover_to_bypass_inflight_did_open_barrier_while_completion_waits(
     ) {
         let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
@@ -3461,6 +4488,43 @@ mod tests {
             Some(1),
             "completion must still observe the didOpen-applied version after the barrier releases, response={completion_response:?}"
         );
+        let completion_context =
+            crate::server::request_context::take_completion_request_context_by_request_id("2")
+                .expect("queued completion request context");
+        assert_eq!(
+            completion_context
+                .completion_barrier_owner_method
+                .as_deref(),
+            Some(DID_OPEN_METHOD)
+        );
+        assert_eq!(
+            completion_context.completion_barrier_owner_uri.as_deref(),
+            Some("file:///hover-bypass-did-open.bsl")
+        );
+        assert_eq!(completion_context.completion_barrier_owner_version, Some(1));
+        assert!(
+            completion_context
+                .completion_barrier_wait_ms
+                .is_some_and(|wait_ms| wait_ms > 0),
+            "completion barrier wait must be attributed once completion was gated behind didOpen"
+        );
+        assert!(
+            completion_context.doc_sync_first_poll_exec_ms.is_some(),
+            "doc-sync first poll exec must be exported for the active barrier owner"
+        );
+        assert_eq!(
+            completion_context.doc_sync_first_poll_outcome.as_deref(),
+            Some("pending")
+        );
+        assert_eq!(
+            completion_context.doc_sync_first_poll_method.as_deref(),
+            Some(DID_OPEN_METHOD)
+        );
+        assert_eq!(
+            completion_context.doc_sync_first_poll_uri.as_deref(),
+            Some("file:///hover-bypass-did-open.bsl")
+        );
+        assert_eq!(completion_context.doc_sync_first_poll_version, Some(1));
 
         let call_order = barrier_state
             .call_order
@@ -4121,6 +5185,189 @@ mod tests {
             .await
             .is_err(),
             "overflow rejection and late cancel must remain exactly-once"
+        );
+
+        drop(client_write);
+        server_task.abort();
+        let _ = server_task.await;
+    }
+
+    #[tokio::test]
+    async fn transport_adapter_attributes_reader_backpressure_before_adapter_read_after_completion_spillover_wait(
+    ) {
+        let (client_stream, server_stream) = tokio::io::duplex(8 * 1024);
+        let (client_read, mut client_write) = tokio::io::split(client_stream);
+        let (server_read, server_write) = tokio::io::split(server_stream);
+        let backpressure_state = Arc::new(CompletionIngressBackpressureState::default());
+
+        let server_task = tokio::spawn({
+            let backpressure_state = backpressure_state.clone();
+            async move {
+                serve_with_completion_handoff_with_admission_queues(
+                    server_read,
+                    server_write,
+                    NullLoopback,
+                    CompletionIngressBackpressureService {
+                        state: backpressure_state,
+                    },
+                    1,
+                    AdmissionQueues::new(AdmissionQueueCapacities {
+                        control: 2,
+                        completion: 1,
+                        general: 1,
+                    }),
+                )
+                .await;
+            }
+        });
+
+        for request in [
+            json!({
+                "jsonrpc": "2.0",
+                "id": 42_122,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///reader-backpressure-queued.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 42_123,
+                "method": "textDocument/completion",
+                "params": {
+                    "textDocument": { "uri": "file:///reader-backpressure-spillover.bsl" },
+                    "position": { "line": 0, "character": 0 }
+                }
+            }),
+        ] {
+            let body = serde_json::to_vec(&request).expect("serialize request");
+            let header = format!("Content-Length: {}\r\n\r\n", body.len());
+            client_write
+                .write_all(header.as_bytes())
+                .await
+                .expect("write request header");
+            client_write
+                .write_all(&body)
+                .await
+                .expect("write request body");
+        }
+        client_write
+            .flush()
+            .await
+            .expect("flush initial saturated completion requests");
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            while backpressure_state
+                .ready_waker
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_none()
+            {
+                backpressure_state.ready_blocked.notified().await;
+            }
+        })
+        .await
+        .expect("scheduler must block before reader-side completion spillover wait is exercised");
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        backpressure_state
+            .ready_release
+            .store(true, Ordering::SeqCst);
+        if let Some(waker) = backpressure_state
+            .ready_waker
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+        {
+            waker.wake();
+        }
+
+        tokio::time::timeout(std::time::Duration::from_millis(150), async {
+            loop {
+                if backpressure_state
+                    .call_order
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .contains(&42_122)
+                {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("queued completion must dispatch to release completion-lane space");
+
+        let traced_request = json!({
+            "jsonrpc": "2.0",
+            "id": 42_124,
+            "method": "textDocument/completion",
+            "params": {
+                "textDocument": { "uri": "file:///reader-backpressure-traced.bsl" },
+                "position": { "line": 0, "character": 0 }
+            }
+        });
+        let traced_body = serde_json::to_vec(&traced_request).expect("serialize traced request");
+        let traced_header = format!("Content-Length: {}\r\n\r\n", traced_body.len());
+        client_write
+            .write_all(traced_header.as_bytes())
+            .await
+            .expect("write traced request header");
+        client_write
+            .write_all(&traced_body)
+            .await
+            .expect("write traced request body");
+        client_write.flush().await.expect("flush traced request");
+
+        let mut reader = BufReader::new(client_read);
+        let mut responses_by_id = HashMap::new();
+        for _ in 0..3 {
+            let response = tokio::time::timeout(
+                std::time::Duration::from_millis(150),
+                read_framed_message(&mut reader),
+            )
+            .await
+            .expect("completion response timeout after releasing reader backpressure");
+            let response_id = response
+                .get("id")
+                .and_then(|value| value.as_i64())
+                .expect("response id");
+            responses_by_id.insert(response_id, response);
+        }
+        assert_eq!(
+            responses_by_id.len(),
+            3,
+            "queued, spillover and traced completions must each resolve exactly once, responses={responses_by_id:?}"
+        );
+        assert!(
+            backpressure_state
+                .call_order
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .contains(&42_124),
+            "traced completion must still reach dispatch after the reader-side wait"
+        );
+
+        let traced_context =
+            crate::server::request_context::take_completion_request_context_by_request_id("42124")
+                .expect("traced completion request context");
+        assert_eq!(
+            traced_context.read_loop_wait_reason.as_deref(),
+            Some("completion_lane_space")
+        );
+        assert!(
+            traced_context.read_loop_wait_ms.unwrap_or(0) > 0,
+            "reader-side spillover wait must be recorded as a positive server-side wait, context={traced_context:?}"
+        );
+        assert_eq!(traced_context.pending_completion_spillover_depth, Some(1));
+        assert_eq!(traced_context.pending_general_request_staged, Some(false));
+        assert!(
+            traced_context.adapter_read_started_at_ms.is_some()
+                && traced_context.adapter_read_at_ms.is_some()
+                && traced_context.adapter_parse_completed_at_ms.is_some(),
+            "traced completion must retain authoritative adapter-read timestamps after the local reader wait, context={traced_context:?}"
         );
 
         drop(client_write);

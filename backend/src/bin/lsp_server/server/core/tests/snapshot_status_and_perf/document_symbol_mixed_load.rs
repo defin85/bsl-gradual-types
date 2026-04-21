@@ -619,25 +619,83 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     "dominant_stage": trace.get("dominant_stage").and_then(|value| value.as_str()),
                     "queue_outcome": trace.get("queue_outcome").and_then(|value| value.as_str()),
                     "turn_wait_outcome": trace.get("turn_wait_outcome").and_then(|value| value.as_str()),
-                    "adapter_read_at_ms": completion_timeline_server_edge_u64(
-                        trace,
-                        "adapter_read_at_ms",
-                    ),
-                    "transport_received_at_ms": completion_timeline_server_edge_u64(
-                        trace,
-                        "transport_received_at_ms",
-                    ),
-                    "jsonrpc_dispatch_received_at_ms": completion_timeline_server_edge_u64(
-                        trace,
-                        "jsonrpc_dispatch_received_at_ms",
-                    ),
-                    "adapter_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
-                        trace,
-                        "adapter_to_dispatch_wait_ms",
-                    ),
-                    "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
-                        trace,
-                        "dispatch_to_request_context_wait_ms",
+                            "adapter_read_at_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "adapter_read_at_ms",
+                            ),
+                            "transport_received_at_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "transport_received_at_ms",
+                            ),
+                            "jsonrpc_dispatch_received_at_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "jsonrpc_dispatch_received_at_ms",
+                            ),
+                            "read_loop_wait_reason": trace
+                                .get("server_edge_details")
+                                .and_then(|value| value.get("read_loop_wait_reason"))
+                                .and_then(|value| value.as_str()),
+                            "read_loop_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "read_loop_wait_ms",
+                            ),
+                            "pending_completion_spillover_depth": completion_timeline_server_edge_u64(
+                                trace,
+                                "pending_completion_spillover_depth",
+                            ),
+                            "adapter_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "adapter_to_dispatch_wait_ms",
+                            ),
+                            "admission_queue_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "admission_queue_wait_ms",
+                            ),
+                            "scheduler_poll_ready_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "scheduler_poll_ready_wait_ms",
+                            ),
+                            "completion_barrier_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "completion_barrier_wait_ms",
+                            ),
+                            "completion_barrier_owner_method": trace
+                                .get("server_edge_details")
+                                .and_then(|value| value.get("completion_barrier_owner_method"))
+                                .and_then(|value| value.as_str()),
+                            "completion_barrier_owner_uri": trace
+                                .get("server_edge_details")
+                                .and_then(|value| value.get("completion_barrier_owner_uri"))
+                                .and_then(|value| value.as_str()),
+                            "completion_barrier_owner_version": trace
+                                .get("server_edge_details")
+                                .and_then(|value| value.get("completion_barrier_owner_version"))
+                                .and_then(|value| value.as_i64()),
+                            "same_file_ingress_token_required_version": trace
+                                .get("server_edge_details")
+                                .and_then(|value| {
+                                    value.get("same_file_ingress_token_required_version")
+                                })
+                                .and_then(|value| value.as_i64()),
+                            "same_file_ingress_token_published_at_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "same_file_ingress_token_published_at_ms",
+                            ),
+                            "same_file_ingress_token_source": trace
+                                .get("server_edge_details")
+                                .and_then(|value| value.get("same_file_ingress_token_source"))
+                                .and_then(|value| value.as_str()),
+                            "same_file_ingress_token_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "same_file_ingress_token_wait_ms",
+                            ),
+                            "scheduler_ready_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "scheduler_ready_to_dispatch_wait_ms",
+                            ),
+                            "dispatch_to_request_context_wait_ms": completion_timeline_server_edge_u64(
+                                trace,
+                                "dispatch_to_request_context_wait_ms",
                             ),
                             "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
                                 trace,
@@ -756,9 +814,67 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                         trace,
                         "jsonrpc_dispatch_received_at_ms",
                     ),
+                    "read_loop_wait_reason": trace
+                        .get("server_edge_details")
+                        .and_then(|value| value.get("read_loop_wait_reason"))
+                        .and_then(|value| value.as_str()),
+                    "read_loop_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "read_loop_wait_ms",
+                    ),
+                    "pending_completion_spillover_depth": completion_timeline_server_edge_u64(
+                        trace,
+                        "pending_completion_spillover_depth",
+                    ),
                     "adapter_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
                         trace,
                         "adapter_to_dispatch_wait_ms",
+                    ),
+                    "admission_queue_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "admission_queue_wait_ms",
+                    ),
+                    "scheduler_poll_ready_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "scheduler_poll_ready_wait_ms",
+                    ),
+                    "completion_barrier_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "completion_barrier_wait_ms",
+                    ),
+                    "completion_barrier_owner_method": trace
+                        .get("server_edge_details")
+                        .and_then(|value| value.get("completion_barrier_owner_method"))
+                        .and_then(|value| value.as_str()),
+                    "completion_barrier_owner_uri": trace
+                        .get("server_edge_details")
+                        .and_then(|value| value.get("completion_barrier_owner_uri"))
+                        .and_then(|value| value.as_str()),
+                    "completion_barrier_owner_version": trace
+                        .get("server_edge_details")
+                        .and_then(|value| value.get("completion_barrier_owner_version"))
+                        .and_then(|value| value.as_i64()),
+                    "same_file_ingress_token_required_version": trace
+                        .get("server_edge_details")
+                        .and_then(|value| {
+                            value.get("same_file_ingress_token_required_version")
+                        })
+                        .and_then(|value| value.as_i64()),
+                    "same_file_ingress_token_published_at_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "same_file_ingress_token_published_at_ms",
+                    ),
+                    "same_file_ingress_token_source": trace
+                        .get("server_edge_details")
+                        .and_then(|value| value.get("same_file_ingress_token_source"))
+                        .and_then(|value| value.as_str()),
+                    "same_file_ingress_token_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "same_file_ingress_token_wait_ms",
+                    ),
+                    "scheduler_ready_to_dispatch_wait_ms": completion_timeline_server_edge_u64(
+                        trace,
+                        "scheduler_ready_to_dispatch_wait_ms",
                     ),
                     "transport_to_handler_wait_ms": completion_timeline_server_edge_u64(
                         trace,
@@ -831,6 +947,45 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 .collect::<Vec<_>>();
             sample_histogram_value(&values)
         };
+        let sample_trace_server_edge_present_samples =
+            |samples: &[serde_json::Value], field: &str| {
+                samples
+                    .iter()
+                    .filter(|sample| {
+                        sample
+                            .get("trace")
+                            .and_then(|trace| trace.get(field))
+                            .and_then(|value| value.as_u64())
+                            .is_some()
+                    })
+                    .count()
+            };
+        let sample_trace_server_edge_max_ms = |samples: &[serde_json::Value], field: &str| {
+            samples
+                .iter()
+                .filter_map(|sample| {
+                    sample
+                        .get("trace")
+                        .and_then(|trace| trace.get(field))
+                        .and_then(|value| value.as_u64())
+                })
+                .max()
+                .unwrap_or(0)
+        };
+        let sample_trace_server_edge_over_budget_samples =
+            |samples: &[serde_json::Value], field: &str, budget_ms: u64| {
+                samples
+                    .iter()
+                    .filter(|sample| {
+                        sample
+                            .get("trace")
+                            .and_then(|trace| trace.get(field))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0)
+                            > budget_ms
+                    })
+                    .count()
+            };
 
         let warmup_non_empty_samples = warmup_samples
             .iter()
@@ -1054,16 +1209,8 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
         );
         let measured_adapter_to_dispatch_p95_ms =
             read_numeric_metric(measured_adapter_to_dispatch_histogram.get("p95"));
-        let measured_adapter_to_dispatch_max_ms = measured_samples
-            .iter()
-            .filter_map(|sample| {
-                sample
-                    .get("trace")
-                    .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
-                    .and_then(|value| value.as_u64())
-            })
-            .max()
-            .unwrap_or(0);
+        let measured_adapter_to_dispatch_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "adapter_to_dispatch_wait_ms");
         let measured_pre_dispatch_wait_over_budget_samples = measured_samples
             .iter()
             .filter(|sample| {
@@ -1085,6 +1232,135 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     .unwrap_or(0)
                     > interactive_wait_budget_ms
                         .saturating_mul(ADAPTER_TO_DISPATCH_MAX_FACTOR)
+            })
+            .count();
+        let measured_read_loop_wait_histogram =
+            sample_trace_server_edge_histogram(&measured_samples, "read_loop_wait_ms");
+        let measured_read_loop_wait_p95_ms =
+            read_numeric_metric(measured_read_loop_wait_histogram.get("p95"));
+        let measured_read_loop_wait_present_samples =
+            sample_trace_server_edge_present_samples(&measured_samples, "read_loop_wait_ms");
+        let measured_read_loop_wait_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "read_loop_wait_ms");
+        let measured_read_loop_wait_over_hard_cap_samples = sample_trace_server_edge_over_budget_samples(
+            &measured_samples,
+            "read_loop_wait_ms",
+            truthful_wait_max_budget_ms,
+        );
+        let measured_admission_queue_wait_histogram =
+            sample_trace_server_edge_histogram(&measured_samples, "admission_queue_wait_ms");
+        let measured_admission_queue_wait_p95_ms =
+            read_numeric_metric(measured_admission_queue_wait_histogram.get("p95"));
+        let measured_admission_queue_wait_present_samples =
+            sample_trace_server_edge_present_samples(&measured_samples, "admission_queue_wait_ms");
+        let measured_admission_queue_wait_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "admission_queue_wait_ms");
+        let measured_admission_queue_wait_over_hard_cap_samples =
+            sample_trace_server_edge_over_budget_samples(
+                &measured_samples,
+                "admission_queue_wait_ms",
+                truthful_wait_max_budget_ms,
+            );
+        let measured_scheduler_poll_ready_wait_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "scheduler_poll_ready_wait_ms",
+        );
+        let measured_scheduler_poll_ready_wait_p95_ms =
+            read_numeric_metric(measured_scheduler_poll_ready_wait_histogram.get("p95"));
+        let measured_scheduler_poll_ready_wait_present_samples = sample_trace_server_edge_present_samples(
+            &measured_samples,
+            "scheduler_poll_ready_wait_ms",
+        );
+        let measured_scheduler_poll_ready_wait_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "scheduler_poll_ready_wait_ms");
+        let measured_scheduler_poll_ready_wait_over_hard_cap_samples =
+            sample_trace_server_edge_over_budget_samples(
+                &measured_samples,
+                "scheduler_poll_ready_wait_ms",
+                truthful_wait_max_budget_ms,
+            );
+        let measured_completion_barrier_wait_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "completion_barrier_wait_ms",
+        );
+        let measured_completion_barrier_wait_p95_ms =
+            read_numeric_metric(measured_completion_barrier_wait_histogram.get("p95"));
+        let measured_completion_barrier_wait_present_samples =
+            sample_trace_server_edge_present_samples(&measured_samples, "completion_barrier_wait_ms");
+        let measured_completion_barrier_wait_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "completion_barrier_wait_ms");
+        let measured_completion_barrier_wait_over_hard_cap_samples =
+            sample_trace_server_edge_over_budget_samples(
+                &measured_samples,
+                "completion_barrier_wait_ms",
+                truthful_wait_max_budget_ms,
+            );
+        let measured_same_file_ingress_token_wait_histogram = sample_trace_server_edge_histogram(
+            &measured_samples,
+            "same_file_ingress_token_wait_ms",
+        );
+        let measured_same_file_ingress_token_wait_p95_ms =
+            read_numeric_metric(measured_same_file_ingress_token_wait_histogram.get("p95"));
+        let measured_same_file_ingress_token_wait_present_samples =
+            sample_trace_server_edge_present_samples(
+                &measured_samples,
+                "same_file_ingress_token_wait_ms",
+            );
+        let measured_same_file_ingress_token_wait_max_ms =
+            sample_trace_server_edge_max_ms(&measured_samples, "same_file_ingress_token_wait_ms");
+        let measured_same_file_ingress_token_wait_over_hard_cap_samples =
+            sample_trace_server_edge_over_budget_samples(
+                &measured_samples,
+                "same_file_ingress_token_wait_ms",
+                truthful_wait_max_budget_ms,
+            );
+        let measured_scheduler_ready_to_dispatch_wait_histogram =
+            sample_trace_server_edge_histogram(
+                &measured_samples,
+                "scheduler_ready_to_dispatch_wait_ms",
+            );
+        let measured_scheduler_ready_to_dispatch_wait_p95_ms =
+            read_numeric_metric(measured_scheduler_ready_to_dispatch_wait_histogram.get("p95"));
+        let measured_scheduler_ready_to_dispatch_wait_present_samples =
+            sample_trace_server_edge_present_samples(
+                &measured_samples,
+                "scheduler_ready_to_dispatch_wait_ms",
+            );
+        let measured_scheduler_ready_to_dispatch_wait_max_ms = sample_trace_server_edge_max_ms(
+            &measured_samples,
+            "scheduler_ready_to_dispatch_wait_ms",
+        );
+        let measured_scheduler_ready_to_dispatch_wait_over_hard_cap_samples =
+            sample_trace_server_edge_over_budget_samples(
+                &measured_samples,
+                "scheduler_ready_to_dispatch_wait_ms",
+                truthful_wait_max_budget_ms,
+            );
+        let measured_same_file_ingress_token_published_samples =
+            sample_trace_server_edge_present_samples(
+                &measured_samples,
+                "same_file_ingress_token_published_at_ms",
+            );
+        let measured_truthful_pre_dispatch_bucket_shift_samples = measured_samples
+            .iter()
+            .filter(|sample| {
+                [
+                    "read_loop_wait_ms",
+                    "admission_queue_wait_ms",
+                    "scheduler_poll_ready_wait_ms",
+                    "completion_barrier_wait_ms",
+                    "same_file_ingress_token_wait_ms",
+                    "scheduler_ready_to_dispatch_wait_ms",
+                ]
+                .into_iter()
+                .any(|field| {
+                    sample
+                        .get("trace")
+                        .and_then(|trace| trace.get(field))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0)
+                        > truthful_wait_max_budget_ms
+                })
             })
             .count();
         let measured_client_to_transport_histogram =
@@ -1224,6 +1500,182 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                     && fail_closed_cause != Some("prepare_timeout")
             })
             .count();
+        let worst_outlier_correlation_slice = measured_samples
+            .iter()
+            .max_by_key(|sample| {
+                let trace = sample.get("trace");
+                [
+                    sample
+                        .get("client_to_transport_wait_ms")
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("read_loop_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("admission_queue_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("scheduler_poll_ready_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("completion_barrier_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("scheduler_ready_to_dispatch_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                    trace
+                        .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                        .and_then(|value| value.as_u64())
+                        .unwrap_or(0),
+                ]
+                .into_iter()
+                .max()
+                .unwrap_or(0)
+            })
+            .map(|sample| {
+                let trace = sample.get("trace");
+                let dominant_server_edge_buckets = [
+                    (
+                        "read_loop_wait_ms",
+                        trace.and_then(|trace| trace.get("read_loop_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "admission_queue_wait_ms",
+                        trace.and_then(|trace| trace.get("admission_queue_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "scheduler_poll_ready_wait_ms",
+                        trace.and_then(|trace| trace.get("scheduler_poll_ready_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "completion_barrier_wait_ms",
+                        trace.and_then(|trace| trace.get("completion_barrier_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "same_file_ingress_token_wait_ms",
+                        trace.and_then(|trace| trace.get("same_file_ingress_token_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "scheduler_ready_to_dispatch_wait_ms",
+                        trace.and_then(|trace| trace.get("scheduler_ready_to_dispatch_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                    (
+                        "adapter_to_dispatch_wait_ms",
+                        trace.and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0),
+                    ),
+                ];
+                let (dominant_server_edge_bucket, dominant_server_edge_wait_ms) =
+                    dominant_server_edge_buckets
+                        .into_iter()
+                        .max_by_key(|(_, value)| *value)
+                        .unwrap_or(("adapter_to_dispatch_wait_ms", 0));
+                serde_json::json!({
+                    "step": sample.get("step").and_then(|value| value.as_str()),
+                    "request_id": sample.get("request_id").and_then(|value| value.as_i64()),
+                    "version": sample.get("version").and_then(|value| value.as_i64()),
+                    "elapsed_ms": sample.get("elapsed_ms").and_then(|value| value.as_u64()),
+                    "completion_request_written_at_ms": sample
+                        .get("completion_request_written_at_ms")
+                        .and_then(|value| value.as_u64()),
+                    "did_change_notifications_per_measured_completion": sample
+                        .get("did_change_notifications_per_measured_completion")
+                        .and_then(|value| value.as_u64()),
+                    "did_save_after_did_change": sample
+                        .get("did_save_after_did_change")
+                        .and_then(|value| value.as_bool()),
+                    "parse_gap_source": sample
+                        .get("parse_gap_source")
+                        .and_then(|value| value.as_str()),
+                    "forced_shadow_fast_path_off_version": sample
+                        .get("forced_shadow_fast_path_off_version")
+                        .and_then(|value| value.as_i64()),
+                    "dominant_server_edge_bucket": dominant_server_edge_bucket,
+                    "dominant_server_edge_wait_ms": dominant_server_edge_wait_ms,
+                    "client_to_transport_wait_ms": sample
+                        .get("client_to_transport_wait_ms")
+                        .and_then(|value| value.as_u64()),
+                    "read_loop_wait_reason": trace
+                        .and_then(|trace| trace.get("read_loop_wait_reason"))
+                        .and_then(|value| value.as_str()),
+                    "read_loop_wait_ms": trace
+                        .and_then(|trace| trace.get("read_loop_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "pending_completion_spillover_depth": trace
+                        .and_then(|trace| trace.get("pending_completion_spillover_depth"))
+                        .and_then(|value| value.as_u64()),
+                    "admission_queue_wait_ms": trace
+                        .and_then(|trace| trace.get("admission_queue_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "scheduler_poll_ready_wait_ms": trace
+                        .and_then(|trace| trace.get("scheduler_poll_ready_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "completion_barrier_wait_ms": trace
+                        .and_then(|trace| trace.get("completion_barrier_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "completion_barrier_owner_method": trace
+                        .and_then(|trace| trace.get("completion_barrier_owner_method"))
+                        .and_then(|value| value.as_str()),
+                    "completion_barrier_owner_uri": trace
+                        .and_then(|trace| trace.get("completion_barrier_owner_uri"))
+                        .and_then(|value| value.as_str()),
+                    "completion_barrier_owner_version": trace
+                        .and_then(|trace| trace.get("completion_barrier_owner_version"))
+                        .and_then(|value| value.as_i64()),
+                    "required_token_version": trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_required_version"))
+                        .and_then(|value| value.as_i64()),
+                    "current_published_token_version": trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_required_version"))
+                        .and_then(|value| value.as_i64()),
+                    "current_published_token_version_note": "derived from same-file publication observed by the sampled completion request context",
+                    "same_file_ingress_token_published_at_ms": trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_published_at_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "current_published_token_source": trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_source"))
+                        .and_then(|value| value.as_str()),
+                    "same_file_ingress_token_wait_ms": trace
+                        .and_then(|trace| trace.get("same_file_ingress_token_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "scheduler_ready_to_dispatch_wait_ms": trace
+                        .and_then(|trace| trace.get("scheduler_ready_to_dispatch_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "adapter_to_dispatch_wait_ms": trace
+                        .and_then(|trace| trace.get("adapter_to_dispatch_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "wait_for_file_version_runtime_queue_wait_ms": trace
+                        .and_then(|trace| trace.get("wait_for_file_version_runtime_queue_wait_ms"))
+                        .and_then(|value| value.as_u64()),
+                    "wait_for_file_version_runtime_resolution": trace
+                        .and_then(|trace| trace.get("wait_for_file_version_runtime_resolution"))
+                        .and_then(|value| value.as_str()),
+                })
+            })
+            .unwrap_or(serde_json::json!(null));
         let parse_cold_start_evidence = serde_json::json!({
             "measured_cold_query_bundle_samples": measured_cold_query_bundle_samples,
             "measured_parse_snapshot_full_total_delta": measured_parse_snapshot_full_total_delta,
@@ -1255,6 +1707,37 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "completion_stage_exact_wait_apply_age_at_start_ms": measured_exact_wait_apply_age_at_start_ms,
             "completion_stage_exact_wait_apply_age_at_terminal_ms": measured_exact_wait_apply_age_at_terminal_ms,
         });
+        let truthful_pre_dispatch_split_evidence = serde_json::json!({
+            "interactive_wait_budget_ms": interactive_wait_budget_ms,
+            "truthful_wait_p95_budget_ms": truthful_wait_p95_budget_ms,
+            "truthful_wait_max_budget_ms": truthful_wait_max_budget_ms,
+            "measured_read_loop_wait_ms": measured_read_loop_wait_histogram,
+            "measured_read_loop_wait_present_samples": measured_read_loop_wait_present_samples,
+            "measured_read_loop_wait_max_ms": measured_read_loop_wait_max_ms,
+            "measured_read_loop_wait_over_hard_cap_samples": measured_read_loop_wait_over_hard_cap_samples,
+            "measured_admission_queue_wait_ms": measured_admission_queue_wait_histogram,
+            "measured_admission_queue_wait_present_samples": measured_admission_queue_wait_present_samples,
+            "measured_admission_queue_wait_max_ms": measured_admission_queue_wait_max_ms,
+            "measured_admission_queue_wait_over_hard_cap_samples": measured_admission_queue_wait_over_hard_cap_samples,
+            "measured_scheduler_poll_ready_wait_ms": measured_scheduler_poll_ready_wait_histogram,
+            "measured_scheduler_poll_ready_wait_present_samples": measured_scheduler_poll_ready_wait_present_samples,
+            "measured_scheduler_poll_ready_wait_max_ms": measured_scheduler_poll_ready_wait_max_ms,
+            "measured_scheduler_poll_ready_wait_over_hard_cap_samples": measured_scheduler_poll_ready_wait_over_hard_cap_samples,
+            "measured_completion_barrier_wait_ms": measured_completion_barrier_wait_histogram,
+            "measured_completion_barrier_wait_present_samples": measured_completion_barrier_wait_present_samples,
+            "measured_completion_barrier_wait_max_ms": measured_completion_barrier_wait_max_ms,
+            "measured_completion_barrier_wait_over_hard_cap_samples": measured_completion_barrier_wait_over_hard_cap_samples,
+            "measured_same_file_ingress_token_wait_ms": measured_same_file_ingress_token_wait_histogram,
+            "measured_same_file_ingress_token_wait_present_samples": measured_same_file_ingress_token_wait_present_samples,
+            "measured_same_file_ingress_token_wait_max_ms": measured_same_file_ingress_token_wait_max_ms,
+            "measured_same_file_ingress_token_wait_over_hard_cap_samples": measured_same_file_ingress_token_wait_over_hard_cap_samples,
+            "measured_same_file_ingress_token_published_samples": measured_same_file_ingress_token_published_samples,
+            "measured_scheduler_ready_to_dispatch_wait_ms": measured_scheduler_ready_to_dispatch_wait_histogram,
+            "measured_scheduler_ready_to_dispatch_wait_present_samples": measured_scheduler_ready_to_dispatch_wait_present_samples,
+            "measured_scheduler_ready_to_dispatch_wait_max_ms": measured_scheduler_ready_to_dispatch_wait_max_ms,
+            "measured_scheduler_ready_to_dispatch_wait_over_hard_cap_samples": measured_scheduler_ready_to_dispatch_wait_over_hard_cap_samples,
+            "measured_truthful_pre_dispatch_bucket_shift_samples": measured_truthful_pre_dispatch_bucket_shift_samples,
+        });
         let parse_cold_start_validation_pass = measured_cold_query_bundle_samples == 0
             && measured_parse_snapshot_no_previous_tree_total_delta == 0
             && measured_parse_snapshot_full_total_delta <= MEASURE_REQUESTS as u64;
@@ -1274,12 +1757,67 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_runtime_apply_changes_queue_wait_present_samples == 0
                 || measured_runtime_apply_changes_queue_wait_max_ms
                     <= APPLY_BACKLOG_MAX_BUDGET_MS as f64;
+        let truthful_pre_dispatch_read_loop_p95_pass = measured_read_loop_wait_present_samples == 0
+            || measured_read_loop_wait_p95_ms <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_read_loop_max_pass = measured_read_loop_wait_present_samples == 0
+            || measured_read_loop_wait_max_ms <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_admission_queue_p95_pass =
+            measured_admission_queue_wait_present_samples == 0
+                || measured_admission_queue_wait_p95_ms <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_admission_queue_max_pass =
+            measured_admission_queue_wait_present_samples == 0
+                || measured_admission_queue_wait_max_ms <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_scheduler_poll_ready_p95_pass =
+            measured_scheduler_poll_ready_wait_present_samples == 0
+                || measured_scheduler_poll_ready_wait_p95_ms <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_scheduler_poll_ready_max_pass =
+            measured_scheduler_poll_ready_wait_present_samples == 0
+                || measured_scheduler_poll_ready_wait_max_ms <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_completion_barrier_p95_pass =
+            measured_completion_barrier_wait_present_samples == 0
+                || measured_completion_barrier_wait_p95_ms <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_completion_barrier_max_pass =
+            measured_completion_barrier_wait_present_samples == 0
+                || measured_completion_barrier_wait_max_ms <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_same_file_token_p95_pass =
+            measured_same_file_ingress_token_wait_present_samples == 0
+                || measured_same_file_ingress_token_wait_p95_ms <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_same_file_token_max_pass =
+            measured_same_file_ingress_token_wait_present_samples == 0
+                || measured_same_file_ingress_token_wait_max_ms <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_scheduler_ready_to_dispatch_p95_pass =
+            measured_scheduler_ready_to_dispatch_wait_present_samples == 0
+                || measured_scheduler_ready_to_dispatch_wait_p95_ms
+                    <= truthful_wait_p95_budget_ms;
+        let truthful_pre_dispatch_scheduler_ready_to_dispatch_max_pass =
+            measured_scheduler_ready_to_dispatch_wait_present_samples == 0
+                || measured_scheduler_ready_to_dispatch_wait_max_ms
+                    <= truthful_wait_max_budget_ms;
+        let truthful_pre_dispatch_token_publication_pass =
+            measured_same_file_ingress_token_published_samples == MEASURE_REQUESTS;
+        let truthful_pre_dispatch_bucket_shift_pass =
+            measured_truthful_pre_dispatch_bucket_shift_samples == 0;
         let apply_backlog_validation_pass = measured_prepare_timeout_wait_for_file_version_samples
             == 0
             && apply_backlog_wait_for_file_version_p95_pass
             && apply_backlog_wait_for_file_version_max_pass
             && apply_backlog_runtime_apply_queue_p95_pass
             && apply_backlog_runtime_apply_queue_max_pass;
+        let truthful_pre_dispatch_split_validation_pass =
+            truthful_pre_dispatch_read_loop_p95_pass
+                && truthful_pre_dispatch_read_loop_max_pass
+                && truthful_pre_dispatch_admission_queue_p95_pass
+                && truthful_pre_dispatch_admission_queue_max_pass
+                && truthful_pre_dispatch_scheduler_poll_ready_p95_pass
+                && truthful_pre_dispatch_scheduler_poll_ready_max_pass
+                && truthful_pre_dispatch_completion_barrier_p95_pass
+                && truthful_pre_dispatch_completion_barrier_max_pass
+                && truthful_pre_dispatch_same_file_token_p95_pass
+                && truthful_pre_dispatch_same_file_token_max_pass
+                && truthful_pre_dispatch_scheduler_ready_to_dispatch_p95_pass
+                && truthful_pre_dispatch_scheduler_ready_to_dispatch_max_pass
+                && truthful_pre_dispatch_token_publication_pass
+                && truthful_pre_dispatch_bucket_shift_pass;
         let parse_cold_start_validation = serde_json::json!({
             "failure_class": "parse_cold_start",
             "status": if parse_cold_start_validation_pass { "pass" } else { "fail" },
@@ -1336,15 +1874,108 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 },
             },
         });
+        let truthful_pre_dispatch_split_validation = serde_json::json!({
+            "failure_class": "truthful_pre_dispatch_split",
+            "status": if truthful_pre_dispatch_split_validation_pass { "pass" } else { "fail" },
+            "checks": {
+                "read_loop_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_read_loop_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_read_loop_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_read_loop_wait_present_samples,
+                },
+                "read_loop_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_read_loop_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_read_loop_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_read_loop_wait_present_samples,
+                },
+                "admission_queue_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_admission_queue_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_admission_queue_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_admission_queue_wait_present_samples,
+                },
+                "admission_queue_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_admission_queue_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_admission_queue_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_admission_queue_wait_present_samples,
+                },
+                "scheduler_poll_ready_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_scheduler_poll_ready_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_scheduler_poll_ready_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_scheduler_poll_ready_wait_present_samples,
+                },
+                "scheduler_poll_ready_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_scheduler_poll_ready_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_scheduler_poll_ready_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_scheduler_poll_ready_wait_present_samples,
+                },
+                "completion_barrier_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_completion_barrier_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_completion_barrier_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_completion_barrier_wait_present_samples,
+                },
+                "completion_barrier_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_completion_barrier_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_completion_barrier_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_completion_barrier_wait_present_samples,
+                },
+                "same_file_ingress_token_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_same_file_token_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_same_file_ingress_token_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_same_file_ingress_token_wait_present_samples,
+                },
+                "same_file_ingress_token_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_same_file_token_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_same_file_ingress_token_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_same_file_ingress_token_wait_present_samples,
+                },
+                "scheduler_ready_to_dispatch_wait_p95_ms": {
+                    "status": if truthful_pre_dispatch_scheduler_ready_to_dispatch_p95_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_scheduler_ready_to_dispatch_wait_p95_ms,
+                    "budget_ms": truthful_wait_p95_budget_ms,
+                    "present_samples": measured_scheduler_ready_to_dispatch_wait_present_samples,
+                },
+                "scheduler_ready_to_dispatch_wait_max_ms": {
+                    "status": if truthful_pre_dispatch_scheduler_ready_to_dispatch_max_pass { "pass" } else { "fail" },
+                    "observed_ms": measured_scheduler_ready_to_dispatch_wait_max_ms,
+                    "budget_ms": truthful_wait_max_budget_ms,
+                    "present_samples": measured_scheduler_ready_to_dispatch_wait_present_samples,
+                },
+                "same_file_ingress_token_published_samples": {
+                    "status": if truthful_pre_dispatch_token_publication_pass { "pass" } else { "fail" },
+                    "observed": measured_same_file_ingress_token_published_samples,
+                    "expected": MEASURE_REQUESTS,
+                },
+                "truthful_pre_dispatch_bucket_shift_samples": {
+                    "status": if truthful_pre_dispatch_bucket_shift_pass { "pass" } else { "fail" },
+                    "observed": measured_truthful_pre_dispatch_bucket_shift_samples,
+                    "expected_max": 0,
+                },
+            },
+        });
         let overall_validation_failing_classes = [
             (!parse_cold_start_validation_pass).then_some("parse_cold_start"),
             (!apply_backlog_validation_pass).then_some("apply_backlog"),
+            (!truthful_pre_dispatch_split_validation_pass)
+                .then_some("truthful_pre_dispatch_split"),
         ]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
         let overall_validation = serde_json::json!({
-            "status": if parse_cold_start_validation_pass && apply_backlog_validation_pass {
+            "status": if parse_cold_start_validation_pass
+                && apply_backlog_validation_pass
+                && truthful_pre_dispatch_split_validation_pass
+            {
                 "pass"
             } else {
                 "fail"
@@ -1441,8 +2072,34 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "truthful_wait_max_budget_ms": truthful_wait_max_budget_ms,
                 "warmup_latency_ms": warmup_latency_histogram,
                 "measured_latency_ms": measured_latency_histogram,
+                "measured_read_loop_wait_ms": measured_read_loop_wait_histogram,
+                "measured_read_loop_wait_max_ms": measured_read_loop_wait_max_ms,
+                "measured_read_loop_wait_present_samples": measured_read_loop_wait_present_samples,
+                "measured_read_loop_wait_over_hard_cap_samples": measured_read_loop_wait_over_hard_cap_samples,
                 "measured_adapter_to_dispatch_wait_ms": measured_adapter_to_dispatch_histogram,
                 "measured_adapter_to_dispatch_wait_max_ms": measured_adapter_to_dispatch_max_ms,
+                "measured_admission_queue_wait_ms": measured_admission_queue_wait_histogram,
+                "measured_admission_queue_wait_max_ms": measured_admission_queue_wait_max_ms,
+                "measured_admission_queue_wait_present_samples": measured_admission_queue_wait_present_samples,
+                "measured_admission_queue_wait_over_hard_cap_samples": measured_admission_queue_wait_over_hard_cap_samples,
+                "measured_scheduler_poll_ready_wait_ms": measured_scheduler_poll_ready_wait_histogram,
+                "measured_scheduler_poll_ready_wait_max_ms": measured_scheduler_poll_ready_wait_max_ms,
+                "measured_scheduler_poll_ready_wait_present_samples": measured_scheduler_poll_ready_wait_present_samples,
+                "measured_scheduler_poll_ready_wait_over_hard_cap_samples": measured_scheduler_poll_ready_wait_over_hard_cap_samples,
+                "measured_completion_barrier_wait_ms": measured_completion_barrier_wait_histogram,
+                "measured_completion_barrier_wait_max_ms": measured_completion_barrier_wait_max_ms,
+                "measured_completion_barrier_wait_present_samples": measured_completion_barrier_wait_present_samples,
+                "measured_completion_barrier_wait_over_hard_cap_samples": measured_completion_barrier_wait_over_hard_cap_samples,
+                "measured_same_file_ingress_token_wait_ms": measured_same_file_ingress_token_wait_histogram,
+                "measured_same_file_ingress_token_wait_max_ms": measured_same_file_ingress_token_wait_max_ms,
+                "measured_same_file_ingress_token_wait_present_samples": measured_same_file_ingress_token_wait_present_samples,
+                "measured_same_file_ingress_token_wait_over_hard_cap_samples": measured_same_file_ingress_token_wait_over_hard_cap_samples,
+                "measured_same_file_ingress_token_published_samples": measured_same_file_ingress_token_published_samples,
+                "measured_scheduler_ready_to_dispatch_wait_ms": measured_scheduler_ready_to_dispatch_wait_histogram,
+                "measured_scheduler_ready_to_dispatch_wait_max_ms": measured_scheduler_ready_to_dispatch_wait_max_ms,
+                "measured_scheduler_ready_to_dispatch_wait_present_samples": measured_scheduler_ready_to_dispatch_wait_present_samples,
+                "measured_scheduler_ready_to_dispatch_wait_over_hard_cap_samples": measured_scheduler_ready_to_dispatch_wait_over_hard_cap_samples,
+                "measured_truthful_pre_dispatch_bucket_shift_samples": measured_truthful_pre_dispatch_bucket_shift_samples,
                 "measured_client_to_transport_wait_ms": measured_client_to_transport_histogram,
                 "measured_client_to_transport_wait_max_ms": measured_client_to_transport_max_ms,
                 "measured_client_to_transport_present_samples": measured_client_to_transport_present_samples,
@@ -1467,6 +2124,7 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_collect_ms": sample_trace_histogram(&measured_samples, "collect_ms"),
                 "parse_cold_start_evidence": parse_cold_start_evidence,
                 "apply_backlog_evidence": apply_backlog_evidence,
+                "truthful_pre_dispatch_split_evidence": truthful_pre_dispatch_split_evidence,
             },
             "extension_like_key_latencies": {
                 "intellisense_v2_wait_for_file_version_diagnostics": histogram_metric_value_or_zero(
@@ -1519,8 +2177,10 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             "validation": {
                 "parse_cold_start": parse_cold_start_validation,
                 "apply_backlog": apply_backlog_validation,
+                "truthful_pre_dispatch_split": truthful_pre_dispatch_split_validation,
                 "overall": overall_validation,
             },
+            "worst_outlier_correlation_slice": worst_outlier_correlation_slice,
             "observability": {
                 "raw": observability_metrics,
             }
@@ -1662,6 +2322,100 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_pre_dispatch_wait_over_hard_cap_samples == 0,
             "mixed-load gate must fail on seconds-scale pre-dispatch backlog under concurrent outline load, measured_pre_dispatch_wait_over_hard_cap_samples={}, measured_samples={measured_samples:?}",
             measured_pre_dispatch_wait_over_hard_cap_samples
+        );
+        assert!(
+            measured_same_file_ingress_token_published_samples == MEASURE_REQUESTS,
+            "mixed-load gate must observe same-file ingress token publication for every measured completion, measured_same_file_ingress_token_published_samples={}, measured_samples={measured_samples:?}",
+            measured_same_file_ingress_token_published_samples
+        );
+        if measured_read_loop_wait_present_samples > 0 {
+            assert!(
+                measured_read_loop_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load reader-wait p95 regression: measured_read_loop_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_read_loop_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_read_loop_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load reader-wait max regression: measured_read_loop_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_read_loop_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        if measured_admission_queue_wait_present_samples > 0 {
+            assert!(
+                measured_admission_queue_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load admission-queue p95 regression: measured_admission_queue_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_admission_queue_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_admission_queue_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load admission-queue max regression: measured_admission_queue_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_admission_queue_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        if measured_scheduler_poll_ready_wait_present_samples > 0 {
+            assert!(
+                measured_scheduler_poll_ready_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load scheduler-poll-ready p95 regression: measured_scheduler_poll_ready_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_scheduler_poll_ready_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_scheduler_poll_ready_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load scheduler-poll-ready max regression: measured_scheduler_poll_ready_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_scheduler_poll_ready_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        if measured_completion_barrier_wait_present_samples > 0 {
+            assert!(
+                measured_completion_barrier_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load completion-barrier p95 regression: measured_completion_barrier_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_completion_barrier_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_completion_barrier_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load completion-barrier max regression: measured_completion_barrier_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_completion_barrier_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        if measured_same_file_ingress_token_wait_present_samples > 0 {
+            assert!(
+                measured_same_file_ingress_token_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load same-file-token p95 regression: measured_same_file_ingress_token_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_same_file_ingress_token_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_same_file_ingress_token_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load same-file-token max regression: measured_same_file_ingress_token_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_same_file_ingress_token_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        if measured_scheduler_ready_to_dispatch_wait_present_samples > 0 {
+            assert!(
+                measured_scheduler_ready_to_dispatch_wait_p95_ms <= truthful_wait_p95_budget_ms,
+                "mixed-load scheduler-ready-to-dispatch p95 regression: measured_scheduler_ready_to_dispatch_wait_ms p95={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_scheduler_ready_to_dispatch_wait_p95_ms,
+                truthful_wait_p95_budget_ms
+            );
+            assert!(
+                measured_scheduler_ready_to_dispatch_wait_max_ms <= truthful_wait_max_budget_ms,
+                "mixed-load scheduler-ready-to-dispatch max regression: measured_scheduler_ready_to_dispatch_wait_ms max={}ms > {}ms, measured_samples={measured_samples:?}",
+                measured_scheduler_ready_to_dispatch_wait_max_ms,
+                truthful_wait_max_budget_ms
+            );
+        }
+        assert!(
+            measured_truthful_pre_dispatch_bucket_shift_samples == 0,
+            "mixed-load gate must fail if seconds-scale wait merely shifts into a newly exposed pre-dispatch bucket, measured_truthful_pre_dispatch_bucket_shift_samples={}, measured_samples={measured_samples:?}",
+            measured_truthful_pre_dispatch_bucket_shift_samples
         );
         assert!(
             measured_client_to_transport_p95_ms <= truthful_wait_p95_budget_ms,

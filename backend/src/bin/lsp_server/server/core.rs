@@ -896,6 +896,8 @@ impl BslLanguageServer {
             diagnostics_save_cycle_sequence_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_received_file_versions_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_current_revision_handoff_versions_v2: Arc::new(RwLock::new(HashMap::new())),
+            latest_same_file_ingress_tokens_v2: Arc::new(RwLock::new(HashMap::new())),
+            same_file_ingress_token_notify_v2: Arc::new(tokio::sync::Notify::new()),
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_detached_diagnostics_ready_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),

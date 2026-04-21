@@ -62,7 +62,7 @@ export type CompletionTimelinePanelState =
 
 
 export const AVERAGE_TRACE_PROVENANCE_NOTICE =
-    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, and v24 truthful pre-enqueue handoff split are unavailable by design.';
+    'Average trace is synthetic; v8 trustworthy pre-method attribution provenance, v9 pre-service-scope split, v10 dispatch split, v11 first-poll / first-wake split, v12 first-poll contention attribution, v13 contender snapshot, v14 executeCommand command detail, v15 completion phase detail, v16 turn-wait resolution detail, v17 transport slot release detail, v18 request-bound client probe correlation detail, v19 adapter ingress pre-dispatch split, v21 flush-aware post-handler egress split, v22 shipped compatibility output-egress split, v23 truthful encode-start/write-start boundary, v24 truthful pre-enqueue handoff split, and v25 completion pre-dispatch decomposition are unavailable by design.';
 
 function sanitizeFirstPollContentionContendersForContract(
     details: CompletionTimelineServerEdgeDetailsTrace,
@@ -232,6 +232,51 @@ function sanitizeServerEdgeDetailsForContract(
             response_ready_to_output_handoff_wait_ms: _responseReadyToOutputHandoffWaitMs,
             response_output_handoff_send_wait_ms: _responseOutputHandoffSendWaitMs,
             response_output_handoff_to_writer_wait_ms: _responseOutputHandoffToWriterWaitMs,
+            ...legacyDetails
+        } = sanitizedDetails;
+        sanitizedDetails = legacyDetails;
+    }
+
+    if (contractVersion < 25) {
+        const {
+            adapter_read_started_at_ms: _adapterReadStartedAtMs,
+            adapter_parse_completed_at_ms: _adapterParseCompletedAtMs,
+            read_loop_wait_reason: _readLoopWaitReason,
+            read_loop_wait_ms: _readLoopWaitMs,
+            pending_completion_spillover_depth: _pendingCompletionSpilloverDepth,
+            pending_general_request_staged: _pendingGeneralRequestStaged,
+            admission_try_enqueue_at_ms: _admissionTryEnqueueAtMs,
+            admission_lane: _admissionLane,
+            admission_lane_depth_before: _admissionLaneDepthBefore,
+            admission_lane_depth_after: _admissionLaneDepthAfter,
+            admission_enqueue_outcome: _admissionEnqueueOutcome,
+            admission_spillover_outcome: _admissionSpilloverOutcome,
+            admission_enqueued_at_ms: _admissionEnqueuedAtMs,
+            admission_queue_wait_ms: _admissionQueueWaitMs,
+            scheduler_woke_at_ms: _schedulerWokeAtMs,
+            scheduler_poll_ready_entered_at_ms: _schedulerPollReadyEnteredAtMs,
+            scheduler_poll_ready_resolved_at_ms: _schedulerPollReadyResolvedAtMs,
+            scheduler_poll_ready_wait_ms: _schedulerPollReadyWaitMs,
+            scheduler_dequeued_at_ms: _schedulerDequeuedAtMs,
+            completion_barrier_active_at_dequeue: _completionBarrierActiveAtDequeue,
+            completion_barrier_generation: _completionBarrierGeneration,
+            completion_barrier_owner_method: _completionBarrierOwnerMethod,
+            completion_barrier_owner_uri: _completionBarrierOwnerUri,
+            completion_barrier_owner_version: _completionBarrierOwnerVersion,
+            completion_barrier_wait_ms: _completionBarrierWaitMs,
+            doc_sync_first_poll_exec_ms: _docSyncFirstPollExecMs,
+            doc_sync_first_poll_outcome: _docSyncFirstPollOutcome,
+            doc_sync_first_poll_method: _docSyncFirstPollMethod,
+            doc_sync_first_poll_uri: _docSyncFirstPollUri,
+            doc_sync_first_poll_version: _docSyncFirstPollVersion,
+            same_file_ingress_token_required_version: _sameFileIngressTokenRequiredVersion,
+            same_file_ingress_token_published_at_ms: _sameFileIngressTokenPublishedAtMs,
+            same_file_ingress_token_source: _sameFileIngressTokenSource,
+            same_file_ingress_token_wait_ms: _sameFileIngressTokenWaitMs,
+            scheduler_service_call_started_at_ms: _schedulerServiceCallStartedAtMs,
+            scheduler_service_call_returned_at_ms: _schedulerServiceCallReturnedAtMs,
+            scheduler_service_call_sync_exec_ms: _schedulerServiceCallSyncExecMs,
+            scheduler_ready_to_dispatch_wait_ms: _schedulerReadyToDispatchWaitMs,
             ...legacyDetails
         } = sanitizedDetails;
         sanitizedDetails = legacyDetails;

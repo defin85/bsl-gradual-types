@@ -71,6 +71,14 @@ struct CompletionRequestKey {
 struct PendingCompletionRequestIds {
     by_key: HashMap<CompletionRequestKey, VecDeque<String>>,
     by_request_id: HashMap<String, PendingCompletionRequestEntry>,
+    same_file_ingress_token_publications_by_uri: HashMap<String, SameFileIngressTokenPublication>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SameFileIngressTokenPublication {
+    pub(crate) required_version: i32,
+    pub(crate) published_at_ms: u64,
+    pub(crate) source: String,
 }
 
 #[derive(Debug)]
@@ -80,10 +88,45 @@ struct PendingCompletionRequestEntry {
     trigger_mode: String,
     cancelled_before_take: bool,
     client_probe_id: Option<String>,
+    adapter_read_started_at_ms: Option<u64>,
     adapter_read_at_ms: Option<u64>,
+    adapter_parse_completed_at_ms: Option<u64>,
+    read_loop_wait_reason: Option<String>,
+    read_loop_wait_ms: Option<u64>,
+    pending_completion_spillover_depth: Option<u64>,
+    pending_general_request_staged: Option<bool>,
+    admission_try_enqueue_at_ms: Option<u64>,
+    admission_lane: Option<String>,
+    admission_lane_depth_before: Option<u64>,
+    admission_lane_depth_after: Option<u64>,
+    admission_enqueue_outcome: Option<String>,
+    admission_spillover_outcome: Option<String>,
+    admission_enqueued_at_ms: Option<u64>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
     request_received_at_ms: Option<u64>,
     transport_slot_released_at_ms: Option<u64>,
+    scheduler_woke_at_ms: Option<u64>,
+    scheduler_poll_ready_entered_at_ms: Option<u64>,
+    scheduler_poll_ready_resolved_at_ms: Option<u64>,
+    scheduler_dequeued_at_ms: Option<u64>,
+    completion_barrier_active_at_dequeue: Option<bool>,
+    completion_barrier_generation: Option<u64>,
+    completion_barrier_owner_method: Option<String>,
+    completion_barrier_owner_uri: Option<String>,
+    completion_barrier_owner_version: Option<i32>,
+    completion_barrier_wait_ms: Option<u64>,
+    completion_barrier_wait_started_at_ms: Option<u64>,
+    doc_sync_first_poll_exec_ms: Option<u64>,
+    doc_sync_first_poll_outcome: Option<String>,
+    doc_sync_first_poll_method: Option<String>,
+    doc_sync_first_poll_uri: Option<String>,
+    doc_sync_first_poll_version: Option<i32>,
+    same_file_ingress_token_required_version: Option<i32>,
+    same_file_ingress_token_published_at_ms: Option<u64>,
+    same_file_ingress_token_source: Option<String>,
+    same_file_ingress_token_wait_ms: Option<u64>,
+    scheduler_service_call_started_at_ms: Option<u64>,
+    scheduler_service_call_returned_at_ms: Option<u64>,
     service_future_created_at_ms: Option<u64>,
     service_future_first_poll_entered_at_ms: Option<u64>,
     service_future_first_poll_outcome: Option<String>,
@@ -102,10 +145,44 @@ pub(crate) struct PendingCompletionRequestContext {
     pub(crate) trigger_mode: String,
     pub(crate) cancelled_before_take: bool,
     pub(crate) client_probe_id: Option<String>,
+    pub(crate) adapter_read_started_at_ms: Option<u64>,
     pub(crate) adapter_read_at_ms: Option<u64>,
+    pub(crate) adapter_parse_completed_at_ms: Option<u64>,
+    pub(crate) read_loop_wait_reason: Option<String>,
+    pub(crate) read_loop_wait_ms: Option<u64>,
+    pub(crate) pending_completion_spillover_depth: Option<u64>,
+    pub(crate) pending_general_request_staged: Option<bool>,
+    pub(crate) admission_try_enqueue_at_ms: Option<u64>,
+    pub(crate) admission_lane: Option<String>,
+    pub(crate) admission_lane_depth_before: Option<u64>,
+    pub(crate) admission_lane_depth_after: Option<u64>,
+    pub(crate) admission_enqueue_outcome: Option<String>,
+    pub(crate) admission_spillover_outcome: Option<String>,
+    pub(crate) admission_enqueued_at_ms: Option<u64>,
     pub(crate) jsonrpc_dispatch_received_at_ms: Option<u64>,
     pub(crate) request_received_at_ms: Option<u64>,
     pub(crate) transport_slot_released_at_ms: Option<u64>,
+    pub(crate) scheduler_woke_at_ms: Option<u64>,
+    pub(crate) scheduler_poll_ready_entered_at_ms: Option<u64>,
+    pub(crate) scheduler_poll_ready_resolved_at_ms: Option<u64>,
+    pub(crate) scheduler_dequeued_at_ms: Option<u64>,
+    pub(crate) completion_barrier_active_at_dequeue: Option<bool>,
+    pub(crate) completion_barrier_generation: Option<u64>,
+    pub(crate) completion_barrier_owner_method: Option<String>,
+    pub(crate) completion_barrier_owner_uri: Option<String>,
+    pub(crate) completion_barrier_owner_version: Option<i32>,
+    pub(crate) completion_barrier_wait_ms: Option<u64>,
+    pub(crate) doc_sync_first_poll_exec_ms: Option<u64>,
+    pub(crate) doc_sync_first_poll_outcome: Option<String>,
+    pub(crate) doc_sync_first_poll_method: Option<String>,
+    pub(crate) doc_sync_first_poll_uri: Option<String>,
+    pub(crate) doc_sync_first_poll_version: Option<i32>,
+    pub(crate) same_file_ingress_token_required_version: Option<i32>,
+    pub(crate) same_file_ingress_token_published_at_ms: Option<u64>,
+    pub(crate) same_file_ingress_token_source: Option<String>,
+    pub(crate) same_file_ingress_token_wait_ms: Option<u64>,
+    pub(crate) scheduler_service_call_started_at_ms: Option<u64>,
+    pub(crate) scheduler_service_call_returned_at_ms: Option<u64>,
     pub(crate) service_future_created_at_ms: Option<u64>,
     pub(crate) service_future_first_poll_entered_at_ms: Option<u64>,
     pub(crate) service_future_first_poll_outcome: Option<String>,
@@ -138,6 +215,45 @@ pub(crate) struct CompletionResponseEgressTracePatch {
     pub(crate) response_output_write_started_at_ms: u64,
     pub(crate) response_output_encode_completed_at_ms: u64,
     pub(crate) response_flush_completed_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct CompletionPreDispatchTracePatch {
+    pub(crate) adapter_read_started_at_ms: Option<u64>,
+    pub(crate) adapter_parse_completed_at_ms: Option<u64>,
+    pub(crate) read_loop_wait_reason: Option<String>,
+    pub(crate) read_loop_wait_ms: Option<u64>,
+    pub(crate) pending_completion_spillover_depth: Option<u64>,
+    pub(crate) pending_general_request_staged: Option<bool>,
+    pub(crate) admission_try_enqueue_at_ms: Option<u64>,
+    pub(crate) admission_lane: Option<String>,
+    pub(crate) admission_lane_depth_before: Option<u64>,
+    pub(crate) admission_lane_depth_after: Option<u64>,
+    pub(crate) admission_enqueue_outcome: Option<String>,
+    pub(crate) admission_spillover_outcome: Option<String>,
+    pub(crate) admission_enqueued_at_ms: Option<u64>,
+    pub(crate) scheduler_woke_at_ms: Option<u64>,
+    pub(crate) scheduler_poll_ready_entered_at_ms: Option<u64>,
+    pub(crate) scheduler_poll_ready_resolved_at_ms: Option<u64>,
+    pub(crate) scheduler_dequeued_at_ms: Option<u64>,
+    pub(crate) completion_barrier_active_at_dequeue: Option<bool>,
+    pub(crate) completion_barrier_generation: Option<u64>,
+    pub(crate) completion_barrier_owner_method: Option<String>,
+    pub(crate) completion_barrier_owner_uri: Option<String>,
+    pub(crate) completion_barrier_owner_version: Option<i32>,
+    pub(crate) completion_barrier_wait_started_at_ms: Option<u64>,
+    pub(crate) completion_barrier_wait_ms: Option<u64>,
+    pub(crate) doc_sync_first_poll_exec_ms: Option<u64>,
+    pub(crate) doc_sync_first_poll_outcome: Option<String>,
+    pub(crate) doc_sync_first_poll_method: Option<String>,
+    pub(crate) doc_sync_first_poll_uri: Option<String>,
+    pub(crate) doc_sync_first_poll_version: Option<i32>,
+    pub(crate) same_file_ingress_token_required_version: Option<i32>,
+    pub(crate) same_file_ingress_token_published_at_ms: Option<u64>,
+    pub(crate) same_file_ingress_token_source: Option<String>,
+    pub(crate) same_file_ingress_token_wait_ms: Option<u64>,
+    pub(crate) scheduler_service_call_started_at_ms: Option<u64>,
+    pub(crate) scheduler_service_call_returned_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -980,6 +1096,10 @@ fn record_pending_completion_request_id(
             entry.client_probe_id = client_probe_id.clone();
             entry.request_received_at_ms = request_received_at_ms;
         }
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
+        );
     } else {
         pending.by_request_id.insert(
             request_id.clone(),
@@ -989,10 +1109,45 @@ fn record_pending_completion_request_id(
                 trigger_mode,
                 cancelled_before_take: false,
                 client_probe_id,
+                adapter_read_started_at_ms: None,
                 adapter_read_at_ms: None,
+                adapter_parse_completed_at_ms: None,
+                read_loop_wait_reason: None,
+                read_loop_wait_ms: None,
+                pending_completion_spillover_depth: None,
+                pending_general_request_staged: None,
+                admission_try_enqueue_at_ms: None,
+                admission_lane: None,
+                admission_lane_depth_before: None,
+                admission_lane_depth_after: None,
+                admission_enqueue_outcome: None,
+                admission_spillover_outcome: None,
+                admission_enqueued_at_ms: None,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms,
                 transport_slot_released_at_ms: None,
+                scheduler_woke_at_ms: None,
+                scheduler_poll_ready_entered_at_ms: None,
+                scheduler_poll_ready_resolved_at_ms: None,
+                scheduler_dequeued_at_ms: None,
+                completion_barrier_active_at_dequeue: None,
+                completion_barrier_generation: None,
+                completion_barrier_owner_method: None,
+                completion_barrier_owner_uri: None,
+                completion_barrier_owner_version: None,
+                completion_barrier_wait_ms: None,
+                completion_barrier_wait_started_at_ms: None,
+                doc_sync_first_poll_exec_ms: None,
+                doc_sync_first_poll_outcome: None,
+                doc_sync_first_poll_method: None,
+                doc_sync_first_poll_uri: None,
+                doc_sync_first_poll_version: None,
+                same_file_ingress_token_required_version: None,
+                same_file_ingress_token_published_at_ms: None,
+                same_file_ingress_token_source: None,
+                same_file_ingress_token_wait_ms: None,
+                scheduler_service_call_started_at_ms: None,
+                scheduler_service_call_returned_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
@@ -1001,6 +1156,10 @@ fn record_pending_completion_request_id(
                 first_poll_contention_contenders: None,
                 service_scope_entered_at_ms: None,
             },
+        );
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
         );
     }
     ensure_request_id_enqueued(&mut pending, &key, &request_id);
@@ -1041,6 +1200,10 @@ pub(crate) fn record_pending_completion_adapter_read_at_ms(
                 entry.adapter_read_at_ms = adapter_read_at_ms;
             }
         }
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
+        );
     } else {
         pending.by_request_id.insert(
             request_id.clone(),
@@ -1050,10 +1213,45 @@ pub(crate) fn record_pending_completion_adapter_read_at_ms(
                 trigger_mode,
                 cancelled_before_take: false,
                 client_probe_id,
+                adapter_read_started_at_ms: None,
                 adapter_read_at_ms,
+                adapter_parse_completed_at_ms: None,
+                read_loop_wait_reason: None,
+                read_loop_wait_ms: None,
+                pending_completion_spillover_depth: None,
+                pending_general_request_staged: None,
+                admission_try_enqueue_at_ms: None,
+                admission_lane: None,
+                admission_lane_depth_before: None,
+                admission_lane_depth_after: None,
+                admission_enqueue_outcome: None,
+                admission_spillover_outcome: None,
+                admission_enqueued_at_ms: None,
                 jsonrpc_dispatch_received_at_ms: None,
                 request_received_at_ms: None,
                 transport_slot_released_at_ms: None,
+                scheduler_woke_at_ms: None,
+                scheduler_poll_ready_entered_at_ms: None,
+                scheduler_poll_ready_resolved_at_ms: None,
+                scheduler_dequeued_at_ms: None,
+                completion_barrier_active_at_dequeue: None,
+                completion_barrier_generation: None,
+                completion_barrier_owner_method: None,
+                completion_barrier_owner_uri: None,
+                completion_barrier_owner_version: None,
+                completion_barrier_wait_ms: None,
+                completion_barrier_wait_started_at_ms: None,
+                doc_sync_first_poll_exec_ms: None,
+                doc_sync_first_poll_outcome: None,
+                doc_sync_first_poll_method: None,
+                doc_sync_first_poll_uri: None,
+                doc_sync_first_poll_version: None,
+                same_file_ingress_token_required_version: None,
+                same_file_ingress_token_published_at_ms: None,
+                same_file_ingress_token_source: None,
+                same_file_ingress_token_wait_ms: None,
+                scheduler_service_call_started_at_ms: None,
+                scheduler_service_call_returned_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
@@ -1063,8 +1261,270 @@ pub(crate) fn record_pending_completion_adapter_read_at_ms(
                 service_scope_entered_at_ms: None,
             },
         );
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
+        );
     }
     ensure_request_id_enqueued(&mut pending, &key, &request_id);
+}
+
+fn patch_pending_completion_pre_dispatch_trace_entry(
+    entry: &mut PendingCompletionRequestEntry,
+    patch: CompletionPreDispatchTracePatch,
+) {
+    if entry.adapter_read_started_at_ms.is_none() {
+        entry.adapter_read_started_at_ms = patch.adapter_read_started_at_ms;
+    }
+    if let Some(value) = patch.adapter_parse_completed_at_ms {
+        entry.adapter_parse_completed_at_ms = Some(value);
+    }
+    if let Some(value) = patch.read_loop_wait_reason {
+        entry.read_loop_wait_reason = Some(value);
+    }
+    if let Some(value) = patch.read_loop_wait_ms {
+        entry.read_loop_wait_ms = Some(value);
+    }
+    if let Some(value) = patch.pending_completion_spillover_depth {
+        entry.pending_completion_spillover_depth = Some(value);
+    }
+    if let Some(value) = patch.pending_general_request_staged {
+        entry.pending_general_request_staged = Some(value);
+    }
+    if entry.admission_try_enqueue_at_ms.is_none() {
+        entry.admission_try_enqueue_at_ms = patch.admission_try_enqueue_at_ms;
+    }
+    if let Some(value) = patch.admission_lane {
+        entry.admission_lane = Some(value);
+    }
+    if let Some(value) = patch.admission_lane_depth_before {
+        entry.admission_lane_depth_before = Some(value);
+    }
+    if let Some(value) = patch.admission_lane_depth_after {
+        entry.admission_lane_depth_after = Some(value);
+    }
+    if let Some(value) = patch.admission_enqueue_outcome {
+        entry.admission_enqueue_outcome = Some(value);
+    }
+    if let Some(value) = patch.admission_spillover_outcome {
+        entry.admission_spillover_outcome = Some(value);
+    }
+    if let Some(value) = patch.admission_enqueued_at_ms {
+        entry.admission_enqueued_at_ms = Some(value);
+    }
+    if entry.scheduler_woke_at_ms.is_none() {
+        entry.scheduler_woke_at_ms = patch.scheduler_woke_at_ms;
+    }
+    if entry.scheduler_poll_ready_entered_at_ms.is_none() {
+        entry.scheduler_poll_ready_entered_at_ms = patch.scheduler_poll_ready_entered_at_ms;
+    }
+    if entry.scheduler_poll_ready_resolved_at_ms.is_none() {
+        entry.scheduler_poll_ready_resolved_at_ms = patch.scheduler_poll_ready_resolved_at_ms;
+    }
+    if entry.scheduler_dequeued_at_ms.is_none() {
+        entry.scheduler_dequeued_at_ms = patch.scheduler_dequeued_at_ms;
+    }
+    if let Some(value) = patch.completion_barrier_active_at_dequeue {
+        entry.completion_barrier_active_at_dequeue = Some(value);
+    }
+    if let Some(value) = patch.completion_barrier_generation {
+        entry.completion_barrier_generation = Some(value);
+    }
+    if let Some(value) = patch.completion_barrier_owner_method {
+        entry.completion_barrier_owner_method = Some(value);
+    }
+    if let Some(value) = patch.completion_barrier_owner_uri {
+        entry.completion_barrier_owner_uri = Some(value);
+    }
+    if let Some(value) = patch.completion_barrier_owner_version {
+        entry.completion_barrier_owner_version = Some(value);
+    }
+    if entry.completion_barrier_wait_started_at_ms.is_none() {
+        entry.completion_barrier_wait_started_at_ms = patch.completion_barrier_wait_started_at_ms;
+    }
+    if let Some(value) = patch.completion_barrier_wait_ms {
+        entry.completion_barrier_wait_ms = Some(value);
+    }
+    if let Some(value) = patch.doc_sync_first_poll_exec_ms {
+        entry.doc_sync_first_poll_exec_ms = Some(value);
+    }
+    if let Some(value) = patch.doc_sync_first_poll_outcome {
+        entry.doc_sync_first_poll_outcome = Some(value);
+    }
+    if let Some(value) = patch.doc_sync_first_poll_method {
+        entry.doc_sync_first_poll_method = Some(value);
+    }
+    if let Some(value) = patch.doc_sync_first_poll_uri {
+        entry.doc_sync_first_poll_uri = Some(value);
+    }
+    if let Some(value) = patch.doc_sync_first_poll_version {
+        entry.doc_sync_first_poll_version = Some(value);
+    }
+    if let Some(value) = patch.same_file_ingress_token_required_version {
+        entry.same_file_ingress_token_required_version = Some(value);
+    }
+    if let Some(value) = patch.same_file_ingress_token_published_at_ms {
+        entry.same_file_ingress_token_published_at_ms = Some(value);
+    }
+    if let Some(value) = patch.same_file_ingress_token_source {
+        entry.same_file_ingress_token_source = Some(value);
+    }
+    if let Some(value) = patch.same_file_ingress_token_wait_ms {
+        entry.same_file_ingress_token_wait_ms = Some(value);
+    }
+    if entry.scheduler_service_call_started_at_ms.is_none() {
+        entry.scheduler_service_call_started_at_ms = patch.scheduler_service_call_started_at_ms;
+    }
+    if entry.scheduler_service_call_returned_at_ms.is_none() {
+        entry.scheduler_service_call_returned_at_ms = patch.scheduler_service_call_returned_at_ms;
+    }
+    if entry.completion_barrier_wait_ms.is_none() {
+        if let (Some(started_at_ms), Some(scheduler_woke_at_ms)) = (
+            entry.completion_barrier_wait_started_at_ms,
+            patch.scheduler_woke_at_ms,
+        ) {
+            entry.completion_barrier_wait_ms =
+                Some(scheduler_woke_at_ms.saturating_sub(started_at_ms));
+        }
+    }
+}
+
+fn patch_pending_completion_same_file_ingress_token_entry(
+    entry: &mut PendingCompletionRequestEntry,
+    required_version: i32,
+    published_at_ms: u64,
+    source: &str,
+) {
+    let should_overwrite = entry
+        .same_file_ingress_token_published_at_ms
+        .is_none_or(|existing_published_at_ms| published_at_ms >= existing_published_at_ms);
+    if !should_overwrite {
+        return;
+    }
+    let wait_started_at_ms = entry
+        .admission_try_enqueue_at_ms
+        .or(entry.admission_enqueued_at_ms)
+        .or(entry.adapter_read_at_ms)
+        .unwrap_or(published_at_ms);
+    entry.same_file_ingress_token_required_version = Some(required_version);
+    entry.same_file_ingress_token_published_at_ms = Some(published_at_ms);
+    entry.same_file_ingress_token_source = Some(source.to_string());
+    entry.same_file_ingress_token_wait_ms =
+        Some(published_at_ms.saturating_sub(wait_started_at_ms));
+}
+
+fn clear_pending_completion_same_file_ingress_token_entry(
+    entry: &mut PendingCompletionRequestEntry,
+) {
+    entry.same_file_ingress_token_required_version = None;
+    entry.same_file_ingress_token_published_at_ms = None;
+    entry.same_file_ingress_token_source = None;
+    entry.same_file_ingress_token_wait_ms = None;
+}
+
+fn patch_pending_completion_same_file_ingress_token_from_publication(
+    pending: &mut PendingCompletionRequestIds,
+    request_id: &str,
+) {
+    let Some(uri) = pending
+        .by_request_id
+        .get(request_id)
+        .map(|entry| entry.uri.clone())
+    else {
+        return;
+    };
+    let Some(publication) = pending
+        .same_file_ingress_token_publications_by_uri
+        .get(&uri)
+        .cloned()
+    else {
+        return;
+    };
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        patch_pending_completion_same_file_ingress_token_entry(
+            entry,
+            publication.required_version,
+            publication.published_at_ms,
+            &publication.source,
+        );
+    }
+}
+
+pub(crate) fn patch_pending_completion_pre_dispatch_trace(
+    request_id: &str,
+    patch: CompletionPreDispatchTracePatch,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(entry) = pending.by_request_id.get_mut(request_id) {
+        patch_pending_completion_pre_dispatch_trace_entry(entry, patch);
+    }
+}
+
+pub(crate) fn record_same_file_ingress_token_publication_for_uri(
+    uri: &str,
+    required_version: i32,
+    published_at_ms: u64,
+    source: &str,
+) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let should_overwrite = pending
+        .same_file_ingress_token_publications_by_uri
+        .get(uri)
+        .is_none_or(|existing| published_at_ms >= existing.published_at_ms);
+    if !should_overwrite {
+        return;
+    }
+    pending.same_file_ingress_token_publications_by_uri.insert(
+        uri.to_string(),
+        SameFileIngressTokenPublication {
+            required_version,
+            published_at_ms,
+            source: source.to_string(),
+        },
+    );
+    for entry in pending
+        .by_request_id
+        .values_mut()
+        .filter(|entry| entry.uri == uri)
+    {
+        patch_pending_completion_same_file_ingress_token_entry(
+            entry,
+            required_version,
+            published_at_ms,
+            source,
+        );
+    }
+}
+
+pub(crate) fn clear_same_file_ingress_token_publication_for_uri(uri: &str) {
+    let mut pending = pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    pending
+        .same_file_ingress_token_publications_by_uri
+        .remove(uri);
+    for entry in pending
+        .by_request_id
+        .values_mut()
+        .filter(|entry| entry.uri == uri)
+    {
+        clear_pending_completion_same_file_ingress_token_entry(entry);
+    }
+}
+
+pub(crate) fn same_file_ingress_token_publication_for_uri(
+    uri: &str,
+) -> Option<SameFileIngressTokenPublication> {
+    pending_completion_request_ids_cell()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .same_file_ingress_token_publications_by_uri
+        .get(uri)
+        .cloned()
 }
 
 fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
@@ -1100,6 +1560,10 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
             entry.client_probe_id = client_probe_id.clone();
             entry.jsonrpc_dispatch_received_at_ms = jsonrpc_dispatch_received_at_ms;
         }
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
+        );
     } else {
         pending.by_request_id.insert(
             request_id.clone(),
@@ -1109,10 +1573,45 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 trigger_mode,
                 cancelled_before_take: false,
                 client_probe_id,
+                adapter_read_started_at_ms: None,
                 adapter_read_at_ms: None,
+                adapter_parse_completed_at_ms: None,
+                read_loop_wait_reason: None,
+                read_loop_wait_ms: None,
+                pending_completion_spillover_depth: None,
+                pending_general_request_staged: None,
+                admission_try_enqueue_at_ms: None,
+                admission_lane: None,
+                admission_lane_depth_before: None,
+                admission_lane_depth_after: None,
+                admission_enqueue_outcome: None,
+                admission_spillover_outcome: None,
+                admission_enqueued_at_ms: None,
                 jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: None,
                 transport_slot_released_at_ms: None,
+                scheduler_woke_at_ms: None,
+                scheduler_poll_ready_entered_at_ms: None,
+                scheduler_poll_ready_resolved_at_ms: None,
+                scheduler_dequeued_at_ms: None,
+                completion_barrier_active_at_dequeue: None,
+                completion_barrier_generation: None,
+                completion_barrier_owner_method: None,
+                completion_barrier_owner_uri: None,
+                completion_barrier_owner_version: None,
+                completion_barrier_wait_ms: None,
+                completion_barrier_wait_started_at_ms: None,
+                doc_sync_first_poll_exec_ms: None,
+                doc_sync_first_poll_outcome: None,
+                doc_sync_first_poll_method: None,
+                doc_sync_first_poll_uri: None,
+                doc_sync_first_poll_version: None,
+                same_file_ingress_token_required_version: None,
+                same_file_ingress_token_published_at_ms: None,
+                same_file_ingress_token_source: None,
+                same_file_ingress_token_wait_ms: None,
+                scheduler_service_call_started_at_ms: None,
+                scheduler_service_call_returned_at_ms: None,
                 service_future_created_at_ms: None,
                 service_future_first_poll_entered_at_ms: None,
                 service_future_first_poll_outcome: None,
@@ -1121,6 +1620,10 @@ fn record_pending_completion_jsonrpc_dispatch_received_at_ms(
                 first_poll_contention_contenders: None,
                 service_scope_entered_at_ms: None,
             },
+        );
+        patch_pending_completion_same_file_ingress_token_from_publication(
+            &mut pending,
+            &request_id,
         );
     }
     ensure_request_id_enqueued(&mut pending, &key, &request_id);
@@ -1278,10 +1781,45 @@ pub(crate) fn record_completion_request_id_for_testing(
             trigger_mode: "none".to_string(),
             cancelled_before_take: false,
             client_probe_id: None,
+            adapter_read_started_at_ms: None,
             adapter_read_at_ms: None,
+            adapter_parse_completed_at_ms: None,
+            read_loop_wait_reason: None,
+            read_loop_wait_ms: None,
+            pending_completion_spillover_depth: None,
+            pending_general_request_staged: None,
+            admission_try_enqueue_at_ms: None,
+            admission_lane: None,
+            admission_lane_depth_before: None,
+            admission_lane_depth_after: None,
+            admission_enqueue_outcome: None,
+            admission_spillover_outcome: None,
+            admission_enqueued_at_ms: None,
             jsonrpc_dispatch_received_at_ms: None,
             request_received_at_ms: None,
             transport_slot_released_at_ms: None,
+            scheduler_woke_at_ms: None,
+            scheduler_poll_ready_entered_at_ms: None,
+            scheduler_poll_ready_resolved_at_ms: None,
+            scheduler_dequeued_at_ms: None,
+            completion_barrier_active_at_dequeue: None,
+            completion_barrier_generation: None,
+            completion_barrier_owner_method: None,
+            completion_barrier_owner_uri: None,
+            completion_barrier_owner_version: None,
+            completion_barrier_wait_ms: None,
+            completion_barrier_wait_started_at_ms: None,
+            doc_sync_first_poll_exec_ms: None,
+            doc_sync_first_poll_outcome: None,
+            doc_sync_first_poll_method: None,
+            doc_sync_first_poll_uri: None,
+            doc_sync_first_poll_version: None,
+            same_file_ingress_token_required_version: None,
+            same_file_ingress_token_published_at_ms: None,
+            same_file_ingress_token_source: None,
+            same_file_ingress_token_wait_ms: None,
+            scheduler_service_call_started_at_ms: None,
+            scheduler_service_call_returned_at_ms: None,
             service_future_created_at_ms: None,
             service_future_first_poll_entered_at_ms: None,
             service_future_first_poll_outcome: None,
@@ -1293,6 +1831,7 @@ pub(crate) fn record_completion_request_id_for_testing(
     ) {
         remove_request_id_from_key_queue(&mut pending, &old_entry.key, &request_id);
     }
+    patch_pending_completion_same_file_ingress_token_from_publication(&mut pending, &request_id);
     ensure_request_id_enqueued(&mut pending, &key, &request_id);
 }
 
@@ -1320,10 +1859,44 @@ pub(crate) fn take_completion_request_context_by_request_id(
         trigger_mode: entry.trigger_mode,
         cancelled_before_take: entry.cancelled_before_take,
         client_probe_id: entry.client_probe_id,
+        adapter_read_started_at_ms: entry.adapter_read_started_at_ms,
         adapter_read_at_ms: entry.adapter_read_at_ms,
+        adapter_parse_completed_at_ms: entry.adapter_parse_completed_at_ms,
+        read_loop_wait_reason: entry.read_loop_wait_reason,
+        read_loop_wait_ms: entry.read_loop_wait_ms,
+        pending_completion_spillover_depth: entry.pending_completion_spillover_depth,
+        pending_general_request_staged: entry.pending_general_request_staged,
+        admission_try_enqueue_at_ms: entry.admission_try_enqueue_at_ms,
+        admission_lane: entry.admission_lane,
+        admission_lane_depth_before: entry.admission_lane_depth_before,
+        admission_lane_depth_after: entry.admission_lane_depth_after,
+        admission_enqueue_outcome: entry.admission_enqueue_outcome,
+        admission_spillover_outcome: entry.admission_spillover_outcome,
+        admission_enqueued_at_ms: entry.admission_enqueued_at_ms,
         jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
         request_received_at_ms: entry.request_received_at_ms,
         transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
+        scheduler_woke_at_ms: entry.scheduler_woke_at_ms,
+        scheduler_poll_ready_entered_at_ms: entry.scheduler_poll_ready_entered_at_ms,
+        scheduler_poll_ready_resolved_at_ms: entry.scheduler_poll_ready_resolved_at_ms,
+        scheduler_dequeued_at_ms: entry.scheduler_dequeued_at_ms,
+        completion_barrier_active_at_dequeue: entry.completion_barrier_active_at_dequeue,
+        completion_barrier_generation: entry.completion_barrier_generation,
+        completion_barrier_owner_method: entry.completion_barrier_owner_method,
+        completion_barrier_owner_uri: entry.completion_barrier_owner_uri,
+        completion_barrier_owner_version: entry.completion_barrier_owner_version,
+        completion_barrier_wait_ms: entry.completion_barrier_wait_ms,
+        doc_sync_first_poll_exec_ms: entry.doc_sync_first_poll_exec_ms,
+        doc_sync_first_poll_outcome: entry.doc_sync_first_poll_outcome,
+        doc_sync_first_poll_method: entry.doc_sync_first_poll_method,
+        doc_sync_first_poll_uri: entry.doc_sync_first_poll_uri,
+        doc_sync_first_poll_version: entry.doc_sync_first_poll_version,
+        same_file_ingress_token_required_version: entry.same_file_ingress_token_required_version,
+        same_file_ingress_token_published_at_ms: entry.same_file_ingress_token_published_at_ms,
+        same_file_ingress_token_source: entry.same_file_ingress_token_source,
+        same_file_ingress_token_wait_ms: entry.same_file_ingress_token_wait_ms,
+        scheduler_service_call_started_at_ms: entry.scheduler_service_call_started_at_ms,
+        scheduler_service_call_returned_at_ms: entry.scheduler_service_call_returned_at_ms,
         service_future_created_at_ms: entry.service_future_created_at_ms,
         service_future_first_poll_entered_at_ms: entry.service_future_first_poll_entered_at_ms,
         service_future_first_poll_outcome: entry.service_future_first_poll_outcome,
@@ -1372,10 +1945,46 @@ pub(crate) fn take_completion_request_context(
                 trigger_mode: entry.trigger_mode,
                 cancelled_before_take: entry.cancelled_before_take,
                 client_probe_id: entry.client_probe_id,
+                adapter_read_started_at_ms: entry.adapter_read_started_at_ms,
                 adapter_read_at_ms: entry.adapter_read_at_ms,
+                adapter_parse_completed_at_ms: entry.adapter_parse_completed_at_ms,
+                read_loop_wait_reason: entry.read_loop_wait_reason,
+                read_loop_wait_ms: entry.read_loop_wait_ms,
+                pending_completion_spillover_depth: entry.pending_completion_spillover_depth,
+                pending_general_request_staged: entry.pending_general_request_staged,
+                admission_try_enqueue_at_ms: entry.admission_try_enqueue_at_ms,
+                admission_lane: entry.admission_lane,
+                admission_lane_depth_before: entry.admission_lane_depth_before,
+                admission_lane_depth_after: entry.admission_lane_depth_after,
+                admission_enqueue_outcome: entry.admission_enqueue_outcome,
+                admission_spillover_outcome: entry.admission_spillover_outcome,
+                admission_enqueued_at_ms: entry.admission_enqueued_at_ms,
                 jsonrpc_dispatch_received_at_ms: entry.jsonrpc_dispatch_received_at_ms,
                 request_received_at_ms: entry.request_received_at_ms,
                 transport_slot_released_at_ms: entry.transport_slot_released_at_ms,
+                scheduler_woke_at_ms: entry.scheduler_woke_at_ms,
+                scheduler_poll_ready_entered_at_ms: entry.scheduler_poll_ready_entered_at_ms,
+                scheduler_poll_ready_resolved_at_ms: entry.scheduler_poll_ready_resolved_at_ms,
+                scheduler_dequeued_at_ms: entry.scheduler_dequeued_at_ms,
+                completion_barrier_active_at_dequeue: entry.completion_barrier_active_at_dequeue,
+                completion_barrier_generation: entry.completion_barrier_generation,
+                completion_barrier_owner_method: entry.completion_barrier_owner_method,
+                completion_barrier_owner_uri: entry.completion_barrier_owner_uri,
+                completion_barrier_owner_version: entry.completion_barrier_owner_version,
+                completion_barrier_wait_ms: entry.completion_barrier_wait_ms,
+                doc_sync_first_poll_exec_ms: entry.doc_sync_first_poll_exec_ms,
+                doc_sync_first_poll_outcome: entry.doc_sync_first_poll_outcome,
+                doc_sync_first_poll_method: entry.doc_sync_first_poll_method,
+                doc_sync_first_poll_uri: entry.doc_sync_first_poll_uri,
+                doc_sync_first_poll_version: entry.doc_sync_first_poll_version,
+                same_file_ingress_token_required_version: entry
+                    .same_file_ingress_token_required_version,
+                same_file_ingress_token_published_at_ms: entry
+                    .same_file_ingress_token_published_at_ms,
+                same_file_ingress_token_source: entry.same_file_ingress_token_source,
+                same_file_ingress_token_wait_ms: entry.same_file_ingress_token_wait_ms,
+                scheduler_service_call_started_at_ms: entry.scheduler_service_call_started_at_ms,
+                scheduler_service_call_returned_at_ms: entry.scheduler_service_call_returned_at_ms,
                 service_future_created_at_ms: entry.service_future_created_at_ms,
                 service_future_first_poll_entered_at_ms: entry
                     .service_future_first_poll_entered_at_ms,

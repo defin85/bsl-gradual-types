@@ -233,6 +233,12 @@ impl BslLanguageServer {
                         text: Arc::from(file_content),
                     },
                 );
+                self.publish_same_file_ingress_token_v2(
+                    file_id,
+                    0,
+                    super::super::SameFileIngressTokenSourceV2::Other,
+                )
+                .await;
                 Ok(0)
             }
         }

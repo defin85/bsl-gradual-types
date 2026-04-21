@@ -68,6 +68,64 @@ suite('Completion Timeline Drilldown Test Suite', () => {
         assert.ok(!verdicts.includes('handler_prelude_dominant'));
     });
 
+    test('buildCompletionTraceBottleneckVerdicts should distinguish reader backpressure before adapter_read', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
+            server_edge_details: {
+                adapter_read_at_ms: 20,
+                transport_received_at_ms: 60,
+                transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                jsonrpc_dispatch_received_at_ms: 60,
+                read_loop_wait_reason: 'completion_lane_space',
+                read_loop_wait_ms: 40,
+                adapter_to_dispatch_wait_ms: 40,
+                admission_queue_wait_ms: 10,
+                scheduler_poll_ready_wait_ms: 5,
+                method_entered_at_ms: 70,
+                handler_entered_at_ms: 72,
+                response_sent_at_ms: 100,
+                transport_to_method_wait_ms: 10,
+                method_prelude_exec_ms: 2,
+                transport_to_handler_wait_ms: 12,
+                server_handler_exec_ms: 28,
+            },
+        }, {
+            correlation_status: 'correlated',
+            client_to_transport_wait_ms: 90,
+        });
+
+        assert.ok(verdicts.includes('reader_backpressure_dominant'));
+        assert.ok(!verdicts.includes('client_before_transport_dominant'));
+        assert.ok(!verdicts.includes('adapter_before_dispatch_dominant'));
+    });
+
+    test('buildCompletionTraceBottleneckVerdicts should distinguish completion barrier dominance', () => {
+        const verdicts = buildCompletionTraceBottleneckVerdicts({
+            stages: [],
+            server_edge_details: {
+                adapter_read_at_ms: 100,
+                transport_received_at_ms: 180,
+                transport_received_at_ms_provenance: 'jsonrpc_dispatch_received',
+                jsonrpc_dispatch_received_at_ms: 180,
+                adapter_to_dispatch_wait_ms: 80,
+                admission_queue_wait_ms: 10,
+                scheduler_poll_ready_wait_ms: 5,
+                completion_barrier_wait_ms: 50,
+                completion_barrier_owner_method: 'textDocument/didOpen',
+                method_entered_at_ms: 190,
+                handler_entered_at_ms: 190,
+                response_sent_at_ms: 240,
+                transport_to_method_wait_ms: 10,
+                method_prelude_exec_ms: 0,
+                transport_to_handler_wait_ms: 10,
+                server_handler_exec_ms: 50,
+            },
+        });
+
+        assert.ok(verdicts.includes('completion_barrier_dominant'));
+        assert.ok(!verdicts.includes('adapter_before_dispatch_dominant'));
+    });
+
     test('buildCompletionTraceBottleneckVerdicts should fail-closed for weak pre-method provenance', () => {
         const verdicts = buildCompletionTraceBottleneckVerdicts({
             stages: [],

@@ -85,6 +85,26 @@ export function hasStrongPreMethodAttribution(
     return getPreMethodAttributionProvenance(trace) === 'same_request_authoritative';
 }
 
+interface CompletionIngressCandidate {
+    verdict: string;
+    waitMs: number;
+}
+
+function strongestPositiveIngressCandidate(
+    candidates: Array<CompletionIngressCandidate | undefined>
+): CompletionIngressCandidate | undefined {
+    let strongest: CompletionIngressCandidate | undefined;
+    for (const candidate of candidates) {
+        if (!candidate || candidate.waitMs <= 0) {
+            continue;
+        }
+        if (!strongest || candidate.waitMs > strongest.waitMs) {
+            strongest = candidate;
+        }
+    }
+    return strongest;
+}
+
 export function derivePrepareTimeoutSubphase(
     details?: CompletionTimelinePrepareDetailsTrace
 ): 'wait_for_file_version' | 'snapshot_with_deps' | 'unavailable' | null {
@@ -123,68 +143,92 @@ export function buildCompletionTraceBottleneckVerdicts(
         verdicts.push('query_bundle_dominant');
         verdicts.push(QUERY_BUNDLE_STAGE_TO_VERDICT[queryBundleDominantStage]);
     }
-    const adapterToDispatchWait = trace.server_edge_details?.adapter_to_dispatch_wait_ms;
-    const transportToMethodWait = trace.server_edge_details?.transport_to_method_wait_ms;
-    const methodPreludeExec = trace.server_edge_details?.method_prelude_exec_ms;
+    const serverEdgeDetails = trace.server_edge_details;
+    const readLoopWait = serverEdgeDetails?.read_loop_wait_ms;
+    const admissionQueueWait = serverEdgeDetails?.admission_queue_wait_ms;
+    const schedulerPollReadyWait = serverEdgeDetails?.scheduler_poll_ready_wait_ms;
+    const completionBarrierWait = serverEdgeDetails?.completion_barrier_wait_ms;
+    const sameFileIngressTokenWait = serverEdgeDetails?.same_file_ingress_token_wait_ms;
+    const adapterToDispatchWait = serverEdgeDetails?.adapter_to_dispatch_wait_ms;
+    const transportToMethodWait = serverEdgeDetails?.transport_to_method_wait_ms;
+    const methodPreludeExec = serverEdgeDetails?.method_prelude_exec_ms;
     const strongPreMethodAttribution = hasStrongPreMethodAttribution(trace);
+    const hasPositiveServerAdmissionSplit = [
+        readLoopWait,
+        admissionQueueWait,
+        schedulerPollReadyWait,
+        completionBarrierWait,
+        sameFileIngressTokenWait,
+    ].some((waitMs) => typeof waitMs === 'number' && waitMs > 0);
+    const fineGrainedIngressCandidate = !queryBundleDominantStage
+        ? strongestPositiveIngressCandidate([
+            typeof readLoopWait === 'number'
+                ? { verdict: 'reader_backpressure_dominant', waitMs: readLoopWait }
+                : undefined,
+            typeof admissionQueueWait === 'number'
+                ? { verdict: 'admission_queue_dominant', waitMs: admissionQueueWait }
+                : undefined,
+            typeof schedulerPollReadyWait === 'number'
+                ? { verdict: 'scheduler_poll_ready_dominant', waitMs: schedulerPollReadyWait }
+                : undefined,
+            typeof completionBarrierWait === 'number'
+                ? { verdict: 'completion_barrier_dominant', waitMs: completionBarrierWait }
+                : undefined,
+            typeof sameFileIngressTokenWait === 'number'
+                ? {
+                    verdict: 'same_file_ingress_token_dominant',
+                    waitMs: sameFileIngressTokenWait,
+                }
+                : undefined,
+        ])
+        : undefined;
+    const ingressDominantCandidate = fineGrainedIngressCandidate
+        ?? (
+            !queryBundleDominantStage
+            && typeof adapterToDispatchWait === 'number'
+            && adapterToDispatchWait > 0
+                ? { verdict: 'adapter_before_dispatch_dominant', waitMs: adapterToDispatchWait }
+                : undefined
+        );
+    if (ingressDominantCandidate) {
+        verdicts.push(ingressDominantCandidate.verdict);
+    }
+    const preMethodDominantCandidate = !queryBundleDominantStage
+        ? strongestPositiveIngressCandidate([
+            strongPreMethodAttribution && typeof transportToMethodWait === 'number'
+                ? {
+                    verdict: 'server_before_method_entry_dominant',
+                    waitMs: transportToMethodWait,
+                }
+                : undefined,
+            typeof methodPreludeExec === 'number'
+                ? { verdict: 'handler_prelude_dominant', waitMs: methodPreludeExec }
+                : undefined,
+        ])
+        : undefined;
     if (
-        !queryBundleDominantStage &&
-        typeof adapterToDispatchWait === 'number' &&
-        adapterToDispatchWait > 0 &&
+        preMethodDominantCandidate &&
         (
-            typeof transportToMethodWait !== 'number' ||
-            adapterToDispatchWait > transportToMethodWait
-        ) &&
-        (
-            typeof methodPreludeExec !== 'number' ||
-            adapterToDispatchWait > methodPreludeExec
+            !ingressDominantCandidate
+            || preMethodDominantCandidate.waitMs > ingressDominantCandidate.waitMs
         )
     ) {
-        verdicts.push('adapter_before_dispatch_dominant');
-    }
-    if (
-        !queryBundleDominantStage &&
-        typeof transportToMethodWait === 'number' &&
-        typeof methodPreludeExec === 'number'
-    ) {
-        if (
-            strongPreMethodAttribution &&
-            transportToMethodWait > 0 &&
-            transportToMethodWait > methodPreludeExec &&
-            (
-                typeof adapterToDispatchWait !== 'number' ||
-                transportToMethodWait > adapterToDispatchWait
-            )
-        ) {
-            verdicts.push('server_before_method_entry_dominant');
-        } else if (
-            methodPreludeExec > 0 &&
-            methodPreludeExec > transportToMethodWait &&
-            (
-                typeof adapterToDispatchWait !== 'number' ||
-                methodPreludeExec > adapterToDispatchWait
-            )
-        ) {
-            verdicts.push('handler_prelude_dominant');
-        }
+        verdicts.push(preMethodDominantCandidate.verdict);
     }
 
     if (
         !queryBundleDominantStage &&
         clientIngress?.correlation_status === 'correlated' &&
+        !hasPositiveServerAdmissionSplit &&
         typeof clientIngress.client_to_transport_wait_ms === 'number' &&
         clientIngress.client_to_transport_wait_ms > 0 &&
         (
-            typeof adapterToDispatchWait !== 'number' ||
-            clientIngress.client_to_transport_wait_ms > adapterToDispatchWait
+            !ingressDominantCandidate
+            || clientIngress.client_to_transport_wait_ms > ingressDominantCandidate.waitMs
         ) &&
         (
-            typeof transportToMethodWait !== 'number' ||
-            clientIngress.client_to_transport_wait_ms > transportToMethodWait
-        ) &&
-        (
-            typeof methodPreludeExec !== 'number' ||
-            clientIngress.client_to_transport_wait_ms > methodPreludeExec
+            !preMethodDominantCandidate
+            || clientIngress.client_to_transport_wait_ms > preMethodDominantCandidate.waitMs
         )
     ) {
         verdicts.push('client_before_transport_dominant');

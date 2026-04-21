@@ -601,6 +601,46 @@ function deriveFindings(
                 `server-side pre-dispatch adapter backlog dominated ${adapterBeforeDispatchCount} completion trace(s).`
             );
         }
+        const readerBackpressureCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('reader_backpressure_dominant')
+        ).length;
+        if (readerBackpressureCount > 0) {
+            findings.push(
+                `reader-side local backpressure before adapter_read dominated ${readerBackpressureCount} completion trace(s).`
+            );
+        }
+        const admissionQueueCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('admission_queue_dominant')
+        ).length;
+        if (admissionQueueCount > 0) {
+            findings.push(
+                `completion admission queue residence dominated ${admissionQueueCount} completion trace(s).`
+            );
+        }
+        const schedulerPollReadyCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('scheduler_poll_ready_dominant')
+        ).length;
+        if (schedulerPollReadyCount > 0) {
+            findings.push(
+                `shared scheduler poll_ready wait dominated ${schedulerPollReadyCount} completion trace(s).`
+            );
+        }
+        const completionBarrierCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('completion_barrier_dominant')
+        ).length;
+        if (completionBarrierCount > 0) {
+            findings.push(
+                `document-sync completion barrier wait dominated ${completionBarrierCount} completion trace(s).`
+            );
+        }
+        const sameFileTokenCount = requestSection.requests.filter((request) =>
+            request.bottleneck_verdicts.includes('same_file_ingress_token_dominant')
+        ).length;
+        if (sameFileTokenCount > 0) {
+            findings.push(
+                `same-file ingress token wait dominated ${sameFileTokenCount} completion trace(s).`
+            );
+        }
         const serverBeforeMethodCount = requestSection.requests.filter((request) =>
             request.bottleneck_verdicts.includes('server_before_method_entry_dominant')
         ).length;

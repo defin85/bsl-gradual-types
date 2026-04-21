@@ -414,6 +414,194 @@ async fn p33_same_file_completion_supersession_releases_active_turn_during_respo
 }
 
 #[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p47_same_file_ingress_token_waits_for_handoff_registration_before_republishing() {
+    const FIXTURE: &str = "Процедура Тест()\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/SameFileIngressToken.bsl")
+        .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let open_token = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("didOpen must publish same-file ingress token");
+    assert_eq!(open_token.file_version, 1);
+    assert_eq!(open_token.source.as_contract_str(), "did_open");
+
+    let text_sync_guard = server.text_sync_v2.lock().await;
+    let did_change = DidChangeTextDocumentParams {
+        text_document: VersionedTextDocumentIdentifier {
+            uri: uri.clone(),
+            version: 2,
+        },
+        content_changes: vec![TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: FIXTURE.to_string(),
+        }],
+    };
+    let did_change_server = server.clone();
+    let did_change_handle = tokio::spawn(async move {
+        did_change_server.did_change(did_change).await;
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let token_before_handoff = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("pre-handoff token state must still be available");
+    assert_eq!(
+        token_before_handoff.file_version, 1,
+        "same-file token must not republish to version 2 before current-revision handoff registration"
+    );
+    assert_eq!(token_before_handoff.source.as_contract_str(), "did_open");
+
+    drop(text_sync_guard);
+    did_change_handle.await.expect("didChange join");
+
+    let token_after_handoff = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("post-handoff token state");
+    assert_eq!(token_after_handoff.file_version, 2);
+    assert_eq!(token_after_handoff.source.as_contract_str(), "did_change");
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p47_did_save_republishes_same_file_ingress_token_after_existing_handoff() {
+    const FIXTURE: &str = "Процедура Тест()\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/SameFileIngressTokenSave.bsl")
+            .expect("form module uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: FIXTURE.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let token_after_open = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("didOpen must publish same-file ingress token");
+    assert_eq!(token_after_open.file_version, 1);
+    assert_eq!(token_after_open.source.as_contract_str(), "did_open");
+
+    server
+        .did_save(DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text: None,
+        })
+        .await;
+
+    let token_after_save = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("didSave must republish same-file ingress token");
+    assert_eq!(token_after_save.file_version, 1);
+    assert_eq!(token_after_save.source.as_contract_str(), "did_save");
+    assert!(
+        token_after_save.published_at_ms >= token_after_open.published_at_ms,
+        "didSave token publication must not move backwards in time"
+    );
+
+    drain_task.abort();
+}
+
+#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration(
 ) {

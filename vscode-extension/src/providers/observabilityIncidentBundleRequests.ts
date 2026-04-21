@@ -76,10 +76,48 @@ export interface ObservabilityIncidentRequestSummary {
     outcome: string;
     total_duration_ms: number;
     dominant_stage?: string;
+    adapter_read_started_at_ms?: number;
+    adapter_parse_completed_at_ms?: number;
     adapter_read_at_ms?: number;
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
+    read_loop_wait_reason?: string;
+    read_loop_wait_ms?: number;
+    pending_completion_spillover_depth?: number;
+    pending_general_request_staged?: boolean;
+    admission_try_enqueue_at_ms?: number;
+    admission_lane?: string;
+    admission_lane_depth_before?: number;
+    admission_lane_depth_after?: number;
+    admission_enqueue_outcome?: string;
+    admission_spillover_outcome?: string;
+    admission_enqueued_at_ms?: number;
     adapter_to_dispatch_wait_ms?: number;
+    admission_queue_wait_ms?: number;
+    scheduler_woke_at_ms?: number;
+    scheduler_poll_ready_entered_at_ms?: number;
+    scheduler_poll_ready_resolved_at_ms?: number;
+    scheduler_poll_ready_wait_ms?: number;
+    scheduler_dequeued_at_ms?: number;
+    completion_barrier_active_at_dequeue?: boolean;
+    completion_barrier_generation?: number;
+    completion_barrier_owner_method?: string;
+    completion_barrier_owner_uri?: string;
+    completion_barrier_owner_version?: number;
+    completion_barrier_wait_ms?: number;
+    doc_sync_first_poll_exec_ms?: number;
+    doc_sync_first_poll_outcome?: string;
+    doc_sync_first_poll_method?: string;
+    doc_sync_first_poll_uri?: string;
+    doc_sync_first_poll_version?: number;
+    same_file_ingress_token_required_version?: number;
+    same_file_ingress_token_published_at_ms?: number;
+    same_file_ingress_token_source?: string;
+    same_file_ingress_token_wait_ms?: number;
+    scheduler_service_call_started_at_ms?: number;
+    scheduler_service_call_returned_at_ms?: number;
+    scheduler_service_call_sync_exec_ms?: number;
+    scheduler_ready_to_dispatch_wait_ms?: number;
     service_future_created_at_ms?: number;
     service_future_first_poll_entered_at_ms?: number;
     service_future_first_poll_outcome?: string;
@@ -201,13 +239,123 @@ export function buildObservabilityIncidentRequestSection(
             outcome: trace.outcome,
             total_duration_ms: trace.total_duration_ms,
             dominant_stage: trace.dominant_stage,
+            adapter_read_started_at_ms: trace.server_edge_details?.adapter_read_started_at_ms,
+            adapter_parse_completed_at_ms: trace.server_edge_details?.adapter_parse_completed_at_ms,
             adapter_read_at_ms: trace.server_edge_details?.adapter_read_at_ms,
             transport_received_at_ms_provenance:
                 trace.server_edge_details?.transport_received_at_ms_provenance,
             jsonrpc_dispatch_received_at_ms:
                 trace.server_edge_details?.jsonrpc_dispatch_received_at_ms,
+            read_loop_wait_reason: contractVersion >= 25
+                ? trace.server_edge_details?.read_loop_wait_reason
+                : undefined,
+            read_loop_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.read_loop_wait_ms
+                : undefined,
+            pending_completion_spillover_depth: contractVersion >= 25
+                ? trace.server_edge_details?.pending_completion_spillover_depth
+                : undefined,
+            pending_general_request_staged: contractVersion >= 25
+                ? trace.server_edge_details?.pending_general_request_staged
+                : undefined,
+            admission_try_enqueue_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.admission_try_enqueue_at_ms
+                : undefined,
+            admission_lane: contractVersion >= 25
+                ? trace.server_edge_details?.admission_lane
+                : undefined,
+            admission_lane_depth_before: contractVersion >= 25
+                ? trace.server_edge_details?.admission_lane_depth_before
+                : undefined,
+            admission_lane_depth_after: contractVersion >= 25
+                ? trace.server_edge_details?.admission_lane_depth_after
+                : undefined,
+            admission_enqueue_outcome: contractVersion >= 25
+                ? trace.server_edge_details?.admission_enqueue_outcome
+                : undefined,
+            admission_spillover_outcome: contractVersion >= 25
+                ? trace.server_edge_details?.admission_spillover_outcome
+                : undefined,
+            admission_enqueued_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.admission_enqueued_at_ms
+                : undefined,
             adapter_to_dispatch_wait_ms:
                 trace.server_edge_details?.adapter_to_dispatch_wait_ms,
+            admission_queue_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.admission_queue_wait_ms
+                : undefined,
+            scheduler_woke_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_woke_at_ms
+                : undefined,
+            scheduler_poll_ready_entered_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_poll_ready_entered_at_ms
+                : undefined,
+            scheduler_poll_ready_resolved_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_poll_ready_resolved_at_ms
+                : undefined,
+            scheduler_poll_ready_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_poll_ready_wait_ms
+                : undefined,
+            scheduler_dequeued_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_dequeued_at_ms
+                : undefined,
+            completion_barrier_active_at_dequeue: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_active_at_dequeue
+                : undefined,
+            completion_barrier_generation: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_generation
+                : undefined,
+            completion_barrier_owner_method: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_owner_method
+                : undefined,
+            completion_barrier_owner_uri: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_owner_uri
+                : undefined,
+            completion_barrier_owner_version: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_owner_version
+                : undefined,
+            completion_barrier_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.completion_barrier_wait_ms
+                : undefined,
+            doc_sync_first_poll_exec_ms: contractVersion >= 25
+                ? trace.server_edge_details?.doc_sync_first_poll_exec_ms
+                : undefined,
+            doc_sync_first_poll_outcome: contractVersion >= 25
+                ? trace.server_edge_details?.doc_sync_first_poll_outcome
+                : undefined,
+            doc_sync_first_poll_method: contractVersion >= 25
+                ? trace.server_edge_details?.doc_sync_first_poll_method
+                : undefined,
+            doc_sync_first_poll_uri: contractVersion >= 25
+                ? trace.server_edge_details?.doc_sync_first_poll_uri
+                : undefined,
+            doc_sync_first_poll_version: contractVersion >= 25
+                ? trace.server_edge_details?.doc_sync_first_poll_version
+                : undefined,
+            same_file_ingress_token_required_version: contractVersion >= 25
+                ? trace.server_edge_details?.same_file_ingress_token_required_version
+                : undefined,
+            same_file_ingress_token_published_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.same_file_ingress_token_published_at_ms
+                : undefined,
+            same_file_ingress_token_source: contractVersion >= 25
+                ? trace.server_edge_details?.same_file_ingress_token_source
+                : undefined,
+            same_file_ingress_token_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.same_file_ingress_token_wait_ms
+                : undefined,
+            scheduler_service_call_started_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_service_call_started_at_ms
+                : undefined,
+            scheduler_service_call_returned_at_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_service_call_returned_at_ms
+                : undefined,
+            scheduler_service_call_sync_exec_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_service_call_sync_exec_ms
+                : undefined,
+            scheduler_ready_to_dispatch_wait_ms: contractVersion >= 25
+                ? trace.server_edge_details?.scheduler_ready_to_dispatch_wait_ms
+                : undefined,
             service_future_created_at_ms:
                 trace.server_edge_details?.service_future_created_at_ms,
             service_future_first_poll_entered_at_ms:

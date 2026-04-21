@@ -2885,6 +2885,12 @@ impl BslLanguageServer {
                 .await
                 .insert(file_id, handoff_registered_at);
         }
+        self.publish_same_file_ingress_token_v2(
+            file_id,
+            version,
+            super::super::SameFileIngressTokenSourceV2::DidOpen,
+        )
+        .await;
         self.schedule_completion_head_precompute_from_current_revision_v2(file_id, version)
             .await;
         self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
@@ -3285,6 +3291,12 @@ impl BslLanguageServer {
                 parser_base_recovery_reuse_parse_result,
             )
         };
+        self.publish_same_file_ingress_token_v2(
+            file_id,
+            version,
+            super::super::SameFileIngressTokenSourceV2::DidChange,
+        )
+        .await;
 
         // Publish current-revision text/version immediately so completion waiters do not sit
         // behind slow parse work on the didChange path.
@@ -3493,6 +3505,21 @@ impl BslLanguageServer {
             })
             .await;
         }
+        if self
+            .latest_current_revision_handoff_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            == Some(version)
+        {
+            self.publish_same_file_ingress_token_v2(
+                file_id,
+                version,
+                super::super::SameFileIngressTokenSourceV2::DidSave,
+            )
+            .await;
+        }
 
         let flow_sensitive_enabled = {
             let settings = self.settings.read().await;
@@ -3537,6 +3564,23 @@ impl BslLanguageServer {
         let _sync_guard = self.text_sync_v2.lock().await;
 
         if let Some(file_id) = self.get_file_id_v2(&uri).await {
+            let closing_version = {
+                let current_revision_handoff_version = self
+                    .latest_current_revision_handoff_versions_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .copied();
+                if current_revision_handoff_version.is_some() {
+                    current_revision_handoff_version
+                } else {
+                    self.latest_received_file_versions_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .copied()
+                }
+            };
             let close_ticket = self
                 .completion_dispatcher_v2
                 .close_file_dispatcher(file_id)
@@ -3634,6 +3678,15 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            if let Some(closing_version) = closing_version {
+                self.publish_same_file_ingress_token_v2(
+                    file_id,
+                    closing_version,
+                    super::super::SameFileIngressTokenSourceV2::DidClose,
+                )
+                .await;
+            }
+            self.clear_same_file_ingress_token_v2(file_id).await;
             self.file_id_to_uri_v2.write().await.remove(&file_id);
             let had_large_churn = self
                 .scale_aware_churn_state_v2

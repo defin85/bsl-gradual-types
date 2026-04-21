@@ -309,7 +309,9 @@ struct CompletionTimelineCapture {
     uri: String,
     trigger_mode: String,
     started_at_ms: u64,
+    adapter_read_started_at_ms: Option<u64>,
     adapter_read_at_ms: Option<u64>,
+    adapter_parse_completed_at_ms: Option<u64>,
     transport_received_at_ms: Option<u64>,
     transport_received_at_ms_provenance: Option<String>,
     jsonrpc_dispatch_received_at_ms: Option<u64>,
@@ -336,6 +338,38 @@ struct CompletionTimelineCapture {
     response_output_encode_completed_at_ms: Option<u64>,
     response_flush_completed_at_ms: Option<u64>,
     cancel_observed_at_ms: Option<u64>,
+    read_loop_wait_reason: Option<String>,
+    read_loop_wait_ms: Option<u64>,
+    pending_completion_spillover_depth: Option<u64>,
+    pending_general_request_staged: Option<bool>,
+    admission_try_enqueue_at_ms: Option<u64>,
+    admission_lane: Option<String>,
+    admission_lane_depth_before: Option<u64>,
+    admission_lane_depth_after: Option<u64>,
+    admission_enqueue_outcome: Option<String>,
+    admission_spillover_outcome: Option<String>,
+    admission_enqueued_at_ms: Option<u64>,
+    scheduler_woke_at_ms: Option<u64>,
+    scheduler_poll_ready_entered_at_ms: Option<u64>,
+    scheduler_poll_ready_resolved_at_ms: Option<u64>,
+    scheduler_dequeued_at_ms: Option<u64>,
+    completion_barrier_active_at_dequeue: Option<bool>,
+    completion_barrier_generation: Option<u64>,
+    completion_barrier_owner_method: Option<String>,
+    completion_barrier_owner_uri: Option<String>,
+    completion_barrier_owner_version: Option<i32>,
+    completion_barrier_wait_ms: Option<u64>,
+    doc_sync_first_poll_exec_ms: Option<u64>,
+    doc_sync_first_poll_outcome: Option<String>,
+    doc_sync_first_poll_method: Option<String>,
+    doc_sync_first_poll_uri: Option<String>,
+    doc_sync_first_poll_version: Option<i32>,
+    same_file_ingress_token_required_version: Option<i32>,
+    same_file_ingress_token_published_at_ms: Option<u64>,
+    same_file_ingress_token_source: Option<String>,
+    same_file_ingress_token_wait_ms: Option<u64>,
+    scheduler_service_call_started_at_ms: Option<u64>,
+    scheduler_service_call_returned_at_ms: Option<u64>,
     timeline_cursor_ms: u64,
     prepare_details: Option<crate::types::CompletionTimelinePrepareDetailsTrace>,
     collect_breakdown: Option<crate::types::CompletionTimelineCollectBreakdownTrace>,
@@ -405,7 +439,9 @@ impl CompletionTimelineCapture {
             uri: uri.to_string(),
             trigger_mode: trigger_mode.to_string(),
             started_at_ms: method_entered_at_ms,
+            adapter_read_started_at_ms: None,
             adapter_read_at_ms: None,
+            adapter_parse_completed_at_ms: None,
             transport_received_at_ms: None,
             transport_received_at_ms_provenance: None,
             jsonrpc_dispatch_received_at_ms: None,
@@ -430,6 +466,38 @@ impl CompletionTimelineCapture {
             response_output_encode_completed_at_ms: None,
             response_flush_completed_at_ms: None,
             cancel_observed_at_ms: None,
+            read_loop_wait_reason: None,
+            read_loop_wait_ms: None,
+            pending_completion_spillover_depth: None,
+            pending_general_request_staged: None,
+            admission_try_enqueue_at_ms: None,
+            admission_lane: None,
+            admission_lane_depth_before: None,
+            admission_lane_depth_after: None,
+            admission_enqueue_outcome: None,
+            admission_spillover_outcome: None,
+            admission_enqueued_at_ms: None,
+            scheduler_woke_at_ms: None,
+            scheduler_poll_ready_entered_at_ms: None,
+            scheduler_poll_ready_resolved_at_ms: None,
+            scheduler_dequeued_at_ms: None,
+            completion_barrier_active_at_dequeue: None,
+            completion_barrier_generation: None,
+            completion_barrier_owner_method: None,
+            completion_barrier_owner_uri: None,
+            completion_barrier_owner_version: None,
+            completion_barrier_wait_ms: None,
+            doc_sync_first_poll_exec_ms: None,
+            doc_sync_first_poll_outcome: None,
+            doc_sync_first_poll_method: None,
+            doc_sync_first_poll_uri: None,
+            doc_sync_first_poll_version: None,
+            same_file_ingress_token_required_version: None,
+            same_file_ingress_token_published_at_ms: None,
+            same_file_ingress_token_source: None,
+            same_file_ingress_token_wait_ms: None,
+            scheduler_service_call_started_at_ms: None,
+            scheduler_service_call_returned_at_ms: None,
             timeline_cursor_ms: 0,
             prepare_details: None,
             collect_breakdown: None,
@@ -761,7 +829,9 @@ impl CompletionTimelineCapture {
     ) -> Option<crate::types::CompletionTimelineServerEdgeDetailsTrace> {
         super::helpers::build_server_edge_details_trace(
             &super::helpers::RequestServerEdgeTraceInputs {
+                adapter_read_started_at_ms: self.adapter_read_started_at_ms,
                 adapter_read_at_ms: self.adapter_read_at_ms,
+                adapter_parse_completed_at_ms: self.adapter_parse_completed_at_ms,
                 transport_received_at_ms: self.transport_received_at_ms,
                 transport_received_at_ms_provenance: self
                     .transport_received_at_ms_provenance
@@ -791,6 +861,40 @@ impl CompletionTimelineCapture {
                 response_output_encode_completed_at_ms: self.response_output_encode_completed_at_ms,
                 response_flush_completed_at_ms: self.response_flush_completed_at_ms,
                 cancel_observed_at_ms: self.cancel_observed_at_ms,
+                read_loop_wait_reason: self.read_loop_wait_reason.clone(),
+                read_loop_wait_ms: self.read_loop_wait_ms,
+                pending_completion_spillover_depth: self.pending_completion_spillover_depth,
+                pending_general_request_staged: self.pending_general_request_staged,
+                admission_try_enqueue_at_ms: self.admission_try_enqueue_at_ms,
+                admission_lane: self.admission_lane.clone(),
+                admission_lane_depth_before: self.admission_lane_depth_before,
+                admission_lane_depth_after: self.admission_lane_depth_after,
+                admission_enqueue_outcome: self.admission_enqueue_outcome.clone(),
+                admission_spillover_outcome: self.admission_spillover_outcome.clone(),
+                admission_enqueued_at_ms: self.admission_enqueued_at_ms,
+                scheduler_woke_at_ms: self.scheduler_woke_at_ms,
+                scheduler_poll_ready_entered_at_ms: self.scheduler_poll_ready_entered_at_ms,
+                scheduler_poll_ready_resolved_at_ms: self.scheduler_poll_ready_resolved_at_ms,
+                scheduler_dequeued_at_ms: self.scheduler_dequeued_at_ms,
+                completion_barrier_active_at_dequeue: self.completion_barrier_active_at_dequeue,
+                completion_barrier_generation: self.completion_barrier_generation,
+                completion_barrier_owner_method: self.completion_barrier_owner_method.clone(),
+                completion_barrier_owner_uri: self.completion_barrier_owner_uri.clone(),
+                completion_barrier_owner_version: self.completion_barrier_owner_version,
+                completion_barrier_wait_ms: self.completion_barrier_wait_ms,
+                doc_sync_first_poll_exec_ms: self.doc_sync_first_poll_exec_ms,
+                doc_sync_first_poll_outcome: self.doc_sync_first_poll_outcome.clone(),
+                doc_sync_first_poll_method: self.doc_sync_first_poll_method.clone(),
+                doc_sync_first_poll_uri: self.doc_sync_first_poll_uri.clone(),
+                doc_sync_first_poll_version: self.doc_sync_first_poll_version,
+                same_file_ingress_token_required_version: self
+                    .same_file_ingress_token_required_version,
+                same_file_ingress_token_published_at_ms: self
+                    .same_file_ingress_token_published_at_ms,
+                same_file_ingress_token_source: self.same_file_ingress_token_source.clone(),
+                same_file_ingress_token_wait_ms: self.same_file_ingress_token_wait_ms,
+                scheduler_service_call_started_at_ms: self.scheduler_service_call_started_at_ms,
+                scheduler_service_call_returned_at_ms: self.scheduler_service_call_returned_at_ms,
             },
         )
     }
@@ -1586,6 +1690,213 @@ impl BslLanguageServer {
             pending_request_context.and_then(|context| context.adapter_read_at_ms)
         {
             timeline_capture.set_adapter_read_at_ms(adapter_read_at_ms);
+        }
+        if let Some(adapter_read_started_at_ms) =
+            pending_request_context.and_then(|context| context.adapter_read_started_at_ms)
+        {
+            timeline_capture.adapter_read_started_at_ms = Some(adapter_read_started_at_ms);
+        }
+        if let Some(adapter_parse_completed_at_ms) =
+            pending_request_context.and_then(|context| context.adapter_parse_completed_at_ms)
+        {
+            timeline_capture.adapter_parse_completed_at_ms = Some(adapter_parse_completed_at_ms);
+        }
+        if let Some(read_loop_wait_reason) =
+            pending_request_context.and_then(|context| context.read_loop_wait_reason.as_deref())
+        {
+            timeline_capture.read_loop_wait_reason = Some(read_loop_wait_reason.to_string());
+        }
+        if let Some(read_loop_wait_ms) =
+            pending_request_context.and_then(|context| context.read_loop_wait_ms)
+        {
+            timeline_capture.read_loop_wait_ms = Some(read_loop_wait_ms);
+        }
+        if let Some(pending_completion_spillover_depth) =
+            pending_request_context.and_then(|context| context.pending_completion_spillover_depth)
+        {
+            timeline_capture.pending_completion_spillover_depth =
+                Some(pending_completion_spillover_depth);
+        }
+        if let Some(pending_general_request_staged) =
+            pending_request_context.and_then(|context| context.pending_general_request_staged)
+        {
+            timeline_capture.pending_general_request_staged = Some(pending_general_request_staged);
+        }
+        if let Some(admission_try_enqueue_at_ms) =
+            pending_request_context.and_then(|context| context.admission_try_enqueue_at_ms)
+        {
+            timeline_capture.admission_try_enqueue_at_ms = Some(admission_try_enqueue_at_ms);
+        }
+        if let Some(admission_lane) =
+            pending_request_context.and_then(|context| context.admission_lane.as_deref())
+        {
+            timeline_capture.admission_lane = Some(admission_lane.to_string());
+        }
+        if let Some(admission_lane_depth_before) =
+            pending_request_context.and_then(|context| context.admission_lane_depth_before)
+        {
+            timeline_capture.admission_lane_depth_before = Some(admission_lane_depth_before);
+        }
+        if let Some(admission_lane_depth_after) =
+            pending_request_context.and_then(|context| context.admission_lane_depth_after)
+        {
+            timeline_capture.admission_lane_depth_after = Some(admission_lane_depth_after);
+        }
+        if let Some(admission_enqueue_outcome) =
+            pending_request_context.and_then(|context| context.admission_enqueue_outcome.as_deref())
+        {
+            timeline_capture.admission_enqueue_outcome =
+                Some(admission_enqueue_outcome.to_string());
+        }
+        if let Some(admission_spillover_outcome) = pending_request_context
+            .and_then(|context| context.admission_spillover_outcome.as_deref())
+        {
+            timeline_capture.admission_spillover_outcome =
+                Some(admission_spillover_outcome.to_string());
+        }
+        if let Some(admission_enqueued_at_ms) =
+            pending_request_context.and_then(|context| context.admission_enqueued_at_ms)
+        {
+            timeline_capture.admission_enqueued_at_ms = Some(admission_enqueued_at_ms);
+        }
+        if let Some(scheduler_woke_at_ms) =
+            pending_request_context.and_then(|context| context.scheduler_woke_at_ms)
+        {
+            timeline_capture.scheduler_woke_at_ms = Some(scheduler_woke_at_ms);
+        }
+        if let Some(scheduler_poll_ready_entered_at_ms) =
+            pending_request_context.and_then(|context| context.scheduler_poll_ready_entered_at_ms)
+        {
+            timeline_capture.scheduler_poll_ready_entered_at_ms =
+                Some(scheduler_poll_ready_entered_at_ms);
+        }
+        if let Some(scheduler_poll_ready_resolved_at_ms) =
+            pending_request_context.and_then(|context| context.scheduler_poll_ready_resolved_at_ms)
+        {
+            timeline_capture.scheduler_poll_ready_resolved_at_ms =
+                Some(scheduler_poll_ready_resolved_at_ms);
+        }
+        if let Some(scheduler_dequeued_at_ms) =
+            pending_request_context.and_then(|context| context.scheduler_dequeued_at_ms)
+        {
+            timeline_capture.scheduler_dequeued_at_ms = Some(scheduler_dequeued_at_ms);
+        }
+        if let Some(completion_barrier_active_at_dequeue) =
+            pending_request_context.and_then(|context| context.completion_barrier_active_at_dequeue)
+        {
+            timeline_capture.completion_barrier_active_at_dequeue =
+                Some(completion_barrier_active_at_dequeue);
+        }
+        if let Some(completion_barrier_generation) =
+            pending_request_context.and_then(|context| context.completion_barrier_generation)
+        {
+            timeline_capture.completion_barrier_generation = Some(completion_barrier_generation);
+        }
+        if let Some(completion_barrier_owner_method) = pending_request_context
+            .and_then(|context| context.completion_barrier_owner_method.as_deref())
+        {
+            timeline_capture.completion_barrier_owner_method =
+                Some(completion_barrier_owner_method.to_string());
+        }
+        if let Some(completion_barrier_owner_uri) = pending_request_context
+            .and_then(|context| context.completion_barrier_owner_uri.as_deref())
+        {
+            timeline_capture.completion_barrier_owner_uri =
+                Some(completion_barrier_owner_uri.to_string());
+        }
+        if let Some(completion_barrier_owner_version) =
+            pending_request_context.and_then(|context| context.completion_barrier_owner_version)
+        {
+            timeline_capture.completion_barrier_owner_version =
+                Some(completion_barrier_owner_version);
+        }
+        if let Some(completion_barrier_wait_ms) =
+            pending_request_context.and_then(|context| context.completion_barrier_wait_ms)
+        {
+            timeline_capture.completion_barrier_wait_ms = Some(completion_barrier_wait_ms);
+        }
+        if let Some(doc_sync_first_poll_exec_ms) =
+            pending_request_context.and_then(|context| context.doc_sync_first_poll_exec_ms)
+        {
+            timeline_capture.doc_sync_first_poll_exec_ms = Some(doc_sync_first_poll_exec_ms);
+        }
+        if let Some(doc_sync_first_poll_outcome) = pending_request_context
+            .and_then(|context| context.doc_sync_first_poll_outcome.as_deref())
+        {
+            timeline_capture.doc_sync_first_poll_outcome =
+                Some(doc_sync_first_poll_outcome.to_string());
+        }
+        if let Some(doc_sync_first_poll_method) = pending_request_context
+            .and_then(|context| context.doc_sync_first_poll_method.as_deref())
+        {
+            timeline_capture.doc_sync_first_poll_method =
+                Some(doc_sync_first_poll_method.to_string());
+        }
+        if let Some(doc_sync_first_poll_uri) =
+            pending_request_context.and_then(|context| context.doc_sync_first_poll_uri.as_deref())
+        {
+            timeline_capture.doc_sync_first_poll_uri = Some(doc_sync_first_poll_uri.to_string());
+        }
+        if let Some(doc_sync_first_poll_version) =
+            pending_request_context.and_then(|context| context.doc_sync_first_poll_version)
+        {
+            timeline_capture.doc_sync_first_poll_version = Some(doc_sync_first_poll_version);
+        }
+        if let Some(same_file_ingress_token_required_version) = pending_request_context
+            .and_then(|context| context.same_file_ingress_token_required_version)
+        {
+            timeline_capture.same_file_ingress_token_required_version =
+                Some(same_file_ingress_token_required_version);
+        }
+        if let Some(same_file_ingress_token_published_at_ms) = pending_request_context
+            .and_then(|context| context.same_file_ingress_token_published_at_ms)
+        {
+            timeline_capture.same_file_ingress_token_published_at_ms =
+                Some(same_file_ingress_token_published_at_ms);
+        }
+        if let Some(same_file_ingress_token_source) = pending_request_context
+            .and_then(|context| context.same_file_ingress_token_source.as_deref())
+        {
+            timeline_capture.same_file_ingress_token_source =
+                Some(same_file_ingress_token_source.to_string());
+        }
+        if let Some(same_file_ingress_token_wait_ms) =
+            pending_request_context.and_then(|context| context.same_file_ingress_token_wait_ms)
+        {
+            timeline_capture.same_file_ingress_token_wait_ms =
+                Some(same_file_ingress_token_wait_ms);
+        }
+        if timeline_capture
+            .same_file_ingress_token_published_at_ms
+            .is_none()
+        {
+            if let Some(token) = self.same_file_ingress_token_v2(file_id).await {
+                if version_hint
+                    .is_none_or(|required_version| token.file_version >= required_version)
+                {
+                    timeline_capture.same_file_ingress_token_required_version =
+                        Some(version_hint.unwrap_or(token.file_version));
+                    timeline_capture.same_file_ingress_token_published_at_ms =
+                        Some(token.published_at_ms);
+                    timeline_capture.same_file_ingress_token_source =
+                        Some(token.source.as_contract_str().to_string());
+                    timeline_capture
+                        .same_file_ingress_token_wait_ms
+                        .get_or_insert(0);
+                }
+            }
+        }
+        if let Some(scheduler_service_call_started_at_ms) =
+            pending_request_context.and_then(|context| context.scheduler_service_call_started_at_ms)
+        {
+            timeline_capture.scheduler_service_call_started_at_ms =
+                Some(scheduler_service_call_started_at_ms);
+        }
+        if let Some(scheduler_service_call_returned_at_ms) = pending_request_context
+            .and_then(|context| context.scheduler_service_call_returned_at_ms)
+        {
+            timeline_capture.scheduler_service_call_returned_at_ms =
+                Some(scheduler_service_call_returned_at_ms);
         }
         if let Some(jsonrpc_dispatch_received_at_ms) =
             current_request_jsonrpc_dispatch_received_at_ms.or_else(|| {
@@ -5031,6 +5342,122 @@ mod tests {
         assert_eq!(details.service_future_to_scope_wait_ms, Some(4));
         assert_eq!(details.transport_to_service_scope_wait_ms, Some(9));
         assert_eq!(details.transport_to_method_wait_ms, Some(14));
+    }
+
+    #[test]
+    fn server_edge_details_derive_pre_dispatch_decomposition_when_present() {
+        let mut capture = sample_capture();
+        capture.adapter_read_started_at_ms = Some(1_699_999_999_980);
+        capture.set_adapter_read_at_ms(1_699_999_999_990);
+        capture.adapter_parse_completed_at_ms = Some(1_699_999_999_990);
+        capture.read_loop_wait_reason = Some("general_lane_space".to_string());
+        capture.read_loop_wait_ms = Some(7);
+        capture.pending_completion_spillover_depth = Some(2);
+        capture.pending_general_request_staged = Some(true);
+        capture.admission_try_enqueue_at_ms = Some(1_699_999_999_991);
+        capture.admission_lane = Some("interactive_completion".to_string());
+        capture.admission_lane_depth_before = Some(1);
+        capture.admission_lane_depth_after = Some(2);
+        capture.admission_enqueue_outcome = Some("enqueued".to_string());
+        capture.admission_spillover_outcome = Some("staged_completion_spillover".to_string());
+        capture.admission_enqueued_at_ms = Some(1_699_999_999_994);
+        capture.scheduler_woke_at_ms = Some(1_699_999_999_997);
+        capture.scheduler_poll_ready_entered_at_ms = Some(1_699_999_999_998);
+        capture.scheduler_poll_ready_resolved_at_ms = Some(1_700_000_000_003);
+        capture.scheduler_dequeued_at_ms = Some(1_700_000_000_005);
+        capture.completion_barrier_active_at_dequeue = Some(false);
+        capture.completion_barrier_generation = Some(7);
+        capture.completion_barrier_owner_method = Some("textDocument/didOpen".to_string());
+        capture.completion_barrier_owner_uri =
+            Some("file:///timeline-pre-dispatch-split.bsl".to_string());
+        capture.completion_barrier_owner_version = Some(3);
+        capture.completion_barrier_wait_ms = Some(2);
+        capture.doc_sync_first_poll_exec_ms = Some(1);
+        capture.doc_sync_first_poll_outcome = Some("pending".to_string());
+        capture.doc_sync_first_poll_method = Some("textDocument/didOpen".to_string());
+        capture.doc_sync_first_poll_uri =
+            Some("file:///timeline-pre-dispatch-split.bsl".to_string());
+        capture.doc_sync_first_poll_version = Some(3);
+        capture.same_file_ingress_token_required_version = Some(3);
+        capture.same_file_ingress_token_published_at_ms = Some(1_700_000_000_006);
+        capture.same_file_ingress_token_source = Some("did_change".to_string());
+        capture.same_file_ingress_token_wait_ms = Some(3);
+        capture.scheduler_service_call_started_at_ms = Some(1_700_000_000_007);
+        capture.scheduler_service_call_returned_at_ms = Some(1_700_000_000_009);
+        capture.set_transport_received_at_ms(1_700_000_000_010);
+        capture.set_transport_received_at_ms_provenance("jsonrpc_dispatch_received");
+        capture.set_jsonrpc_dispatch_received_at_ms(1_700_000_000_010);
+        capture.set_request_context_call_entered_at_ms(1_700_000_000_012);
+        capture.set_service_future_created_at_ms(1_700_000_000_013);
+        capture.set_service_scope_entered_at_ms(1_700_000_000_015);
+        capture.set_method_entered_at_ms(1_700_000_000_020);
+        capture.set_handler_entered_at_ms(1_700_000_000_024);
+        capture.set_response_sent_at_ms(1_700_000_000_040);
+
+        let trace = capture.into_trace(
+            "trace-pre-dispatch-split".to_string(),
+            std::time::Duration::from_millis(60),
+            "ok_non_empty",
+        );
+        let details = trace
+            .server_edge_details
+            .expect("server_edge_details must be present");
+
+        assert_eq!(details.adapter_read_started_at_ms, Some(1_699_999_999_980));
+        assert_eq!(
+            details.adapter_parse_completed_at_ms,
+            Some(1_699_999_999_990)
+        );
+        assert_eq!(
+            details.read_loop_wait_reason.as_deref(),
+            Some("general_lane_space")
+        );
+        assert_eq!(details.read_loop_wait_ms, Some(7));
+        assert_eq!(details.pending_completion_spillover_depth, Some(2));
+        assert_eq!(details.pending_general_request_staged, Some(true));
+        assert_eq!(details.admission_try_enqueue_at_ms, Some(1_699_999_999_991));
+        assert_eq!(
+            details.admission_lane.as_deref(),
+            Some("interactive_completion")
+        );
+        assert_eq!(details.admission_lane_depth_before, Some(1));
+        assert_eq!(details.admission_lane_depth_after, Some(2));
+        assert_eq!(
+            details.admission_enqueue_outcome.as_deref(),
+            Some("enqueued")
+        );
+        assert_eq!(
+            details.admission_spillover_outcome.as_deref(),
+            Some("staged_completion_spillover")
+        );
+        assert_eq!(details.admission_queue_wait_ms, Some(6));
+        assert_eq!(details.scheduler_poll_ready_wait_ms, Some(5));
+        assert_eq!(details.scheduler_service_call_sync_exec_ms, Some(2));
+        assert_eq!(details.scheduler_ready_to_dispatch_wait_ms, Some(4));
+        assert_eq!(details.adapter_to_dispatch_wait_ms, Some(20));
+        assert_eq!(details.completion_barrier_active_at_dequeue, Some(false));
+        assert_eq!(details.completion_barrier_generation, Some(7));
+        assert_eq!(
+            details.completion_barrier_owner_method.as_deref(),
+            Some("textDocument/didOpen")
+        );
+        assert_eq!(
+            details.completion_barrier_owner_uri.as_deref(),
+            Some("file:///timeline-pre-dispatch-split.bsl")
+        );
+        assert_eq!(details.completion_barrier_owner_version, Some(3));
+        assert_eq!(details.completion_barrier_wait_ms, Some(2));
+        assert_eq!(details.doc_sync_first_poll_exec_ms, Some(1));
+        assert_eq!(
+            details.doc_sync_first_poll_outcome.as_deref(),
+            Some("pending")
+        );
+        assert_eq!(details.same_file_ingress_token_required_version, Some(3));
+        assert_eq!(
+            details.same_file_ingress_token_source.as_deref(),
+            Some("did_change")
+        );
+        assert_eq!(details.same_file_ingress_token_wait_ms, Some(3));
     }
 
     #[test]

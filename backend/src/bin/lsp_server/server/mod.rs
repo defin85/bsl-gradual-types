@@ -100,6 +100,34 @@ pub(crate) struct CompletionHeadServeObservationV2 {
     pub served_at: Instant,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SameFileIngressTokenSourceV2 {
+    DidOpen,
+    DidChange,
+    DidSave,
+    DidClose,
+    Other,
+}
+
+impl SameFileIngressTokenSourceV2 {
+    pub(crate) fn as_contract_str(self) -> &'static str {
+        match self {
+            Self::DidOpen => "did_open",
+            Self::DidChange => "did_change",
+            Self::DidSave => "did_save",
+            Self::DidClose => "did_close",
+            Self::Other => "other",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SameFileIngressTokenV2 {
+    pub file_version: i32,
+    pub published_at_ms: u64,
+    pub source: SameFileIngressTokenSourceV2,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct DocumentSymbolReadyStateV2 {
     pub file_version: i32,
@@ -307,6 +335,9 @@ pub struct BslLanguageServer {
     /// into the runtime writer queue. This is stricter than `latest_received_file_versions_v2`,
     /// which may advance before the runtime handoff is actually enqueued.
     pub(crate) latest_current_revision_handoff_versions_v2: Arc<RwLock<HashMap<V2FileId, i32>>>,
+    pub(crate) latest_same_file_ingress_tokens_v2:
+        Arc<RwLock<HashMap<V2FileId, SameFileIngressTokenV2>>>,
+    pub(crate) same_file_ingress_token_notify_v2: Arc<Notify>,
     pub(crate) latest_document_shadow_state_v2:
         Arc<RwLock<HashMap<V2FileId, DocumentShadowStateV2>>>,
     pub(crate) latest_ready_parse_snapshots_v2:

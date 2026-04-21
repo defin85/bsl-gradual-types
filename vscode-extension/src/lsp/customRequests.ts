@@ -810,7 +810,9 @@ export interface CompletionTimelinePrepareDetailsTrace {
 }
 
 export interface CompletionTimelineServerEdgeDetailsTrace {
+    adapter_read_started_at_ms?: number;
     adapter_read_at_ms?: number;
+    adapter_parse_completed_at_ms?: number;
     transport_received_at_ms: number;
     transport_received_at_ms_provenance?: CompletionTimelineTransportReceivedAtMsProvenance;
     jsonrpc_dispatch_received_at_ms?: number;
@@ -834,8 +836,44 @@ export interface CompletionTimelineServerEdgeDetailsTrace {
     response_output_encode_completed_at_ms?: number;
     response_flush_completed_at_ms?: number;
     cancel_observed_at_ms?: number;
+    read_loop_wait_reason?: string;
+    read_loop_wait_ms?: number;
+    pending_completion_spillover_depth?: number;
+    pending_general_request_staged?: boolean;
+    admission_try_enqueue_at_ms?: number;
+    admission_lane?: string;
+    admission_lane_depth_before?: number;
+    admission_lane_depth_after?: number;
+    admission_enqueue_outcome?: string;
+    admission_spillover_outcome?: string;
+    admission_enqueued_at_ms?: number;
+    scheduler_woke_at_ms?: number;
+    scheduler_poll_ready_entered_at_ms?: number;
+    scheduler_poll_ready_resolved_at_ms?: number;
+    scheduler_dequeued_at_ms?: number;
+    completion_barrier_active_at_dequeue?: boolean;
+    completion_barrier_generation?: number;
+    completion_barrier_owner_method?: string;
+    completion_barrier_owner_uri?: string;
+    completion_barrier_owner_version?: number;
+    completion_barrier_wait_ms?: number;
+    doc_sync_first_poll_exec_ms?: number;
+    doc_sync_first_poll_outcome?: string;
+    doc_sync_first_poll_method?: string;
+    doc_sync_first_poll_uri?: string;
+    doc_sync_first_poll_version?: number;
+    same_file_ingress_token_required_version?: number;
+    same_file_ingress_token_published_at_ms?: number;
+    same_file_ingress_token_source?: string;
+    same_file_ingress_token_wait_ms?: number;
+    scheduler_service_call_started_at_ms?: number;
+    scheduler_service_call_returned_at_ms?: number;
     dispatch_to_request_context_wait_ms?: number;
     adapter_to_dispatch_wait_ms?: number;
+    admission_queue_wait_ms?: number;
+    scheduler_poll_ready_wait_ms?: number;
+    scheduler_service_call_sync_exec_ms?: number;
+    scheduler_ready_to_dispatch_wait_ms?: number;
     transport_to_slot_release_wait_ms?: number;
     transport_to_service_future_wait_ms?: number;
     service_future_to_scope_wait_ms?: number;

@@ -588,6 +588,7 @@ impl AdmissionQueues {
         self.space_notify.notify_waiters();
     }
 
+    #[cfg(test)]
     fn lane_depth(&self, lane: AdmissionLane) -> usize {
         let state = self
             .state

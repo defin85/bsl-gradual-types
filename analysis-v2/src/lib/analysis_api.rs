@@ -97,6 +97,18 @@ fn merge_ir_build_profiles(
     Some(current)
 }
 
+struct TypeIndexPrecomputeFinishArgs {
+    file_id: FileId,
+    file: SourceFile,
+    expected_version: Option<i32>,
+    queue_wait_ms: u128,
+    parse_snapshot_meta: TypeIndexParseSnapshotMeta,
+    exec_ms: u128,
+    type_index: Arc<type_inference_v2::TypeIndex>,
+    build_profile: type_inference_v2::TypeIndexBuildProfile,
+    ir_profile: IrBuildProfile,
+}
+
 impl AnalysisV2 {
     fn parse_snapshot_for_file(&self, file_id: FileId, file: SourceFile) -> Option<&ParseSnapshot> {
         let snapshot = self.parse_snapshots.get(&file_id)?;
@@ -458,32 +470,32 @@ impl AnalysisV2 {
                 "type_index_precompute: type_index build ready"
             );
             let exec_ms = exec_started.elapsed().as_millis();
-            return self.finish_type_index_precompute_for_program(
+            self.finish_type_index_precompute_for_program(TypeIndexPrecomputeFinishArgs {
                 file_id,
                 file,
                 expected_version,
                 queue_wait_ms,
                 parse_snapshot_meta,
                 exec_ms,
-                Arc::new(profiled.index),
-                profiled.profile,
-                profiled_ir.profile,
-            );
+                type_index: Arc::new(profiled.index),
+                build_profile: profiled.profile,
+                ir_profile: profiled_ir.profile,
+            })
         } else {
             let index_snapshot =
                 cancellable(|| type_index(&self.db, file, self.deps, self.settings))?;
             let exec_ms = exec_started.elapsed().as_millis();
-            return self.finish_type_index_precompute_for_program(
+            self.finish_type_index_precompute_for_program(TypeIndexPrecomputeFinishArgs {
                 file_id,
                 file,
                 expected_version,
                 queue_wait_ms,
                 parse_snapshot_meta,
                 exec_ms,
-                index_snapshot.index(),
-                index_snapshot.build_profile(),
-                IrBuildProfile::default(),
-            );
+                type_index: index_snapshot.index(),
+                build_profile: index_snapshot.build_profile(),
+                ir_profile: IrBuildProfile::default(),
+            })
         }
     }
 
@@ -526,71 +538,75 @@ impl AnalysisV2 {
                 deps_data,
             )
         })?;
-        self.finish_type_index_precompute_for_program(
+        self.finish_type_index_precompute_for_program(TypeIndexPrecomputeFinishArgs {
             file_id,
             file,
             expected_version,
             queue_wait_ms,
             parse_snapshot_meta,
-            exec_started.elapsed().as_millis(),
-            Arc::new(profiled.index),
-            profiled.profile,
-            IrBuildProfile::default(),
-        )
+            exec_ms: exec_started.elapsed().as_millis(),
+            type_index: Arc::new(profiled.index),
+            build_profile: profiled.profile,
+            ir_profile: IrBuildProfile::default(),
+        })
     }
 
     fn finish_type_index_precompute_for_program(
         &self,
-        file_id: FileId,
-        file: SourceFile,
-        expected_version: Option<i32>,
-        queue_wait_ms: u128,
-        parse_snapshot_meta: TypeIndexParseSnapshotMeta,
-        exec_ms: u128,
-        type_index: Arc<type_inference_v2::TypeIndex>,
-        build_profile: type_inference_v2::TypeIndexBuildProfile,
-        ir_profile: IrBuildProfile,
+        args: TypeIndexPrecomputeFinishArgs,
     ) -> Cancellable<TypeIndexPrecomputeResult> {
-        let key = self.make_type_index_artifact_key(file_id, file.version(&self.db));
-        let latest_version = file.version(&self.db);
-        if expected_version.is_some_and(|version| version != latest_version) {
+        let key = self.make_type_index_artifact_key(args.file_id, args.file.version(&self.db));
+        let latest_version = args.file.version(&self.db);
+        if args
+            .expected_version
+            .is_some_and(|version| version != latest_version)
+        {
             return Ok(TypeIndexPrecomputeResult {
                 reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeSuperseded,
                 file_version: Some(latest_version),
                 stats: TypeIndexPrecomputeStats {
-                    queue_wait_ms,
-                    exec_ms,
-                    ir_ms: ir_profile.total_ms,
-                    ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
-                    semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
-                    semantic_facts_seed_module_context_ms: ir_profile
+                    queue_wait_ms: args.queue_wait_ms,
+                    exec_ms: args.exec_ms,
+                    ir_ms: args.ir_profile.total_ms,
+                    ast_to_ir_convert_ms: args.ir_profile.ast_to_ir_convert_ms,
+                    semantic_facts_materialize_ms: args.ir_profile.semantic_facts_materialize_ms,
+                    semantic_facts_seed_module_context_ms: args
+                        .ir_profile
                         .semantic_facts_seed_module_context_ms,
-                    semantic_facts_local_function_summaries_ms: ir_profile
+                    semantic_facts_local_function_summaries_ms: args
+                        .ir_profile
                         .semantic_facts_local_function_summaries_ms,
-                    semantic_facts_visit_statements_ms: ir_profile
+                    semantic_facts_visit_statements_ms: args
+                        .ir_profile
                         .semantic_facts_visit_statements_ms,
-                    semantic_facts_visit_callable_body_ms: ir_profile
+                    semantic_facts_visit_callable_body_ms: args
+                        .ir_profile
                         .semantic_facts_visit_callable_body_ms,
-                    semantic_facts_visit_callable_body_count: ir_profile
+                    semantic_facts_visit_callable_body_count: args
+                        .ir_profile
                         .semantic_facts_visit_callable_body_count,
-                    semantic_facts_merge_control_flow_env_ms: ir_profile
+                    semantic_facts_merge_control_flow_env_ms: args
+                        .ir_profile
                         .semantic_facts_merge_control_flow_env_ms,
-                    semantic_facts_merge_control_flow_env_count: ir_profile
+                    semantic_facts_merge_control_flow_env_count: args
+                        .ir_profile
                         .semantic_facts_merge_control_flow_env_count,
-                    semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
-                    semantic_facts_local_function_summary_count: ir_profile
+                    semantic_facts_statement_count: args.ir_profile.semantic_facts_statement_count,
+                    semantic_facts_local_function_summary_count: args
+                        .ir_profile
                         .semantic_facts_local_function_summary_count,
-                    semantic_facts_index_entry_count: ir_profile.semantic_facts_index_entry_count,
-                    build_ms: build_profile.total_ms,
+                    semantic_facts_index_entry_count: args.ir_profile.semantic_facts_index_entry_count,
+                    build_ms: args.build_profile.total_ms,
                     ..TypeIndexPrecomputeStats::default()
                 },
             });
         }
 
+        let build_ms = args.build_profile.total_ms;
         let artifact = Arc::new(TypeIndexArtifact {
-            type_index,
-            build_profile,
-            parse_snapshot_meta,
+            type_index: args.type_index,
+            build_profile: args.build_profile,
+            parse_snapshot_meta: args.parse_snapshot_meta,
             produced_at_millis: unix_time_millis(),
         });
         let store_outcome = self
@@ -603,29 +619,36 @@ impl AnalysisV2 {
             reason_code: TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeExactStored,
             file_version: Some(latest_version),
             stats: TypeIndexPrecomputeStats {
-                queue_wait_ms,
-                exec_ms,
-                ir_ms: ir_profile.total_ms,
-                ast_to_ir_convert_ms: ir_profile.ast_to_ir_convert_ms,
-                semantic_facts_materialize_ms: ir_profile.semantic_facts_materialize_ms,
-                semantic_facts_seed_module_context_ms: ir_profile
+                queue_wait_ms: args.queue_wait_ms,
+                exec_ms: args.exec_ms,
+                ir_ms: args.ir_profile.total_ms,
+                ast_to_ir_convert_ms: args.ir_profile.ast_to_ir_convert_ms,
+                semantic_facts_materialize_ms: args.ir_profile.semantic_facts_materialize_ms,
+                semantic_facts_seed_module_context_ms: args
+                    .ir_profile
                     .semantic_facts_seed_module_context_ms,
-                semantic_facts_local_function_summaries_ms: ir_profile
+                semantic_facts_local_function_summaries_ms: args
+                    .ir_profile
                     .semantic_facts_local_function_summaries_ms,
-                semantic_facts_visit_statements_ms: ir_profile.semantic_facts_visit_statements_ms,
-                semantic_facts_visit_callable_body_ms: ir_profile
+                semantic_facts_visit_statements_ms: args.ir_profile.semantic_facts_visit_statements_ms,
+                semantic_facts_visit_callable_body_ms: args
+                    .ir_profile
                     .semantic_facts_visit_callable_body_ms,
-                semantic_facts_visit_callable_body_count: ir_profile
+                semantic_facts_visit_callable_body_count: args
+                    .ir_profile
                     .semantic_facts_visit_callable_body_count,
-                semantic_facts_merge_control_flow_env_ms: ir_profile
+                semantic_facts_merge_control_flow_env_ms: args
+                    .ir_profile
                     .semantic_facts_merge_control_flow_env_ms,
-                semantic_facts_merge_control_flow_env_count: ir_profile
+                semantic_facts_merge_control_flow_env_count: args
+                    .ir_profile
                     .semantic_facts_merge_control_flow_env_count,
-                semantic_facts_statement_count: ir_profile.semantic_facts_statement_count,
-                semantic_facts_local_function_summary_count: ir_profile
+                semantic_facts_statement_count: args.ir_profile.semantic_facts_statement_count,
+                semantic_facts_local_function_summary_count: args
+                    .ir_profile
                     .semantic_facts_local_function_summary_count,
-                semantic_facts_index_entry_count: ir_profile.semantic_facts_index_entry_count,
-                build_ms: build_profile.total_ms,
+                semantic_facts_index_entry_count: args.ir_profile.semantic_facts_index_entry_count,
+                build_ms,
                 evicted_per_file_window_total: store_outcome.evicted_per_file_window_total,
                 evicted_global_guard_total: store_outcome.evicted_global_guard_total,
             },

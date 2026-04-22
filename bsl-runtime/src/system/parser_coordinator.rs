@@ -1052,9 +1052,10 @@ impl ParserCoordinator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn finalize_parse_snapshot_report_with_options(
         &self,
-        file_path: &PathBuf,
+        file_path: &Path,
         new_content: &str,
         new_hash: [u8; 32],
         new_tree_hash: u64,
@@ -1090,7 +1091,7 @@ impl ParserCoordinator {
         }
         parse_exec_subphases.core_parse_build_ms = Some(duration_to_u64_ms(core_started.elapsed()));
         match self.run_optional_cache_enrichment_with_cancellation(
-            file_path.as_path(),
+            file_path,
             new_hash,
             new_content,
             &parse_result,
@@ -1840,6 +1841,7 @@ impl ParserCoordinator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn parse_incremental_with_report_singleflight_leader_with_cancellation_and_options(
         &self,
         file_path: PathBuf,
@@ -3647,7 +3649,7 @@ impl ParserCoordinator {
                 &mut execution_attribution,
                 &mut lowering_observer,
             )
-            .map(|parse_result| {
+            .inspect(|_| {
                 lowering_attribution.reused_progress_ms = Some(duration_to_u64_ms(
                     execution_attribution.reused_progress_elapsed,
                 ));
@@ -3688,7 +3690,6 @@ impl ParserCoordinator {
                 ));
                 lowering_attribution.rebuild_dispatch_other_call_count =
                     Some(execution_attribution.rebuild_dispatch_other_call_count);
-                parse_result
             })?
         } else if let Some(reused_program_prefix) = options
             .reused_program_prefix
@@ -4180,7 +4181,13 @@ impl TreeSitterParser {
         };
         let tree = parser
             .parse_with_options(
-                &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                &mut |i, _| {
+                    if i < len {
+                        &bytes[i..]
+                    } else {
+                        Default::default()
+                    }
+                },
                 old_tree,
                 Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
             )
@@ -4374,7 +4381,13 @@ impl TreeSitterParser {
             };
             let new_tree = parser
                 .parse_with_options(
-                    &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                    &mut |i, _| {
+                        if i < len {
+                            &bytes[i..]
+                        } else {
+                            Default::default()
+                        }
+                    },
                     Some(&tree),
                     Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
                 )
@@ -4406,7 +4419,13 @@ impl TreeSitterParser {
             };
             let tree = parser
                 .parse_with_options(
-                    &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
+                    &mut |i, _| {
+                        if i < len {
+                            &bytes[i..]
+                        } else {
+                            Default::default()
+                        }
+                    },
                     None,
                     Some(tree_sitter::ParseOptions::new().progress_callback(&mut progress)),
                 )

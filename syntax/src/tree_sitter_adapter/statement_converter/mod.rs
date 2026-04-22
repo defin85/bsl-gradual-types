@@ -309,7 +309,7 @@ pub fn convert_source_file_cached_with_observer(
     line_index: &LineIndex,
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
-    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count());
     convert_source_file_cached_internal(node, source, line_index, &mut progress, &mut observer)
 }
 
@@ -320,12 +320,8 @@ pub fn convert_source_file_cached_with_observer_and_reused_prefix(
     reused_prefix: &[Statement],
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
-    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
-    let mut statements = Vec::with_capacity(
-        reused_prefix
-            .len()
-            .saturating_add(node.child_count() as usize),
-    );
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count());
+    let mut statements = Vec::with_capacity(reused_prefix.len().saturating_add(node.child_count()));
     let mut reused_index = 0usize;
     let mut cursor = node.walk();
 
@@ -360,7 +356,7 @@ pub fn convert_source_file_cached_with_observer_and_reuse_plan(
     execution_attribution: &mut LoweringExecutionAttribution,
     mut observer: impl FnMut(usize, usize) -> Result<(), String>,
 ) -> Result<Vec<Statement>, String> {
-    let mut progress = LoweringProgressState::with_total_hint(node.child_count() as usize);
+    let mut progress = LoweringProgressState::with_total_hint(node.child_count());
     let mut statements = Vec::with_capacity(reuse_plan.top_level_nodes.len());
     let mut reuse_index = 0usize;
     let mut cursor = node.walk();

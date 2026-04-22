@@ -1170,6 +1170,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks<
     F,
     R,

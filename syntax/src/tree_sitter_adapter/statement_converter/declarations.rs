@@ -95,7 +95,8 @@ fn convert_function_definition_cached_internal(
             }
             _ => {
                 if super::is_lowering_progress_unit_kind(child.kind()) {
-                    if let Some(plan) = body_reuse.as_deref_mut() {
+                    if let Some(plan) = body_reuse.as_mut() {
+                        let plan = &mut **plan;
                         if lowered_body_index < plan.reused_prefix_len {
                             let reused = plan
                                 .reused_body_prefix
@@ -103,9 +104,8 @@ fn convert_function_definition_cached_internal(
                                 .expect("reused body prefix entry must exist");
                             let started = std::time::Instant::now();
                             super::observe_reused_statement_progress(&reused, progress, observer)?;
-                            if let Some(execution_attribution) =
-                                execution_attribution.as_deref_mut()
-                            {
+                            if let Some(execution_attribution) = execution_attribution.as_mut() {
+                                let execution_attribution = &mut **execution_attribution;
                                 execution_attribution.reused_progress_elapsed =
                                     execution_attribution
                                         .reused_progress_elapsed
@@ -126,9 +126,8 @@ fn convert_function_definition_cached_internal(
                                 .expect("reused body suffix entry must exist");
                             let started = std::time::Instant::now();
                             super::observe_reused_statement_progress(&reused, progress, observer)?;
-                            if let Some(execution_attribution) =
-                                execution_attribution.as_deref_mut()
-                            {
+                            if let Some(execution_attribution) = execution_attribution.as_mut() {
+                                let execution_attribution = &mut **execution_attribution;
                                 execution_attribution.reused_progress_elapsed =
                                     execution_attribution
                                         .reused_progress_elapsed
@@ -148,21 +147,22 @@ fn convert_function_definition_cached_internal(
                 // Собираем тело функции через dispatcher
                 let node_kind = child.kind();
                 let started = std::time::Instant::now();
-                let maybe_stmt =
-                    if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
-                        super::dispatch_statement_cached_internal_with_attribution(
-                            &child,
-                            source,
-                            line_index,
-                            progress,
-                            observer,
-                            Some(execution_attribution),
-                        )?
-                    } else {
-                        super::dispatch_statement_cached_internal(
-                            &child, source, line_index, progress, observer,
-                        )?
-                    };
+                let maybe_stmt = if let Some(execution_attribution) = execution_attribution.as_mut()
+                {
+                    let execution_attribution = &mut **execution_attribution;
+                    super::dispatch_statement_cached_internal_with_attribution(
+                        &child,
+                        source,
+                        line_index,
+                        progress,
+                        observer,
+                        Some(execution_attribution),
+                    )?
+                } else {
+                    super::dispatch_statement_cached_internal(
+                        &child, source, line_index, progress, observer,
+                    )?
+                };
                 if let Some(stmt) = maybe_stmt {
                     body.push(stmt);
                 }
@@ -171,7 +171,8 @@ fn convert_function_definition_cached_internal(
                     callable_body_dispatch_elapsed.saturating_add(elapsed);
                 callable_body_dispatch_call_count =
                     callable_body_dispatch_call_count.saturating_add(1);
-                if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
+                if let Some(execution_attribution) = execution_attribution.as_mut() {
+                    let execution_attribution = &mut **execution_attribution;
                     super::record_rebuild_dispatch_attribution(
                         execution_attribution,
                         node_kind,
@@ -182,7 +183,8 @@ fn convert_function_definition_cached_internal(
         }
     }
 
-    if let Some(execution_attribution) = execution_attribution.as_deref_mut() {
+    if let Some(execution_attribution) = execution_attribution.as_mut() {
+        let execution_attribution = &mut **execution_attribution;
         execution_attribution.rebuild_dispatch_callable_body_dispatch_elapsed =
             execution_attribution
                 .rebuild_dispatch_callable_body_dispatch_elapsed

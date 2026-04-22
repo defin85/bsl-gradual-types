@@ -1800,16 +1800,23 @@ Hardcoded foreign `change_id` в runtime/perf path MUST NOT использова
 - **AND** такой артефакт не может быть использован как cutover evidence
 
 ### Requirement: LSP предоставляет versioned per-request completion timeline контракт (MUST)
-LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version `24`.
+LSP MUST предоставлять server-driven custom request `bsl.getCompletionTimeline` с contract version
+`25`.
 
-Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через `workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
-Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской реконструкции из логов, incident summary или агрегированных observability-метрик.
+Для VS Code extension в текущей архитектуре этот контракт MUST быть доступен через
+`workspace/executeCommand` с `command: bsl.getCompletionTimeline`.
+Per-request timeline payload MUST формироваться на стороне LSP и MUST NOT требовать клиентской
+реконструкции из логов, incident summary или агрегированных observability-метрик.
 
-Репозиторий MUST поддерживать versioned contract baseline `contracts/lsp-completion-timeline/v21`, синхронизированный с текущим authoritative payload и его bounded field-set.
+Репозиторий MUST поддерживать versioned contract baseline
+`contracts/lsp-completion-timeline/v22`, синхронизированный с текущим authoritative payload и его
+bounded field-set.
 
-`v24` MUST сохранять additive `v23` ingress/query-body/flush-aware/output-egress semantics, включая grouped `query_bundle*` taxonomy, `response_sent_at_ms`, existing `response_output_*` milestones и `response_flush_completed_at_ms`.
+`v25` MUST сохранять additive `v24` ingress/query-body/flush-aware/output-egress semantics,
+включая grouped `query_bundle*` taxonomy, `response_sent_at_ms`, existing `response_output_*`
+milestones и `response_flush_completed_at_ms`.
 
-Контракт `v24` MUST включать:
+Контракт `v25` MUST включать:
 
 - `version` (числовой номер контракта);
 - `traces` (массив completion trace записей).
@@ -1824,66 +1831,120 @@ Per-request timeline payload MUST формироваться на стороне
 - optional `server_edge_details`;
 - `stages`.
 
-Если `server_edge_details` присутствует, additive `v24` post-handler handoff split MAY включать:
+Если `server_edge_details` присутствует, additive `v25` pre-dispatch decomposition MAY
+включать:
 
-- `response_output_handoff_started_at_ms`;
-- `response_output_handoff_enqueued_at_ms`;
-- `response_ready_to_output_handoff_wait_ms`;
-- `response_output_handoff_send_wait_ms`;
-- `response_output_handoff_to_writer_wait_ms`.
+- `adapter_read_started_at_ms`;
+- `adapter_parse_completed_at_ms`;
+- `read_loop_wait_reason`;
+- `read_loop_wait_ms`;
+- `pending_completion_spillover_depth`;
+- `pending_general_request_staged`;
+- `admission_try_enqueue_at_ms`;
+- `admission_lane`;
+- `admission_lane_depth_before`;
+- `admission_lane_depth_after`;
+- `admission_enqueue_outcome`;
+- `admission_spillover_outcome`;
+- `admission_enqueued_at_ms`;
+- `admission_queue_wait_ms`;
+- `scheduler_woke_at_ms`;
+- `scheduler_poll_ready_entered_at_ms`;
+- `scheduler_poll_ready_resolved_at_ms`;
+- `scheduler_poll_ready_wait_ms`;
+- `scheduler_dequeued_at_ms`;
+- `completion_barrier_active_at_dequeue`;
+- `completion_barrier_generation`;
+- `completion_barrier_owner_method`;
+- `completion_barrier_owner_uri`;
+- `completion_barrier_owner_version`;
+- `completion_barrier_wait_ms`;
+- `scheduler_service_call_started_at_ms`;
+- `scheduler_service_call_returned_at_ms`;
+- `scheduler_service_call_sync_exec_ms`;
+- `doc_sync_first_poll_exec_ms`;
+- `doc_sync_first_poll_outcome`;
+- `doc_sync_first_poll_method`;
+- `doc_sync_first_poll_uri`;
+- `doc_sync_first_poll_version`;
+- `same_file_ingress_token_required_version`;
+- `same_file_ingress_token_published_at_ms`;
+- `same_file_ingress_token_source`;
+- `same_file_ingress_token_wait_ms`;
+- `scheduler_ready_to_dispatch_wait_ms`.
 
-Если `response_output_handoff_started_at_ms` присутствует, payload MUST включать и `response_output_handoff_enqueued_at_ms`.
+`read_loop_wait_reason` MUST использовать только bounded vocabulary:
 
-Если `response_output_handoff_started_at_ms` присутствует, payload MUST сохранять `response_output_enqueue_completed_at_ms` как legacy compatibility boundary output-writer selection для completion response и MUST включать все три derived fields:
+- `completion_lane_space`;
+- `general_lane_space`;
+- `none`.
 
-- `response_ready_to_output_handoff_wait_ms`;
-- `response_output_handoff_send_wait_ms`;
-- `response_output_handoff_to_writer_wait_ms`.
+Если `read_loop_wait_reason` присутствует и не равен `none`, payload MUST включать и
+`read_loop_wait_ms`.
 
-Если `response_ready_to_output_handoff_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_sent_at_ms` и `response_output_handoff_started_at_ms` и MUST NOT включать blocking внутри outbound handoff path.
+Если `pending_completion_spillover_depth` присутствует, payload MUST отражать queue depth на
+момент reader-side wait, а не post-facto агрегированную оценку.
 
-Если `response_output_handoff_send_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_output_handoff_started_at_ms` и `response_output_handoff_enqueued_at_ms` и MUST NOT включать wait после успешного handoff acceptance.
+Если `admission_lane_depth_before` или `admission_lane_depth_after` присутствуют, они MUST
+описывать depth именно того admission lane, в который пытались enqueue текущий request.
 
-Если `response_output_handoff_to_writer_wait_ms` присутствует, это поле MUST описывать только server-side интервал между `response_output_handoff_enqueued_at_ms` и `response_output_enqueue_completed_at_ms` и MUST NOT трактоваться как writer-queue backlog или конкретный blocker class без дополнительных authoritative fields.
+`admission_lane` MUST использовать только bounded vocabulary:
 
-Compatibility field `response_ready_to_output_enqueue_wait_ms` MAY сохраняться как umbrella интервал между `response_sent_at_ms` и `response_output_enqueue_completed_at_ms`, но MUST NOT переопределяться как точный синоним одного из новых `v24` buckets.
+- `control`;
+- `interactive_completion`;
+- `document_sync_ingress`;
+- `general`.
 
-`response_output_enqueue_completed_at_ms` MUST NOT переосмысляться как truthful send-side enqueue completion для `v24`; это legacy compatibility field с writer-selection semantics, несмотря на историческое имя.
+Если `admission_enqueued_at_ms` присутствует, payload MUST включать и
+`admission_queue_wait_ms`.
 
-#### Scenario: VS Code клиент получает `v24` payload без reconstruction
+Если `scheduler_poll_ready_resolved_at_ms` присутствует, payload MUST включать и
+`scheduler_poll_ready_wait_ms`, и `scheduler_ready_to_dispatch_wait_ms`.
 
-- **GIVEN** VS Code extension запрашивает completion timeline
-- **WHEN** клиент вызывает `workspace/executeCommand` с `command: bsl.getCompletionTimeline`
-- **THEN** LSP возвращает response контракта `v24` с server-generated traces
-- **AND** клиент не строит authoritative server trace из raw logs, incident summary или p95/p99 агрегатов
+Если `completion_barrier_active_at_dequeue=true`, payload SHOULD публиковать и
+`completion_barrier_owner_method`; если owner относится к file-scoped document-sync path, payload
+SHOULD публиковать и `completion_barrier_owner_uri`, и `completion_barrier_owner_version`.
 
-#### Scenario: Post-handler handoff gap отделён на три truthful bucket
+Если `same_file_ingress_token_published_at_ms` присутствует, payload MUST включать и
+`same_file_ingress_token_required_version`, и `same_file_ingress_token_wait_ms`.
 
-- **GIVEN** completion handler уже подготовил response, outbound handoff начнётся позже, send-side acceptance завершится ещё позже, а output writer выберет completion response позже этого
-- **WHEN** клиент читает `server_edge_details`
-- **THEN** payload сохраняет `response_sent_at_ms` и legacy `response_output_enqueue_completed_at_ms`
-- **AND** публикует `response_output_handoff_started_at_ms`, `response_output_handoff_enqueued_at_ms`, `response_ready_to_output_handoff_wait_ms`, `response_output_handoff_send_wait_ms` и `response_output_handoff_to_writer_wait_ms` отдельно, если handoff boundaries наблюдаемы
+Если `same_file_ingress_token_source` присутствует, payload MUST использовать bounded vocabulary:
 
-#### Scenario: Legacy `response_output_enqueue_completed_at_ms` не выдаётся за truthful enqueue acceptance
+- `did_open`;
+- `did_change`;
+- `did_save`;
+- `did_close`;
+- `other`.
 
-- **GIVEN** authoritative payload содержит новый `v24` handoff split
-- **WHEN** downstream consumer читает `server_edge_details`
-- **THEN** `response_output_enqueue_completed_at_ms` трактуется как legacy writer-selection seam
-- **AND** truthful send-side acceptance публикуется только через `response_output_handoff_enqueued_at_ms`
+Если additive `v25` admission split присутствует, compatibility field
+`adapter_to_dispatch_wait_ms` MUST сохранять umbrella semantics для полного server-side интервала
+между `adapter_read_at_ms` и earliest dispatch boundary.
 
-#### Scenario: Compatibility enqueue wait остаётся umbrella, а не переименованным bucket
+Если additive `v25` admission split присутствует полностью, сумма
+`admission_queue_wait_ms + scheduler_poll_ready_wait_ms + completion_barrier_wait_ms + same_file_ingress_token_wait_ms + scheduler_ready_to_dispatch_wait_ms`
+MUST совпадать с `adapter_to_dispatch_wait_ms`.
 
-- **GIVEN** authoritative payload содержит новый `v24` handoff split
-- **WHEN** downstream consumer читает `server_edge_details`
-- **THEN** `response_ready_to_output_enqueue_wait_ms` сохраняет compatibility semantics для полного интервала `response_sent_at_ms -> response_output_enqueue_completed_at_ms`
-- **AND** consumer не трактует `v23` payload как будто truthful handoff boundaries уже были доступны
+#### Scenario: `v25` payload раскладывает local reader wait и `adapter_read -> dispatch`
+
+- **GIVEN** completion request сначала столкнулся с reader-side wait из-за local spillover или
+  затем уже был задержан до dispatch в service pipeline
+- **WHEN** оператор читает `server_edge_details`
+- **THEN** payload может публиковать `read_loop_wait_reason`, `read_loop_wait_ms`,
+  `pending_completion_spillover_depth`, `admission_lane`, `admission_enqueued_at_ms`,
+  `admission_queue_wait_ms`, `scheduler_poll_ready_resolved_at_ms`,
+  `scheduler_poll_ready_wait_ms`, `completion_barrier_wait_ms`,
+  `same_file_ingress_token_required_version`, `same_file_ingress_token_published_at_ms`,
+  `same_file_ingress_token_wait_ms` и `scheduler_ready_to_dispatch_wait_ms`
+- **AND** `adapter_to_dispatch_wait_ms` остаётся compatibility umbrella для всего
+  `adapter_read -> dispatch` окна
 
 #### Scenario: Versioned contract baseline синхронизирован с shipped payload
 
-- **GIVEN** authoritative completion timeline уже публикует contract `v24`
+- **GIVEN** authoritative completion timeline уже публикует contract `v25`
 - **WHEN** репозиторий фиксирует versioned contract baseline для этой поверхности
-- **THEN** `contracts/lsp-completion-timeline/v21` совпадает по bounded field-set с runtime payload
-- **AND** policy/verification scripts валидируют именно `v24/v21`, а не более старую версию
+- **THEN** `contracts/lsp-completion-timeline/v22` совпадает по bounded field-set с runtime
+  payload
+- **AND** policy/verification scripts валидируют именно `v25/v22`, а не более старую версию
 
 ### Requirement: Timeline stage taxonomy bounded и совместима с completion observability (MUST)
 Stage names в per-request timeline MUST использовать bounded taxonomy, согласованную с completion stage observability.
@@ -2281,32 +2342,77 @@ Object MUST оставаться bounded и MAY включать только:
 - **AND** не подменяет отсутствие данных guessed queue/exec/wake split
 
 ### Requirement: Human-readable completion ingress verdicts остаются truthful и positive-only (MUST)
-Derived verdicts для `Completion Timeline` panel, clipboard и связанных extension projections MUST строиться только из уже имеющихся bounded latency fields и MUST NOT маркировать trace как ingress-bottleneck, если соответствующая ingress задержка отсутствует.
+Derived verdicts для `Completion Timeline` panel, clipboard и связанных extension projections MUST
+строиться только из уже имеющихся bounded latency fields и MUST NOT маркировать trace как
+ingress-bottleneck, если соответствующая ingress задержка отсутствует.
 
 Derived verdict layer MUST:
-- использовать только существующие bounded waits (`adapter_to_dispatch_wait_ms`, `transport_to_method_wait_ms`, `method_prelude_exec_ms` и, при наличии deterministic correlation в downstream consumer, `client_to_transport_wait_ms`);
+
+- использовать bounded waits `read_loop_wait_ms`, `admission_queue_wait_ms`,
+  `scheduler_poll_ready_wait_ms`, `completion_barrier_wait_ms`,
+  `same_file_ingress_token_wait_ms`, `adapter_to_dispatch_wait_ms`,
+  `transport_to_method_wait_ms`, `method_prelude_exec_ms` и, при наличии deterministic
+  correlation в downstream consumer, `client_to_transport_wait_ms`;
 - строить ingress verdict только при положительной доминирующей задержке;
-- различать как минимум `adapter_before_dispatch_dominant`, `server_before_method_entry_dominant` и `handler_prelude_dominant`;
-- MAY различать `client_before_transport_dominant`, если downstream projection уже имеет deterministic probe correlation и authoritative earliest server ingress boundary;
-- не выводить generic ingress verdict только потому, что `0 >= 0` или потому что одна из задержек отсутствует.
+- различать как минимум `reader_backpressure_dominant`, `admission_queue_dominant`,
+  `scheduler_poll_ready_dominant`, `completion_barrier_dominant`,
+  `same_file_ingress_token_dominant`,
+  `adapter_before_dispatch_dominant`, `server_before_method_entry_dominant` и
+  `handler_prelude_dominant`;
+- использовать `adapter_before_dispatch_dominant` как backward-compatible umbrella verdict только
+  если finer `v25` admission split отсутствует;
+- MAY различать `client_before_transport_dominant`, только если deterministic correlation уже
+  доказала положительный wait до самой ранней authoritative server ingress boundary, local
+  `read_loop_wait_ms` отсутствует или не доминирует, и server-side `v25` admission buckets не
+  объясняют задержку;
+- не выводить generic ingress verdict только потому, что `0 >= 0` или потому что одна из
+  задержек отсутствует.
 
-#### Scenario: Adapter wait доминирует над dispatch-to-method и handler prelude
-- **GIVEN** completion trace имеет положительный `adapter_to_dispatch_wait_ms`, который доминирует над `transport_to_method_wait_ms` и `method_prelude_exec_ms`
-- **WHEN** extension строит human-readable verdicts
-- **THEN** trace получает verdict `adapter_before_dispatch_dominant`
-- **AND** trace не получает `client_before_transport_dominant` только из-за позднего dispatch timestamp
+#### Scenario: Reader-side spillover dominates before dispatch
 
-#### Scenario: Hot trace без положительного ingress wait не получает ingress verdict
-- **GIVEN** completion trace имеет `adapter_to_dispatch_wait_ms=0`, `transport_to_method_wait_ms=0` и `method_prelude_exec_ms=0`
+- **GIVEN** completion trace имеет положительный `read_loop_wait_ms`, вызванный
+  `read_loop_wait_reason=completion_lane_space`
 - **WHEN** extension строит human-readable verdicts
-- **THEN** trace не получает ingress verdict
-- **AND** trace не маркируется как `handler_prelude_dominant`
+- **THEN** trace получает verdict `reader_backpressure_dominant`
+- **AND** trace не получает verdict `client_before_transport_dominant`
 
-#### Scenario: Handler prelude доминирует над server-side waits
-- **GIVEN** completion trace имеет положительный `method_prelude_exec_ms`, который доминирует над `adapter_to_dispatch_wait_ms` и `transport_to_method_wait_ms`
+#### Scenario: Queue residence доминирует над shared readiness и handler prelude
+
+- **GIVEN** completion trace имеет положительный `admission_queue_wait_ms`, который доминирует
+  над `scheduler_poll_ready_wait_ms`, `same_file_ingress_token_wait_ms`,
+  `transport_to_method_wait_ms` и `method_prelude_exec_ms`
 - **WHEN** extension строит human-readable verdicts
-- **THEN** trace получает verdict `handler_prelude_dominant`
-- **AND** trace не получает `adapter_before_dispatch_dominant`
+- **THEN** trace получает verdict `admission_queue_dominant`
+- **AND** trace не получает verdict `client_before_transport_dominant`
+
+#### Scenario: Shared readiness доминирует над queue residence
+
+- **GIVEN** completion trace имеет положительный `scheduler_poll_ready_wait_ms`, который
+  доминирует над `admission_queue_wait_ms`, `transport_to_method_wait_ms` и
+  `method_prelude_exec_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `scheduler_poll_ready_dominant`
+- **AND** trace не деградирует в coarse `adapter_before_dispatch_dominant`, если `v25`
+  admission split уже присутствует
+
+#### Scenario: Completion barrier dominates and the owner stays attributable
+
+- **GIVEN** completion trace имеет положительный `completion_barrier_wait_ms`, который
+  доминирует над `admission_queue_wait_ms`, `scheduler_poll_ready_wait_ms` и
+  `same_file_ingress_token_wait_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace получает verdict `completion_barrier_dominant`
+- **AND** authoritative payload сохраняет barrier owner attribution, если она была доступна на
+  server side
+
+#### Scenario: Server-side admission split suppresses false client ingress blame
+
+- **GIVEN** request summary имеет deterministic probe correlation
+- **AND** authoritative payload содержит положительный `admission_queue_wait_ms` или
+  `scheduler_poll_ready_wait_ms` или `read_loop_wait_ms` или `same_file_ingress_token_wait_ms`
+- **WHEN** extension строит human-readable verdicts
+- **THEN** trace не получает verdict `client_before_transport_dominant`
+- **AND** projection остаётся fail-closed по client-side supplement
 
 ### Requirement: Client-side ingress supplement остаётся fail-closed и deterministic (MUST)
 Если extension-projection добавляет human-readable client-side ingress verdict поверх authoritative completion trace, такой verdict MUST появляться только при deterministic probe correlation и положительном доминирующем client-side wait до самой ранней authoritative server ingress boundary.
@@ -3070,49 +3176,67 @@ Gate MUST fail:
 - **AND** evidence указывает на concurrent outline outcome/load, а не маскирует regression как generic completion slowdown
 
 ### Requirement: Interactive completion admission изолирован от general LSP backlog до dispatch (MUST)
-Система MUST изолировать `textDocument/completion` от unrelated general LSP traffic в окне между чтением request transport adapter'ом и dispatch в service pipeline.
+Система MUST изолировать `textDocument/completion` от unrelated general LSP traffic в окне между
+чтением request transport adapter'ом и dispatch в service pipeline.
 
 Изоляция MUST обеспечивать:
-- shared readiness/admission state MUST принадлежать одному scheduler owner; reader/producers MUST NOT вызывать `poll_ready()/call()` напрямую;
-- completion request классифицируется и попадает в interactive admission queue до shared `poll_ready()` blocking для general traffic;
-- general requests MUST NOT удерживать freshly-read completion request вне interactive admission queue только из-за общего readiness wait;
-- completion-supporting document-sync notifications (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, `textDocument/didClose`), прочитанные transport adapter'ом до completion на том же transport path, MUST NOT теряться или застревать за unrelated general backlog так, чтобы последующий completion видел stale current revision;
-- control traffic (`$/cancelRequest`, shutdown-related flow) MAY preempt queued completion admission;
-- saturated completion spillover MUST оставаться bounded и fail-closed: older queued completion MAY завершаться pre-dispatch outcome `queue_rejected`, но single reader MUST NOT останавливаться так, чтобы поздний control traffic не был даже классифицирован;
-- queued completion cancellation MUST сохранять existing exactly-once terminal semantics, MUST возвращать ровно один terminal response и MUST NOT допускать late publish после признанного cancel.
 
-#### Scenario: General request burst не блокирует completion до dispatch
-- **GIVEN** transport adapter уже читает burst general requests, включая `textDocument/documentSymbol`
-- **AND** на том же transport path приходит новый completion request
-- **WHEN** сервер выбирает, что dispatch-ить дальше
-- **THEN** completion попадает в interactive admission queue без ожидания завершения general readiness path
-- **AND** authoritative trace не показывает seconds-scale `adapter_to_dispatch_wait_ms` только из-за concurrent general backlog
+- shared readiness/admission state MUST принадлежать одному scheduler owner; reader/producers MUST
+  NOT вызывать `poll_ready()/call()` напрямую;
+- completion request классифицируется и попадает в interactive admission queue до shared
+  readiness blocking для general traffic;
+- general requests MUST NOT удерживать freshly-read completion request вне interactive admission
+  queue только из-за общего readiness wait;
+- completion-supporting document-sync notifications
+  (`textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`,
+  `textDocument/didClose`) MUST публиковать same-file ingress ownership/token через
+  per-file owner, который применяет raw document ordering для этого файла и делает latest
+  handoff observable до того, как later completion для того же файла зависит от него;
+- same-file ingress token MUST публиковаться только после регистрации current-revision handoff
+  для соответствующего `(file_id, version)`, а не на более ранней dispatcher-event boundary;
+- once the relevant same-file ingress token is already published, unrelated same-priority work для
+  других файлов MUST NOT удерживать later completion first response только из-за shared FIFO
+  residence;
+- control traffic (`$/cancelRequest`, shutdown-related flow) MAY preempt queued completion
+  admission;
+- saturated completion spillover MUST оставаться bounded и fail-closed: older queued completion MAY
+  завершаться pre-dispatch outcome `queue_rejected`, но transport runtime MUST NOT деградировать в
+  reader stall, который мешает позднему control traffic даже быть классифицированным;
+- queued completion cancellation MUST сохранять existing exactly-once terminal semantics, MUST
+  возвращать ровно один terminal response и MUST NOT допускать late publish после признанного
+  cancel.
 
-#### Scenario: `didChange` handoff не теряется за unrelated general backlog на default path
-- **GIVEN** transport adapter уже держит unrelated `textDocument/documentSymbol` backlog
-- **AND** затем на том же transport path приходит `textDocument/didChange`, публикующий новую current revision
-- **AND** после этого приходит completion request для того же документа
+#### Scenario: Same-file ingress token делает completion независимым от unrelated same-priority FIFO
+
+- **GIVEN** transport runtime уже держит queued work для других файлов
+- **AND** для файла `F` same-file `didChange` или `didSave` уже опубликовал актуальный ingress
+  token
+- **AND** затем приходит completion request для того же файла `F`
 - **WHEN** сервер формирует first response для completion
-- **THEN** `didChange` current-revision handoff достигает interactive admission path раньше completion result
-- **AND** completion first response видит latest current revision, а не stale текст до `didChange`
+- **THEN** completion зависит от ingress token файла `F`, а не от unrelated same-priority FIFO
+  residence
+- **AND** first response не сидит seconds-scale только потому, что раньше были прочитаны
+  unrelated document-sync requests для других файлов
+
+#### Scenario: Dispatcher event не считается same-file ingress token publication
+
+- **GIVEN** `didChange` для файла `F` уже был отправлен в completion dispatcher
+- **AND** current-revision handoff для `(F, version)` ещё не зарегистрирован
+- **WHEN** оператор читает authoritative trace
+- **THEN** payload не считает same-file ingress token опубликованным
+- **AND** later completion для файла `F` не может считаться wait-free только по факту раннего
+  dispatcher event
 
 #### Scenario: Queued completion отменяется до dispatch без late publish
+
 - **GIVEN** completion request уже стоит в pre-dispatch queue
 - **AND** до его dispatch приходит matching `$/cancelRequest`
 - **WHEN** scheduler обрабатывает control lane
 - **THEN** queued completion помечается cancelled до dispatch
-- **AND** сервер возвращает ровно один terminal response с cancellation semantics `RequestCancelled`
-- **AND** authoritative trace публикует outcome `cancelled` без выдуманных post-dispatch timestamps
-- **AND** система сохраняет exactly-once terminal semantics без поздней публикации completion result
-
-#### Scenario: Saturated completion spillover не прячет late cancel за reader stall
-- **GIVEN** completion lane уже заполнен queued completion work
-- **AND** bounded completion spillover тоже исчерпан
-- **AND** затем на том же transport path приходит ещё один completion request, а сразу после него matching `$/cancelRequest`
-- **WHEN** transport adapter применяет overflow policy до dispatch
-- **THEN** older queued completion fail-closed завершается pre-dispatch outcome `queue_rejected` вместо блокировки single reader
-- **AND** late `$/cancelRequest` всё ещё классифицируется и отменяет самый новый queued completion до dispatch
-- **AND** transport path сохраняет exactly-once terminal semantics без late publish
+- **AND** сервер возвращает ровно один terminal response с cancellation semantics
+  `RequestCancelled`
+- **AND** authoritative trace публикует outcome `cancelled` без выдуманных post-dispatch
+  timestamps
 
 ### Requirement: Auxiliary LSP CPU work stays isolated from interactive transport/runtime loops (MUST)
 CPU-heavy auxiliary LSP work, не являющаяся primary semantic body текущего interactive ответа, MUST выполняться через bounded blocking или эквивалентную isolated CPU boundary и MUST NOT выполняться inline на async runtime threads, которые обслуживают:
@@ -3154,20 +3278,45 @@ Auxiliary jobs MAY оставаться bounded, cancellable и coalesced, но 
 - **AND** parse fan-out остаётся bounded одним leader parse
 
 ### Requirement: Representative mixed-load guard budgets truthful ingress and handoff seams (MUST)
-Representative mixed-load regression coverage для completion MUST budget-ить truthful latency seams, которые остаются user-visible после probe/egress split, а не только legacy pre-dispatch ingress split.
+Representative mixed-load regression coverage для completion MUST budget-ить truthful latency
+seams, которые остаются user-visible после `v25` admission decomposition, а не только legacy
+pre-dispatch ingress split.
 
 Guard MUST как минимум:
-- использовать same-file profile `didChange + didSave + documentSymbol burst + completion` на representative large-module fixture;
-- собирать authoritative fields `client_to_transport_wait_ms`, `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms`;
-- fail-ить, если auxiliary runtime work уводит trace в seconds-scale ingress или handoff backlog, даже если `adapter_to_dispatch_wait_ms` остаётся в бюджете;
-- сохранять existing correctness checks для non-empty completion, fail-closed counters и `documentSymbol latest_ready` behavior.
 
-#### Scenario: Truthful mixed-load gate ловит starvation, скрытую от legacy pre-dispatch split
+- использовать same-file profile `didChange + didSave + documentSymbol burst + completion` на
+  representative large-module fixture;
+- собирать authoritative fields `read_loop_wait_ms`, `admission_queue_wait_ms`,
+  `scheduler_poll_ready_wait_ms`, `completion_barrier_wait_ms`,
+  `same_file_ingress_token_wait_ms`, `client_to_transport_wait_ms`,
+  `service_future_to_first_poll_wait_ms` и `response_output_handoff_send_wait_ms`;
+- fail-ить, если same-file completion after the relevant ingress token is already published всё
+  равно получает seconds-scale `read_loop_wait_ms`, `admission_queue_wait_ms`,
+  `scheduler_poll_ready_wait_ms`, `completion_barrier_wait_ms` или
+  `same_file_ingress_token_wait_ms`;
+- fail-ить, если regression снова маскируется как client-side ingress, когда authoritative
+  server-side `v25` admission split уже объясняет задержку;
+- сохранять existing correctness checks для non-empty completion, fail-closed counters и
+  `documentSymbol latest_ready` behavior.
+
+#### Scenario: Representative gate ловит same-file residual after ready ingress token without bucket shift
+
 - **GIVEN** representative same-file mixed-load profile на крупном модуле
-- **AND** completion handler hot path уже ready или fast
-- **WHEN** auxiliary outline/context work regression-ит и stall-ит transport ingress или completion handoff
-- **THEN** representative gate завершается ошибкой по truthful `client_to_transport_wait_ms` или `response_output_handoff_send_wait_ms`
-- **AND** regression не маскируется только потому, что `adapter_to_dispatch_wait_ms` остался в бюджете
+- **AND** relevant same-file ingress token уже опубликован до measured completion
+- **WHEN** measured completion sample всё ещё проводит seconds-scale время в
+  `read_loop_wait_ms`, `admission_queue_wait_ms`, `scheduler_poll_ready_wait_ms`,
+  `completion_barrier_wait_ms` или `same_file_ingress_token_wait_ms`
+- **THEN** gate завершается ошибкой
+- **AND** regression не маскируется под generic client ingress или cold query-body cost
+
+#### Scenario: Representative evidence keeps a correlation slice for the worst outlier
+
+- **GIVEN** representative mixed-load profile на крупном модуле уже поймал worst completion outlier
+- **WHEN** оператор читает checked-in evidence
+- **THEN** evidence сохраняет хотя бы один correlation slice с active same-file freshness pressure
+  when present
+- **AND** этот slice может включать barrier owner, required token version, current published token
+  version/source и timestamps, достаточные чтобы сопоставить outlier с overlapping didChange train
 
 ### Requirement: Same-file save-triggered auxiliary churn does not regress current-revision readiness fast lane (MUST)
 После того как current-revision handoff для requested revision уже зарегистрирован через `didOpen` или `didChange`, same-file `didSave`-triggered refresh и другой auxiliary same-file churn MAY продолжаться в фоне, но MUST NOT возвращать interactive completion к `prepare_timeout@wait_for_file_version`, если truthful transport seams уже остаются в интерактивном бюджете.
@@ -4294,4 +4443,1001 @@ mixed-load profile, который одновременно упражняет:
 - **WHEN** diagnostics save trace экспортирует terminal или in-flight состояние
 - **THEN** trace сохраняет explicit request-centric blocker facts
 - **AND** не подменяет remaining delay на guessed generic `pending`
+
+### Requirement: Transport runtime progression stays task-isolated from scheduler/service work (MUST)
+The system MUST keep transport runtime progression task-isolated from scheduler/service work.
+
+Transport runtime loops, отвечающие за adapter read/decode/classify, single-owner scheduling и
+output/handoff progression, MUST выполняться на independently progressing async tasks или на
+эквивалентной starvation-safe boundary. Long-running pre-await work, readiness wait или barrier
+handling в одном loop MUST NOT по конструкции останавливать остальные loops.
+
+Этот contract MUST гарантировать как минимум:
+
+- поздний adapter read/decode/classify может продолжаться, даже если scheduler уже занят stalled
+  request;
+- ready output/flush progression может продолжаться, даже если input/scheduler остаются заняты
+  другим request path;
+- pre-await work inside document-sync or barrier-related futures MAY существовать, но MUST NOT
+  монополизировать тот же async task, что обслуживает transport reader или output writer;
+- task-isolation MUST сохранять existing single-owner `poll_ready()/call()` semantics, а не
+  заменять её конкурентными вызовами в несколько owners.
+
+#### Scenario: Stalled scheduler branch не мешает позднему cancel быть классифицированным
+
+- **GIVEN** scheduler уже держит stalled request branch до dispatch
+- **AND** затем transport получает новый `$/cancelRequest`
+- **WHEN** transport runtime продолжает работу
+- **THEN** reader продолжает read/decode/classify нового control request
+- **AND** cancel не застревает только потому, что stalled scheduler branch живёт на том же async
+  task
+
+#### Scenario: Ready response flush не стоит за unrelated scheduler stall
+
+- **GIVEN** один request уже подготовил user-facing response и готов к output/flush progression
+- **AND** другой request всё ещё держит scheduler path в stalled state
+- **WHEN** transport runtime продолжает работу
+- **THEN** ready response flush progresses independently
+- **AND** output path не ждёт завершения unrelated scheduler stall только из-за same-task topology
+
+### Requirement: Same-version `didSave` heavy follow-up MUST wake on the first matching diagnostics artifact within the bounded wait window
+
+The system MUST treat canonical live `ready_artifacts` materialization and detached
+diagnostics-ready artifact publication as two distinct bounded wake sources for the same
+still-current `didSave` target whenever heavy follow-up is waiting on same-version readiness for
+that target.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent same-save identity;
+- prefer canonical `ready_artifacts` immediately when they are already materialized;
+- during the bounded wait, race canonical `ready_artifacts` materialization against matching
+  detached diagnostics-ready artifact publication for that same target;
+- allow canonical `ready_artifacts` to win if live exact readiness materializes first;
+- allow detached diagnostics-ready artifacts to win only while canonical live exact readiness is
+  still pending for the same target;
+- use a cancellation-safe or semantically equivalent restart-safe wake surface so repeated
+  wait-loop restarts do not lose detached publication events;
+- preserve latest-wins supersession, diagnostics-generation matching, version matching,
+  `save_cycle_sequence` matching, cancellation, and truthful miss outcomes when the target is no
+  longer current;
+- preserve fail-closed semantics for `hover`, `definition`, `signatureHelp`, completion exact
+  upgrade, and semantically equivalent interactive exact consumers until canonical live exact
+  readiness completes;
+- export operator-facing evidence that names which wake source won (`ready_artifacts`,
+  `detached_ready_artifacts`, or a truthful miss outcome) and how long the bounded wait lasted;
+- MUST NOT satisfy this requirement by widening the bounded wait budget or by treating detached
+  diagnostics-ready state as canonical live exact readiness.
+
+#### Scenario: Detached diagnostics-ready publication wins the bounded wait before canonical timeout
+
+- **GIVEN** `didSave` heavy follow-up is waiting on a still-current same-version target
+- **AND** canonical live exact `ready_artifacts` are not yet materialized for that target
+- **AND** a matching detached diagnostics-ready artifact is published during the bounded wait
+- **WHEN** the waiter resolves the first matching wake source
+- **THEN** the heavy follow-up completes through `detached_ready_artifacts`
+- **AND** it does not burn the rest of the bounded wait budget merely because canonical
+  `ready_install` is still pending
+- **AND** exported evidence names `detached_ready_artifacts` as the wake winner
+
+#### Scenario: Canonical ready artifacts still win if they materialize first
+
+- **GIVEN** `didSave` heavy follow-up is waiting on a still-current same-version target
+- **AND** both canonical ready-artifact materialization and detached publication are possible for
+  that target
+- **WHEN** canonical live exact `ready_artifacts` materialize before any matching detached wake
+- **THEN** the heavy follow-up completes through `ready_artifacts`
+- **AND** detached diagnostics-ready publication, if it appears later, does not rewrite the winner
+  for that wait
+
+#### Scenario: Stale detached publication does not wake a newer still-current target
+
+- **GIVEN** a newer same-file revision, diagnostics generation, or `save_cycle_sequence` has
+  already overtaken an older waiting target
+- **AND** a detached diagnostics-ready artifact is published for the older target
+- **WHEN** the newer waiter evaluates the detached wake source
+- **THEN** it ignores the stale detached publication
+- **AND** terminal behavior remains truthful through supersession, mismatch, cancellation, or
+  another bounded miss outcome
+
+### Requirement: Same-version `didSave` follow-up MUST use detached diagnostics-ready artifacts without weakening live exact gates
+
+The system MUST allow same-version `didSave` heavy follow-up to complete from a detached
+diagnostics-ready artifact when bounded exact work has already produced the diagnostics-ready
+payload for the still-current target but canonical live exact readiness for that same target is
+still blocked on `ready_install`, type-index publication, or semantically equivalent live install
+work.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent same-save identity;
+- publish the detached artifact outside canonical live current-revision exact readiness and outside
+  APIs that interactive exact consumers treat as proof of exact readiness;
+- keep the detached artifact bounded to diagnostics-save follow-up, request-centric incident
+  bundle export, or semantically equivalent diagnostics-only consumers;
+- allow `didSave` follow-up to prefer the detached artifact over terminal `shadow_state` fallback
+  when the target remains still-current and the detached artifact is already materialized;
+- preserve exact same-version semantics, latest-wins supersession, cancellation, and truthful
+  fallback when a newer same-file revision or newer save cycle overtakes the target or detached
+  proof is exhausted;
+- preserve fail-closed semantics for `hover`, `definition`, `signatureHelp`, `type-at-position`,
+  completion exact upgrade, and semantically equivalent interactive exact consumers until
+  canonical live exact readiness completes;
+- preserve operator-facing evidence that distinguishes detached diagnostics-ready consumption from
+  canonical live `ready_artifacts`, degraded `shadow_state`, and superseded outcomes;
+- MUST NOT satisfy this requirement by early-publishing snapshot-backed live exact state,
+  `SetFileWithSnapshot`, or semantically equivalent partial install that makes diagnostics-ready
+  state look like canonical current-revision exact readiness.
+
+#### Scenario: `didSave` follow-up uses detached diagnostics-ready artifacts while live install is still pending
+
+- **GIVEN** a same-version exact producer already built the bounded diagnostics-ready payload for a
+  `didSave` target
+- **AND** canonical live exact readiness for that target is still blocked on `ready_install`,
+  type-index publication, or semantically equivalent live install work
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** `didSave` heavy follow-up resolves the still-current target
+- **THEN** the follow-up completes through the detached diagnostics-ready artifact
+- **AND** it does not keep live exact install as the primary gate for that diagnostics-only path
+- **AND** exported evidence identifies detached diagnostics-ready consumption rather than terminal
+  `shadow_state`
+
+#### Scenario: Interactive exact consumers remain fail-closed until canonical live readiness exists
+
+- **GIVEN** a detached diagnostics-ready artifact already exists for revision `V`
+- **AND** canonical live exact readiness for revision `V` is still unavailable
+- **WHEN** the IDE requests `hover`, `definition`, `signatureHelp`, `type-at-position`, or
+  semantically equivalent exact behavior for revision `V`
+- **THEN** the request does not treat the detached artifact as canonical exact truth
+- **AND** the existing live exact-readiness / fail-closed policy remains in force
+
+#### Scenario: Superseded same-file target does not leak detached diagnostics artifacts
+
+- **GIVEN** a detached diagnostics-ready artifact exists for an older same-file revision or older
+  `save_cycle_sequence`
+- **WHEN** a newer same-file revision or newer save cycle overtakes that target
+- **THEN** the older detached artifact is not consumed as the answer for the newer target
+- **AND** terminal disposition remains truthful through supersession, cancellation, or another
+  bounded fallback outcome
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `parser_base_recovery` on the save-critical path
+
+The system MUST treat matching parser-base proof or recovery as save-critical work only to the
+extent required to resume exact ready-snapshot materialization for the still-current same-version
+target whenever `didSave` heavy follow-up is waiting on that target and the dominant exact blocker
+remains `parser_base_recovery`.
+
+This behavior MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target;
+- when `didSave` follow-up observes a matching still-current in-flight same-version producer,
+  promote and wait on that producer rather than bypassing it through a parallel didSave-only
+  semantic branch;
+- keep `parser_base_recovery` focused on bounded work required to prove or install a matching
+  parser base for that exact target before later tree-build or exact-artifact work proceeds;
+- preserve the existing bounded wait and relief-valve budgets as the primary latency envelope and
+  MUST NOT rely on widening them as the primary remedy;
+- treat exhausted recovery proof as bounded failure to match/install the parser base or to advance
+  the still-current producer beyond `parser_base_recovery` into a later exact checkpoint within the
+  existing envelope, and MUST NOT treat mere continued elapsed time inside the unchanged checkpoint
+  as sufficient proof;
+- preserve exact same-version semantics for any produced ready snapshot;
+- preserve latest-wins supersession and cancellation when a newer same-file revision or newer save
+  cycle overtakes the target;
+- preserve truthful fallback to degraded paths only when bounded recovery proof is exhausted or the
+  target is superseded.
+
+#### Scenario: Still-current same-version producer leaves `parser_base_recovery` in bounded time
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the dominant exact blocker would otherwise remain `parser_base_recovery`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** runtime executes save-critical parser-base recovery for the exact target
+- **THEN** the producer prioritizes only the bounded recovery work required to prove or install a
+  matching parser base for that target
+- **AND** `didSave` follow-up keeps waiting on that promoted producer rather than switching to a
+  parallel didSave-only semantic branch
+- **AND** the path reaches later exact work or materializes ready artifacts without falling back to
+  `shadow_state` solely because `parser_base_recovery` monopolized the same-version exact path
+
+#### Scenario: Exhausted recovery proof preserves truthful fallback
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact same-version producer
+- **AND** bounded save-critical parser-base recovery cannot prove or install a matching parser base,
+  or cannot move the still-current producer beyond `parser_base_recovery` within the existing
+  envelope
+- **WHEN** runtime exhausts that recovery proof
+- **THEN** the system MAY fall back truthfully to the existing degraded path
+- **AND** observability preserves that `parser_base_recovery` was the exhausted blocker rather than
+  hiding the incident under a generic parse delay
+- **AND** the fallback is not justified solely by additional wall time spent in the same unchanged
+  `parser_base_recovery` checkpoint
+
+### Requirement: Diagnostics-only semantic simplification MUST NOT regress later LSP exact consumers on the same current revision
+
+The system MUST preserve canonical current-revision exact semantics for LSP exact consumers after a
+diagnostics-only semantic path has already executed for that same revision.
+
+At minimum this requirement applies to:
+
+- `textDocument/hover`;
+- `textDocument/definition`;
+- and any other LSP semantic query that shares their exact-only runtime path in the final
+  implementation.
+
+This behavior MUST:
+
+- keep diagnostics-only artifacts non-substitutable for exact LSP semantic queries;
+- keep later hover/definition requests able to reach the canonical exact artifact for the same
+  current revision when that artifact is already ready or becomes ready through the existing
+  bounded exact-readiness policy;
+- preserve fail-closed empty/unavailable behavior when the exact current-revision artifact is
+  genuinely unavailable within bounded policy;
+- preserve the current serve-only / fail-closed contract for LSP exact consumers and MUST NOT be
+  satisfied by silently re-enabling hidden on-demand exact materialization on the LSP request
+  path;
+- NOT be satisfied by silently widening diagnostics-only materialization until it effectively
+  becomes a second exact contract;
+- preserve bounded fail-closed reason-code observability for genuine exact misses.
+
+#### Scenario: Same-revision hover and definition still recover canonical exact semantics after diagnostics-only path
+
+- **GIVEN** a diagnostics-only semantic path has already run for the current document revision
+- **AND** a later LSP hover or goto-definition request needs canonical exact semantics for that
+  same revision
+- **AND** the exact artifact for that revision is already ready or becomes ready through the
+  existing bounded exact-readiness policy
+- **WHEN** the runtime serves the LSP request
+- **THEN** it serves the request from the canonical exact artifact path for that revision
+- **AND** it does not treat the diagnostics-only artifact as a successful exact cache hit
+- **AND** hover/definition return the expected exact result
+
+#### Scenario: Genuine exact miss remains fail-closed after diagnostics-only path
+
+- **GIVEN** a diagnostics-only semantic path has already run for the current document revision
+- **AND** the exact current-revision artifact is still genuinely unavailable within bounded policy
+- **WHEN** LSP hover or goto-definition is requested
+- **THEN** the response remains empty or unavailable according to the API contract
+- **AND** the runtime does not rescue the request with stale, search-only, or diagnostics-only
+  semantic substitutes
+
+### Requirement: Same-version `didSave` follow-up MUST bound exact `parse_exec` residence before the first subphase callback
+
+The system MUST bound the opaque pre-subphase `parse_exec` residence of a still-current
+same-version exact ready-snapshot producer whenever `didSave` heavy follow-up is waiting on that
+producer.
+
+This behavior MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash, save_cycle_sequence)`
+  target, or a semantically equivalent per-save-cycle identity;
+- treat the region currently observable as `before_first_parse_exec_subphase` as part of the
+  save-critical exact path rather than as an unbounded invisible entry span;
+- either materially reduce that representative blocked interval or expose truthful bounded internal
+  progress for the same target before the steady-state follow-up latency is dominated by that
+  region;
+- preserve the current bounded wait and relief-valve budgets as the primary latency envelope;
+- NOT be satisfied solely by widening those budgets;
+- NOT be satisfied solely by relabelling the same opaque interval under another observability
+  bucket without reducing or truthfully subdividing it for the same target;
+- preserve exact same-version semantics for any produced ready artifacts;
+- preserve latest-wins supersession, retarget, and cancellation behavior when a newer same-file
+  revision or newer save cycle overtakes the target;
+- preserve operator-facing low-cardinality evidence distinguishing still-current continuation,
+  exhausted continuation proof, supersession, and cancellation.
+
+#### Scenario: Still-current same-version producer reaches bounded progress before opaque pre-subphase `parse_exec` dominates
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the representative timeout leaf would otherwise be `before_first_parse_exec_subphase`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** runtime executes the representative save-follow-up policy
+- **THEN** the producer reaches a bounded first in-parse progress point or materializes exact ready
+  artifacts in time for the representative path to avoid spending its steady-state latency inside
+  one opaque pre-subphase `parse_exec` span
+- **AND** the heavy follow-up remains on `ready_artifacts`
+
+#### Scenario: Newer target still supersedes the pre-subphase producer truthfully
+
+- **GIVEN** an exact same-version producer is still inside bounded pre-subphase `parse_exec`
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded checkpoint
+- **THEN** the producer MAY terminate, retarget, or fall back truthfully instead of publishing
+  stale output
+- **AND** the system does not keep an obsolete target alive merely to avoid reporting pre-subphase
+  attribution
+
+### Requirement: Exact same-version `program_lowering` MUST materialize safe reuse without a second deep-clone of unchanged regions
+
+The system MUST, when applying a conservative exact same-version lowering-reuse plan for the
+current ready-snapshot target, materialize reused top-level lowering units and reused callable-body
+statement windows by ownership transfer or an equivalently bounded no-extra-clone path rather than
+deep-cloning the unchanged subtree a second time before final `Program` assembly.
+
+This behavior MUST:
+
+- preserve the fail-closed invalidation boundaries introduced by
+  `refactor-33-exact-program-lowering-changed-range-reuse`;
+- preserve exact same-version semantics, latest-wins supersession, and truthful
+  cancellation/retarget behavior for save-follow-up exact assembly;
+- remove the second full-subtree deep-clone during final `Program` assembly for reused regions;
+- allow at most one bounded rebase/update pass needed to align moved reused nodes to the current
+  revision, rather than silently expanding this change into a broader structural-sharing rewrite.
+
+#### Scenario: Local same-file edit reuses unchanged lowered regions without a second deep clone
+
+- **GIVEN** the previous exact ready snapshot already proved many top-level lowering units and
+  callable-body statement windows unchanged
+- **AND** the current same-file target still qualifies for conservative reuse under the existing
+  invalidation rules
+- **WHEN** exact `program_lowering` materializes the final `Program`
+- **THEN** the runtime moves those unchanged regions into the final assembly through the consumed
+  reuse plan
+- **AND** it does not deep-clone the full reused subtree a second time solely to rebuild the final
+  `Program`
+
+#### Scenario: Ambiguous invalidation still rebuilds instead of reusing
+
+- **GIVEN** a same-file edit touches or may affect a lowering boundary whose reuse soundness is not
+  proven
+- **WHEN** exact `program_lowering` derives or applies the reuse plan
+- **THEN** the affected region is rebuilt fail-closed
+- **AND** the runtime does not use ownership-based materialization to bypass rebuild eligibility
+
+### Requirement: Exact reuse observability MUST remain truthful after ownership-based plan consumption
+
+The system MUST preserve truthful reuse-versus-rebuild attribution for one traced exact same-file
+save-follow-up target even when the lowering-reuse plan is consumed by ownership during final
+`program_lowering` assembly.
+
+This evidence MUST include at least:
+
+- the reuse-plan outcome for the traced exact target;
+- bounded reused-versus-rebuilt lowering workload counts;
+- the residual exact `program_lowering` latency for that same traced target.
+
+#### Scenario: Representative follow-up still explains reduced exact lowering work truthfully
+
+- **GIVEN** ownership-based reuse materialization is enabled for a representative same-file
+  save-follow-up target
+- **WHEN** a live diagnostics-save bundle or checked-in report is exported
+- **THEN** the report still exposes both the exact `program_lowering` residual and the
+  reused-versus-rebuilt lowering breakdown for that traced target
+- **AND** operators can distinguish "less work was materialized" from "the same work was merely
+  relabeled"
+
+### Requirement: Representative same-file save-follow-up MUST bound diagnostics-only semantic query residual once the exact path is stable
+
+The system MUST reduce diagnostics-only semantic query latency on the representative same-file
+`didSave` heavy follow-up family once that family already remains on current exact
+`ready_artifacts`, without regressing exactness truthfulness.
+
+This behavior MUST:
+
+- preserve the current exact `ready_artifacts` path for supported representative same-file
+  save-follow-up targets;
+- preserve diagnostics-only semantic materialization for supported cases, or preserve truthful full
+  fallback when parity cannot be proven;
+- NOT be satisfied solely by widening upstream wait budgets or by silently shifting supported
+  diagnostics-only work onto the full semantic-facts path;
+- preserve operator-facing evidence that distinguishes diagnostics-only current-exact work from
+  full fallback and shows where the dominant semantic residual moved.
+
+#### Scenario: Representative family stays exact while diagnostics-only semantic query residual drops
+
+- **GIVEN** a representative same-file save-follow-up family already publishes through current exact
+  `ready_artifacts`
+- **AND** diagnostics-only semantic query is the dominant remaining residual on that family
+- **WHEN** the runtime executes semantic diagnostics for that representative family
+- **THEN** refreshed representative evidence shows lower diagnostics-only semantic query latency
+  than the checked-in `refactor-39` baseline
+- **AND** the family still remains on `ready_artifacts`
+- **AND** the traced semantic path remains diagnostics-only unless a truthful full fallback is
+  required
+
+#### Scenario: Unsupported optimization does not fake a latency win through silent fallback
+
+- **GIVEN** an attempted diagnostics-only optimization cannot preserve semantic parity for the
+  current exact target
+- **WHEN** the runtime executes semantic diagnostics for that target
+- **THEN** it preserves truthful diagnostics-only versus full-fallback attribution
+- **AND** it does not claim success by silently downgrading supported work to full fallback or by
+  publishing stale semantic results
+
+### Requirement: Diagnostics-only semantic evidence MUST export path-specific leaf attribution
+
+When semantic diagnostics use the diagnostics-only materialization path, the system MUST export
+path-specific leaf attribution for the diagnostics-only semantic-facts builder rather than only an
+aggregate diagnostics-only IR total.
+
+At minimum this evidence MUST distinguish:
+
+- AST->IR conversion time;
+- diagnostics-only semantic-facts build subphases that actually ran for the traced target;
+- diagnostics collection time after diagnostics-only materialization;
+- the traced diagnostics semantic materialization path for that target;
+- the absence of full-semantic-facts-only subphases that did not run on that path.
+
+The diagnostics-only leaf surface MUST use a dedicated diagnostics-only field family or equivalent
+dedicated namespace.
+
+Reusing the existing `semantic_diagnostics_ir_semantic_facts_*` full-path field family for
+diagnostics-only work MUST NOT satisfy this requirement, even if the old fields are accompanied by
+best-effort comments or indirect cumulative metrics.
+
+The exported diagnostics-only leaf attribution MUST be sourced from the diagnostics-only builder
+profile returned by `analysis-v2` rather than heuristically reconstructed only downstream.
+
+#### Scenario: Representative report explains the diagnostics-only residual truthfully
+
+- **GIVEN** a representative same-file save-follow-up uses diagnostics-only semantic
+  materialization
+- **WHEN** the runtime exports the traced diagnostics report
+- **THEN** the report includes diagnostics-only leaf attribution for that traced target
+- **AND** the report includes the traced diagnostics semantic `materialization_path`
+- **AND** skipped full-semantic-facts-only subphases stay absent or zero
+- **AND** operators can see whether the remaining residual is in AST->IR, diagnostics-only facts
+  build, or diagnostics collection
+
+#### Scenario: Reusing the old full-path leaf family without traced path identity is rejected
+
+- **GIVEN** an implementation exports diagnostics-only timings only through the old
+  `semantic_diagnostics_ir_semantic_facts_*` field family or omits the traced
+  `materialization_path`
+- **WHEN** the representative diagnostics report is reviewed
+- **THEN** the requirement is not satisfied
+- **AND** the diagnostics-only leaf surface is still considered ambiguous
+
+### Requirement: Same-version `didSave` follow-up MUST bound terminal `shadow_state` fallback while a still-current exact producer remains in `parse_exec`
+
+The system MUST prefer a bounded still-current exact path when `didSave` heavy follow-up is
+waiting on an exact same-version producer that is still current and already inside bounded
+`parse_exec`.
+
+On the representative save-follow-up family, terminal `shadow_state` fallback MUST remain a
+truthful exception rather than the steady-state outcome for that state.
+
+This behavior MUST:
+
+- remain bound to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)`
+  target, or a semantically equivalent per-save-cycle identity;
+- preserve the existing bounded wait and relief-valve budgets as the primary latency envelope;
+- NOT be satisfied solely by widening those budgets instead of improving still-current producer
+  continuity, proof, or promotion behavior;
+- avoid repeatedly terminating the heavy follow-up on
+  `wait_probe=timeout -> relief_valve=engaged_timed_out -> shadow_state` solely because the
+  initial bounded wait elapsed while the same producer remained the newest valid target;
+- preserve exact same-version semantics for any produced ready artifacts;
+- preserve truthful supersession, cancellation, and fallback when a newer same-file revision or
+  newer save cycle overtakes the current target, or when the runtime can no longer prove that the
+  in-flight producer remains the bounded best candidate;
+- preserve operator-facing low-cardinality evidence that distinguishes:
+  - a still-current exact continuation path that remained eligible after the initial timeout;
+  - a terminal `shadow_state` fallback because still-current continuation proof was exhausted;
+  - truthful supersession, cancellation, or other terminal non-continuation outcomes.
+
+#### Scenario: Still-current same-version `parse_exec` producer wins the heavy follow-up path
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish
+- **AND** the heavy follow-up is waiting on a still-current exact same-version producer that is
+  already inside bounded `parse_exec`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** the runtime executes the representative save-follow-up policy
+- **THEN** the heavy follow-up publishes through `ready_artifacts`
+- **AND** `shadow_state` is not the terminal branch solely because the initial bounded wait elapsed
+
+#### Scenario: Truthful fallback remains when the current exact target is no longer provable
+
+- **GIVEN** the heavy follow-up exhausted its initial bounded wait on an exact same-version
+  producer
+- **AND** either a newer same-file revision or newer save cycle overtakes that target, or the
+  runtime can no longer prove that the in-flight producer remains the bounded best candidate
+- **WHEN** the runtime finalizes the follow-up path
+- **THEN** it MAY terminate truthfully through `shadow_state` or `superseded_generation`
+- **AND** the exported evidence preserves whether still-current continuation was attempted
+- **AND** the exported evidence preserves why the still-current exact path was not chosen
+
+### Requirement: Semantic diagnostics MUST support diagnostics-only type-hint materialization for the current exact target
+
+The system MUST support a diagnostics-only semantic path that materializes only the type-hint
+artifact required by semantic diagnostics for the current exact target instead of always
+materializing full `SemanticFacts`.
+
+At minimum this diagnostics-only artifact MUST support:
+
+- `assignment_value_type_by_span`;
+- `call_receiver_type_by_span`;
+- `call_arg_types_by_span`;
+- `member_access_object_type_by_span`.
+
+This behavior MUST:
+
+- preserve semantic diagnostics parity with the full semantic path for supported cases;
+- fall back to the full semantic path fail-closed when parity cannot be proven for a case;
+- avoid performing diagnostics-irrelevant full semantic-facts work on supported same-file
+  save-follow-up targets.
+
+#### Scenario: Representative semantic diagnostics use diagnostics-only hints instead of full semantic facts
+
+- **GIVEN** a same-file save-follow-up requests semantic diagnostics for a current exact target
+- **AND** that target falls within the supported diagnostics-only contract
+- **WHEN** the runtime materializes semantic inputs for diagnostics
+- **THEN** it builds diagnostics-only type hints instead of full `SemanticFacts`
+- **AND** the resulting semantic diagnostics remain equivalent to the full semantic path
+
+#### Scenario: Unsupported diagnostics case falls back to the full semantic path
+
+- **GIVEN** semantic diagnostics encounter a case whose parity is not proven under the
+  diagnostics-only contract
+- **WHEN** the runtime prepares semantic inputs for diagnostics
+- **THEN** it falls back to full `SemanticFacts`
+- **AND** it does not silently publish reduced diagnostics from an unsupported narrowed path
+
+### Requirement: Diagnostics-only semantic artifacts MUST remain isolated from the full exact semantic artifact cache
+
+The system MUST NOT store diagnostics-only semantic artifacts under the current full exact semantic
+cache identity for the same `(file, version, deps, settings)` target.
+
+Diagnostics-only artifacts MUST be ephemeral or stored under a separate diagnostics cache namespace
+so later interactive exact consumers cannot mistake them for full `SemanticFacts`.
+This isolation requirement also applies to any cached `SemanticProgram`, completion-head artifact,
+or equivalent exact IR-derived artifact that interactive exact consumers reuse.
+The diagnostics-only path MUST NOT publish a trimmed semantic artifact into the current exact
+interactive slot for that target.
+
+#### Scenario: Diagnostics-only query does not poison later interactive exact requests
+
+- **GIVEN** a diagnostics-only semantic query already ran for the current exact target
+- **WHEN** a later interactive exact request such as hover, completion, definition,
+  `signatureHelp`, or type-at-position needs full semantic facts
+- **THEN** the runtime does not treat the diagnostics-only artifact as a cache hit for the full
+  semantic contract
+- **AND** the interactive request still reads or builds full `SemanticFacts`
+
+### Requirement: Representative diagnostics evidence MUST distinguish diagnostics-only hints from full semantic-facts fallback
+
+The system MUST export low-cardinality attribution showing whether representative semantic
+diagnostics used diagnostics-only hint materialization or fell back to full `SemanticFacts`.
+
+This evidence MUST include at least:
+
+- the diagnostics semantic path identity for the traced target;
+- the bounded latency for diagnostics-hint materialization or full semantic-facts fallback;
+- the remaining diagnostics collection/query latency for that same traced target.
+
+#### Scenario: Representative report explains the diagnostics semantic path truthfully
+
+- **GIVEN** a representative same-file save-follow-up exports semantic diagnostics evidence
+- **WHEN** the diagnostics path finishes or exports a checked-in report
+- **THEN** the report distinguishes diagnostics-only hint materialization from full semantic-facts
+  fallback for that traced target
+- **AND** operators can attribute the residual to the correct semantic path instead of inferring it
+  indirectly
+
+### Requirement: Exact same-version `program_lowering` MUST avoid whole-callable body rebuild for bounded local edits when safe
+
+The system MUST, for an exact same-version ready-snapshot target whose changed ranges stay inside
+one callable body, derive a conservative callable-body partial-rebuild plan when body-local
+invalidation boundaries can be proven safely.
+
+When that plan proves that only a bounded local region inside the callable body is invalidated, the
+runtime MUST rebuild only the invalidated statement window and any semantically dependent enclosing
+control-flow region, rather than recursively dispatching every statement in the callable body.
+
+This behavior MUST:
+
+- stay bound to the exact `(file_id, requested_version, text_hash)` target;
+- preserve the fail-closed invalidation discipline established by
+  `refactor-33-exact-program-lowering-changed-range-reuse`;
+- preserve exact same-version semantics, latest-wins supersession, and truthful
+  cancellation/retarget behavior;
+- rebuild the whole callable body instead of guessing when body-local soundness is not proven.
+
+#### Scenario: Bounded local edit inside one large callable body rebuilds only the invalidated body window
+
+- **GIVEN** the previous same-file revision already has an exact ready snapshot
+- **AND** the new revision changes only a bounded local region inside one large callable body
+- **AND** the runtime can prove safe body-local invalidation boundaries for that edit
+- **WHEN** exact ready-snapshot assembly lowers the still-current target
+- **THEN** the runtime rebuilds only the invalidated body-local region and any semantically
+  dependent enclosing control-flow region
+- **AND** it does not recursively dispatch the whole callable body solely because that one local
+  edit occurred
+
+#### Scenario: Ambiguous body-local invalidation falls back to whole-callable rebuild
+
+- **GIVEN** a same-file edit inside one callable body touches or may affect a body-local boundary
+  whose rebuild soundness is not proven
+- **WHEN** exact ready-snapshot assembly derives or applies the callable-body partial-rebuild plan
+- **THEN** the affected callable body is rebuilt fail-closed
+- **AND** the runtime does not guess a narrower partial-rebuild boundary
+
+### Requirement: Representative exact lowering observability MUST expose rebuilt callable-body work
+
+The system MUST export operator-facing evidence showing how much direct rebuilt callable-body work
+remains for one traced exact same-file save-follow-up target on representative large-module churn.
+
+This evidence MUST include at least:
+
+- the exact `program_lowering` residual for the traced target;
+- whether the rebuilt callable used bounded body-local rebuild or whole-callable fallback;
+- direct rebuilt callable-body dispatch time and call count for that traced target.
+
+#### Scenario: Representative follow-up explains parser residual using rebuilt callable-body metrics
+
+- **GIVEN** a representative large-module same-file save follow-up exercises the exact path after
+  the callable-body partial-rebuild change
+- **WHEN** a live diagnostics-save bundle or checked-in report is exported
+- **THEN** the evidence shows the exact `program_lowering` residual and the direct rebuilt
+  callable-body metrics for that traced target
+- **AND** operators can distinguish "less callable-body work was rebuilt" from "the same parser
+  hotspot was only relabeled"
+
+#### Scenario: Whole-callable fallback remains truthful in representative evidence
+
+- **GIVEN** the traced exact target falls back to whole-callable rebuild because body-local
+  boundaries are ambiguous
+- **WHEN** observability exports the representative follow-up result
+- **THEN** the report truthfully indicates that bounded callable-body partial rebuild did not
+  qualify
+- **AND** the direct rebuilt callable-body metrics remain coherent for that fallback path
+
+### Requirement: Canonical local-function-summary inference MUST short-circuit singleton non-recursive SCCs
+
+The system MUST, when canonical semantic-facts materialization derives local routine summaries for
+the current exact target revision, detect singleton SCCs that have no self-edge and compute their
+summaries without entering the general recursive fixed-point loop.
+
+This behavior MUST:
+
+- preserve the same exact semantic contract for return types and local call targets;
+- rely only on already stabilized out-of-SCC summaries plus the current routine body;
+- keep self-recursive singleton SCCs off the fast path.
+
+#### Scenario: Singleton non-recursive local routine resolves without recursive fixed-point
+
+- **GIVEN** one local routine belongs to an SCC of size `1`
+- **AND** that SCC has no self-edge
+- **AND** callees outside the SCC are already stabilized by reverse-topological processing
+- **WHEN** canonical semantic-facts materialization computes local-function summaries
+- **THEN** the runtime computes that routine summary in one bounded pass
+- **AND** it does not enter the general recursive fixed-point loop for that SCC
+- **AND** the resulting summary remains equivalent to the exact semantic contract
+
+#### Scenario: Self-recursive singleton stays on the convergence path
+
+- **GIVEN** one local routine belongs to an SCC of size `1`
+- **AND** that routine calls itself, so the SCC has a self-edge
+- **WHEN** canonical semantic-facts materialization computes local-function summaries
+- **THEN** the singleton fast path does not apply
+- **AND** the routine summary is still derived through a convergence-safe recursive path
+
+### Requirement: Recursive local-summary SCC solving MUST iterate SCC-locally rather than rebuilding file-wide snapshots
+
+The system MUST, when canonical semantic-facts materialization solves a recursive local-routine
+SCC, preserve a stable base view for out-of-SCC summaries and restrict per-iteration rebuild work
+to the active SCC overlay rather than rebuilding a full-file local-summary snapshot.
+
+This behavior MUST:
+
+- let in-SCC lookups observe the latest current-SCC overlay values;
+- let out-of-SCC lookups observe stable already-finalized summaries;
+- avoid cloning, rebuilding, or remapping unrelated out-of-SCC summaries per SCC or per iteration
+  under a helper that is only nominally called `base`;
+- preserve deterministic ordering and convergence behavior for recursive SCCs.
+
+#### Scenario: Recursive SCC iterations reuse stable out-of-SCC summaries
+
+- **GIVEN** a file contains one recursive local-routine SCC and many unrelated local routines
+- **WHEN** the runtime iterates that SCC to convergence
+- **THEN** each iteration reuses stable summaries outside the active SCC from a base lookup
+- **AND** only the active SCC overlay participates in per-iteration rebuild work
+- **AND** the runtime does not rebuild a full-file local-summary snapshot on each iteration
+
+### Requirement: Representative save-follow-up evidence MUST expose local-summary convergence attribution
+
+The system MUST export low-cardinality local-summary convergence attribution for representative
+same-file save-follow-up evidence whenever canonical semantic diagnostics report
+`local_function_summaries` cost.
+
+This evidence MUST include at least:
+
+- total `local_function_summaries` latency;
+- `prep`, `fixed_point`, `snapshot_build`, and `body_infer` subphases;
+- `function_count`, `scc_count`, and fixed-point iteration count;
+- `singleton_fast_path_count` and `recursive_scc_count`.
+
+#### Scenario: Representative report distinguishes singleton fast-path wins from recursive residual
+
+- **GIVEN** a representative large-module same-file save-follow-up exports canonical semantic
+  diagnostics evidence
+- **WHEN** `local_function_summaries` remains visible in that report
+- **THEN** the report includes local-summary convergence attribution and bounded workload counts
+- **AND** an operator can distinguish singleton fast-path wins from remaining recursive-SCC work
+
+### Requirement: Exact same-version `program_lowering` MUST reuse unchanged lowering units for local same-file edits when safe
+
+The system MUST derive a conservative lowering-reuse plan for exact same-version ready-snapshot
+assembly from the previous exact ready state and the current changed ranges.
+When that plan proves that some lowering units are unchanged, the runtime MUST reuse them instead
+of rebuilding the entire lowering region.
+
+This behavior MUST:
+
+- stay bound to the exact `(file_id, requested_version, text_hash)` target;
+- support reuse of unchanged top-level lowering units and bounded body-local reuse of unchanged
+  sibling statement windows when soundness can be proven;
+- rebuild any lowering region whose invalidation boundary cannot be proven safely;
+- preserve exact same-version semantics, latest-wins supersession, and truthful cancellation /
+  retarget behavior.
+
+#### Scenario: Local edit inside one large callable body reuses unchanged lowering units
+
+- **GIVEN** the previous same-file revision already has an exact ready snapshot
+- **AND** the new revision changes only a bounded local region inside one large callable body
+- **WHEN** exact ready-snapshot assembly builds the still-current target
+- **THEN** the runtime reuses unchanged lowering units outside the invalidated region
+- **AND** the exact path does not rebuild the whole file or whole body solely because one local
+  edit occurred
+
+#### Scenario: Ambiguous invalidation falls back to rebuild instead of stale reuse
+
+- **GIVEN** a same-file edit touches or may affect a lowering boundary whose reuse soundness is not
+  proven
+- **WHEN** the runtime derives the exact lowering-reuse plan
+- **THEN** the affected region is rebuilt fail-closed
+- **AND** the system does not publish stale exact artifacts by guessing that reuse is safe
+
+### Requirement: Exact `program_lowering` reuse MUST remain observable on representative load
+
+The system MUST export operator-facing evidence showing how much exact `program_lowering` work was
+reused versus rebuilt for one traced target on representative large-module same-file churn.
+Acceptance for this change MUST prove reduced exact lowering work rather than only reduced wall-clock
+latency with no visibility into what changed.
+
+This behavior MUST:
+
+- keep reuse-versus-rebuild evidence tied to one exact traced target and save cycle;
+- expose a truthful reuse-plan outcome for the operator-facing trace or metrics snapshot;
+- expose bounded summaries of reused and rebuilt lowering work for the exact path;
+- preserve truthful dominant checkpoint and timeout attribution for the same traced target.
+
+#### Scenario: Representative follow-up reports reduced exact lowering work with reuse evidence
+
+- **GIVEN** a representative large-module same-file save follow-up exercises the exact path after
+  the lowering-reuse change
+- **WHEN** a live diagnostics-save bundle or checked-in report is exported
+- **THEN** the evidence shows both the exact `program_lowering` residual and the reuse-versus-rebuild
+  breakdown for that traced target
+- **AND** operators can distinguish "less work was rebuilt" from "the system merely waited longer
+  or relabeled the same hotspot"
+
+#### Scenario: Full rebuild remains truthful when reuse does not qualify
+
+- **GIVEN** the lowering-reuse plan decides that the current exact target must rebuild the affected
+  region completely
+- **WHEN** observability exports the traced follow-up result
+- **THEN** the reuse-versus-rebuild evidence truthfully reports that reuse did not qualify
+- **AND** dominant checkpoint and timeout attribution remain coherent for that full-rebuild path
+
+### Requirement: Same-file `didSave` heavy follow-up MUST stop treating `shadow_state` as the steady-state terminal path once a bounded exact producer is still current
+
+After `save_fastlane` already published the same-version first refresh, the system MUST prefer a
+still-current exact same-version ready-snapshot producer strongly enough that `shadow_state`
+remains a truthful fallback rather than the steady-state terminal branch for bounded
+`program_lowering` workloads.
+
+This behavior MUST:
+
+- preserve the existing bounded wait budgets as the primary latency envelope;
+- keep the still-current exact producer on the hottest path once it has already entered bounded
+  `ready_snapshot_assembly` / `program_lowering`;
+- avoid branch selection or same-file churn policies that repeatedly starve the best exact
+  candidate while it is still the latest valid producer for the save cycle;
+- preserve latest-wins supersession, cancellation, and exact same-version guarantees.
+
+#### Scenario: Still-current bounded exact producer publishes the heavy follow-up through `ready_artifacts`
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish
+- **AND** the heavy follow-up is waiting on a still-current exact same-version producer that is
+  already inside bounded `program_lowering`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** the representative same-file mixed profile continues under the existing bounded
+  follow-up policy
+- **THEN** the heavy follow-up publishes through `ready_artifacts`
+- **AND** `shadow_state` is not the terminal branch for that save cycle
+
+#### Scenario: Newer same-file target still supersedes the exact producer truthfully
+
+- **GIVEN** the heavy follow-up is currently waiting on a bounded exact same-version producer
+- **AND** a newer same-file revision or newer save cycle arrives before publish
+- **WHEN** the runtime re-evaluates the still-current target
+- **THEN** the older producer MAY be superseded, cancelled, or retargeted truthfully
+- **AND** the system does not keep the older save cycle alive just to avoid a `shadow_state`
+  fallback
+
+### Requirement: Same-file ranged `didChange` MUST keep a parser-base-capable exact head close enough to `shadow_state`
+
+The system MUST keep a parser-base-capable exact head close enough to the live `shadow_state` that
+`ready_snapshot_lags_shadow_state` stops being the dominant steady-state explanation for
+`fallback_reason=stale_parser_base` on representative large-module same-file churn profiles.
+
+This behavior MUST:
+
+- remain bound to the exact `(file_id, requested_version, text_hash)` target;
+- prefer advancing one still-current exact head or bounded recovery/prime path over repeatedly
+  spawning parse workers that are predictably retargeted during `parse_exec`;
+- preserve truthful fallback when a matching parser base still cannot be proven;
+- preserve latest-wins semantics and MUST NOT reuse stale parser-base state for a newer revision.
+
+#### Scenario: Representative ranged churn advances or recovers a parser-base-capable head before defaulting to `stale_parser_base`
+
+- **GIVEN** same-file ranged `didChange` churn has advanced `shadow_state` beyond the latest ready
+  exact head
+- **AND** the next ranged revision would otherwise report
+  `fallback_reason=stale_parser_base` with root cause `ready_snapshot_lags_shadow_state`
+- **WHEN** the runtime chooses the next exact build / recovery path for that revision
+- **THEN** it first advances or recovers a parser-base-capable exact head for the newest still-current target
+- **AND** the newest ranged `didChange` does not default immediately to `stale_parser_base` solely
+  because the old ready head lagged behind `shadow_state`
+
+#### Scenario: Truthful fallback remains when no matching parser base can be proven
+
+- **GIVEN** same-file ranged churn still cannot prove a matching parser base for the newest
+  still-current revision after the bounded freshness / recovery path is exhausted
+- **WHEN** the runtime finalizes the parse path for that revision
+- **THEN** it MAY still fall back truthfully through `stale_parser_base`
+- **AND** observability preserves that the bounded freshness / recovery path was attempted and
+  exhausted for the same exact target
+
+### Requirement: Same-version `didSave` follow-up MUST keep exact `program_lowering` bounded on the save-critical path
+
+The system MUST treat exact same-version `program_lowering` as a bounded save-critical region
+whenever `didSave` heavy follow-up is waiting on a still-current exact producer. The runtime MUST
+not require a single monolithic lowering span to complete before save-critical promotion,
+supersession checks, or the first publishable exact ready snapshot decision can take effect.
+
+This behavior MUST:
+
+- introduce bounded cooperative lowering checkpoints that the runtime can observe while exact
+  lowering is still in progress;
+- derive those checkpoints from actual lowering progress units (for example declaration, body, or
+  bounded child batches) rather than only from wall-clock polling around one opaque lowering call;
+- preserve exact same-version semantics for the produced ready snapshot;
+- preserve truthful supersession / retarget behavior when a newer same-file revision or newer save
+  cycle overtakes the current target.
+
+#### Scenario: Save-critical exact producer advances through bounded lowering checkpoints
+
+- **GIVEN** `didSave` heavy follow-up is waiting on an exact still-current same-version producer
+- **AND** the producer is inside `program_lowering`
+- **WHEN** runtime observes the next bounded lowering checkpoint
+- **THEN** save-critical promotion and timeout attribution can react at that checkpoint
+- **AND** the producer is not forced to remain invisible inside one monolithic lowering span
+
+#### Scenario: Newer same-file target supersedes the bounded lowering producer
+
+- **GIVEN** an exact same-version producer is already inside bounded `program_lowering`
+- **AND** a newer same-file revision or newer save cycle arrives
+- **WHEN** the producer reaches the next bounded lowering checkpoint
+- **THEN** the producer MAY terminate or retarget truthfully instead of publishing stale output
+- **AND** the system does not relax exactness rules for the superseded target
+
+### Requirement: Exact `program_lowering` attribution MUST remain internally coherent for one traced target
+
+The system MUST export target-coherent, internally coherent conversion attribution whenever exact
+same-version ready-snapshot work is in or times out inside `program_lowering`. Operator-facing
+observability MUST not emit one diagnostics-save trace whose aggregate `program_conversion` timing
+contradicts its own bounded conversion slices.
+
+This attribution MUST:
+
+- remain tied to the exact current `(file_id, requested_version, text_hash)` target and
+  `save_cycle_sequence`;
+- merge or replace conversion attribution as one target-coherent tuple rather than as independent
+  per-field maxima gathered from multiple probe snapshots;
+- guarantee that exported `program_conversion_ms` is absent or greater than or equal to every
+  constituent conversion slice present in the same trace;
+- prevent stale aggregate conversion timing from one traced target or probe snapshot from leaking
+  into another target's final follow-up trace;
+- keep dominant checkpoint identity and dominant duration derived from the same target-coherent
+  attribution view as the exported aggregate and bounded slice fields;
+- preserve the higher-level truthful distinction between parse timeout, publish/apply blocker, and
+  fallback-to-`shadow_state`.
+
+#### Scenario: Timeout inside `program_lowering` reports coherent aggregate and slice timings
+
+- **GIVEN** `didSave` follow-up times out while the exact same-version producer is still inside
+  `program_lowering`
+- **WHEN** diagnostics save timeline and incident bundle are exported
+- **THEN** the exported evidence names the dominant lowering checkpoint truthfully
+- **AND** `program_conversion_ms` is absent or greater than or equal to the reported
+  `program_lowering_ms` and `publishable_artifact_packaging_ms`
+
+#### Scenario: Repeated follow-up probe snapshots do not produce a self-contradictory final trace
+
+- **GIVEN** the same `didSave` cycle records multiple follow-up probe snapshots while exact work is
+  still moving through bounded conversion checkpoints
+- **WHEN** diagnostics save timeline finalizes the operator-facing trace
+- **THEN** the final trace keeps conversion aggregate, bounded slices, and dominant checkpoint
+  coherent with one traced target
+- **AND** the final trace does not merge stale aggregate timing with fresher per-slice maxima from
+  another target state
+
+### Requirement: Same-file didChange current-revision handoff registers ahead of full handler work (MUST)
+Система MUST регистрировать current-revision `SetFile` handoff и публиковать same-file ingress
+token для `(file_id, V)` через минимальный ingress fast lane после того, как same-file
+`textDocument/didChange` для requested revision `V` уже принят и декодирован и сервер может
+вычислить canonical updated text для этого change, но раньше, чем delayed full-handler work
+(`lsp_did_change`, parse-snapshot scheduling, diagnostics scheduling или другой same-file
+auxiliary work) сможет seconds-scale удерживать later completion для того же файла.
+
+Этот fast lane MUST:
+
+- обновлять `latest_received` и same-file shadow state именно тем текстом, который принят для
+  `didChange` revision `V`;
+- публиковать same-file ingress token только после того, как current-revision handoff для
+  `(file_id, V)` действительно зарегистрирован;
+- сохранять latest-wins и out-of-order semantics для same-file revisions;
+- не допускать, чтобы downstream handler path double-apply-ил тот же `SetFile` или публиковал
+  более сильную readiness semantics, чем реально был зарегистрированный handoff.
+
+#### Scenario: Later completion no longer waits for full didChange handler entry
+- **GIVEN** same-file `didChange` для revision `V` уже достиг server ingress
+- **AND** сервер уже может вычислить canonical updated text для этого change
+- **AND** full `lsp_did_change` handler work для той же notification ещё не завершилось
+- **WHEN** позже приходит completion request для того же файла
+- **THEN** completion MAY ждать truthful current-revision handoff для revision `V`
+- **AND** completion MUST NOT spend seconds-scale same-file wait только потому, что
+  `didChange` ещё не достиг full handler entry или его later auxiliary stages
+
+#### Scenario: Dispatcher bookkeeping alone does not publish same-file freshness
+- **GIVEN** same-file `didChange` для revision `V` уже создал barrier-owner или другое transport
+  bookkeeping
+- **AND** current-revision handoff для `(file_id, V)` ещё не зарегистрирован
+- **WHEN** оператор читает authoritative completion trace
+- **THEN** same-file ingress token для revision `V` остаётся не опубликован
+- **AND** система не считает later same-file completion wait-free только по факту раннего
+  dispatcher bookkeeping
+
+#### Scenario: Superseded older didChange cannot re-publish stale same-file token
+- **GIVEN** same-file `didChange` для revision `V` уже in-flight на fast lane
+- **AND** затем приходит более новая revision `V+1` для того же файла
+- **WHEN** latest-wins semantics выбирают текущую authoritative revision
+- **THEN** older revision `V` MUST NOT publish or re-publish a same-file ingress token, который
+  может задержать или исказить completion для `V+1`
+- **AND** later same-file completion ждёт только ту revision, которая остаётся authoritative
+
+### Requirement: Representative mixed-load evidence fails on post-didChange handoff lag (MUST)
+Representative same-file mixed-load validation для крупного модуля MUST завершаться ошибкой, если
+later completion всё ещё проводит seconds-scale время в `completion_barrier_wait_ms` или
+`same_file_ingress_token_wait_ms` после того, как earlier same-file `didChange` уже наблюдался на
+server ingress для требуемой revision и positive client/output-side waits не объясняют outlier.
+
+Checked-in evidence для этого gate MUST сохранять хотя бы один correlation slice, который
+показывает:
+
+- requested revision completion trace;
+- barrier owner revision, если owner присутствует;
+- когда same-file handoff/token стал observable для этой revision.
+
+#### Scenario: Live gate fails when handoff publication still lags after didChange ingress
+- **GIVEN** representative same-file mixed-load profile на крупном модуле
+- **AND** same-file `didChange` для requested revision уже наблюдался на server ingress до later
+  completion trace
+- **WHEN** measured completion sample всё ещё тратит seconds-scale время в
+  `completion_barrier_wait_ms` или `same_file_ingress_token_wait_ms`
+- **THEN** representative gate завершается ошибкой
+- **AND** regression не маскируется под generic client ingress, output handoff или cold
+  query-body latency
+
+#### Scenario: Worst outlier evidence preserves same-file revision ownership
+- **GIVEN** representative same-file mixed-load profile уже поймал worst completion outlier
+- **WHEN** оператор читает checked-in evidence
+- **THEN** evidence сохраняет correlation slice c requested revision и barrier owner revision,
+  когда owner доступен
+- **AND** по evidence можно понять, когда same-file handoff/token стал observable для этой
+  completion path
 

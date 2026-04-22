@@ -30,7 +30,7 @@
       observability work correct on top of the already-registered authoritative revision.
 - [x] 3.3 Add regressions for same-file `didChange` -> completion ordering, superseded/out-of-order
       revisions, and truthful token publication.
-- [ ] 3.4 Refresh representative mixed-load evidence on `examples/conf_big` showing that
+- [x] 3.4 Refresh representative mixed-load evidence on `examples/conf_big` showing that
       post-edit completion no longer spends seconds-scale latency in
       `completion_barrier_wait_ms` / `same_file_ingress_token_wait_ms`.
 
@@ -38,5 +38,5 @@
 
 - [x] 4.1 Run targeted backend/runtime/transport regressions for the new didChange handoff fast
       lane and its same-file ordering semantics.
-- [ ] 4.2 Run representative live/perf validation for the new same-file mixed-load gate.
+- [x] 4.2 Run representative live/perf validation for the new same-file mixed-load gate.
 - [x] 4.3 Run `openspec validate refactor-48-didchange-current-revision-handoff-fast-lane --strict --no-interactive`.

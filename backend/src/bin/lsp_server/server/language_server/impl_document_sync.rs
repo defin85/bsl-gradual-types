@@ -31,6 +31,7 @@ struct DidChangePostHandoffWorkV2 {
     uri: Url,
     file_id: bsl_analysis_v2::FileId,
     version: i32,
+    diagnostics_save_cycle_sequence_at_handoff: u64,
     path: Arc<str>,
     updated_text: Arc<str>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
@@ -304,6 +305,23 @@ async fn derive_parser_base_recovery_reuse_parse_result_from_shadow_state_v2(
         return None;
     }
     if analysis.file_text(file_id).ok().flatten().as_deref() != Some(shadow_state.text.as_ref()) {
+        return None;
+    }
+    let parse_result = analysis.parse_result(file_id).ok().flatten()?;
+    (!parse_result.has_errors()).then_some(parse_result)
+}
+
+async fn derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    version: i32,
+    text: &str,
+) -> Option<Arc<bsl_syntax::ast::ParseResult>> {
+    let analysis = server.analysis_v2.snapshot().await;
+    if analysis.file_version(file_id).ok().flatten() != Some(version) {
+        return None;
+    }
+    if analysis.file_text(file_id).ok().flatten().as_deref() != Some(text) {
         return None;
     }
     let parse_result = analysis.parse_result(file_id).ok().flatten()?;
@@ -1032,9 +1050,25 @@ impl BslLanguageServer {
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
         let forced_full_parse_reason = request.forced_full_parse_reason;
+        let same_version_rebuild_reuse_parse_result_for_parse = if matches!(
+            request.admission_lane,
+            Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+        ) && parser_edits.is_empty()
+        {
+            derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
+                self,
+                file_id,
+                version,
+                text_for_parse.as_ref(),
+            )
+            .await
+        } else {
+            None
+        };
         let parse_call = if let Some(task_control) = task_control_for_parse.clone() {
             let task_control_for_lane = Arc::clone(&task_control);
             let task_control_for_exec = Some(Arc::clone(&task_control));
+            let task_control_for_exec_started = Arc::clone(&task_control);
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -1051,7 +1085,11 @@ impl BslLanguageServer {
                 &task_control.control_notify,
                 Some(self.coordinator.as_ref()),
                 Option::<fn()>::None,
-                Option::<fn(Duration)>::None,
+                Some(move |_queue_wait_elapsed| {
+                    task_control_for_exec_started.transition_phase_attribution(
+                        super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+                    );
+                }),
                 move || {
                     let preserve_late_ranged_parser_base = || {
                         task_control_for_exec.as_ref().is_some_and(|control| {
@@ -1092,6 +1130,14 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
+                    if let Some(parse_result) =
+                        same_version_rebuild_reuse_parse_result_for_parse.as_ref()
+                    {
+                        parser.prime_ast_cache_for_source(
+                            text_for_parse.as_ref(),
+                            Arc::clone(parse_result),
+                        );
+                    }
                     let parse_exec_progress = |subphase: bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase| {
                         let mapped = match subphase {
                             bsl_runtime::system::parser_coordinator::ParseSnapshotExecSubphase::CoreParseBuild => {
@@ -1346,6 +1392,14 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
+                    if let Some(parse_result) =
+                        same_version_rebuild_reuse_parse_result_for_parse.as_ref()
+                    {
+                        parser.prime_ast_cache_for_source(
+                            text_for_parse.as_ref(),
+                            Arc::clone(parse_result),
+                        );
+                    }
                     let mut effective_forced_full_parse_reason = forced_full_parse_reason;
                     if effective_forced_full_parse_reason
                         == Some(
@@ -1833,9 +1887,6 @@ impl BslLanguageServer {
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
                 Ordering::SeqCst,
             );
-            task_control.transition_phase_attribution(
-                super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
-            );
             self.refresh_snapshot_status_v2(file_id).await;
             let (parse_snapshot, deferred_work, program_lowering_summary) = match self
                 .build_parse_snapshot_v2(BuildParseSnapshotRequest {
@@ -1939,6 +1990,7 @@ impl BslLanguageServer {
                     break;
                 }
             };
+            task_control.set_program_lowering_summary(program_lowering_summary);
             task_control.transition_phase_attribution(
                 super::super::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
             );
@@ -2996,11 +3048,19 @@ impl BslLanguageServer {
             .write()
             .await
             .insert(file_id, handoff_registered_at);
+        let diagnostics_save_cycle_sequence_at_handoff = self
+            .diagnostics_save_cycle_sequence_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            .unwrap_or(0);
 
         Some(DidChangePostHandoffWorkV2 {
             uri: uri.clone(),
             file_id,
             version,
+            diagnostics_save_cycle_sequence_at_handoff,
             path,
             updated_text,
             parser_edits,
@@ -3022,6 +3082,43 @@ impl BslLanguageServer {
             maybe_inject_did_change_post_handoff_delay().await;
             server.run_did_change_post_handoff_v2(work).await;
         });
+    }
+
+    async fn did_change_diagnostics_are_stale_after_same_version_save_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        requested_version: i32,
+        diagnostics_save_cycle_sequence_at_handoff: u64,
+        updated_text: &Arc<str>,
+    ) -> bool {
+        let latest_save_cycle_sequence = self
+            .diagnostics_save_cycle_sequence_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied()
+            .unwrap_or(0);
+        if latest_save_cycle_sequence <= diagnostics_save_cycle_sequence_at_handoff {
+            return false;
+        }
+
+        let latest_received_version = self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
+        if latest_received_version != Some(requested_version) {
+            return false;
+        }
+
+        self.latest_document_shadow_state_v2
+            .read()
+            .await
+            .get(&file_id)
+            .is_some_and(|state| {
+                state.version == requested_version && state.text.as_ref() == updated_text.as_ref()
+            })
     }
 
     async fn run_did_change_post_handoff_v2(&self, work: DidChangePostHandoffWorkV2) {
@@ -3214,8 +3311,60 @@ impl BslLanguageServer {
             })
             .await;
         }
+        if self
+            .did_change_diagnostics_are_stale_after_same_version_save_v2(
+                work.file_id,
+                work.version,
+                work.diagnostics_save_cycle_sequence_at_handoff,
+                &work.updated_text,
+            )
+            .await
+        {
+            let latest_save_cycle_sequence = self
+                .diagnostics_save_cycle_sequence_v2
+                .read()
+                .await
+                .get(&work.file_id)
+                .copied()
+                .unwrap_or(0);
+            debug!(
+                uri = %work.uri,
+                file_id = work.file_id.0,
+                requested_version = work.version,
+                save_cycle_sequence_at_handoff = work.diagnostics_save_cycle_sequence_at_handoff,
+                latest_save_cycle_sequence,
+                "skip stale didChange diagnostics scheduling after same-version didSave"
+            );
+            return;
+        }
         self.schedule_type_index_precompute_v2(work.file_id, work.version)
             .await;
+        if self
+            .did_change_diagnostics_are_stale_after_same_version_save_v2(
+                work.file_id,
+                work.version,
+                work.diagnostics_save_cycle_sequence_at_handoff,
+                &work.updated_text,
+            )
+            .await
+        {
+            let latest_save_cycle_sequence = self
+                .diagnostics_save_cycle_sequence_v2
+                .read()
+                .await
+                .get(&work.file_id)
+                .copied()
+                .unwrap_or(0);
+            debug!(
+                uri = %work.uri,
+                file_id = work.file_id.0,
+                requested_version = work.version,
+                save_cycle_sequence_at_handoff = work.diagnostics_save_cycle_sequence_at_handoff,
+                latest_save_cycle_sequence,
+                "skip stale didChange diagnostics scheduling after same-version didSave"
+            );
+            return;
+        }
 
         let flow_sensitive_enabled = {
             let settings = self.settings.read().await;

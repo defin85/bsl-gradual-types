@@ -2423,3 +2423,59 @@ fn p7_ready_parse_snapshot_probe_wait_decision_classifies_cancellation_and_super
         Some(diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Superseded)
     );
 }
+
+#[tokio::test]
+async fn p7_diagnostics_save_timeline_fastlane_progress_reads_matching_archived_trace() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p7-fastlane-progress-reads-archived-trace.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(93),
+        diagnostics_generation: 12,
+        save_cycle_sequence: 5,
+        requested_version: 17,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::SaveFastlane,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "save_fastlane".to_string(),
+                publish_kind: "syntax_only".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 17,
+                syntax_work_mode: Some("recomputed".to_string()),
+                syntax_diagnostics_query_ms: Some(9),
+                ..Default::default()
+            }),
+        },
+    );
+
+    assert_eq!(
+        server.diagnostics_save_timeline_fastlane_progress(&uri, key),
+        crate::server::core::DiagnosticsSaveTimelineFastlaneProgress::SuccessfulFirstPublish
+    );
+
+    server.record_diagnostics_save_timeline_profile_disposition(
+        &uri,
+        key,
+        bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        bsl_runtime::application::DiagnosticsDisposition::ClientCancel,
+    );
+
+    assert_eq!(
+        server.diagnostics_save_timeline_fastlane_progress(&uri, key),
+        crate::server::core::DiagnosticsSaveTimelineFastlaneProgress::SuccessfulFirstPublish
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(trace.save_fastlane_outcome.as_deref(), Some("published"));
+    assert_eq!(
+        trace.first_publish.as_ref().map(|publish| publish.profile.as_str()),
+        Some("save_fastlane")
+    );
+}

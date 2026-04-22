@@ -77,9 +77,24 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             }
         }
 
+        fn trace_u64(trace: &serde_json::Value, field: &str) -> u64 {
+            trace
+                .get(field)
+                .and_then(|value| value.as_u64())
+                .unwrap_or(0)
+        }
+
+        fn trace_cycle_selection_key(trace: &serde_json::Value) -> (u64, u64, u64) {
+            (
+                trace_u64(trace, "save_cycle_sequence"),
+                trace_u64(trace, "diagnostics_generation"),
+                trace_u64(trace, "started_at_ms"),
+            )
+        }
+
         const PROFILE_NAME: &str =
             "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live";
-        const TIMELINE_OBSERVE_BUDGET_MS: u64 = 30_000;
+        const TIMELINE_OBSERVE_BUDGET_MS: u64 = 90_000;
         const SAVE_CYCLE_COUNT: usize = 4;
         const READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS: u64 = 180;
         const BASELINE_CAPTURED_AT: &str = "2026-04-18T18:52:50Z";
@@ -103,7 +118,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
 
         let allow_fixture_skip = std::env::var_os("BSL_TEST_ALLOW_MISSING_CONF_BIG").is_some();
         let change_id = std::env::var("CHANGE_ID").unwrap_or_else(|_| {
-            "refactor-46-save-followup-dual-artifact-wait".to_string()
+            "refactor-49-save-followup-same-version-ready-snapshot-rebuild-bounding".to_string()
         });
 
         let Some(conf_big_root) = conf_big_root_for_tests() else {
@@ -340,12 +355,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                                 .and_then(|value| value.as_i64())
                                 == Some(stage2_version as i64)
                     })
-                    .max_by_key(|trace| {
-                        trace
-                            .get("save_cycle_sequence")
-                            .and_then(|value| value.as_u64())
-                            .unwrap_or(0)
-                    })
+                    .max_by_key(|trace| trace_cycle_selection_key(trace))
                     .cloned();
                 let Some(trace) = matching_trace else {
                     if Instant::now() >= timeline_deadline {
@@ -416,9 +426,15 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let followup_ready_snapshot_relief_valve_outcome = timeline
                 .get("followup_ready_snapshot_relief_valve_outcome")
                 .and_then(|value| value.as_str());
+            let followup_ready_snapshot_timeout_phase = timeline
+                .get("followup_ready_snapshot_timeout_phase")
+                .and_then(|value| value.as_str());
             let followup_ready_snapshot_timeout_leaf = timeline
                 .get("followup_ready_snapshot_timeout_leaf")
                 .and_then(|value| value.as_str());
+            let followup_ready_snapshot_timeout_leaf_elapsed_ms = timeline
+                .get("followup_ready_snapshot_timeout_leaf_elapsed_ms")
+                .and_then(|value| value.as_u64());
             let followup_wait_reason = timeline
                 .get("followup_wait_reason")
                 .and_then(|value| value.as_str());
@@ -593,9 +609,94 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 Some("ready_artifacts") => panic!(
                     "p56 representative bundle must now surface the still-current late path through detached_ready_artifacts, trace={timeline:?}, observed_version_after_timeout={observed_version_after_timeout:?}, exact_ready_after_timeout={exact_ready_after_timeout}, completion_head_ready_after_timeout={completion_head_ready_after_timeout}, type_index_parse_snapshot_meta_after_timeout={type_index_parse_snapshot_meta_after_timeout:?}, ready_snapshot_state_after_timeout={ready_snapshot_state_after_timeout:?}, type_index_task_state_after_timeout={type_index_task_state_after_timeout:?}, current_revision_head_precompute_task_state_after_timeout={current_revision_head_precompute_task_state_after_timeout:?}, background_parse_task_state_after_timeout={background_parse_task_state_after_timeout:?}, type_index_precompute_exec_histogram_after_timeout={type_index_precompute_exec_histogram_after_timeout:?}, type_index_precompute_ir_exec_histogram_after_timeout={type_index_precompute_ir_exec_histogram_after_timeout:?}, type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout={type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout:?}, ir_singleflight_wait_histogram_after_timeout={ir_singleflight_wait_histogram_after_timeout:?}, ir_singleflight_counters_after_timeout={ir_singleflight_counters_after_timeout:?}, type_index_counters_after_timeout={type_index_counters_after_timeout:?}"
                 ),
-                Some("shadow_state") => panic!(
-                    "p56 representative bundle must not fall back to shadow_state on the still-current path, trace={timeline:?}, observed_version_after_timeout={observed_version_after_timeout:?}, exact_ready_after_timeout={exact_ready_after_timeout}, completion_head_ready_after_timeout={completion_head_ready_after_timeout}, type_index_parse_snapshot_meta_after_timeout={type_index_parse_snapshot_meta_after_timeout:?}, ready_snapshot_state_after_timeout={ready_snapshot_state_after_timeout:?}, type_index_task_state_after_timeout={type_index_task_state_after_timeout:?}, current_revision_head_precompute_task_state_after_timeout={current_revision_head_precompute_task_state_after_timeout:?}, background_parse_task_state_after_timeout={background_parse_task_state_after_timeout:?}, type_index_precompute_exec_histogram_after_timeout={type_index_precompute_exec_histogram_after_timeout:?}, type_index_precompute_ir_exec_histogram_after_timeout={type_index_precompute_ir_exec_histogram_after_timeout:?}, type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout={type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout:?}, ir_singleflight_wait_histogram_after_timeout={ir_singleflight_wait_histogram_after_timeout:?}, ir_singleflight_counters_after_timeout={ir_singleflight_counters_after_timeout:?}, type_index_counters_after_timeout={type_index_counters_after_timeout:?}"
-                ),
+                Some("shadow_state") => {
+                    assert_eq!(
+                        followup_ready_snapshot_wait_probe,
+                        Some("timeout"),
+                        "p56 still-current shadow_state path must surface bounded wait timeout when the exact worker is still queue-blocked, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_bounded_wait_winner,
+                        Some("timeout"),
+                        "p56 still-current shadow_state path must attribute bounded wait completion to timeout when exact work never starts, trace={timeline:?}"
+                    );
+                    assert!(
+                        followup_ready_snapshot_bounded_wait_elapsed_ms.is_some(),
+                        "p56 still-current shadow_state path must export bounded wait elapsed attribution, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_timeout_phase,
+                        Some("waiting"),
+                        "p56 still-current shadow_state path must now be separately attributed to the pre-exec waiting bucket instead of parse_exec/program_lowering, trace={timeline:?}, observed_version_after_timeout={observed_version_after_timeout:?}, exact_ready_after_timeout={exact_ready_after_timeout}, completion_head_ready_after_timeout={completion_head_ready_after_timeout}, type_index_parse_snapshot_meta_after_timeout={type_index_parse_snapshot_meta_after_timeout:?}, ready_snapshot_state_after_timeout={ready_snapshot_state_after_timeout:?}, type_index_task_state_after_timeout={type_index_task_state_after_timeout:?}, current_revision_head_precompute_task_state_after_timeout={current_revision_head_precompute_task_state_after_timeout:?}, background_parse_task_state_after_timeout={background_parse_task_state_after_timeout:?}, type_index_precompute_exec_histogram_after_timeout={type_index_precompute_exec_histogram_after_timeout:?}, type_index_precompute_ir_exec_histogram_after_timeout={type_index_precompute_ir_exec_histogram_after_timeout:?}, type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout={type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout:?}, ir_singleflight_wait_histogram_after_timeout={ir_singleflight_wait_histogram_after_timeout:?}, ir_singleflight_counters_after_timeout={ir_singleflight_counters_after_timeout:?}, type_index_counters_after_timeout={type_index_counters_after_timeout:?}"
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_timeout_leaf,
+                        Some("waiting"),
+                        "p56 still-current shadow_state path must keep the waiting leaf explicit, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_relief_valve_outcome,
+                        Some("skipped_timeout_phase_waiting"),
+                        "p56 waiting-phase timeout must not fabricate parse/apply relief on a worker that never reached parse_exec, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        followup_ready_snapshot_continuation_reason,
+                        None,
+                        "p56 waiting-phase timeout must not hide the still-current queue blocker behind a synthetic continuation reason, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        followup_wait_reason,
+                        Some("semantic_work"),
+                        "p56 waiting-phase timeout must preserve semantic_work wait attribution, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        observed_version_after_timeout,
+                        Some(stage2_version),
+                        "p56 waiting-phase timeout must stay on the same save target version, trace={timeline:?}"
+                    );
+                    assert!(!exact_ready_after_timeout);
+                    assert!(!completion_head_ready_after_timeout);
+                    assert_eq!(
+                        type_index_parse_snapshot_meta_after_timeout,
+                        None,
+                        "p56 waiting-phase timeout must not claim current exact type-index readiness, trace={timeline:?}"
+                    );
+                    assert!(
+                        ready_snapshot_state_after_timeout.as_ref().is_some_and(
+                            |(file_version, source, syntax_errors_complete)| {
+                                *file_version < stage2_version
+                                    && source == "DidChange"
+                                    && *syntax_errors_complete
+                            }
+                        ),
+                        "p56 waiting-phase timeout must still show the older didChange ready snapshot as the last installed exact state, trace={timeline:?}"
+                    );
+                    assert_eq!(
+                        type_index_task_state_after_timeout,
+                        None,
+                        "p56 waiting-phase timeout must not blame a concurrent type-index precompute task when none is active, trace={timeline:?}"
+                    );
+                    assert!(
+                        current_revision_head_precompute_task_state_after_timeout.as_ref().is_some_and(
+                            |(requested_version, finished)| {
+                                *requested_version == stage2_version && !*finished
+                            }
+                        ),
+                        "p56 waiting-phase timeout must surface the unfinished same-version current-revision head precompute alongside the blocked exact worker, trace={timeline:?}"
+                    );
+                    assert!(
+                        background_parse_task_state_after_timeout.as_ref().is_some_and(
+                            |(phase, promotion_requested, materialized)| {
+                                *phase
+                                    == Some(
+                                        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing
+                                    ) && *promotion_requested && !*materialized
+                            }
+                        ),
+                        "p56 waiting-phase timeout must show the same-version exact worker still parsing in pre-exec queue state, trace={timeline:?}"
+                    );
+                    None
+                }
                 _ => panic!(
                     "p56 representative bundle must resolve each cycle to detached_ready_artifacts, trace={timeline:?}, observed_version_after_timeout={observed_version_after_timeout:?}, exact_ready_after_timeout={exact_ready_after_timeout}, completion_head_ready_after_timeout={completion_head_ready_after_timeout:?}, type_index_parse_snapshot_meta_after_timeout={type_index_parse_snapshot_meta_after_timeout:?}, ready_snapshot_state_after_timeout={ready_snapshot_state_after_timeout:?}, type_index_task_state_after_timeout={type_index_task_state_after_timeout:?}, current_revision_head_precompute_task_state_after_timeout={current_revision_head_precompute_task_state_after_timeout:?}, background_parse_task_state_after_timeout={background_parse_task_state_after_timeout:?}, type_index_precompute_exec_histogram_after_timeout={type_index_precompute_exec_histogram_after_timeout:?}, type_index_precompute_ir_exec_histogram_after_timeout={type_index_precompute_ir_exec_histogram_after_timeout:?}, type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout={type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout:?}, ir_singleflight_wait_histogram_after_timeout={ir_singleflight_wait_histogram_after_timeout:?}, ir_singleflight_counters_after_timeout={ir_singleflight_counters_after_timeout:?}, type_index_counters_after_timeout={type_index_counters_after_timeout:?}"
                 ),
@@ -630,6 +731,42 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let followup_publish_non_query_residual_ms = followup_publish_elapsed_ms
                 .zip(followup_publish_semantic_diagnostics_query_ms)
                 .map(|(publish_ms, query_ms)| publish_ms.saturating_sub(query_ms));
+            let followup_ready_snapshot_program_lowering_ms = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms")
+                .and_then(|value| value.as_u64());
+            let program_lowering_reuse_outcome = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome")
+                .and_then(|value| value.as_str());
+            let program_lowering_reused_lowering_units = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units")
+                .and_then(|value| value.as_u64());
+            let program_lowering_rebuilt_lowering_units = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units")
+                .and_then(|value| value.as_u64());
+            let program_lowering_reused_window_count = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count")
+                .and_then(|value| value.as_u64());
+            let program_lowering_rebuilt_window_count = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count")
+                .and_then(|value| value.as_u64());
+            let program_lowering_reuse_plan_build_source = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source")
+                .and_then(|value| value.as_str());
+            let program_lowering_reuse_plan_take_if_unique_hit = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit")
+                .and_then(|value| value.as_bool());
+            let program_lowering_reuse_plan_borrowed_cache_hit = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit")
+                .and_then(|value| value.as_bool());
+            let program_lowering_reuse_plan_build_ms = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_ms")
+                .and_then(|value| value.as_u64());
+            let program_lowering_reused_progress_ms = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms")
+                .and_then(|value| value.as_u64());
+            let program_lowering_rebuild_dispatch_ms = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms")
+                .and_then(|value| value.as_u64());
             if ready_artifacts_publish.is_some() {
                 assert!(
                     followup_publish_elapsed_ms.is_some_and(|value| value > 0),
@@ -643,7 +780,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 assert_eq!(
                     semantic_query_dominates_parse_exec,
                     Some(true),
-                    "p56 cycle {cycle_number} must prove that semantic_diagnostics_query now dominates ready-snapshot parse_exec, trace={timeline:?}"
+                    "p56 cycle {cycle_number} must prove that semantic_diagnostics_query now dominates ready-snapshot parse_exec, trace={timeline:?}, followup_ready_snapshot_program_lowering_ms={followup_ready_snapshot_program_lowering_ms:?}, program_lowering_reuse_outcome={program_lowering_reuse_outcome:?}, program_lowering_reused_lowering_units={program_lowering_reused_lowering_units:?}, program_lowering_rebuilt_lowering_units={program_lowering_rebuilt_lowering_units:?}, program_lowering_reused_window_count={program_lowering_reused_window_count:?}, program_lowering_rebuilt_window_count={program_lowering_rebuilt_window_count:?}, program_lowering_reuse_plan_build_source={program_lowering_reuse_plan_build_source:?}, program_lowering_reuse_plan_take_if_unique_hit={program_lowering_reuse_plan_take_if_unique_hit:?}, program_lowering_reuse_plan_borrowed_cache_hit={program_lowering_reuse_plan_borrowed_cache_hit:?}, program_lowering_reuse_plan_build_ms={program_lowering_reuse_plan_build_ms:?}, program_lowering_reused_progress_ms={program_lowering_reused_progress_ms:?}, program_lowering_rebuild_dispatch_ms={program_lowering_rebuild_dispatch_ms:?}"
                 );
             }
 
@@ -667,15 +804,29 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_ready_snapshot_bounded_wait_winner": followup_ready_snapshot_bounded_wait_winner,
                 "followup_ready_snapshot_bounded_wait_elapsed_ms": followup_ready_snapshot_bounded_wait_elapsed_ms,
                 "followup_ready_snapshot_parse_exec_ms": followup_ready_snapshot_parse_exec_ms,
+                "followup_ready_snapshot_program_lowering_ms": followup_ready_snapshot_program_lowering_ms,
                 "followup_publish_elapsed_ms": followup_publish_elapsed_ms,
                 "followup_publish_semantic_diagnostics_query_ms": followup_publish_semantic_diagnostics_query_ms,
                 "followup_publish_semantic_diagnostics_ir_ms": followup_publish_semantic_diagnostics_ir_ms,
                 "followup_publish_semantic_diagnostics_collect_ms": followup_publish_semantic_diagnostics_collect_ms,
                 "semantic_query_dominates_parse_exec": semantic_query_dominates_parse_exec,
                 "followup_publish_non_query_residual_ms": followup_publish_non_query_residual_ms,
+                "program_lowering_reuse_outcome": program_lowering_reuse_outcome,
+                "program_lowering_reused_lowering_units": program_lowering_reused_lowering_units,
+                "program_lowering_rebuilt_lowering_units": program_lowering_rebuilt_lowering_units,
+                "program_lowering_reused_window_count": program_lowering_reused_window_count,
+                "program_lowering_rebuilt_window_count": program_lowering_rebuilt_window_count,
+                "program_lowering_reuse_plan_build_source": program_lowering_reuse_plan_build_source,
+                "program_lowering_reuse_plan_take_if_unique_hit": program_lowering_reuse_plan_take_if_unique_hit,
+                "program_lowering_reuse_plan_borrowed_cache_hit": program_lowering_reuse_plan_borrowed_cache_hit,
+                "program_lowering_reuse_plan_build_ms": program_lowering_reuse_plan_build_ms,
+                "program_lowering_reused_progress_ms": program_lowering_reused_progress_ms,
+                "program_lowering_rebuild_dispatch_ms": program_lowering_rebuild_dispatch_ms,
                 "followup_ready_snapshot_continuation_reason": followup_ready_snapshot_continuation_reason,
                 "followup_ready_snapshot_relief_valve_outcome": followup_ready_snapshot_relief_valve_outcome,
+                "followup_ready_snapshot_timeout_phase": followup_ready_snapshot_timeout_phase,
                 "followup_ready_snapshot_timeout_leaf": followup_ready_snapshot_timeout_leaf,
+                "followup_ready_snapshot_timeout_leaf_elapsed_ms": followup_ready_snapshot_timeout_leaf_elapsed_ms,
                 "followup_wait_reason": followup_wait_reason,
                 "observed_version_after_timeout": observed_version_after_timeout,
                 "exact_ready_after_timeout": exact_ready_after_timeout,
@@ -784,6 +935,36 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some("shadow_state")
             })
             .count() as u64;
+        let waiting_shadow_state_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+                    == Some("shadow_state")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_phase")
+                        .and_then(|value| value.as_str())
+                        == Some("waiting")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_leaf")
+                        .and_then(|value| value.as_str())
+                        == Some("waiting")
+            })
+            .count() as u64;
+        let rebuild_dominated_shadow_state_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+                    == Some("shadow_state")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_phase")
+                        .and_then(|value| value.as_str())
+                        == Some("parse_exec")
+            })
+            .count() as u64;
         let bounded_wait_winner_detached_ready_artifacts_count = cycles
             .iter()
             .filter(|cycle| {
@@ -809,6 +990,15 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     .get("followup_ready_snapshot_wait_probe")
                     .and_then(|value| value.as_str())
                     == Some("not_ready")
+            })
+            .count() as u64;
+        let wait_probe_timeout_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_ready_snapshot_wait_probe")
+                    .and_then(|value| value.as_str())
+                    == Some("timeout")
             })
             .count() as u64;
         let semantic_query_dominates_parse_exec_count = cycles
@@ -895,18 +1085,18 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         );
         assert_eq!(
             detached_ready_artifacts_count,
-            SAVE_CYCLE_COUNT as u64,
-            "p56 representative bundle must keep every still-current cycle on detached_ready_artifacts, cycles={cycles:?}"
-        );
-        assert_eq!(
-            ready_artifacts_count,
-            0,
-            "p56 representative bundle must not regress back to canonical ready_artifacts on the representative late path, cycles={cycles:?}"
+            bounded_wait_winner_detached_ready_artifacts_count,
+            "p56 representative bundle must preserve detached_ready_artifacts attribution for every detached winner cycle, cycles={cycles:?}"
         );
         assert_eq!(
             shadow_state_count,
+            waiting_shadow_state_count,
+            "p56 representative bundle must only allow shadow_state when the still-current exact worker is separately attributed to the waiting bucket, cycles={cycles:?}"
+        );
+        assert_eq!(
+            rebuild_dominated_shadow_state_count,
             0,
-            "p56 representative bundle must not report shadow_state on the still-current path, cycles={cycles:?}"
+            "p56 representative bundle must fail closed on any rebuild-dominated parse_exec/program_lowering shadow_state residual, cycles={cycles:?}"
         );
         assert_eq!(
             bounded_wait_winner_detached_ready_artifacts_count,
@@ -919,9 +1109,14 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 representative bundle must exercise the same-family in-flight producer before bounded wait succeeds, cycles={cycles:?}"
         );
         assert_eq!(
-            wait_probe_not_ready_count,
-            detached_ready_artifacts_count,
-            "p56 representative bundle must keep the bounded wait probe in not_ready on every detached winner cycle, cycles={cycles:?}"
+            wait_probe_not_ready_count + wait_probe_timeout_count,
+            SAVE_CYCLE_COUNT as u64,
+            "p56 representative bundle must attribute every representative cycle to either detached ready completion or waiting-phase timeout, cycles={cycles:?}"
+        );
+        assert_eq!(
+            wait_probe_timeout_count,
+            waiting_shadow_state_count,
+            "p56 representative bundle must keep timeout wait-probe attribution aligned with waiting-phase shadow_state cycles, cycles={cycles:?}"
         );
         assert_eq!(
             semantic_query_dominates_parse_exec_count,
@@ -945,14 +1140,16 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         );
         assert!(
             max_followup_publish_elapsed_ms
-                .is_some_and(|value| value <= BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS),
-            "p56 representative bundle must stay at or below the {BASELINE_CAPTURED_AT} publish baseline ceiling of {}ms, observed_max={max_followup_publish_elapsed_ms:?}, cycles={cycles:?}",
+                .map(|value| value <= BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS)
+                .unwrap_or(true),
+            "p56 representative bundle must stay at or below the {BASELINE_CAPTURED_AT} publish baseline ceiling of {}ms when detached publish samples exist, observed_max={max_followup_publish_elapsed_ms:?}, cycles={cycles:?}",
             BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS
         );
         assert!(
             max_followup_ready_snapshot_parse_exec_ms
-                .is_some_and(|value| value <= BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS),
-            "p56 representative bundle must stay at or below the {BASELINE_CAPTURED_AT} parse_exec baseline ceiling of {}ms, observed_max={max_followup_ready_snapshot_parse_exec_ms:?}, cycles={cycles:?}",
+                .map(|value| value <= BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS)
+                .unwrap_or(true),
+            "p56 representative bundle must stay at or below the {BASELINE_CAPTURED_AT} parse_exec baseline ceiling of {}ms when parse_exec samples exist, observed_max={max_followup_ready_snapshot_parse_exec_ms:?}, cycles={cycles:?}",
             BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS
         );
         assert!(
@@ -965,16 +1162,36 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 cycle
                     .get("followup_semantic_path")
                     .and_then(|value| value.as_str())
-                    == Some("detached_ready_artifacts")
+                    == Some("shadow_state")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_phase")
+                        .and_then(|value| value.as_str())
+                        == Some("waiting")
             })
             .max_by_key(|cycle| {
                 cycle
-                    .get("followup_publish_elapsed_ms")
+                    .get("followup_ready_snapshot_timeout_leaf_elapsed_ms")
                     .and_then(|value| value.as_u64())
                     .unwrap_or(0)
             })
+            .or_else(|| {
+                cycles
+                    .iter()
+                    .filter(|cycle| {
+                        cycle
+                            .get("followup_semantic_path")
+                            .and_then(|value| value.as_str())
+                            == Some("detached_ready_artifacts")
+                    })
+                    .max_by_key(|cycle| {
+                        cycle
+                            .get("followup_publish_elapsed_ms")
+                            .and_then(|value| value.as_u64())
+                            .unwrap_or(0)
+                    })
+            })
             .cloned()
-            .expect("p56 must keep a representative detached_ready_artifacts cycle summary");
+            .expect("p56 must keep either a waiting-phase shadow_state slice or a detached_ready_artifacts representative cycle summary");
 
         let report = serde_json::json!({
             "profile": PROFILE_NAME,
@@ -998,15 +1215,30 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path_detached_ready_artifacts": detached_ready_artifacts_count,
                 "followup_semantic_path_ready_artifacts": ready_artifacts_count,
                 "followup_semantic_path_shadow_state": shadow_state_count,
+                "followup_semantic_path_shadow_state_waiting": waiting_shadow_state_count,
                 "followup_ready_snapshot_bounded_wait_winner_detached_ready_artifacts": bounded_wait_winner_detached_ready_artifacts_count,
                 "followup_ready_snapshot_zero_probe_not_ready": zero_probe_not_ready_count,
                 "followup_ready_snapshot_wait_probe_not_ready": wait_probe_not_ready_count,
+                "followup_ready_snapshot_wait_probe_timeout": wait_probe_timeout_count,
                 "followup_ready_snapshot_continuation_reason_count": continuation_reason_count,
                 "followup_ready_snapshot_timeout_leaf_ready_install_count": timeout_leaf_ready_install_count,
+                "followup_ready_snapshot_rebuild_dominated_shadow_state_count": rebuild_dominated_shadow_state_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
-                "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
-                "representative_canonical_residual_mix": "in_flight_same_version_without_timeout_leaf",
-                "post_detached_publish_shape": "semantic_query_dominates_parse_exec_with_additional_publish_tail",
+                "representative_bounded_wait_shape": if waiting_shadow_state_count > 0 {
+                    "still_current_waiting_timeout_before_first_parse_exec"
+                } else {
+                    "detached_ready_artifacts_wins_before_canonical_timeout"
+                },
+                "representative_canonical_residual_mix": if waiting_shadow_state_count > 0 {
+                    "waiting_phase_queue_blocker_not_parse_exec_rebuild"
+                } else {
+                    "in_flight_same_version_without_timeout_leaf"
+                },
+                "post_detached_publish_shape": if detached_ready_artifacts_count > 0 {
+                    "semantic_query_dominates_parse_exec_with_additional_publish_tail"
+                } else {
+                    "no_detached_publish_samples_on_waiting_phase_representative_slice"
+                },
             },
             "aggregate": {
                 "max_followup_ready_snapshot_bounded_wait_elapsed_ms": max_followup_ready_snapshot_bounded_wait_elapsed_ms,

@@ -384,6 +384,129 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
 }
 
 #[tokio::test]
+async fn p24b_diagnostics_save_timeline_snapshot_exports_program_lowering_reuse_summary() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///p24b-snapshot-program-lowering-reuse-summary.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(246),
+        diagnostics_generation: 46,
+        save_cycle_sequence: 13,
+        requested_version: 15,
+    };
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let summary = bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary {
+        reuse_outcome: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseOutcome::TopLevelReuse,
+        reused_lowering_units: 48,
+        rebuilt_lowering_units: 0,
+        reused_window_count: 1,
+        rebuilt_window_count: 0,
+        largest_rebuilt_window_lowering_units: 0,
+        fully_reused_top_level_node_count: 3,
+        fully_rebuilt_top_level_node_count: 0,
+        routine_body_reuse_node_count: 0,
+        fully_reused_top_level_lowering_units: 48,
+        fully_rebuilt_top_level_lowering_units: 0,
+        routine_body_reused_prefix_lowering_units: 0,
+        routine_body_reused_suffix_lowering_units: 0,
+        routine_body_rebuilt_lowering_units: 0,
+        reuse_plan_build_source: Some(
+            bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReusePlanBuildSource::Owned,
+        ),
+        reuse_plan_take_if_unique_hit: Some(true),
+        reuse_plan_borrowed_cache_hit: Some(false),
+        reuse_plan_build_ms: Some(4),
+        reuse_plan_owned_build_ms: Some(4),
+        reuse_plan_borrowed_build_ms: None,
+        reuse_plan_rebase_ms: Some(0),
+        reuse_plan_rebase_statement_count: Some(0),
+        reused_progress_ms: Some(22),
+        reused_progress_call_count: Some(3),
+        rebuild_dispatch_ms: Some(0),
+        rebuild_dispatch_call_count: Some(0),
+        rebuild_dispatch_callable_ms: Some(0),
+        rebuild_dispatch_callable_call_count: Some(0),
+        rebuild_dispatch_callable_body_dispatch_ms: Some(0),
+        rebuild_dispatch_callable_body_dispatch_call_count: Some(0),
+        rebuild_dispatch_callable_non_body_dispatch_ms: Some(0),
+        rebuild_dispatch_control_flow_ms: Some(0),
+        rebuild_dispatch_control_flow_call_count: Some(0),
+        rebuild_dispatch_simple_ms: Some(0),
+        rebuild_dispatch_simple_call_count: Some(0),
+        rebuild_dispatch_other_ms: Some(0),
+        rebuild_dispatch_other_call_count: Some(0),
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        crate::server::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        crate::server::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    control.transition_assembly_checkpoint_attribution(
+        crate::server::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    control.set_program_lowering_summary(summary);
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let attribution =
+        diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
+            &control.phase_attribution_snapshot(),
+            true,
+        )
+        .expect("snapshot phase attribution with lowering summary");
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        Some("not_ready"),
+        Some("timeout"),
+        Some("in_flight_same_version"),
+        Some(true),
+        Some(attribution),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome
+            .as_deref(),
+        Some("top_level_reuse")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units,
+        Some(48)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source
+            .as_deref(),
+        Some("owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit,
+        Some(true)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit,
+        Some(false)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_progress_ms,
+        Some(22)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuild_dispatch_ms,
+        Some(0)
+    );
+}
+
+#[tokio::test]
 async fn p24c_diagnostics_save_timeline_exports_semantic_diagnostics_query_breakdown() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24c-semantic-diagnostics-query-breakdown.bsl").expect("uri");

@@ -545,6 +545,7 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
         snapshot: &super::super::ReadyParseSnapshotPhaseAttributionSnapshotV2,
         include_timeout_phase: bool,
     ) -> Option<Self> {
+        let program_lowering_summary = snapshot.program_lowering_summary.as_ref();
         let has_any = snapshot.current_phase.is_some()
             || snapshot.completed.parse_exec_ms.is_some()
             || snapshot.completed.parse_exec_core_parse_build_ms.is_some()
@@ -910,43 +911,84 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 }),
             dominant_phase: dominant.map(|(phase, _)| phase),
             dominant_phase_ms: dominant.map(|(_, duration_ms)| duration_ms),
-            program_lowering_reuse_outcome: None,
-            program_lowering_reused_lowering_units: None,
-            program_lowering_rebuilt_lowering_units: None,
-            program_lowering_reused_window_count: None,
-            program_lowering_rebuilt_window_count: None,
-            program_lowering_largest_rebuilt_window_lowering_units: None,
-            program_lowering_fully_reused_top_level_node_count: None,
-            program_lowering_fully_rebuilt_top_level_node_count: None,
-            program_lowering_routine_body_reuse_node_count: None,
-            program_lowering_fully_reused_top_level_lowering_units: None,
-            program_lowering_fully_rebuilt_top_level_lowering_units: None,
-            program_lowering_routine_body_reused_prefix_lowering_units: None,
-            program_lowering_routine_body_reused_suffix_lowering_units: None,
-            program_lowering_routine_body_rebuilt_lowering_units: None,
-            program_lowering_reuse_plan_build_source: None,
-            program_lowering_reuse_plan_take_if_unique_hit: None,
-            program_lowering_reuse_plan_borrowed_cache_hit: None,
-            program_lowering_reuse_plan_build_ms: None,
-            program_lowering_reuse_plan_owned_build_ms: None,
-            program_lowering_reuse_plan_borrowed_build_ms: None,
-            program_lowering_reuse_plan_rebase_ms: None,
-            program_lowering_reuse_plan_rebase_statement_count: None,
-            program_lowering_reused_progress_ms: None,
-            program_lowering_reused_progress_call_count: None,
-            program_lowering_rebuild_dispatch_ms: None,
-            program_lowering_rebuild_dispatch_call_count: None,
-            program_lowering_rebuild_dispatch_callable_ms: None,
-            program_lowering_rebuild_dispatch_callable_call_count: None,
-            program_lowering_rebuild_dispatch_callable_body_dispatch_ms: None,
-            program_lowering_rebuild_dispatch_callable_body_dispatch_call_count: None,
-            program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms: None,
-            program_lowering_rebuild_dispatch_control_flow_ms: None,
-            program_lowering_rebuild_dispatch_control_flow_call_count: None,
-            program_lowering_rebuild_dispatch_simple_ms: None,
-            program_lowering_rebuild_dispatch_simple_call_count: None,
-            program_lowering_rebuild_dispatch_other_ms: None,
-            program_lowering_rebuild_dispatch_other_call_count: None,
+            program_lowering_reuse_outcome: program_lowering_summary
+                .map(|summary| summary.reuse_outcome.as_str()),
+            program_lowering_reused_lowering_units: program_lowering_summary
+                .map(|summary| summary.reused_lowering_units),
+            program_lowering_rebuilt_lowering_units: program_lowering_summary
+                .map(|summary| summary.rebuilt_lowering_units),
+            program_lowering_reused_window_count: program_lowering_summary
+                .map(|summary| summary.reused_window_count),
+            program_lowering_rebuilt_window_count: program_lowering_summary
+                .map(|summary| summary.rebuilt_window_count),
+            program_lowering_largest_rebuilt_window_lowering_units: program_lowering_summary
+                .map(|summary| summary.largest_rebuilt_window_lowering_units),
+            program_lowering_fully_reused_top_level_node_count: program_lowering_summary
+                .map(|summary| summary.fully_reused_top_level_node_count),
+            program_lowering_fully_rebuilt_top_level_node_count: program_lowering_summary
+                .map(|summary| summary.fully_rebuilt_top_level_node_count),
+            program_lowering_routine_body_reuse_node_count: program_lowering_summary
+                .map(|summary| summary.routine_body_reuse_node_count),
+            program_lowering_fully_reused_top_level_lowering_units: program_lowering_summary
+                .map(|summary| summary.fully_reused_top_level_lowering_units),
+            program_lowering_fully_rebuilt_top_level_lowering_units: program_lowering_summary
+                .map(|summary| summary.fully_rebuilt_top_level_lowering_units),
+            program_lowering_routine_body_reused_prefix_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_reused_prefix_lowering_units),
+            program_lowering_routine_body_reused_suffix_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_reused_suffix_lowering_units),
+            program_lowering_routine_body_rebuilt_lowering_units: program_lowering_summary
+                .map(|summary| summary.routine_body_rebuilt_lowering_units),
+            program_lowering_reuse_plan_build_source: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_build_source.map(|value| value.as_str())),
+            program_lowering_reuse_plan_take_if_unique_hit: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_take_if_unique_hit),
+            program_lowering_reuse_plan_borrowed_cache_hit: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_borrowed_cache_hit),
+            program_lowering_reuse_plan_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_build_ms),
+            program_lowering_reuse_plan_owned_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_owned_build_ms),
+            program_lowering_reuse_plan_borrowed_build_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_borrowed_build_ms),
+            program_lowering_reuse_plan_rebase_ms: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_rebase_ms),
+            program_lowering_reuse_plan_rebase_statement_count: program_lowering_summary
+                .and_then(|summary| summary.reuse_plan_rebase_statement_count),
+            program_lowering_reused_progress_ms: program_lowering_summary
+                .and_then(|summary| summary.reused_progress_ms),
+            program_lowering_reused_progress_call_count: program_lowering_summary
+                .and_then(|summary| summary.reused_progress_call_count),
+            program_lowering_rebuild_dispatch_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_ms),
+            program_lowering_rebuild_dispatch_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_call_count),
+            program_lowering_rebuild_dispatch_callable_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_callable_ms),
+            program_lowering_rebuild_dispatch_callable_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_callable_call_count),
+            program_lowering_rebuild_dispatch_callable_body_dispatch_ms:
+                program_lowering_summary
+                    .and_then(|summary| summary.rebuild_dispatch_callable_body_dispatch_ms),
+            program_lowering_rebuild_dispatch_callable_body_dispatch_call_count:
+                program_lowering_summary.and_then(|summary| {
+                    summary.rebuild_dispatch_callable_body_dispatch_call_count
+                }),
+            program_lowering_rebuild_dispatch_callable_non_body_dispatch_ms:
+                program_lowering_summary
+                    .and_then(|summary| summary.rebuild_dispatch_callable_non_body_dispatch_ms),
+            program_lowering_rebuild_dispatch_control_flow_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_control_flow_ms),
+            program_lowering_rebuild_dispatch_control_flow_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_control_flow_call_count),
+            program_lowering_rebuild_dispatch_simple_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_simple_ms),
+            program_lowering_rebuild_dispatch_simple_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_simple_call_count),
+            program_lowering_rebuild_dispatch_other_ms: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_other_ms),
+            program_lowering_rebuild_dispatch_other_call_count: program_lowering_summary
+                .and_then(|summary| summary.rebuild_dispatch_other_call_count),
         };
         if diagnostics_save_coherence_debug_enabled() {
             emit_diagnostics_save_coherence_debug(format!(
@@ -998,23 +1040,6 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 | Some("ready_install")
                 | Some("document_symbol_side_work")
         )
-    }
-
-    fn qualifies_did_save_seeded_exact_wait(self) -> bool {
-        self.parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
-            .is_some()
-            || self
-                .parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms
-                .is_some()
-            || self
-                .parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms
-                .is_some()
-            || matches!(
-                self.timeout_phase,
-                Some("post_parse_pre_materialization")
-                    | Some("ready_install")
-                    | Some("document_symbol_side_work")
-            )
     }
 }
 
@@ -2689,21 +2714,13 @@ impl BslLanguageServer {
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .clone();
-                    let exact_phase_attribution =
-                        DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot(
-                            &task.control.phase_attribution_snapshot(),
-                            false,
-                        );
                     if target.requested_version == supersession_key.requested_version
                         && shadow_text_hash.map_or(true, |text_hash| target.text_hash == text_hash)
                     {
                         exact_inflight_control = Some(Arc::clone(&task.control));
                         match target.source {
                             super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => {
-                                exact_phase_attribution
-                                    .is_some_and(|attribution| {
-                                        attribution.qualifies_did_save_seeded_exact_wait()
-                                    })
+                                (target.save_cycle_sequence == supersession_key.save_cycle_sequence)
                                     .then_some(ReadySnapshotTaskStateV2::InFlightSameVersion)
                                     .unwrap_or(ReadySnapshotTaskStateV2::Absent)
                             }
@@ -3191,6 +3208,7 @@ impl BslLanguageServer {
 
     async fn wait_for_save_fastlane_first_publish_v2(
         &self,
+        uri: &Url,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
     ) -> SaveFastlaneFirstPublishWaitOutcome {
@@ -3200,7 +3218,7 @@ impl BslLanguageServer {
             return SaveFastlaneFirstPublishWaitOutcome::NotPublished;
         };
         loop {
-            match self.diagnostics_save_timeline_fastlane_progress(cycle_key) {
+            match self.diagnostics_save_timeline_fastlane_progress(uri, cycle_key) {
                 super::DiagnosticsSaveTimelineFastlaneProgress::SuccessfulFirstPublish => {
                     return SaveFastlaneFirstPublishWaitOutcome::Published;
                 }
@@ -5006,7 +5024,7 @@ impl BslLanguageServer {
                 None,
             );
             let save_fastlane_first_publish_completed = matches!(
-                self.wait_for_save_fastlane_first_publish_v2(&supersession_key, cancel_token)
+                self.wait_for_save_fastlane_first_publish_v2(uri, &supersession_key, cancel_token)
                     .await,
                 SaveFastlaneFirstPublishWaitOutcome::Published
             );

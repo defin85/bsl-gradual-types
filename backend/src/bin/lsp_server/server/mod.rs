@@ -648,6 +648,8 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
     pub current_assembly_checkpoint: Option<ReadyParseSnapshotAssemblyCheckpointV2>,
     pub current_assembly_checkpoint_elapsed_ms: Option<u64>,
     pub completed: ReadyParseSnapshotPhaseAttributionV2,
+    pub program_lowering_summary:
+        Option<bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary>,
 }
 
 impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
@@ -781,6 +783,8 @@ struct ReadyParseSnapshotPhaseAttributionStateV2 {
     current_assembly_checkpoint: Option<ReadyParseSnapshotAssemblyCheckpointV2>,
     current_assembly_checkpoint_started_at: Option<Instant>,
     completed: ReadyParseSnapshotPhaseAttributionV2,
+    program_lowering_summary:
+        Option<bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary>,
 }
 
 impl ReadyParseSnapshotPhaseAttributionStateV2 {
@@ -794,6 +798,14 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
         self.current_assembly_checkpoint = None;
         self.current_assembly_checkpoint_started_at = None;
         self.completed = ReadyParseSnapshotPhaseAttributionV2::default();
+        self.program_lowering_summary = None;
+    }
+
+    fn set_program_lowering_summary(
+        &mut self,
+        summary: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+    ) {
+        self.program_lowering_summary = Some(summary);
     }
 
     fn transition_to(&mut self, phase: ReadyParseSnapshotAttributionPhaseV2, now: Instant) {
@@ -1022,6 +1034,7 @@ impl ReadyParseSnapshotPhaseAttributionStateV2 {
                 .current_assembly_checkpoint_started_at
                 .map(|started_at| duration_to_u64_ms(now.saturating_duration_since(started_at))),
             completed: self.completed.clone(),
+            program_lowering_summary: self.program_lowering_summary,
         }
     }
 }
@@ -1347,6 +1360,16 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .transition_assembly_checkpoint_to(checkpoint, Instant::now());
+    }
+
+    pub(crate) fn set_program_lowering_summary(
+        &self,
+        summary: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+    ) {
+        self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .set_program_lowering_summary(summary);
     }
 
     pub(crate) fn finish_phase_attribution(&self) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {

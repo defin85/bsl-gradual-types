@@ -1195,6 +1195,128 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn exact_ready_snapshot_same_content_reuses_cached_lowering_plan() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-same-content-reuse-parity.bsl");
+        let base = "Процедура Alpha()\n    Сообщить(\"alpha\");\nКонецПроцедуры\n\nПроцедура Beta()\n    Сообщить(\"beta\");\nКонецПроцедуры\n\nПроцедура Gamma()\n    Сообщить(\"gamma\");\nКонецПроцедуры\n"
+            .to_string();
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                base,
+                Vec::new(),
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path same-content report");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert_ne!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+        );
+        assert!(report.program_lowering_summary.reused_lowering_units > 0);
+        assert_eq!(
+            report
+                .program_lowering_summary
+                .fully_rebuilt_top_level_node_count,
+            0
+        );
+        assert!(
+            report
+                .program_lowering_summary
+                .fully_reused_top_level_node_count
+                > 0
+        );
+        assert!(
+            report
+                .program_lowering_summary
+                .reuse_plan_build_source
+                .is_some(),
+            "same-content exact path must record lowering reuse provenance"
+        );
+    }
+
+    #[test]
+    fn exact_ready_snapshot_same_content_preserves_owned_cache_entry_when_same_version_seed_reprimes(
+    ) {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-same-content-owned-reuse-parity.bsl");
+        let base = build_large_ascii_callable_fixture(64);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+
+        let same_version_seed =
+            Arc::new(bsl_syntax::parse_fast(&base).expect("same-version seed parse result"));
+        parser.prime_ast_cache_for_source(&base, Arc::clone(&same_version_seed));
+
+        let report = parser
+            .parse_incremental_with_report_with_cancellation_and_options(
+                file_path,
+                base,
+                Vec::new(),
+                &AtomicBool::new(false),
+                ParseSnapshotExecutionOptions {
+                    save_critical_initial: false,
+                    save_critical_requested: None,
+                    reused_program_prefix: None,
+                    lowering_reuse_plan: None,
+                    lowering_reuse_summary: None,
+                    lowering_reuse_attribution: None,
+                    exact_ready_snapshot_control_callback: None,
+                    progress_callback: None,
+                    core_build_progress_callback: None,
+                    assembly_progress_callback: None,
+                },
+            )
+            .expect("exact-path same-content report with same-version reprime");
+
+        assert!(report.incremental);
+        assert!(report.fallback_reason.is_none());
+        assert_eq!(
+            report.program_lowering_summary.reuse_plan_build_source,
+            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Owned)
+        );
+        assert_eq!(
+            report
+                .program_lowering_summary
+                .reuse_plan_take_if_unique_hit,
+            Some(true)
+        );
+        assert_eq!(
+            report
+                .program_lowering_summary
+                .reuse_plan_borrowed_cache_hit,
+            Some(false)
+        );
+        assert_ne!(
+            report.program_lowering_summary.reuse_outcome,
+            ParseSnapshotProgramLoweringReuseOutcome::FullRebuild
+        );
+    }
+
+    #[test]
     fn exact_ready_snapshot_reuse_path_matches_full_parse_for_if_region_body_edit() {
         let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();

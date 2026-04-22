@@ -638,7 +638,8 @@ impl ParserCoordinator {
         source: &str,
         parse_result: Arc<bsl_syntax::ast::ParseResult>,
     ) {
-        self.ast_cache.put(ast_cache_key(source), parse_result);
+        self.ast_cache
+            .put_if_absent(ast_cache_key(source), parse_result);
     }
 
     pub fn ast_cache_stats(&self) -> crate::system::ast_cache::AstCacheStats {
@@ -829,41 +830,53 @@ impl ParserCoordinator {
                 let core_started = std::time::Instant::now();
                 let line_index = Arc::new(bsl_line_index::LineIndex::new(&new_content));
                 debug!("Content unchanged, using cached tree");
-                let result = TreeSitterAdapter::convert_tree(&old_tree, &new_content)?;
-                let program_lowering_summary = Self::summarize_program_lowering(&result, options);
+                let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+                let mut lowering_reuse_plan = self.build_exact_same_content_lowering_reuse_plan(
+                    &new_content,
+                    &old_tree,
+                    &mut lowering_attribution,
+                );
+                let lowering_reuse_summary = lowering_reuse_plan
+                    .as_ref()
+                    .map(Self::build_program_lowering_summary_plan);
+                let assembly_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
+                    ..options
+                };
+                let (result, deferred_syntax_error_assembly) = self
+                    .run_exact_ready_snapshot_assembly_with_cancellation(
+                        &old_tree,
+                        &new_content,
+                        cancellation_flag,
+                        assembly_options,
+                        &mut lowering_attribution,
+                        lowering_reuse_plan.as_mut(),
+                    )?;
+                let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
+                    lowering_reuse_attribution: Some(&lowering_attribution),
+                    ..options
+                };
                 if cancellation_flag.load(Ordering::SeqCst) {
                     return Err(PARSE_COORDINATOR_CANCELLED_ERROR.to_string());
                 }
-                let mut parse_exec_subphases = ParseSnapshotExecSubphaseAttribution {
-                    core_parse_build_ms: Some(duration_to_u64_ms(core_started.elapsed())),
-                    ..Default::default()
-                };
-                match self.run_optional_cache_enrichment_with_cancellation(
+                return self.finalize_parse_snapshot_report_with_options(
                     &file_path,
-                    new_hash,
                     &new_content,
-                    &result,
-                    cancellation_flag,
-                    options,
-                )? {
-                    Some(elapsed_ms) => {
-                        parse_exec_subphases.optional_cache_enrichment_ms = Some(elapsed_ms);
-                    }
-                    None => {
-                        parse_exec_subphases.deferred_optional_cache_enrichment = true;
-                    }
-                }
-                return Ok(ParseSnapshotReport {
-                    parse_result: result,
+                    new_hash,
+                    new_tree_hash,
                     line_index,
-                    changed_ranges: Vec::new(),
-                    backend_tree: old_tree.clone(),
-                    backend_tree_hash: new_tree_hash,
-                    incremental: true,
-                    fallback_reason: None,
-                    parse_exec_subphases,
-                    program_lowering_summary,
-                });
+                    old_tree.as_ref().clone(),
+                    result,
+                    Vec::new(),
+                    true,
+                    None,
+                    core_started,
+                    cancellation_flag,
+                    report_options,
+                    None,
+                    deferred_syntax_error_assembly,
+                );
             }
         }
 
@@ -1147,16 +1160,29 @@ impl ParserCoordinator {
                 );
                 debug!("Content unchanged, using cached tree");
                 let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+                let mut lowering_reuse_plan = self.build_exact_same_content_lowering_reuse_plan(
+                    &new_content,
+                    &old_tree,
+                    &mut lowering_attribution,
+                );
+                let lowering_reuse_summary = lowering_reuse_plan
+                    .as_ref()
+                    .map(Self::build_program_lowering_summary_plan);
+                let assembly_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
+                    ..options
+                };
                 let (result, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &old_tree,
                         &new_content,
                         cancellation_flag,
-                        options,
+                        assembly_options,
                         &mut lowering_attribution,
-                        None,
+                        lowering_reuse_plan.as_mut(),
                     )?;
                 let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
                     lowering_reuse_attribution: Some(&lowering_attribution),
                     ..options
                 };
@@ -1867,16 +1893,29 @@ impl ParserCoordinator {
                 let core_started = std::time::Instant::now();
                 debug!("Content unchanged, using cached tree");
                 let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+                let mut lowering_reuse_plan = self.build_exact_same_content_lowering_reuse_plan(
+                    &old_source,
+                    &old_tree,
+                    &mut lowering_attribution,
+                );
+                let lowering_reuse_summary = lowering_reuse_plan
+                    .as_ref()
+                    .map(Self::build_program_lowering_summary_plan);
+                let assembly_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
+                    ..options
+                };
                 let (result, deferred_syntax_error_assembly) = self
                     .run_exact_ready_snapshot_assembly_with_cancellation(
                         &old_tree,
                         &new_content,
                         cancellation_flag,
-                        options,
+                        assembly_options,
                         &mut lowering_attribution,
-                        None,
+                        lowering_reuse_plan.as_mut(),
                     )?;
                 let report_options = ParseSnapshotExecutionOptions {
+                    lowering_reuse_summary: lowering_reuse_summary.as_ref(),
                     lowering_reuse_attribution: Some(&lowering_attribution),
                     ..options
                 };
@@ -2328,6 +2367,88 @@ impl ParserCoordinator {
         attribution.reuse_plan_build_ms = Some(elapsed_ms);
         attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
         Some(plan)
+    }
+
+    fn build_exact_same_content_lowering_reuse_plan(
+        &self,
+        source: &str,
+        new_tree: &tree_sitter::Tree,
+        attribution: &mut ParseSnapshotProgramLoweringAttribution,
+    ) -> Option<LoweringReusePlan> {
+        if !exact_program_lowering_reuse_enabled() {
+            return None;
+        }
+        let cache_key = ast_cache_key(source);
+        attribution.reuse_plan_take_if_unique_hit = Some(false);
+        attribution.reuse_plan_borrowed_cache_hit = Some(false);
+        if let Some(previous_parse_result) = self.ast_cache.take_if_unique(cache_key) {
+            attribution.reuse_plan_take_if_unique_hit = Some(true);
+            let started = std::time::Instant::now();
+            match Self::derive_exact_same_content_lowering_reuse_plan_owned(previous_parse_result) {
+                Ok(plan) => {
+                    let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                    attribution.reuse_plan_build_source =
+                        Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Owned);
+                    attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                    attribution.reuse_plan_owned_build_ms = Some(elapsed_ms);
+                    return Some(plan);
+                }
+                Err(previous_parse_result) => {
+                    self.ast_cache
+                        .put(cache_key, Arc::new(previous_parse_result));
+                }
+            }
+        }
+        let previous_parse_result = self.ast_cache.get(cache_key)?;
+        attribution.reuse_plan_borrowed_cache_hit = Some(true);
+        let started = std::time::Instant::now();
+        let plan = Self::derive_exact_same_content_lowering_reuse_plan(
+            previous_parse_result.as_ref(),
+            new_tree,
+        )?;
+        let elapsed_ms = duration_to_u64_ms(started.elapsed());
+        attribution.reuse_plan_build_source =
+            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
+        attribution.reuse_plan_build_ms = Some(elapsed_ms);
+        attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
+        Some(plan)
+    }
+
+    fn derive_exact_same_content_lowering_reuse_plan(
+        previous_parse_result: &ParseResult,
+        _new_tree: &tree_sitter::Tree,
+    ) -> Option<LoweringReusePlan> {
+        let previous_top_level = previous_parse_result.program.statements.as_slice();
+        if previous_top_level.is_empty() {
+            return None;
+        }
+
+        Some(LoweringReusePlan {
+            outcome: LoweringReusePlanOutcome::TopLevelReuse,
+            top_level_nodes: previous_top_level
+                .iter()
+                .cloned()
+                .map(LoweringReuseNodePlan::ReuseStatement)
+                .collect(),
+        })
+    }
+
+    fn derive_exact_same_content_lowering_reuse_plan_owned(
+        previous_parse_result: ParseResult,
+    ) -> Result<LoweringReusePlan, ParseResult> {
+        if previous_parse_result.program.statements.is_empty() {
+            return Err(previous_parse_result);
+        }
+
+        Ok(LoweringReusePlan {
+            outcome: LoweringReusePlanOutcome::TopLevelReuse,
+            top_level_nodes: previous_parse_result
+                .program
+                .statements
+                .into_iter()
+                .map(LoweringReuseNodePlan::ReuseStatement)
+                .collect(),
+        })
     }
 
     fn derive_exact_lowering_reuse_plan(

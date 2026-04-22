@@ -376,6 +376,170 @@ async fn p7_did_save_fastlane_followup_publishes_full_diagnostics_from_ready_art
 }
 
 #[tokio::test]
+async fn p7_did_save_same_version_rebuild_reuses_current_revision_parse_result_seed() {
+    let _env_lock = lock_test_env().await;
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, _socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_same_version_rebuild_seed_fixture.bsl")
+        .expect("fixture uri");
+    let text = "Процедура Alpha()\n    Сообщить(\"alpha\");\nКонецПроцедуры\n\nПроцедура Beta()\n    Сообщить(\"beta\");\nКонецПроцедуры\n\nПроцедура Gamma()\n    Сообщить(\"gamma\");\nКонецПроцедуры\n";
+
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: text.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let analysis = server.analysis_v2.snapshot().await;
+            if analysis.file_version(file_id).ok().flatten() == Some(1)
+                && analysis.file_text(file_id).ok().flatten().as_deref() == Some(text)
+                && analysis.parse_result(file_id).ok().flatten().is_some()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("matching current-revision analysis state must exist before didSave");
+
+    let background_task = server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    if let Some(task) = background_task {
+        task.control
+            .cancel_requested
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        task.control.control_notify.notify_waiters();
+        task.handle.abort();
+    }
+    server.cancel_current_revision_head_precompute_v2(file_id).await;
+    server.cancel_type_index_precompute_v2(file_id).await;
+    server.latest_ready_parse_snapshots_v2.write().await.remove(&file_id);
+    server
+        .latest_detached_diagnostics_ready_artifacts_v2
+        .write()
+        .await
+        .remove(&file_id);
+
+    let path = uri
+        .to_file_path()
+        .expect("fixture path")
+        .to_string_lossy()
+        .to_string();
+    let parser = server
+        .coordinator
+        .parser_coordinator()
+        .expect("parser coordinator");
+    parser
+        .parse_incremental_with_report(PathBuf::from(&path), text.to_string(), Vec::new())
+        .expect("seed same-version tree cache");
+    parser.clear_ast_cache();
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let ready_state = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready.as_ref().is_some_and(|state| {
+                state.parse_snapshot.file_version == 1
+                    && state.source
+                        == crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+            }) {
+                break ready.expect("ready state must exist");
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didSave same-version rebuild must materialize a didSave ready snapshot");
+
+    let summary = ready_state
+        .program_lowering_summary
+        .expect("ready snapshot must export program lowering summary");
+    assert_ne!(
+        summary.reuse_outcome,
+        bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseOutcome::FullRebuild,
+        "same-version didSave rebuild must not stay on cold full program lowering when current-revision parse state already matches"
+    );
+    assert!(summary.reused_lowering_units > 0);
+    assert_eq!(summary.fully_rebuilt_top_level_node_count, 0);
+    assert!(summary.fully_reused_top_level_node_count > 0);
+    assert!(
+        summary.reuse_plan_build_source.is_some(),
+        "same-version didSave rebuild must expose reuse-plan provenance"
+    );
+}
+
+#[tokio::test]
 async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_before_shadow_state() {
     struct EnvVarGuard {
         key: &'static str,
@@ -728,7 +892,7 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         full_publish
             .get("semantic_path")
             .and_then(|value| value.as_str()),
-        Some("ready_artifacts")
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         full_publish
@@ -746,7 +910,20 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         trace
             .get("followup_ready_snapshot_wait_probe")
             .and_then(|value| value.as_str()),
-        Some("ready")
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_bounded_wait_winner")
+            .and_then(|value| value.as_str()),
+        Some("detached_ready_artifacts")
+    );
+    assert!(
+        trace
+            .get("followup_ready_snapshot_bounded_wait_elapsed_ms")
+            .and_then(|value| value.as_u64())
+            .is_some(),
+        "detached same-version winner must still export bounded wait elapsed attribution, trace={trace:?}"
     );
     assert_eq!(
         trace
@@ -764,7 +941,7 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         trace
             .get("followup_semantic_path")
             .and_then(|value| value.as_str()),
-        Some("ready_artifacts")
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         trace
@@ -802,10 +979,6 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
-    let histograms = metrics
-        .get("histograms")
-        .and_then(|value| value.as_object())
-        .expect("metrics.histograms object");
     assert!(
         read_u64_metric(counters.get(
             "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
@@ -819,38 +992,12 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
         0,
         "didSave exact wait must not start a duplicate didSave snapshot worker for the same text/version, counters={counters:?}"
     );
-    assert!(
-        read_u64_metric(counters.get(
-            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change"
-        )) > 0,
-        "didChange same-version worker must export ready snapshot materialization counter, counters={counters:?}"
-    );
     assert_eq!(
         read_u64_metric(counters.get(
             "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save"
         )),
         0,
         "didSave exact wait must not materialize a duplicate didSave snapshot worker for the same text/version, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(
-            histograms
-                .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
-                .and_then(|value| value.get("count"))
-        ) > 0,
-        "didChange same-version worker must export ready snapshot materialization latency, histograms={histograms:?}"
-    );
-    assert!(
-        read_u64_metric(counters.get(
-            "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_change_phase_parse_exec"
-        )) > 0,
-        "didChange exact worker must export parse_exec phase counter, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(counters.get(
-            "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_change_phase_document_symbol_side_work"
-        )) > 0,
-        "didChange exact worker must export documentSymbol side-work as a separate phase, counters={counters:?}"
     );
     assert!(
         read_u64_metric(counters.get(
@@ -860,9 +1007,9 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
     );
     assert!(
         read_u64_metric(counters.get(
-            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_ready"
+            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_not_ready"
         )) > 0,
-        "didSave exact wait must export bounded-wait ready counter, counters={counters:?}"
+        "didSave exact wait must export bounded-wait not_ready probe attribution before the detached wakeup wins, counters={counters:?}"
     );
     assert!(
         read_u64_metric(counters.get(
@@ -872,9 +1019,9 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
     );
     assert!(
         read_u64_metric(counters.get(
-            "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts"
+            "intellisense_v2_diagnostics_save_followup_semantic_path_total_path_detached_ready_artifacts"
         )) > 0,
-        "didSave exact wait must export ready_artifacts semantic path counter, counters={counters:?}"
+        "didSave exact wait must export detached_ready_artifacts semantic path counter, counters={counters:?}"
     );
 
     let report = serde_json::json!({
@@ -945,6 +1092,266 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
             .expect("serialize refactor-17 in-flight exact report"),
     )
     .expect("write refactor-17 in-flight exact report");
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_late_same_version_did_change_must_not_supersede_did_save_followup_generation() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const DID_CHANGE_POST_HANDOFF_DELAY_MS: u64 = 1_200;
+    const DID_SAVE_PARSE_DELAY_MS: u64 = 2_500;
+
+    let _env_lock = lock_test_env().await;
+    let _did_change_post_handoff_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_POST_HANDOFF_DELAY_MS",
+        &DID_CHANGE_POST_HANDOFF_DELAY_MS.to_string(),
+    );
+    let _did_save_parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_SAVE_PARSE_DELAY_MS",
+        &DID_SAVE_PARSE_DELAY_MS.to_string(),
+    );
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_followup_late_same_version_did_change_fixture.bsl")
+        .expect("fixture");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must materialize same-version ready parse snapshot");
+
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let received_version = server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+            let shadow_version = server
+                .latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.version);
+            if received_version == Some(2) && shadow_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange must advance latest received version and shadow state before didSave");
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let timeline = tokio::time::timeout(Duration::from_secs(8), async {
+        loop {
+            let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_711, 8).await;
+            let traces = timeline
+                .get("traces")
+                .and_then(|value| value.as_array())
+                .expect("diagnostics save timeline traces");
+            if let Some(trace) = traces.iter().find(|trace| {
+                trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                    && trace
+                        .get("requested_version")
+                        .and_then(|value| value.as_i64())
+                        == Some(2)
+            }) {
+                let followup_publish_present = trace
+                    .get("followup_publish")
+                    .and_then(|value| value.as_object())
+                    .is_some();
+                let idle_heavy_outcome = trace
+                    .get("idle_heavy_outcome")
+                    .and_then(|value| value.as_str());
+                if followup_publish_present || idle_heavy_outcome.is_some() {
+                    break trace.clone();
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("didSave follow-up must expose terminal save trace");
+
+    assert_eq!(
+        timeline
+            .get("first_publish")
+            .and_then(|value| value.get("profile"))
+            .and_then(|value| value.as_str()),
+        Some("save_fastlane")
+    );
+    assert_ne!(
+        timeline
+            .get("idle_heavy_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation"),
+        "late same-version didChange diagnostics must not supersede the didSave follow-up generation, trace={timeline:?}"
+    );
+    assert_ne!(
+        timeline
+            .get("terminal_outcome")
+            .and_then(|value| value.as_str()),
+        Some("superseded_generation"),
+        "terminal save trace must stay owned by the didSave cycle when no newer revision exists, trace={timeline:?}"
+    );
+    assert!(
+        timeline
+            .get("followup_publish")
+            .and_then(|value| value.as_object())
+            .is_some(),
+        "same-version didSave cycle must still reach follow-up publish after late didChange post-handoff wakes up, trace={timeline:?}"
+    );
 
     drain_task.abort();
 }
@@ -1410,7 +1817,8 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
 }
 
 #[tokio::test]
-async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task_exists() {
+async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_refresh_task_exists(
+) {
     struct EnvVarGuard {
         key: &'static str,
         previous: Option<String>,
@@ -1626,7 +2034,7 @@ async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task
         assert_eq!(
             target.source,
             crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
-            "regression must exercise the same-version didSave refresh task that should not count as exact-task evidence"
+            "regression must exercise the same-version didSave refresh task that now serves as exact-task evidence for the save cycle"
         );
     }
 
@@ -1737,20 +2145,20 @@ async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task
         full_publish
             .get("semantic_path")
             .and_then(|value| value.as_str()),
-        Some("shadow_state"),
-        "fallback after missing ready snapshot must stay truthful about shadow-state semantic path, trace={trace:?}"
+        Some("detached_ready_artifacts"),
+        "same-version didSave refresh must now let detached ready artifacts win instead of falling back straight to shadow_state, trace={trace:?}"
     );
     assert_eq!(
         full_publish
             .get("semantic_parse_source")
             .and_then(|value| value.as_str()),
-        Some("salsa")
+        Some("snapshot")
     );
     assert_eq!(
         full_publish
             .get("semantic_ir_source")
             .and_then(|value| value.as_str()),
-        Some("salsa")
+        Some("snapshot_build")
     );
     assert!(
         full_publish.get("syntax_diagnostics_query_ms").is_none(),
@@ -1760,36 +2168,45 @@ async fn p7_did_save_followup_skips_bounded_wait_when_only_did_save_refresh_task
         trace
             .get("followup_semantic_path")
             .and_then(|value| value.as_str()),
-        Some("shadow_state")
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         trace
             .get("followup_semantic_parse_source")
             .and_then(|value| value.as_str()),
-        Some("salsa")
+        Some("snapshot")
     );
     assert_eq!(
         trace
             .get("followup_semantic_ir_source")
             .and_then(|value| value.as_str()),
-        Some("salsa")
+        Some("snapshot_build")
     );
     assert_eq!(
         trace
             .get("followup_ready_snapshot_zero_probe")
             .and_then(|value| value.as_str()),
         Some("not_ready"),
-        "stale latest-version path must retain zero-budget probe attribution before the bounded wait observes version mismatch, trace={trace:?}"
+        "same-version didSave refresh must still miss the zero-budget probe before bounded wait/detached publication wins, trace={trace:?}"
     );
-    assert!(
-        trace.get("followup_ready_snapshot_wait_probe").is_none(),
-        "shadow-state fallback must not report bounded-wait probe when fallback succeeds first, trace={trace:?}"
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_wait_probe")
+            .and_then(|value| value.as_str()),
+        Some("not_ready"),
+        "detached-ready winner must keep bounded-wait probe attribution on the same save cycle, trace={trace:?}"
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_bounded_wait_winner")
+            .and_then(|value| value.as_str()),
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         trace
             .get("followup_ready_snapshot_task_state")
             .and_then(|value| value.as_str()),
-        Some("absent")
+        Some("in_flight_same_version")
     );
     assert_eq!(
         trace

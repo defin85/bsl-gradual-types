@@ -545,9 +545,17 @@ pub(crate) enum DiagnosticsSaveTimelineFastlaneProgress {
 
 fn diagnostics_save_timeline_fastlane_progress_inner(
     store: &super::DiagnosticsSaveTimelineStore,
+    uri: &Url,
     key: super::DiagnosticsSaveTimelineCycleKey,
 ) -> DiagnosticsSaveTimelineFastlaneProgress {
-    let Some(trace) = store.active_cycles.get(&key) else {
+    let Some(trace) = store.active_cycles.get(&key).or_else(|| {
+        store.traces.iter().rev().find(|trace| {
+            trace.uri == uri.as_str()
+                && trace.requested_version == key.requested_version
+                && trace.diagnostics_generation == key.diagnostics_generation
+                && trace.save_cycle_sequence == key.save_cycle_sequence
+        })
+    }) else {
         return DiagnosticsSaveTimelineFastlaneProgress::Pending;
     };
 
@@ -2447,13 +2455,14 @@ impl BslLanguageServer {
 
     pub(crate) fn diagnostics_save_timeline_fastlane_progress(
         &self,
+        uri: &Url,
         key: super::DiagnosticsSaveTimelineCycleKey,
     ) -> DiagnosticsSaveTimelineFastlaneProgress {
         let store = self
             .diagnostics_save_timeline_store
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        diagnostics_save_timeline_fastlane_progress_inner(&store, key)
+        diagnostics_save_timeline_fastlane_progress_inner(&store, uri, key)
     }
 
     pub(crate) fn clear_active_diagnostics_save_timeline_cycles_for_file(&self, file_id: V2FileId) {

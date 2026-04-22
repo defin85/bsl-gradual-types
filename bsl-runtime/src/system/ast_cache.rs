@@ -106,6 +106,28 @@ impl AstCache {
         storage.put(key, value);
     }
 
+    pub fn put_if_absent(&self, key: [u8; 32], value: Arc<ParseResult>) -> bool {
+        let mut storage = self
+            .storage
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if storage.contains(&key) {
+            return false;
+        }
+
+        let will_evict = storage.len() >= storage.cap().get();
+        if will_evict {
+            let mut stats = self
+                .stats
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            stats.evictions += 1;
+        }
+
+        storage.put(key, value);
+        true
+    }
+
     pub fn clear(&self) {
         let mut storage = self
             .storage

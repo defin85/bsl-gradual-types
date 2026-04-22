@@ -27,6 +27,24 @@ struct BuildParseSnapshotRequest {
     did_change_attribution: Option<super::super::DidChangeParseSnapshotAttributionV2>,
 }
 
+struct DidChangePostHandoffWorkV2 {
+    uri: Url,
+    file_id: bsl_analysis_v2::FileId,
+    version: i32,
+    path: Arc<str>,
+    updated_text: Arc<str>,
+    parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
+    previous_shadow_state: Option<DocumentShadowStateV2>,
+    identical_text_previous_version: Option<i32>,
+    tail_whitespace_append_previous_version: Option<i32>,
+    previous_analysis_for_identical_text_reuse: Option<bsl_analysis_v2::AnalysisV2>,
+    parse_snapshot_change_shape: &'static str,
+    parse_snapshot_replay_order: &'static str,
+    parse_snapshot_content_changes_count: usize,
+    parse_snapshot_base_text_source: &'static str,
+    parse_snapshot_base_document_version: Option<i32>,
+}
+
 enum BuildParseSnapshotAbortReasonV2 {
     Superseded,
     RetargetedDuringParse,
@@ -65,6 +83,9 @@ static DID_SAVE_PARSE_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
 static DID_CHANGE_PRE_MATERIALIZATION_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+static DID_CHANGE_POST_HANDOFF_DELAY_ACTIVE: AtomicUsize = AtomicUsize::new(0);
 
 #[cfg(test)]
 async fn maybe_inject_parse_delay(env_key: &'static str, active_counter: &'static AtomicUsize) {
@@ -114,6 +135,18 @@ async fn maybe_inject_did_change_pre_materialization_delay() {
 
 #[cfg(not(test))]
 async fn maybe_inject_did_change_pre_materialization_delay() {}
+
+#[cfg(test)]
+async fn maybe_inject_did_change_post_handoff_delay() {
+    maybe_inject_parse_delay(
+        "BSL_TEST_DID_CHANGE_POST_HANDOFF_DELAY_MS",
+        &DID_CHANGE_POST_HANDOFF_DELAY_ACTIVE,
+    )
+    .await;
+}
+
+#[cfg(not(test))]
+async fn maybe_inject_did_change_post_handoff_delay() {}
 
 #[cfg(test)]
 fn maybe_inject_blocking_parse_delay_for_test(env_key: &'static str) {
@@ -2818,6 +2851,447 @@ impl BslLanguageServer {
         });
     }
 
+    async fn apply_did_change_current_revision_fast_lane_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        uri: &Url,
+        version: i32,
+        changes: &[TextDocumentContentChangeEvent],
+        path: Arc<str>,
+        parse_snapshot_change_shape: &'static str,
+        parse_snapshot_replay_order: &'static str,
+        parse_snapshot_content_changes_count: usize,
+    ) -> Option<DidChangePostHandoffWorkV2> {
+        let _sync_guard = self.text_sync_v2.lock().await;
+        let previous_shadow_state = {
+            let shadow = self.latest_document_shadow_state_v2.read().await;
+            shadow.get(&file_id).cloned()
+        };
+
+        let (
+            updated_text,
+            parser_edits,
+            parse_snapshot_base_text_source,
+            parse_snapshot_base_document_version,
+        ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
+            if let Some(state) = previous_shadow_state.as_ref() {
+                if version < state.version {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        requested_version = version,
+                        shadow_version = state.version,
+                        "Skipping out-of-order didChange for older version"
+                    );
+                    return None;
+                }
+            }
+            if let Some(state) = previous_shadow_state.as_ref() {
+                (
+                    full_change.text.clone(),
+                    whole_text_change_to_parser_edit(state.text.as_ref(), &full_change.text)
+                        .into_iter()
+                        .collect(),
+                    "shadow_state",
+                    Some(state.version),
+                )
+            } else {
+                (full_change.text.clone(), Vec::new(), "not_applicable", None)
+            }
+        } else {
+            if let Some(state) = previous_shadow_state.as_ref() {
+                if version < state.version {
+                    warn!(
+                        uri = %uri,
+                        file_id = file_id.0,
+                        requested_version = version,
+                        shadow_version = state.version,
+                        "Skipping out-of-order didChange for older version"
+                    );
+                    return None;
+                }
+            }
+            let (base_text, base_text_source, base_document_version) =
+                if let Some(state) = previous_shadow_state.as_ref() {
+                    (state.text.to_string(), "shadow_state", Some(state.version))
+                } else {
+                    (
+                        self.analysis_v2
+                            .snapshot()
+                            .await
+                            .file_text(file_id)
+                            .ok()
+                            .flatten()
+                            .map(|text| text.to_string())
+                            .unwrap_or_default(),
+                        "analysis_snapshot",
+                        None,
+                    )
+                };
+
+            let replay_plan = canonicalize_ranged_did_change_replay_plan(changes);
+            let mut current_text = base_text;
+            let mut parser_edits = Vec::with_capacity(replay_plan.len());
+            for step in replay_plan {
+                current_text = apply_text_edit(&current_text, step.range, &step.new_text);
+                parser_edits.push(step.parser_edit);
+            }
+            (
+                current_text,
+                parser_edits,
+                base_text_source,
+                base_document_version,
+            )
+        };
+
+        let identical_text_previous_version = previous_shadow_state.as_ref().and_then(|state| {
+            (state.text.as_ref() == updated_text.as_str()).then_some(state.version)
+        });
+        let tail_whitespace_append_previous_version =
+            previous_shadow_state.as_ref().and_then(|state| {
+                let previous_text = state.text.as_ref();
+                if !updated_text.starts_with(previous_text)
+                    || updated_text.len() <= previous_text.len()
+                {
+                    return None;
+                }
+                let suffix = &updated_text[previous_text.len()..];
+                (!suffix.is_empty() && suffix.chars().all(char::is_whitespace))
+                    .then_some(state.version)
+            });
+        let previous_analysis_for_identical_text_reuse =
+            if identical_text_previous_version.is_some() {
+                Some(self.analysis_v2.snapshot().await)
+            } else {
+                None
+            };
+
+        self.latest_received_file_versions_v2
+            .write()
+            .await
+            .insert(file_id, version);
+        let updated_text: Arc<str> = Arc::from(updated_text);
+        self.latest_document_shadow_state_v2.write().await.insert(
+            file_id,
+            super::super::DocumentShadowStateV2 {
+                version,
+                text: updated_text.clone(),
+            },
+        );
+        self.analysis_v2.apply_changes_interactive(
+            bsl_runtime::application::ObservabilityOrigin::Lsp,
+            vec![bsl_analysis_v2::Change::SetFile {
+                file_id,
+                text: updated_text.clone(),
+                version,
+                path: path.clone(),
+            }],
+        );
+        let handoff_registered_at = Instant::now();
+        self.latest_current_revision_handoff_versions_v2
+            .write()
+            .await
+            .insert(file_id, version);
+        self.latest_apply_enqueued_at_v2
+            .write()
+            .await
+            .insert(file_id, handoff_registered_at);
+
+        Some(DidChangePostHandoffWorkV2 {
+            uri: uri.clone(),
+            file_id,
+            version,
+            path,
+            updated_text,
+            parser_edits,
+            previous_shadow_state,
+            identical_text_previous_version,
+            tail_whitespace_append_previous_version,
+            previous_analysis_for_identical_text_reuse,
+            parse_snapshot_change_shape,
+            parse_snapshot_replay_order,
+            parse_snapshot_content_changes_count,
+            parse_snapshot_base_text_source,
+            parse_snapshot_base_document_version,
+        })
+    }
+
+    fn spawn_did_change_post_handoff_v2(&self, work: DidChangePostHandoffWorkV2) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            maybe_inject_did_change_post_handoff_delay().await;
+            server.run_did_change_post_handoff_v2(work).await;
+        });
+    }
+
+    async fn run_did_change_post_handoff_v2(&self, work: DidChangePostHandoffWorkV2) {
+        if self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&work.file_id)
+            .copied()
+            != Some(work.version)
+        {
+            return;
+        }
+
+        let scale_aware_knobs =
+            bsl_runtime::application::ScaleAwareDiagnosticsKnobs::from_runtime_config();
+        let mut large_churn_active = false;
+        if scale_aware_knobs.enabled {
+            let is_large_document = bsl_runtime::application::scale_aware_document_is_large(
+                &work.updated_text,
+                scale_aware_knobs,
+            );
+            let now = Instant::now();
+            let transition = {
+                let mut churn_state = self.scale_aware_churn_state_v2.write().await;
+                let state = churn_state.entry(work.file_id).or_insert(
+                    super::super::ScaleAwareChurnStateV2 {
+                        window_started_at: now,
+                        changes_in_window: 0,
+                        large_churn_active: false,
+                    },
+                );
+                let transition =
+                    advance_large_churn_state(state, now, is_large_document, scale_aware_knobs);
+                large_churn_active = state.large_churn_active;
+                transition
+            };
+            match transition {
+                LargeChurnTransition::Entered => self
+                    .coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "enter",
+                    ),
+                LargeChurnTransition::Exited => self
+                    .coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "exit",
+                    ),
+                LargeChurnTransition::None => {}
+            }
+        } else {
+            let was_active = self
+                .scale_aware_churn_state_v2
+                .write()
+                .await
+                .remove(&work.file_id)
+                .is_some_and(|state| state.large_churn_active);
+            if was_active {
+                self.coordinator
+                    .record_intellisense_v2_large_churn_transition(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        "exit",
+                    );
+            }
+        }
+
+        if self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&work.file_id)
+            .copied()
+            != Some(work.version)
+        {
+            return;
+        }
+
+        let (
+            forced_full_parse_reason,
+            parse_snapshot_stale_parser_base,
+            parser_base_recovery_text,
+            parser_base_recovery_reuse_parse_result,
+        ) = if let Some(state) = work.previous_shadow_state.clone() {
+            let shadow_state_parser_base = self
+                .inspect_shadow_state_parser_base_v2(work.file_id, work.path.as_ref(), &state)
+                .await;
+            let parser_base_recovery_text = shadow_state_parser_base
+                .stale_parser_base
+                .as_ref()
+                .filter(|stale| stale.root_cause == "ready_snapshot_lags_shadow_state")
+                .map(|_| state.text.clone());
+            let parser_base_recovery_reuse_parse_result = if parser_base_recovery_text.is_some() {
+                derive_parser_base_recovery_reuse_parse_result_from_shadow_state_v2(
+                    self,
+                    work.file_id,
+                    &state,
+                )
+                .await
+            } else {
+                None
+            };
+            (
+                shadow_state_parser_base.forced_full_parse_reason,
+                shadow_state_parser_base.stale_parser_base,
+                parser_base_recovery_text,
+                parser_base_recovery_reuse_parse_result,
+            )
+        } else {
+            (None, None, None, None)
+        };
+
+        if self
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&work.file_id)
+            .copied()
+            != Some(work.version)
+        {
+            return;
+        }
+
+        if work.identical_text_previous_version.is_none()
+            && work.tail_whitespace_append_previous_version.is_none()
+        {
+            self.schedule_completion_head_precompute_from_current_revision_v2(
+                work.file_id,
+                work.version,
+            )
+            .await;
+        }
+        if let Some(previous_version) = work.identical_text_previous_version {
+            self.spawn_completion_head_reuse_from_previous_version_v2(
+                work.file_id,
+                work.version,
+                previous_version,
+                work.previous_analysis_for_identical_text_reuse
+                    .expect("previous analysis snapshot for identical-text head reuse"),
+            );
+        }
+        if let Some(previous_version) = work.tail_whitespace_append_previous_version {
+            self.spawn_completion_head_version_alias_from_previous_version_v2(
+                work.file_id,
+                work.version,
+                previous_version,
+            );
+        }
+        if large_churn_active {
+            self.coordinator.record_intellisense_v2_parse_snapshot(
+                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                "other",
+                0,
+                0,
+                Some("other"),
+                Duration::default(),
+            );
+            self.spawn_large_churn_completion_head_reuse_v2(
+                work.file_id,
+                work.version,
+                work.path.clone(),
+                work.updated_text.clone(),
+                work.parser_edits,
+            );
+        } else {
+            self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
+                file_id: work.file_id,
+                requested_version: work.version,
+                save_cycle_sequence: None,
+                path: work.path.clone(),
+                text: work.updated_text.clone(),
+                parser_base_recovery_text,
+                parser_base_recovery_reuse_parse_result,
+                parser_edits: work.parser_edits,
+                forced_full_parse_reason,
+                async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
+                blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
+                force_reschedule_same_version: false,
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                did_change_attribution: Some(DidChangeParseSnapshotAttributionV2 {
+                    uri: work.uri.clone(),
+                    base_text_source: work.parse_snapshot_base_text_source,
+                    change_shape: work.parse_snapshot_change_shape,
+                    content_changes_count: work.parse_snapshot_content_changes_count,
+                    replay_order: work.parse_snapshot_replay_order,
+                    base_document_version: work.parse_snapshot_base_document_version,
+                    stale_parser_base: parse_snapshot_stale_parser_base,
+                }),
+            })
+            .await;
+        }
+        self.schedule_type_index_precompute_v2(work.file_id, work.version)
+            .await;
+
+        let flow_sensitive_enabled = {
+            let settings = self.settings.read().await;
+            settings.enable_flow_sensitive
+        };
+        let diagnostics_generation = self.bump_diagnostics_generation_v2(work.file_id).await;
+        for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
+            bsl_runtime::application::DiagnosticsTrigger::DidChange,
+        ) {
+            if !should_schedule_profile(
+                bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                *profile,
+                flow_sensitive_enabled,
+            ) {
+                continue;
+            }
+            if should_defer_heavy_diagnostics_for_large_churn(
+                bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                *profile,
+                large_churn_active,
+            ) {
+                self.coordinator
+                    .record_intellisense_v2_heavy_diagnostics_deferred(
+                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                        profile.as_str(),
+                        bsl_runtime::application::DeferredHeavyDiagnosticsReason::LargeAndChurn
+                            .as_str(),
+                    );
+                self.schedule_diagnostics_profile_v2(
+                    work.uri.clone(),
+                    work.file_id,
+                    work.version,
+                    diagnostics_generation,
+                    None,
+                    bsl_runtime::application::DiagnosticsTrigger::Idle,
+                    *profile,
+                    true,
+                )
+                .await;
+                continue;
+            }
+            match profile {
+                bsl_runtime::application::DiagnosticsProfile::Fast => {
+                    self.run_diagnostics_profile_immediate_v2(
+                        work.uri.clone(),
+                        work.file_id,
+                        work.version,
+                        diagnostics_generation,
+                        bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                        *profile,
+                    )
+                    .await;
+                }
+                _ => {
+                    let trigger = match profile {
+                        bsl_runtime::application::DiagnosticsProfile::IdleHeavy => {
+                            bsl_runtime::application::DiagnosticsTrigger::Idle
+                        }
+                        _ => bsl_runtime::application::DiagnosticsTrigger::DidChange,
+                    };
+                    self.schedule_diagnostics_profile_v2(
+                        work.uri.clone(),
+                        work.file_id,
+                        work.version,
+                        diagnostics_generation,
+                        None,
+                        trigger,
+                        *profile,
+                        true,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
     pub(super) async fn lsp_did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri;
         let text = params.text_document.text;
@@ -2983,313 +3457,21 @@ impl BslLanguageServer {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
         };
-        let (
-            updated_text,
-            path,
-            parser_edits,
-            forced_full_parse_reason,
-            large_churn_active,
-            identical_text_previous_version,
-            tail_whitespace_append_previous_version,
-            previous_analysis_for_identical_text_reuse,
-            parse_snapshot_base_text_source,
-            parse_snapshot_base_document_version,
-            parse_snapshot_stale_parser_base,
-            parser_base_recovery_text,
-            parser_base_recovery_reuse_parse_result,
-        ) = {
-            let _sync_guard = self.text_sync_v2.lock().await;
-            let previous_shadow_state = {
-                let shadow = self.latest_document_shadow_state_v2.read().await;
-                shadow.get(&file_id).cloned()
-            };
-
-            let (
-                updated_text,
-                parser_edits,
-                forced_full_parse_reason,
-                parse_snapshot_base_text_source,
-                parse_snapshot_base_document_version,
-                parse_snapshot_stale_parser_base,
-                parser_base_recovery_text,
-                parser_base_recovery_reuse_parse_result,
-            ) = if let Some(full_change) = changes.iter().find(|c| c.range.is_none()) {
-                if let Some(state) = previous_shadow_state.as_ref() {
-                    if version < state.version {
-                        warn!(
-                            uri = %uri,
-                            file_id = file_id.0,
-                            requested_version = version,
-                            shadow_version = state.version,
-                            "Skipping out-of-order didChange for older version"
-                        );
-                        return;
-                    }
-                }
-                if let Some(state) = previous_shadow_state.clone() {
-                    let shadow_state_parser_base = self
-                        .inspect_shadow_state_parser_base_v2(file_id, path.as_str(), &state)
-                        .await;
-                    let parser_base_recovery_text = shadow_state_parser_base
-                        .stale_parser_base
-                        .as_ref()
-                        .filter(|stale| stale.root_cause == "ready_snapshot_lags_shadow_state")
-                        .map(|_| state.text.clone());
-                    let parser_base_recovery_reuse_parse_result =
-                        if parser_base_recovery_text.is_some() {
-                            derive_parser_base_recovery_reuse_parse_result_from_shadow_state_v2(
-                                self, file_id, &state,
-                            )
-                            .await
-                        } else {
-                            None
-                        };
-                    let parser_edits =
-                        whole_text_change_to_parser_edit(state.text.as_ref(), &full_change.text)
-                            .into_iter()
-                            .collect();
-                    (
-                        full_change.text.clone(),
-                        parser_edits,
-                        shadow_state_parser_base.forced_full_parse_reason,
-                        "shadow_state",
-                        Some(state.version),
-                        shadow_state_parser_base.stale_parser_base,
-                        parser_base_recovery_text,
-                        parser_base_recovery_reuse_parse_result,
-                    )
-                } else {
-                    (
-                        full_change.text.clone(),
-                        Vec::new(),
-                        None,
-                        "not_applicable",
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                }
-            } else {
-                if let Some(state) = previous_shadow_state.as_ref() {
-                    if version < state.version {
-                        warn!(
-                            uri = %uri,
-                            file_id = file_id.0,
-                            requested_version = version,
-                            shadow_version = state.version,
-                            "Skipping out-of-order didChange for older version"
-                        );
-                        return;
-                    }
-                }
-                let (
-                    base_text,
-                    parse_snapshot_base_text_source,
-                    parse_snapshot_base_document_version,
-                    forced_full_parse_reason,
-                    parse_snapshot_stale_parser_base,
-                    parser_base_recovery_text,
-                    parser_base_recovery_reuse_parse_result,
-                ) = if let Some(state) = previous_shadow_state.clone() {
-                    let shadow_state_parser_base = self
-                        .inspect_shadow_state_parser_base_v2(file_id, path.as_str(), &state)
-                        .await;
-                    let parser_base_recovery_text = shadow_state_parser_base
-                        .stale_parser_base
-                        .as_ref()
-                        .filter(|stale| stale.root_cause == "ready_snapshot_lags_shadow_state")
-                        .map(|_| state.text.clone());
-                    let parser_base_recovery_reuse_parse_result =
-                        if parser_base_recovery_text.is_some() {
-                            derive_parser_base_recovery_reuse_parse_result_from_shadow_state_v2(
-                                self, file_id, &state,
-                            )
-                            .await
-                        } else {
-                            None
-                        };
-                    (
-                        state.text.to_string(),
-                        "shadow_state",
-                        Some(state.version),
-                        shadow_state_parser_base.forced_full_parse_reason,
-                        shadow_state_parser_base.stale_parser_base,
-                        parser_base_recovery_text,
-                        parser_base_recovery_reuse_parse_result,
-                    )
-                } else {
-                    (
-                        self.analysis_v2
-                            .snapshot()
-                            .await
-                            .file_text(file_id)
-                            .ok()
-                            .flatten()
-                            .map(|text| text.to_string())
-                            .unwrap_or_default(),
-                        "analysis_snapshot",
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
-                };
-
-                let replay_plan = canonicalize_ranged_did_change_replay_plan(&changes);
-                let mut current_text = base_text;
-                let mut parser_edits = Vec::with_capacity(replay_plan.len());
-                for step in replay_plan {
-                    current_text = apply_text_edit(&current_text, step.range, &step.new_text);
-                    parser_edits.push(step.parser_edit);
-                }
-                (
-                    current_text,
-                    parser_edits,
-                    forced_full_parse_reason,
-                    parse_snapshot_base_text_source,
-                    parse_snapshot_base_document_version,
-                    parse_snapshot_stale_parser_base,
-                    parser_base_recovery_text,
-                    parser_base_recovery_reuse_parse_result,
-                )
-            };
-            let identical_text_previous_version =
-                previous_shadow_state.as_ref().and_then(|state| {
-                    (state.text.as_ref() == updated_text.as_str()).then_some(state.version)
-                });
-            let tail_whitespace_append_previous_version =
-                previous_shadow_state.as_ref().and_then(|state| {
-                    let previous_text = state.text.as_ref();
-                    if !updated_text.starts_with(previous_text)
-                        || updated_text.len() <= previous_text.len()
-                    {
-                        return None;
-                    }
-                    let suffix = &updated_text[previous_text.len()..];
-                    (!suffix.is_empty() && suffix.chars().all(char::is_whitespace))
-                        .then_some(state.version)
-                });
-
-            let scale_aware_knobs =
-                bsl_runtime::application::ScaleAwareDiagnosticsKnobs::from_runtime_config();
-            let mut large_churn_active = false;
-            if scale_aware_knobs.enabled {
-                let is_large_document = bsl_runtime::application::scale_aware_document_is_large(
-                    &updated_text,
-                    scale_aware_knobs,
-                );
-                let now = Instant::now();
-                let transition = {
-                    let mut churn_state = self.scale_aware_churn_state_v2.write().await;
-                    let state = churn_state.entry(file_id).or_insert(
-                        super::super::ScaleAwareChurnStateV2 {
-                            window_started_at: now,
-                            changes_in_window: 0,
-                            large_churn_active: false,
-                        },
-                    );
-                    let transition =
-                        advance_large_churn_state(state, now, is_large_document, scale_aware_knobs);
-                    large_churn_active = state.large_churn_active;
-                    transition
-                };
-                match transition {
-                    LargeChurnTransition::Entered => self
-                        .coordinator
-                        .record_intellisense_v2_large_churn_transition(
-                            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                            "enter",
-                        ),
-                    LargeChurnTransition::Exited => self
-                        .coordinator
-                        .record_intellisense_v2_large_churn_transition(
-                            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                            "exit",
-                        ),
-                    LargeChurnTransition::None => {}
-                }
-            } else {
-                let was_active = self
-                    .scale_aware_churn_state_v2
-                    .write()
-                    .await
-                    .remove(&file_id)
-                    .is_some_and(|state| state.large_churn_active);
-                if was_active {
-                    self.coordinator
-                        .record_intellisense_v2_large_churn_transition(
-                            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                            "exit",
-                        );
-                }
-            }
-            let previous_analysis_for_identical_text_reuse =
-                if identical_text_previous_version.is_some() {
-                    Some(self.analysis_v2.snapshot().await)
-                } else {
-                    None
-                };
-
-            self.latest_received_file_versions_v2
-                .write()
-                .await
-                .insert(file_id, version);
-            let updated_text: Arc<str> = Arc::from(updated_text);
-            let path: Arc<str> = Arc::from(path);
-            self.latest_document_shadow_state_v2.write().await.insert(
+        let path: Arc<str> = Arc::from(path);
+        let Some(work) = self
+            .apply_did_change_current_revision_fast_lane_v2(
                 file_id,
-                super::super::DocumentShadowStateV2 {
-                    version,
-                    text: updated_text.clone(),
-                },
-            );
-            let mut current_revision_changes = vec![bsl_analysis_v2::Change::SetFile {
-                file_id,
-                text: updated_text.clone(),
+                &uri,
                 version,
-                path: path.clone(),
-            }];
-            if let Some(previous_version) = tail_whitespace_append_previous_version {
-                current_revision_changes.push(
-                    bsl_analysis_v2::Change::ReuseCompletionHeadFromPreviousVersion {
-                        file_id,
-                        expected_version: version,
-                        previous_version,
-                    },
-                );
-            }
-            // This handoff advances transport-visible freshness immediately, but runtime
-            // applied_version may still lag until the interactive writer path catches up.
-            self.analysis_v2.apply_changes_interactive(
-                bsl_runtime::application::ObservabilityOrigin::Lsp,
-                current_revision_changes,
-            );
-            let handoff_registered_at = Instant::now();
-            self.latest_current_revision_handoff_versions_v2
-                .write()
-                .await
-                .insert(file_id, version);
-            self.latest_apply_enqueued_at_v2
-                .write()
-                .await
-                .insert(file_id, handoff_registered_at);
-            (
-                updated_text,
+                &changes,
                 path,
-                parser_edits,
-                forced_full_parse_reason,
-                large_churn_active,
-                identical_text_previous_version,
-                tail_whitespace_append_previous_version,
-                previous_analysis_for_identical_text_reuse,
-                parse_snapshot_base_text_source,
-                parse_snapshot_base_document_version,
-                parse_snapshot_stale_parser_base,
-                parser_base_recovery_text,
-                parser_base_recovery_reuse_parse_result,
+                parse_snapshot_change_shape,
+                parse_snapshot_replay_order,
+                parse_snapshot_content_changes_count,
             )
+            .await
+        else {
+            return;
         };
         self.publish_same_file_ingress_token_v2(
             file_id,
@@ -3297,150 +3479,7 @@ impl BslLanguageServer {
             super::super::SameFileIngressTokenSourceV2::DidChange,
         )
         .await;
-
-        // Publish current-revision text/version immediately so completion waiters do not sit
-        // behind slow parse work on the didChange path.
-        if identical_text_previous_version.is_none()
-            && tail_whitespace_append_previous_version.is_none()
-        {
-            self.schedule_completion_head_precompute_from_current_revision_v2(file_id, version)
-                .await;
-        }
-        if let Some(previous_version) = identical_text_previous_version {
-            self.spawn_completion_head_reuse_from_previous_version_v2(
-                file_id,
-                version,
-                previous_version,
-                previous_analysis_for_identical_text_reuse
-                    .expect("previous analysis snapshot for identical-text head reuse"),
-            );
-        }
-        if let Some(previous_version) = tail_whitespace_append_previous_version {
-            self.spawn_completion_head_version_alias_from_previous_version_v2(
-                file_id,
-                version,
-                previous_version,
-            );
-        }
-        if large_churn_active {
-            self.coordinator.record_intellisense_v2_parse_snapshot(
-                bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                "other",
-                0,
-                0,
-                Some("other"),
-                Duration::default(),
-            );
-            self.spawn_large_churn_completion_head_reuse_v2(
-                file_id,
-                version,
-                path.clone(),
-                updated_text.clone(),
-                parser_edits,
-            );
-        } else {
-            self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
-                file_id,
-                requested_version: version,
-                save_cycle_sequence: None,
-                path: path.clone(),
-                text: updated_text.clone(),
-                parser_base_recovery_text,
-                parser_base_recovery_reuse_parse_result,
-                parser_edits,
-                forced_full_parse_reason,
-                async_delay_mode: ParseSnapshotAsyncDelayMode::DidChangeTestOnly,
-                blocking_delay_env_key: Some("BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS"),
-                force_reschedule_same_version: false,
-                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
-                did_change_attribution: Some(DidChangeParseSnapshotAttributionV2 {
-                    uri: uri.clone(),
-                    base_text_source: parse_snapshot_base_text_source,
-                    change_shape: parse_snapshot_change_shape,
-                    content_changes_count: parse_snapshot_content_changes_count,
-                    replay_order: parse_snapshot_replay_order,
-                    base_document_version: parse_snapshot_base_document_version,
-                    stale_parser_base: parse_snapshot_stale_parser_base,
-                }),
-            })
-            .await;
-        }
-        self.schedule_type_index_precompute_v2(file_id, version)
-            .await;
-
-        let flow_sensitive_enabled = {
-            let settings = self.settings.read().await;
-            settings.enable_flow_sensitive
-        };
-        let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
-        for profile in bsl_runtime::application::diagnostics_profiles_for_trigger(
-            bsl_runtime::application::DiagnosticsTrigger::DidChange,
-        ) {
-            if !should_schedule_profile(
-                bsl_runtime::application::DiagnosticsTrigger::DidChange,
-                *profile,
-                flow_sensitive_enabled,
-            ) {
-                continue;
-            }
-            if should_defer_heavy_diagnostics_for_large_churn(
-                bsl_runtime::application::DiagnosticsTrigger::DidChange,
-                *profile,
-                large_churn_active,
-            ) {
-                self.coordinator
-                    .record_intellisense_v2_heavy_diagnostics_deferred(
-                        bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-                        profile.as_str(),
-                        bsl_runtime::application::DeferredHeavyDiagnosticsReason::LargeAndChurn
-                            .as_str(),
-                    );
-                self.schedule_diagnostics_profile_v2(
-                    uri.clone(),
-                    file_id,
-                    version,
-                    diagnostics_generation,
-                    None,
-                    bsl_runtime::application::DiagnosticsTrigger::Idle,
-                    *profile,
-                    true,
-                )
-                .await;
-                continue;
-            }
-            match profile {
-                bsl_runtime::application::DiagnosticsProfile::Fast => {
-                    self.run_diagnostics_profile_immediate_v2(
-                        uri.clone(),
-                        file_id,
-                        version,
-                        diagnostics_generation,
-                        bsl_runtime::application::DiagnosticsTrigger::DidChange,
-                        *profile,
-                    )
-                    .await;
-                }
-                _ => {
-                    let trigger = match profile {
-                        bsl_runtime::application::DiagnosticsProfile::IdleHeavy => {
-                            bsl_runtime::application::DiagnosticsTrigger::Idle
-                        }
-                        _ => bsl_runtime::application::DiagnosticsTrigger::DidChange,
-                    };
-                    self.schedule_diagnostics_profile_v2(
-                        uri.clone(),
-                        file_id,
-                        version,
-                        diagnostics_generation,
-                        None,
-                        trigger,
-                        *profile,
-                        true,
-                    )
-                    .await;
-                }
-            }
-        }
+        self.spawn_did_change_post_handoff_v2(work);
     }
 
     pub(super) async fn lsp_did_save(&self, params: DidSaveTextDocumentParams) {

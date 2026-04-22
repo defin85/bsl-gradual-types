@@ -601,6 +601,175 @@ async fn p47_did_save_republishes_same_file_ingress_token_after_existing_handoff
     drain_task.abort();
 }
 
+#[tokio::test]
+async fn p48_out_of_order_did_change_cannot_republish_stale_same_file_token() {
+    const V1_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\nКонецПроцедуры\n";
+    const V3_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str =
+        "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Описание\", \"x\");\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri =
+        Url::parse("file:///Documents/Док1/Forms/Форма1/Ext/Form/OutOfOrderSameFileToken.bsl")
+            .expect("form module uri");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change_v3_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 3,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V3_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("version 3 didChange notification");
+    assert!(did_change_v3_response.is_none(), "didChange is a notification");
+
+    let token_after_v3 = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("version 3 didChange must publish token");
+    assert_eq!(token_after_v3.file_version, 3);
+    assert_eq!(token_after_v3.source.as_contract_str(), "did_change");
+
+    let did_change_v2_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("out-of-order didChange notification");
+    assert!(did_change_v2_response.is_none(), "didChange is a notification");
+
+    assert_eq!(
+        server
+            .latest_received_file_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied(),
+        Some(3),
+        "older didChange must not overwrite latest-received version after a newer revision already won"
+    );
+    assert_eq!(
+        server
+            .latest_current_revision_handoff_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied(),
+        Some(3),
+        "older didChange must not re-register a stale current-revision handoff"
+    );
+    let shadow_state_after_v2 = server
+        .latest_document_shadow_state_v2
+        .read()
+        .await
+        .get(&file_id)
+        .cloned()
+        .expect("shadow state after newer didChange");
+    assert_eq!(shadow_state_after_v2.version, 3);
+    assert_eq!(shadow_state_after_v2.text.as_ref(), V3_FIXTURE);
+    assert_eq!(
+        server
+            .analysis_v2
+            .file_revision_state(file_id)
+            .await
+            .map(|state| state.version),
+        Some(3),
+        "older didChange must not overwrite analysis runtime after a newer revision already won"
+    );
+    let token_after_v2 = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("same-file token after out-of-order didChange");
+    assert_eq!(token_after_v2.file_version, 3);
+    assert_eq!(token_after_v2.source.as_contract_str(), "did_change");
+
+    drain_task.abort();
+}
+
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_same_file_completion_supersession_releases_pre_active_turn_wait_before_active_registration(

@@ -890,6 +890,212 @@ async fn p33_completion_service_first_poll_ignores_blocking_did_change_parse_del
     drain_task.abort();
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn p48_did_change_service_returns_after_truthful_handoff_before_post_handoff_work_finishes() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    S.Вставить(\"Описание\", \"x\");\n    ДляCompletion = S.\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _post_handoff_delay_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_POST_HANDOFF_DELAY_MS", "1500");
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let mut service = crate::server::request_context::RequestContextService::new(service);
+
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let uri = Url::parse("file:///test_p48_did_change_post_handoff_fast_lane.bsl").expect("uri");
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 1,
+                            text: V1_FIXTURE.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    server.sync_v2_globals().await;
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let did_change_started = Instant::now();
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    let did_change_elapsed = did_change_started.elapsed();
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    assert!(
+        did_change_elapsed < Duration::from_millis(250),
+        "didChange notification future must return after truthful handoff/token publication instead of waiting for post-handoff work (elapsed={did_change_elapsed:?})"
+    );
+    assert_eq!(
+        server
+            .analysis_v2
+            .file_revision_state(file_id)
+            .await
+            .map(|state| state.version),
+        Some(2),
+        "didChange fast lane must publish revision 2 into analysis runtime before returning"
+    );
+    assert_eq!(
+        server
+            .latest_current_revision_handoff_versions_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied(),
+        Some(2),
+        "didChange fast lane must register current-revision handoff before returning"
+    );
+    let same_file_token = server
+        .same_file_ingress_token_for_test(file_id)
+        .await
+        .expect("didChange fast lane must publish same-file ingress token");
+    assert_eq!(same_file_token.file_version, 2);
+    assert_eq!(same_file_token.source.as_contract_str(), "did_change");
+
+    let completion_position = find_utf16_position_after_marker(V2_FIXTURE, "ДляCompletion = S.");
+    let completion_started = Instant::now();
+    let completion_labels = lsp_completion_labels_with_request(
+        &mut service,
+        4063,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+    let completion_elapsed = completion_started.elapsed();
+    assert!(
+        completion_elapsed < Duration::from_millis(250),
+        "completion must not inherit post-handoff didChange delay once the truthful handoff/token is already published (elapsed={completion_elapsed:?}, labels={completion_labels:?})"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 40630, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces
+        .last()
+        .expect("completion trace after delayed post-handoff didChange");
+    let service_future_to_first_poll_wait_ms =
+        completion_timeline_server_edge_u64(trace, "service_future_to_first_poll_wait_ms")
+            .expect("service_future_to_first_poll_wait_ms");
+    let completion_barrier_wait_ms =
+        completion_timeline_server_edge_u64(trace, "completion_barrier_wait_ms").unwrap_or(0);
+    let same_file_ingress_token_wait_ms =
+        completion_timeline_server_edge_u64(trace, "same_file_ingress_token_wait_ms")
+            .expect("same_file_ingress_token_wait_ms");
+    assert!(
+        service_future_to_first_poll_wait_ms < 250,
+        "completion first poll must stay bounded after didChange fast-lane return, trace={trace:?}"
+    );
+    assert!(
+        completion_barrier_wait_ms < 250,
+        "completion must not spend seconds-scale time in completion_barrier_wait_ms after didChange fast-lane return, trace={trace:?}"
+    );
+    assert_eq!(
+        same_file_ingress_token_wait_ms, 0,
+        "completion must observe the already-published truthful same-file token without extra wait, trace={trace:?}"
+    );
+    assert_eq!(
+        trace.get("server_edge_details")
+            .and_then(|value| value.as_object())
+            .and_then(|details| details.get("same_file_ingress_token_source"))
+            .and_then(|value| value.as_str()),
+        Some("did_change"),
+        "completion trace must keep the truthful didChange token source after fast-lane publication, trace={trace:?}"
+    );
+    wait_for_type_index_precompute_phase(
+        &server,
+        file_id,
+        crate::server::core::deps_and_precompute::TypeIndexPrecomputePhaseV2::Computing,
+    )
+    .await;
+
+    drain_task.abort();
+}
+
 #[tokio::test]
 async fn p33_completion_transport_first_poll_stays_short_under_completion_burst() {
     struct EnvVarGuard {

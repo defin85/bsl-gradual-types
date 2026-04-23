@@ -1097,6 +1097,148 @@ async fn p7_did_save_followup_prefers_inflight_same_version_ready_snapshot_befor
 }
 
 #[tokio::test]
+async fn p7_did_save_discards_stale_completed_previous_version_type_index_task() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+    let server = server_holder
+        .lock()
+        .expect("server holder lock")
+        .clone()
+        .expect("server must be captured");
+
+    let uri = Url::parse("file:///did_save_discards_stale_completed_type_index_task_fixture.bsl")
+        .expect("fixture");
+    let text = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(
+                    serde_json::to_value(DidOpenTextDocumentParams {
+                        text_document: TextDocumentItem {
+                            uri: uri.clone(),
+                            language_id: "bsl".to_string(),
+                            version: 3,
+                            text: text.to_string(),
+                        },
+                    })
+                    .expect("DidOpenTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server
+        .get_file_id_v2(&uri)
+        .await
+        .expect("file id after didOpen");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let latest_version = server
+                .latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied();
+            let shadow_version = server
+                .latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.version);
+            if latest_version == Some(3) && shadow_version == Some(3) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must register current version and shadow state");
+
+    server.cancel_type_index_precompute_v2(file_id).await;
+    let completed_handle = tokio::spawn(async {});
+    tokio::task::yield_now().await;
+    assert!(
+        completed_handle.is_finished(),
+        "seeded stale task handle must be finished before insertion"
+    );
+    server
+        .type_index_precompute_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::TypeIndexPrecomputeTaskV2 {
+                task_id: 9001,
+                supersession_key: crate::server::TypeIndexPrecomputeSupersessionKeyV2 {
+                    file_id,
+                    requested_version: 2,
+                },
+                work_class: bsl_runtime::application::CpuWorkClass::Interactive,
+                phase: Arc::new(std::sync::atomic::AtomicU8::new(
+                    crate::server::core::deps_and_precompute::TypeIndexPrecomputePhaseV2::Completed
+                        .as_u8(),
+                )),
+                active_requested_version: Arc::new(std::sync::atomic::AtomicI32::new(2)),
+                scheduled_at: Instant::now(),
+                handle: completed_handle,
+            },
+        );
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    let requested_version_after_save = server
+        .type_index_precompute_tasks_v2
+        .lock()
+        .await
+        .get(&file_id)
+        .map(|task| task.supersession_key.requested_version);
+    assert_ne!(
+        requested_version_after_save,
+        Some(2),
+        "didSave must discard stale completed previous-version type-index task before follow-up observation"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_late_same_version_did_change_must_not_supersede_did_save_followup_generation() {
     struct EnvVarGuard {
         key: &'static str,

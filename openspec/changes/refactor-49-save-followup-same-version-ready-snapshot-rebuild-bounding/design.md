@@ -53,28 +53,40 @@ After the latest diagnostics-save timeline pass, the picture narrowed again:
   `semantic_diagnostics_query_ms~=1.8s`, so semantic query work still does not dominate the ready
   snapshot parse-exec stage.
 
-After the latest snapshot-summary observability pass, one more seam became explicit:
+After the final same-version rebuild pass, the representative live contour is now acceptance-ready:
 
-- the previous representative rerun proved that cycle-2 detached follow-up could still spend
-  `program_lowering~=45.1s`, but the in-flight phase snapshot exported `program_lowering_*` reuse
-  fields as `None`;
-- this was not the exact worker "having no summary", but a wiring gap:
-  `DiagnosticsReadySnapshotPhaseAttributionV2::from_snapshot()` discarded
-  `program_lowering_summary` even though the exact parse report and ready-state already had it;
-- that propagation bug is now fixed locally and covered by a focused diagnostics-save unit;
-- however the next representative `p56` rerun on the same tree regressed earlier again on cycle 2,
-  back to `followup_wait_reason=pending_publish` before any bounded semantic-path decision.
+- stale completed previous-version type-index tasks are discarded before `didChange` and
+  `didSave` follow-up observation, so waiting-phase representative probes no longer inherit fake
+  previous-version `type_index_task_state_after_timeout` noise;
+- when a same-version `DidSaveFollowup` rebuild has non-empty `parser_edits`, the exact worker may
+  prime the parser AST cache from the previous ready snapshot if that snapshot is exact-safe,
+  older than the requested version, syntax-complete, parse-error-free, and text-distinct from the
+  requested content;
+- the `2026-04-23` representative `p56` rerun on `examples/conf_big` now keeps the detached cycle
+  out of the old cold-rebuild bucket:
+  `followup_semantic_path=detached_ready_artifacts`,
+  `followup_ready_snapshot_parse_exec_ms=150`,
+  `followup_ready_snapshot_program_lowering_ms=137`,
+  `followup_publish_semantic_diagnostics_query_ms=1118`,
+  `program_lowering_reuse_outcome=routine_body_reuse`,
+  `program_lowering_reuse_plan_build_source=owned`,
+  `program_lowering_reuse_plan_take_if_unique_hit=true`,
+  `program_lowering_reused_lowering_units=2079`, and
+  `program_lowering_rebuilt_lowering_units=9`;
+- the same representative report still includes waiting-phase `shadow_state` cycles, but those are
+  now separately attributed to `waiting`, not `parse_exec/program_lowering`, and the acceptance
+  test only allows them when the saved exact ready snapshot later materializes on the same save
+  target.
 
-So the next implementation step is still not another gate relaxation. It is:
+So the accepted closure is now explicit:
 
-1. keep the synthetic owned-cache repro as the local proof that the parser/runtime seam is fixed;
-2. keep the archived-trace fastlane-progress repro as the local proof that the cycle-1
-   `pending_publish` publication-proof seam is fixed;
-3. keep the snapshot-summary repro as the local proof that in-flight exact-worker probes can export
-   `program_lowering` reuse summaries instead of flattening them to `None`;
-4. localize why representative live follow-up still oscillates on cycle 2 between the earlier
-   `pending_publish` stall and the later cold `program_lowering` outlier on the same save target;
-5. then refresh representative live evidence again.
+1. the parser/runtime seam is fixed locally by preserving previous-ready AST ownership for
+   same-version `didSave` rebuilds with real edits;
+2. stale previous-version type-index leftovers no longer pollute the waiting-phase contour;
+3. detached representative cycles prove query-dominated follow-up rather than rebuild-dominated
+   `program_lowering`;
+4. remaining `shadow_state` cycles are truthful waiting-phase queue blockers, which stay visible
+   without re-opening this change as a rebuild regression.
 
 ## Goals
 

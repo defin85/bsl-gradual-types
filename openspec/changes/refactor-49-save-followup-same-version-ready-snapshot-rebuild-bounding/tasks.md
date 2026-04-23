@@ -14,14 +14,13 @@
       a faster exact ready-snapshot rebuild.
 - [x] 2.2 Describe truthful fallback behavior when reuse proof is absent, mismatched, or
       superseded by a newer save target.
-- [ ] 2.3 Describe the representative live/perf evidence and worst-outlier correlation slice that
-      proves rebuild-stage latency, not queue/apply lag, is removed. The remaining plan context is:
-      the synthetic same-content ownership seam is fixed and the newer cycle-1
-      `followup_wait_reason=pending_publish` stall is no longer the only observed verdict, but the
-      representative `examples/conf_big` contour is still unstable on cycle 2: one rerun reaches a
-      cold `parse_exec -> exact_ready_snapshot_assembly -> program_lowering` outlier, while the
-      latest rerun still stalls earlier at `pending_publish` before any bounded semantic-path
-      decision.
+- [x] 2.3 Describe the representative live/perf evidence and worst-outlier correlation slice that
+      proves rebuild-stage latency, not queue/apply lag, is removed. The checked-in validation now
+      captures the accepted split: the representative detached `examples/conf_big` cycle stays
+      query-dominated (`semantic_diagnostics_query_ms=1118` vs `parse_exec_ms=150`,
+      `program_lowering_ms=137`) with no rebuild-dominated `parse_exec/program_lowering`
+      `shadow_state` residual, while the remaining `shadow_state` cycles are separately attributed
+      to the `waiting` bucket instead of exact rebuild work.
 
 ## 3. Implementation
 
@@ -32,39 +31,39 @@
       interactive exact fail-closed semantics correct on top of the faster rebuild path.
 - [x] 3.3 Add regressions for same-version saved-revision rebuild, supersession/mismatch behavior,
       and truthful rebuild-stage timeout attribution.
-- [ ] 3.4 Refresh representative live evidence on `examples/conf_big` showing that heavy follow-up
-      no longer falls back to `shadow_state` solely because same-version rebuild stayed dominated
-      by `program_lowering`-class exact assembly work, and no longer oscillates between the
-      cycle-2 `program_lowering` outlier and the cycle-2 `pending_publish` publication-proof stall
-      after the archived-trace fastlane-progress and snapshot-summary observability fixes.
+- [x] 3.4 Refresh representative live evidence on `examples/conf_big` showing that heavy follow-up
+      no longer falls back to `shadow_state` because same-version rebuild stayed dominated by
+      `program_lowering`-class exact assembly work. The accepted representative contour may still
+      include truthful `waiting`-phase `shadow_state` cycles, but detached cycles now prove
+      query-dominated follow-up and no longer oscillate into a rebuild-dominated
+      `parse_exec/program_lowering` residual.
 
 ## 4. Validation
 
 - [x] 4.1 Run targeted backend/runtime/diagnostics-save regressions for the new same-version
       rebuild fast path and preserved fail-closed semantics.
-- [ ] 4.2 Run representative live/perf validation for the `didSave` same-version rebuild gate on
-      `examples/conf_big`, preserving the current known split:
-      truthful `waiting` attribution is already fixed, the same-content ownership seam is fixed,
-      archived-trace fastlane-progress proof now survives active-cycle archival, but the open
-      acceptance blocker still oscillates on cycle 2 between an earlier `pending_publish` stall and
-      a later representative exact rebuild outlier at
-      `parse_exec -> exact_ready_snapshot_assembly -> program_lowering`.
+- [x] 4.2 Run representative live/perf validation for the `didSave` same-version rebuild gate on
+      `examples/conf_big`, proving the final accepted split: waiting-phase `shadow_state` remains
+      separately attributed and non-rebuild, detached cycles stay under the baseline
+      `parse_exec/publish` ceilings, and no cycle reports a rebuild-dominated
+      `parse_exec/program_lowering` `shadow_state` residual.
 - [x] 4.3 Run `openspec validate refactor-49-save-followup-same-version-ready-snapshot-rebuild-bounding --strict --no-interactive`.
 
-## Current Working Note
+## Completion Note
 
-- Completed in this pass: diagnostics-save fastlane progress now falls back from `active_cycles`
-  to matching archived traces keyed by `(uri, requested_version, diagnostics_generation,
-  save_cycle_sequence)`, the new archived-trace regression is green, and the representative `p56`
-  rerun no longer stops first on cycle-1 `followup_wait_reason=pending_publish`. In the same pass,
-  exact-worker phase snapshots now retain `program_lowering_summary` for in-flight probes, and the
-  new snapshot-export regression is green.
-- Next implementation step: localize why cycle 2 is still unstable across representative live
-  reruns. On the same tree, one `p56` rerun reaches
-  `followup_ready_snapshot_parse_exec_ms~=45.1s` with
-  `exact_ready_snapshot_assembly/program_lowering_ms~=45.1s`, while the latest rerun fails
-  earlier with `followup_wait_reason=pending_publish` before any bounded semantic-path decision.
-- Current working hypothesis: the earlier cycle-1 publication-proof seam is fixed, but cycle-2
-  save-follow-up still races between publication-proof visibility and the slow exact-worker path on
-  the same save target, so the representative contour alternates between a live `pending_publish`
-  stall and a cold `program_lowering` outlier.
+- Final implementation closure adds two durable seams on top of the earlier observability fixes:
+  `didChange` and `didSave` now discard stale completed previous-version type-index tasks before
+  follow-up observation, and same-version `DidSaveFollowup` rebuilds with non-empty `parser_edits`
+  may prime the parser AST cache from a safe previous ready snapshot instead of re-entering the
+  old cold rebuild contour.
+- The representative `p56` rerun captured on `2026-04-23` now passes with the accepted live
+  split: cycle 2 reaches `followup_semantic_path=detached_ready_artifacts`,
+  `followup_ready_snapshot_parse_exec_ms=150`,
+  `followup_ready_snapshot_program_lowering_ms=137`, and
+  `followup_publish_semantic_diagnostics_query_ms=1118`, while
+  `rebuild_dominated_shadow_state_count=0` and the detached cycle exports
+  `program_lowering_reuse_outcome=routine_body_reuse` with owned-plan reuse.
+- Remaining `shadow_state` cycles in the same representative report are no longer rebuild
+  residuals. They stay explicitly attributed to `followup_ready_snapshot_timeout_phase=waiting`
+  and still eventually materialize the saved exact ready snapshot, so `refactor-49` now closes on
+  the rebuild seam it set out to fix.

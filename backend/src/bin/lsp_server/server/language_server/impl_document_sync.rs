@@ -27,6 +27,12 @@ struct BuildParseSnapshotRequest {
     did_change_attribution: Option<super::super::DidChangeParseSnapshotAttributionV2>,
 }
 
+#[derive(Clone)]
+struct ParseSnapshotAstReuseSeedV2 {
+    source_text: Arc<str>,
+    parse_result: Arc<bsl_syntax::ast::ParseResult>,
+}
+
 struct DidChangePostHandoffWorkV2 {
     uri: Url,
     file_id: bsl_analysis_v2::FileId,
@@ -293,6 +299,30 @@ fn derive_reused_prefix_parse_result_from_ready_state(
         return None;
     }
     Some(ready_state.parse_snapshot.parse_result.clone())
+}
+
+fn derive_same_version_rebuild_previous_ready_seed_v2(
+    ready_state: &ReadyParseSnapshotStateV2,
+    requested_version: i32,
+    requested_text: &Arc<str>,
+) -> Option<ParseSnapshotAstReuseSeedV2> {
+    if !ready_state.syntax_errors_complete
+        || ready_state.parse_snapshot.parse_result.has_errors()
+        || ready_state.parse_snapshot.file_version >= requested_version
+        || ready_state.text.as_ref() == requested_text.as_ref()
+        || ready_state
+            .parse_snapshot
+            .parse_result
+            .program
+            .statements
+            .is_empty()
+    {
+        return None;
+    }
+    Some(ParseSnapshotAstReuseSeedV2 {
+        source_text: Arc::clone(&ready_state.text),
+        parse_result: ready_state.parse_snapshot.parse_result.clone(),
+    })
 }
 
 async fn derive_parser_base_recovery_reuse_parse_result_from_shadow_state_v2(
@@ -1050,6 +1080,25 @@ impl BslLanguageServer {
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
         let forced_full_parse_reason = request.forced_full_parse_reason;
+        let same_version_previous_ready_seed_for_parse = if matches!(
+            request.admission_lane,
+            Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+        ) && !parser_edits.is_empty()
+        {
+            self.latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .and_then(|state| {
+                    derive_same_version_rebuild_previous_ready_seed_v2(
+                        state,
+                        version,
+                        &text_for_parse,
+                    )
+                })
+        } else {
+            None
+        };
         let same_version_rebuild_reuse_parse_result_for_parse = if matches!(
             request.admission_lane,
             Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
@@ -1069,6 +1118,8 @@ impl BslLanguageServer {
             let task_control_for_lane = Arc::clone(&task_control);
             let task_control_for_exec = Some(Arc::clone(&task_control));
             let task_control_for_exec_started = Arc::clone(&task_control);
+            let same_version_previous_ready_seed_for_exec =
+                same_version_previous_ready_seed_for_parse.clone();
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -1130,6 +1181,12 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
+                    if let Some(seed) = same_version_previous_ready_seed_for_exec.as_ref() {
+                        parser.prime_ast_cache_for_source(
+                            seed.source_text.as_ref(),
+                            Arc::clone(&seed.parse_result),
+                        );
+                    }
                     if let Some(parse_result) =
                         same_version_rebuild_reuse_parse_result_for_parse.as_ref()
                     {
@@ -1362,6 +1419,8 @@ impl BslLanguageServer {
             )
             .await
         } else {
+            let same_version_previous_ready_seed_for_exec =
+                same_version_previous_ready_seed_for_parse.clone();
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
                 bsl_runtime::application::CpuWorkClass::Background,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
@@ -1392,6 +1451,12 @@ impl BslLanguageServer {
                     let Some(parser) = coordinator.parser_coordinator() else {
                         return Err(BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted);
                     };
+                    if let Some(seed) = same_version_previous_ready_seed_for_exec.as_ref() {
+                        parser.prime_ast_cache_for_source(
+                            seed.source_text.as_ref(),
+                            Arc::clone(&seed.parse_result),
+                        );
+                    }
                     if let Some(parse_result) =
                         same_version_rebuild_reuse_parse_result_for_parse.as_ref()
                     {
@@ -3022,6 +3087,8 @@ impl BslLanguageServer {
             .write()
             .await
             .insert(file_id, version);
+        self.cleanup_stale_completed_type_index_precompute_task_v2(file_id, version)
+            .await;
         let updated_text: Arc<str> = Arc::from(updated_text);
         self.latest_document_shadow_state_v2.write().await.insert(
             file_id,
@@ -3660,6 +3727,8 @@ impl BslLanguageServer {
         };
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
         let save_cycle_sequence = self.bump_diagnostics_save_cycle_sequence_v2(file_id).await;
+        self.cleanup_stale_completed_type_index_precompute_task_v2(file_id, version)
+            .await;
         if let Some(text) = save_text {
             self.latest_document_shadow_state_v2.write().await.insert(
                 file_id,

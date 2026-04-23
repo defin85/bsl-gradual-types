@@ -198,6 +198,21 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) async fn cleanup_stale_completed_type_index_precompute_task_v2(
+        &self,
+        file_id: V2FileId,
+        current_version: i32,
+    ) {
+        let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+        let should_remove = tasks.get(&file_id).is_some_and(|task| {
+            Self::is_completed_retained_type_index_task(task)
+                && task.supersession_key.requested_version != current_version
+        });
+        if should_remove {
+            let _ = tasks.remove(&file_id);
+        }
+    }
+
     async fn snapshot_for_completion_wait_v2(&self) -> bsl_analysis_v2::AnalysisV2 {
         self.analysis_v2
             .completion_current_revision_snapshot_for_origin_and_operation(

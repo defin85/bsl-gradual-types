@@ -1282,6 +1282,7 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub cancel_requested: AtomicBool,
     pub retarget_requested: AtomicBool,
     pub promotion_requested: AtomicBool,
+    interactive_cpu_requested: AtomicBool,
     pub materialized: AtomicBool,
     detached_ready_artifact_publication_epoch: AtomicU64,
     pub phase: AtomicU8,
@@ -1293,10 +1294,20 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
 
 impl BackgroundParseSnapshotApplyTaskControlV2 {
     pub(crate) fn new() -> Self {
+        Self::new_with_work_class(bsl_runtime::application::CpuWorkClass::Background)
+    }
+
+    pub(crate) fn new_with_work_class(
+        cpu_work_class: bsl_runtime::application::CpuWorkClass,
+    ) -> Self {
         Self {
             cancel_requested: AtomicBool::new(false),
             retarget_requested: AtomicBool::new(false),
             promotion_requested: AtomicBool::new(false),
+            interactive_cpu_requested: AtomicBool::new(matches!(
+                cpu_work_class,
+                bsl_runtime::application::CpuWorkClass::Interactive
+            )),
             materialized: AtomicBool::new(false),
             detached_ready_artifact_publication_epoch: AtomicU64::new(0),
             phase: AtomicU8::new(0),
@@ -1305,6 +1316,27 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             detached_ready_artifact_notify: Notify::new(),
             materialized_notify: Notify::new(),
         }
+    }
+
+    pub(crate) fn cpu_work_class(&self) -> bsl_runtime::application::CpuWorkClass {
+        if self.interactive_cpu_requested.load(Ordering::SeqCst) {
+            bsl_runtime::application::CpuWorkClass::Interactive
+        } else {
+            bsl_runtime::application::CpuWorkClass::Background
+        }
+    }
+
+    pub(crate) fn set_cpu_work_class(
+        &self,
+        cpu_work_class: bsl_runtime::application::CpuWorkClass,
+    ) {
+        self.interactive_cpu_requested.store(
+            matches!(
+                cpu_work_class,
+                bsl_runtime::application::CpuWorkClass::Interactive
+            ),
+            Ordering::SeqCst,
+        );
     }
 
     pub(crate) fn note_detached_ready_artifact_published(&self) {

@@ -14,6 +14,7 @@ struct BuildParseSnapshotRequest {
     version: i32,
     path: Arc<str>,
     text: Arc<str>,
+    cpu_work_class: bsl_runtime::application::CpuWorkClass,
     reused_prefix_parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     parser_base_recovery_text: Option<Arc<str>>,
     parser_base_recovery_reuse_parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
@@ -596,6 +597,7 @@ struct BackgroundParseSnapshotApplyArgs {
     save_cycle_sequence: Option<u64>,
     path: Arc<str>,
     text: Arc<str>,
+    cpu_work_class: bsl_runtime::application::CpuWorkClass,
     parser_base_recovery_text: Option<Arc<str>>,
     parser_base_recovery_reuse_parse_result: Option<Arc<bsl_syntax::ast::ParseResult>>,
     parser_edits: Vec<bsl_runtime::system::parser_coordinator::TextEdit>,
@@ -1080,11 +1082,17 @@ impl BslLanguageServer {
         let file_id = request.file_id;
         let parser_edits = request.parser_edits;
         let forced_full_parse_reason = request.forced_full_parse_reason;
-        let same_version_previous_ready_seed_for_parse = if matches!(
-            request.admission_lane,
-            Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
-        ) && !parser_edits.is_empty()
-        {
+        let initial_admission_lane = request.admission_lane;
+        let promoted_to_did_save_followup = task_control_for_parse.as_ref().is_some_and(|control| {
+            control.promotion_requested.load(Ordering::SeqCst)
+        });
+        let same_version_did_save_followup =
+            matches!(
+                initial_admission_lane,
+                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+            ) || promoted_to_did_save_followup;
+        let same_version_previous_ready_seed_for_parse =
+            if same_version_did_save_followup && !parser_edits.is_empty() {
             self.latest_ready_parse_snapshots_v2
                 .read()
                 .await
@@ -1096,14 +1104,11 @@ impl BslLanguageServer {
                         &text_for_parse,
                     )
                 })
-        } else {
-            None
-        };
-        let same_version_rebuild_reuse_parse_result_for_parse = if matches!(
-            request.admission_lane,
-            Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
-        ) && parser_edits.is_empty()
-        {
+            } else {
+                None
+            };
+        let same_version_rebuild_reuse_parse_result_for_parse =
+            if same_version_did_save_followup && parser_edits.is_empty() {
             derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
                 self,
                 file_id,
@@ -1111,9 +1116,9 @@ impl BslLanguageServer {
                 text_for_parse.as_ref(),
             )
             .await
-        } else {
-            None
-        };
+            } else {
+                None
+            };
         let parse_call = if let Some(task_control) = task_control_for_parse.clone() {
             let task_control_for_lane = Arc::clone(&task_control);
             let task_control_for_exec = Some(Arc::clone(&task_control));
@@ -1121,7 +1126,7 @@ impl BslLanguageServer {
             let same_version_previous_ready_seed_for_exec =
                 same_version_previous_ready_seed_for_parse.clone();
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_dynamic_lane_hooks(
-                bsl_runtime::application::CpuWorkClass::Background,
+                request.cpu_work_class,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 move || {
                     if task_control_for_lane
@@ -1130,7 +1135,7 @@ impl BslLanguageServer {
                     {
                         Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
                     } else {
-                        request.admission_lane
+                        initial_admission_lane
                     }
                 },
                 &task_control.control_notify,
@@ -1260,7 +1265,7 @@ impl BslLanguageServer {
                     let mut parse_options =
                         bsl_runtime::system::parser_coordinator::ParseSnapshotExecutionOptions::default();
                     parse_options.save_critical_initial = matches!(
-                        request.admission_lane,
+                        initial_admission_lane,
                         Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
                     );
                     parse_options.save_critical_requested =
@@ -1422,7 +1427,7 @@ impl BslLanguageServer {
             let same_version_previous_ready_seed_for_exec =
                 same_version_previous_ready_seed_for_parse.clone();
             bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
-                bsl_runtime::application::CpuWorkClass::Background,
+                request.cpu_work_class,
                 bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
                 request.admission_lane,
                 Some(self.coordinator.as_ref()),
@@ -1729,7 +1734,7 @@ impl BslLanguageServer {
 
     async fn schedule_background_parse_snapshot_apply_v2(
         &self,
-        args: BackgroundParseSnapshotApplyArgs,
+        mut args: BackgroundParseSnapshotApplyArgs,
     ) {
         let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
         let file_id = args.file_id;
@@ -1742,11 +1747,58 @@ impl BslLanguageServer {
                     args.source,
                     super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
                 ) {
-                    task.target
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .save_cycle_sequence = args.save_cycle_sequence;
-                    if !matches!(
+                    let pre_exec_waiting = task
+                        .control
+                        .phase_attribution_snapshot()
+                        .current_phase
+                        == Some(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
+                    let waiting_did_change_needs_respawn = pre_exec_waiting
+                        && !matches!(
+                            current_target.source,
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                        );
+                    if waiting_did_change_needs_respawn {
+                        args = BackgroundParseSnapshotApplyArgs {
+                            file_id: args.file_id,
+                            requested_version: args.requested_version,
+                            save_cycle_sequence: args.save_cycle_sequence,
+                            path: current_target.path.clone(),
+                            text: current_target.text.clone(),
+                            cpu_work_class: args.cpu_work_class,
+                            parser_base_recovery_text: current_target
+                                .parser_base_recovery_text
+                                .clone(),
+                            parser_base_recovery_reuse_parse_result: current_target
+                                .parser_base_recovery_reuse_parse_result
+                                .clone(),
+                            parser_edits: current_target.parser_edits.clone(),
+                            forced_full_parse_reason: current_target.forced_full_parse_reason,
+                            async_delay_mode: args.async_delay_mode,
+                            blocking_delay_env_key: args.blocking_delay_env_key,
+                            force_reschedule_same_version: args.force_reschedule_same_version,
+                            source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                            did_change_attribution: current_target.did_change_attribution.clone(),
+                        };
+                    }
+                    if !waiting_did_change_needs_respawn {
+                        let mut target = task
+                            .target
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        target.save_cycle_sequence = args.save_cycle_sequence;
+                        if pre_exec_waiting
+                            && !matches!(
+                                target.source,
+                                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                            )
+                        {
+                            target.source =
+                                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave;
+                        }
+                        task.control.set_cpu_work_class(args.cpu_work_class);
+                    }
+                    if !waiting_did_change_needs_respawn
+                        && !matches!(
                         current_target.source,
                         super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
                     ) {
@@ -1755,8 +1807,19 @@ impl BslLanguageServer {
                             .store(true, Ordering::SeqCst);
                         task.control.control_notify.notify_waiters();
                     }
+                    if !waiting_did_change_needs_respawn
+                        && (pre_exec_waiting
+                        || matches!(
+                            current_target.source,
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                        )
+                        || !args.force_reschedule_same_version)
+                    {
+                        return;
+                    }
+                } else {
+                    return;
                 }
-                return;
             }
             if !args.force_reschedule_same_version && same_version {
                 return;
@@ -1816,7 +1879,11 @@ impl BslLanguageServer {
         let target = Arc::new(std::sync::Mutex::new(
             background_parse_snapshot_apply_target_from_args(&args, text_hash, 1),
         ));
-        let task_control = Arc::new(super::super::BackgroundParseSnapshotApplyTaskControlV2::new());
+        let task_control = Arc::new(
+            super::super::BackgroundParseSnapshotApplyTaskControlV2::new_with_work_class(
+                args.cpu_work_class,
+            ),
+        );
         let server = self.clone();
         let worker_target_epoch = Arc::clone(&target_epoch);
         let worker_target = Arc::clone(&target);
@@ -1859,7 +1926,7 @@ impl BslLanguageServer {
             {
                 break;
             }
-            let target = target_state
+            let mut target = target_state
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone();
@@ -1894,6 +1961,16 @@ impl BslLanguageServer {
                     _ = &mut notified => {}
                 }
             }
+            let refreshed_target = target_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if refreshed_target.epoch != target.epoch {
+                lifecycle_guard.set_terminal_reason("retargeted_before_parse");
+                task_control.control_notify.notify_waiters();
+                continue;
+            }
+            target = refreshed_target;
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
@@ -1925,6 +2002,16 @@ impl BslLanguageServer {
                     maybe_inject_did_save_parse_delay().await;
                 }
             }
+            let refreshed_target = target_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if refreshed_target.epoch != target.epoch {
+                lifecycle_guard.set_terminal_reason("retargeted_before_parse");
+                task_control.control_notify.notify_waiters();
+                continue;
+            }
+            target = refreshed_target;
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
@@ -1959,6 +2046,7 @@ impl BslLanguageServer {
                     version: target.requested_version,
                     path: target.path.clone(),
                     text: target.text.clone(),
+                    cpu_work_class: task_control.cpu_work_class(),
                     reused_prefix_parse_result: self
                         .latest_ready_parse_snapshots_v2
                         .read()
@@ -3310,6 +3398,33 @@ impl BslLanguageServer {
             return;
         }
 
+        if self
+            .did_change_diagnostics_are_stale_after_same_version_save_v2(
+                work.file_id,
+                work.version,
+                work.diagnostics_save_cycle_sequence_at_handoff,
+                &work.updated_text,
+            )
+            .await
+        {
+            let latest_save_cycle_sequence = self
+                .diagnostics_save_cycle_sequence_v2
+                .read()
+                .await
+                .get(&work.file_id)
+                .copied()
+                .unwrap_or(0);
+            debug!(
+                uri = %work.uri,
+                file_id = work.file_id.0,
+                requested_version = work.version,
+                save_cycle_sequence_at_handoff = work.diagnostics_save_cycle_sequence_at_handoff,
+                latest_save_cycle_sequence,
+                "skip stale didChange follow-up scheduling after same-version didSave"
+            );
+            return;
+        }
+
         if work.identical_text_previous_version.is_none()
             && work.tail_whitespace_append_previous_version.is_none()
         {
@@ -3358,6 +3473,7 @@ impl BslLanguageServer {
                 save_cycle_sequence: None,
                 path: work.path.clone(),
                 text: work.updated_text.clone(),
+                cpu_work_class: bsl_runtime::application::CpuWorkClass::Background,
                 parser_base_recovery_text,
                 parser_base_recovery_reuse_parse_result,
                 parser_edits: work.parser_edits,
@@ -3589,6 +3705,7 @@ impl BslLanguageServer {
             save_cycle_sequence: None,
             path: path.clone(),
             text: text.clone(),
+            cpu_work_class: bsl_runtime::application::CpuWorkClass::Background,
             parser_base_recovery_text: None,
             parser_base_recovery_reuse_parse_result: None,
             parser_edits: Vec::new(),
@@ -3750,6 +3867,7 @@ impl BslLanguageServer {
                 save_cycle_sequence: Some(save_cycle_sequence),
                 path: Arc::from(path),
                 text,
+                cpu_work_class: bsl_runtime::application::CpuWorkClass::Interactive,
                 parser_base_recovery_text: None,
                 parser_base_recovery_reuse_parse_result: None,
                 parser_edits: Vec::new(),

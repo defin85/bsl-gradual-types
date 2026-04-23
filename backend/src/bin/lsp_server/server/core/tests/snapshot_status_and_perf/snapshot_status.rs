@@ -291,6 +291,7 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
         cancel_requested: std::sync::atomic::AtomicBool::new(false),
         retarget_requested: std::sync::atomic::AtomicBool::new(false),
         promotion_requested: std::sync::atomic::AtomicBool::new(false),
+        interactive_cpu_requested: std::sync::atomic::AtomicBool::new(false),
         materialized: std::sync::atomic::AtomicBool::new(false),
         detached_ready_artifact_publication_epoch: std::sync::atomic::AtomicU64::new(0),
         phase: std::sync::atomic::AtomicU8::new(
@@ -482,6 +483,7 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
                     cancel_requested: std::sync::atomic::AtomicBool::new(false),
                     retarget_requested: std::sync::atomic::AtomicBool::new(false),
                     promotion_requested: std::sync::atomic::AtomicBool::new(false),
+                    interactive_cpu_requested: std::sync::atomic::AtomicBool::new(false),
                     materialized: std::sync::atomic::AtomicBool::new(false),
                     detached_ready_artifact_publication_epoch:
                         std::sync::atomic::AtomicU64::new(0),

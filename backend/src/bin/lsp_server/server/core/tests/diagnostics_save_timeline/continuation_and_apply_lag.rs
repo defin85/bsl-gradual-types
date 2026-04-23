@@ -2154,7 +2154,7 @@ async fn p26_diagnostics_save_timeline_keeps_skipped_apply_lag_for_waiting_exact
         .await;
     assert!(
         disposition.is_none(),
-        "waiting-only exact phase should still skip relief on apply lag, disposition={disposition:?}"
+        "waiting-only exact phase should keep relief/continuation bounded even when it still falls through, disposition={disposition:?}"
     );
 
     let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
@@ -2162,7 +2162,13 @@ async fn p26_diagnostics_save_timeline_keeps_skipped_apply_lag_for_waiting_exact
         trace
             .followup_ready_snapshot_relief_valve_outcome
             .as_deref(),
-        Some("skipped_apply_lag")
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_continuation_reason
+            .as_deref(),
+        Some("exhausted_continuation_proof")
     );
 }
 

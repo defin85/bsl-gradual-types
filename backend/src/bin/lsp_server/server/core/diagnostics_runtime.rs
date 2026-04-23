@@ -161,7 +161,6 @@ pub(crate) enum ReadySnapshotReliefValveOutcomeV2 {
     SkippedRuntimeQueueWait,
     SkippedApplyLag,
     SkippedTimeoutPhaseUnavailable,
-    SkippedTimeoutPhaseWaiting,
 }
 
 impl ReadySnapshotReliefValveOutcomeV2 {
@@ -177,7 +176,6 @@ impl ReadySnapshotReliefValveOutcomeV2 {
             Self::SkippedRuntimeQueueWait => "skipped_runtime_queue_wait",
             Self::SkippedApplyLag => "skipped_apply_lag",
             Self::SkippedTimeoutPhaseUnavailable => "skipped_timeout_phase_unavailable",
-            Self::SkippedTimeoutPhaseWaiting => "skipped_timeout_phase_waiting",
         }
     }
 }
@@ -234,7 +232,8 @@ impl ReadySnapshotContinuationObservationV2 {
     fn qualifies_continuation(self) -> bool {
         matches!(
             self.phase,
-            Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec)
+            Some(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting)
+                | Some(super::super::ReadyParseSnapshotAttributionPhaseV2::ParseExec)
                 | Some(
                     super::super::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization
                 )
@@ -3281,6 +3280,24 @@ impl BslLanguageServer {
         if shadow_state.version != supersession_key.requested_version {
             return None;
         }
+        let branch_context = self
+            .diagnostics_save_followup_branch_context_v2(supersession_key)
+            .await;
+        let ready_snapshot_phase_attribution = self
+            .ready_snapshot_phase_attribution_for_probe_v2(
+                supersession_key,
+                branch_context.shadow_text_hash,
+                None,
+                true,
+            )
+            .await
+            .or(branch_context.ready_snapshot_phase_attribution);
+        if branch_context.ready_snapshot_task_state == ReadySnapshotTaskStateV2::InFlightSameVersion
+            && ready_snapshot_phase_attribution
+                .is_some_and(|attribution| attribution.timeout_phase == Some("waiting"))
+        {
+            return None;
+        }
 
         let save_fastlane_syntax_artifacts = self
             .save_fastlane_syntax_artifacts_for_version_v2(
@@ -4201,12 +4218,7 @@ impl BslLanguageServer {
         } else {
             match phase_attribution {
                 Some(attribution) if attribution.has_late_exact_timeout_phase() => None,
-                Some(attribution) if attribution.timeout_phase == Some("waiting") => apply_lag
-                    .is_some()
-                    .then_some(ReadySnapshotReliefValveOutcomeV2::SkippedApplyLag)
-                    .or(Some(
-                        ReadySnapshotReliefValveOutcomeV2::SkippedTimeoutPhaseWaiting,
-                    )),
+                Some(attribution) if attribution.timeout_phase == Some("waiting") => None,
                 _ => apply_lag
                     .is_some()
                     .then_some(ReadySnapshotReliefValveOutcomeV2::SkippedApplyLag)

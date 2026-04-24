@@ -24,23 +24,23 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Add a dedicated same-version `didSave` exact-producer admission lane and CPU-budget tier
+- [x] 3.1 Add a dedicated same-version `didSave` exact-producer admission lane and CPU-budget tier
       in the runtime policy layer.
-- [ ] 3.2 Rework same-version `didSave` scheduling around producer ownership and lifecycle so the
+- [x] 3.2 Rework same-version `didSave` scheduling around producer ownership and lifecycle so the
       bounded contract ends at detached diagnostics-ready publication instead of depending on a
       mutable worker promotion path.
-- [ ] 3.3 Update heavy follow-up waiting, wakeup, and observability to consume producer lifecycle
+- [x] 3.3 Update heavy follow-up waiting, wakeup, and observability to consume producer lifecycle
       events truthfully and preserve fail-closed semantics.
-- [ ] 3.4 Update regressions and representative live gate expectations so waiting-only
+- [x] 3.4 Update regressions and representative live gate expectations so waiting-only
       `shadow_state` terminal publish is no longer accepted for still-current save families.
-- [ ] 3.5 Update the representative `examples/conf_big` gate to fail on the full inherited
+- [x] 3.5 Update the representative `examples/conf_big` gate to fail on the full inherited
       `refactor-50` contour: waiting-phase timeout, `shadow_state` terminal path,
       query-dominated semantic fallback, and later same-family exact readiness.
 
 ## 4. Validation
 
-- [ ] 4.1 Run targeted backend/runtime/diagnostics-save regressions for the dedicated
+- [x] 4.1 Run targeted backend/runtime/diagnostics-save regressions for the dedicated
       save-critical producer path.
-- [ ] 4.2 Run representative live/perf validation for the same-version `didSave` exact-producer
+- [x] 4.2 Run representative live/perf validation for the same-version `didSave` exact-producer
       gate on `examples/conf_big`.
 - [x] 4.3 Run `openspec validate refactor-51-didsave-exact-producer-lane-bounding --strict --no-interactive`.

@@ -1574,13 +1574,6 @@ async fn p33_did_save_coalesces_same_version_outline_refresh_on_default_path() {
     harness.shutdown().await;
 }
 #[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_current_revision_head_precompute_stays_available_under_background_cpu_saturation() {
     const V1_FIXTURE: &str =

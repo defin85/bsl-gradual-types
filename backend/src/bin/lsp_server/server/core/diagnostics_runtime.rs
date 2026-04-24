@@ -15,9 +15,23 @@ fn maybe_inject_save_fastlane_shadow_parse_delay_for_test() {
 #[cfg(not(debug_assertions))]
 fn maybe_inject_save_fastlane_shadow_parse_delay_for_test() {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SaveFastlaneFirstPublishWaitOutcome {
     Published,
+    DetachedReadyArtifacts,
     NotPublished,
+}
+
+impl SaveFastlaneFirstPublishWaitOutcome {
+    fn as_str(self) -> &'static str {
+        match self {
+            SaveFastlaneFirstPublishWaitOutcome::Published => "published",
+            SaveFastlaneFirstPublishWaitOutcome::DetachedReadyArtifacts => {
+                "detached_ready_artifacts"
+            }
+            SaveFastlaneFirstPublishWaitOutcome::NotPublished => "not_published",
+        }
+    }
 }
 
 pub(crate) const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_WAIT_BUDGET: Duration =
@@ -144,6 +158,7 @@ impl ReadySnapshotTaskStateV2 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DiagnosticsSaveFollowupBranchContextV2 {
     ready_snapshot_task_state: ReadySnapshotTaskStateV2,
+    producer_lifecycle_state: Option<super::super::DidSaveExactProducerLifecycleStateV2>,
     shadow_state_available: bool,
     shadow_text_hash: Option<[u8; 32]>,
     ready_snapshot_phase_attribution: Option<DiagnosticsReadySnapshotPhaseAttributionV2>,
@@ -1413,6 +1428,7 @@ struct SaveFollowupReadyArtifactsReply {
     observed_settings_id: String,
     runtime_queue_wait: Option<Duration>,
     apply_lag: Option<Duration>,
+    snapshot_with_deps_elapsed: Option<Duration>,
     syntax_elapsed: Option<Duration>,
     semantic_elapsed: Option<Duration>,
     syntax_work_mode: Option<&'static str>,
@@ -1429,6 +1445,7 @@ struct SaveFollowupParseSnapshotExecutionInputV2 {
     parse_snapshot: bsl_analysis_v2::ParseSnapshot,
     syntax_errors_complete: bool,
     semantic_path: &'static str,
+    pre_exec_elapsed: Duration,
 }
 
 pub(crate) enum SaveFollowupReadyArtifactsAttemptV2 {
@@ -1438,7 +1455,7 @@ pub(crate) enum SaveFollowupReadyArtifactsAttemptV2 {
 
 enum DidSaveFollowupAdmissionOutcome {
     Admitted {
-        guard: DidSaveFollowupSlotGuard,
+        guard: Box<DidSaveFollowupSlotGuard>,
         queue_wait_elapsed: Option<Duration>,
     },
     Disposition {
@@ -1659,7 +1676,7 @@ impl BslLanguageServer {
                         );
                 }
                 return DidSaveFollowupAdmissionOutcome::Admitted {
-                    guard: DidSaveFollowupSlotGuard::new(self.clone()),
+                    guard: Box::new(DidSaveFollowupSlotGuard::new(self.clone())),
                     queue_wait_elapsed,
                 };
             }
@@ -1709,6 +1726,7 @@ impl BslLanguageServer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn finalize_diagnostics_save_profile_result_v2(
         &self,
         uri: &Url,
@@ -2395,12 +2413,7 @@ impl BslLanguageServer {
                 ready_state.text.as_ref(),
                 parse_snapshot.line_index.as_ref(),
             ),
-            parse_snapshot
-                .parse_result
-                .syntax_errors
-                .iter()
-                .cloned()
-                .collect(),
+            parse_snapshot.parse_result.syntax_errors.to_vec(),
             Self::parse_snapshot_observability_mode_v2(&parse_snapshot),
             started.elapsed(),
         ))
@@ -2428,7 +2441,7 @@ impl BslLanguageServer {
         self.ready_parse_snapshot_state_for_version_v2(file_id, requested_version)
             .await
             .filter(|state| {
-                expected_text_hash.map_or(true, |text_hash| {
+                expected_text_hash.is_none_or(|text_hash| {
                     *blake3::hash(state.text.as_bytes()).as_bytes() == text_hash
                 })
             })
@@ -2547,32 +2560,20 @@ impl BslLanguageServer {
             .map(|task_control| task_control.current_detached_ready_artifact_publication_epoch())
             .unwrap_or_default();
         loop {
-            if let Some(state) = self
-                .ready_parse_snapshot_state_for_target_v2(
-                    supersession_key.file_id,
-                    supersession_key.requested_version,
-                    expected_text_hash,
-                )
-                .await
-            {
-                return ReadyParseSnapshotProbeResultV2 {
-                    outcome: ReadyParseSnapshotProbeOutcomeV2::Ready,
-                    state: Some(state),
-                    detached_artifact: None,
-                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::ReadyArtifacts,
-                    elapsed: wait_started.elapsed(),
-                };
-            }
-            if probe_slot.allows_detached_ready_artifact() {
-                if let Some(detached_artifact) = self
-                    .detached_diagnostics_ready_artifact_for_target_v2(
+            let detached_artifact =
+                if supersession_key.save_cycle_sequence.is_some() && expected_text_hash.is_some() {
+                    self.detached_diagnostics_ready_artifact_for_target_v2(
                         supersession_key.file_id,
                         supersession_key.requested_version,
                         supersession_key.save_cycle_sequence,
                         expected_text_hash,
                     )
                     .await
-                {
+                } else {
+                    None
+                };
+            if probe_slot.allows_detached_ready_artifact() {
+                if let Some(detached_artifact) = detached_artifact.clone() {
                     return ReadyParseSnapshotProbeResultV2 {
                         outcome: ReadyParseSnapshotProbeOutcomeV2::NotReady,
                         state: None,
@@ -2581,6 +2582,33 @@ impl BslLanguageServer {
                         elapsed: wait_started.elapsed(),
                     };
                 }
+            }
+            if let Some(state) = self
+                .ready_parse_snapshot_state_for_target_v2(
+                    supersession_key.file_id,
+                    supersession_key.requested_version,
+                    expected_text_hash,
+                )
+                .await
+            {
+                if matches!(probe_slot, ReadyParseSnapshotProbeSlotV2::ZeroBudget)
+                    && detached_artifact.is_some()
+                {
+                    return ReadyParseSnapshotProbeResultV2 {
+                        outcome: ReadyParseSnapshotProbeOutcomeV2::NotReady,
+                        state: None,
+                        detached_artifact: None,
+                        wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::NotReady,
+                        elapsed: wait_started.elapsed(),
+                    };
+                }
+                return ReadyParseSnapshotProbeResultV2 {
+                    outcome: ReadyParseSnapshotProbeOutcomeV2::Ready,
+                    state: Some(state),
+                    detached_artifact: None,
+                    wait_winner: ReadyParseSnapshotBoundedWaitWinnerV2::ReadyArtifacts,
+                    elapsed: wait_started.elapsed(),
+                };
             }
             let cancel_reason = cancel_token
                 .filter(|token| token.is_cancelled())
@@ -2701,8 +2729,45 @@ impl BslLanguageServer {
                 shadow_text_hash,
             )
             .await;
+        let producer_lifecycle_state =
+            match (supersession_key.save_cycle_sequence, shadow_text_hash) {
+                (Some(save_cycle_sequence), Some(text_hash)) => self
+                    .did_save_exact_producer_lifecycle_v2
+                    .read()
+                    .await
+                    .get(&super::super::DidSaveExactProducerKeyV2 {
+                        file_id: supersession_key.file_id,
+                        requested_version: supersession_key.requested_version,
+                        text_hash,
+                        save_cycle_sequence,
+                    })
+                    .map(|entry| entry.state),
+                _ => None,
+            };
+        let save_family_detached_artifact_available =
+            match (supersession_key.save_cycle_sequence, shadow_text_hash) {
+                (Some(save_cycle_sequence), Some(text_hash)) => self
+                    .detached_diagnostics_ready_artifact_for_target_v2(
+                        supersession_key.file_id,
+                        supersession_key.requested_version,
+                        Some(save_cycle_sequence),
+                        Some(text_hash),
+                    )
+                    .await
+                    .is_some(),
+                _ => false,
+            };
         let mut exact_inflight_control = None;
-        let ready_snapshot_task_state = if ready_state.is_some() {
+        let ready_snapshot_task_state = if save_family_detached_artifact_available
+            && matches!(
+                producer_lifecycle_state,
+                Some(
+                    super::super::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished
+                        | super::super::DidSaveExactProducerLifecycleStateV2::FullyMaterialized
+                )
+            ) {
+            ReadySnapshotTaskStateV2::InFlightSameVersion
+        } else if ready_state.is_some() {
             ReadySnapshotTaskStateV2::ReadySameVersion
         } else {
             let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
@@ -2714,14 +2779,12 @@ impl BslLanguageServer {
                         .unwrap_or_else(|poisoned| poisoned.into_inner())
                         .clone();
                     if target.requested_version == supersession_key.requested_version
-                        && shadow_text_hash.map_or(true, |text_hash| target.text_hash == text_hash)
+                        && shadow_text_hash.is_none_or(|text_hash| target.text_hash == text_hash)
                     {
                         exact_inflight_control = Some(Arc::clone(&task.control));
                         match target.source {
                             super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => {
-                                (target.save_cycle_sequence == supersession_key.save_cycle_sequence)
-                                    .then_some(ReadySnapshotTaskStateV2::InFlightSameVersion)
-                                    .unwrap_or(ReadySnapshotTaskStateV2::Absent)
+                                if target.save_cycle_sequence == supersession_key.save_cycle_sequence { ReadySnapshotTaskStateV2::InFlightSameVersion } else { ReadySnapshotTaskStateV2::Absent }
                             }
                             super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen
                             | super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => {
@@ -2733,6 +2796,11 @@ impl BslLanguageServer {
                     } else {
                         ReadySnapshotTaskStateV2::InFlightOtherVersion
                     }
+                }
+                None if producer_lifecycle_state
+                    .is_some_and(|state| state.is_still_current_producer()) =>
+                {
+                    ReadySnapshotTaskStateV2::InFlightSameVersion
                 }
                 None => ReadySnapshotTaskStateV2::Absent,
             }
@@ -2755,6 +2823,7 @@ impl BslLanguageServer {
             });
         DiagnosticsSaveFollowupBranchContextV2 {
             ready_snapshot_task_state,
+            producer_lifecycle_state,
             shadow_state_available: shadow_state.is_some(),
             shadow_text_hash,
             ready_snapshot_phase_attribution,
@@ -2776,6 +2845,7 @@ impl BslLanguageServer {
             )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_diagnostics_save_followup_wait_state_v2(
         &self,
         uri: &Url,
@@ -2827,6 +2897,7 @@ impl BslLanguageServer {
         self.record_diagnostics_save_timeline_followup_blocker_reason(uri, cycle_key, reason);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn record_diagnostics_save_followup_probe_state_v2(
         &self,
         uri: &Url,
@@ -2834,6 +2905,7 @@ impl BslLanguageServer {
         ready_snapshot_zero_probe: Option<ReadyParseSnapshotProbeOutcomeV2>,
         ready_snapshot_wait_probe: Option<ReadyParseSnapshotProbeOutcomeV2>,
         ready_snapshot_task_state: Option<ReadySnapshotTaskStateV2>,
+        producer_lifecycle_state: Option<super::super::DidSaveExactProducerLifecycleStateV2>,
         shadow_state_available: Option<bool>,
         ready_snapshot_phase_attribution: Option<DiagnosticsReadySnapshotPhaseAttributionV2>,
     ) {
@@ -2851,6 +2923,13 @@ impl BslLanguageServer {
             shadow_state_available,
             ready_snapshot_phase_attribution,
         );
+        if let Some(producer_lifecycle_state) = producer_lifecycle_state {
+            self.record_diagnostics_save_timeline_followup_producer_lifecycle_state(
+                uri,
+                cycle_key,
+                producer_lifecycle_state.as_str(),
+            );
+        }
     }
 
     fn record_diagnostics_save_followup_bounded_wait_result_v2(
@@ -3050,6 +3129,7 @@ impl BslLanguageServer {
         Some((control, observation))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn continue_save_followup_ready_snapshot_after_relief_timeout_v2(
         &self,
         uri: &Url,
@@ -3226,6 +3306,27 @@ impl BslLanguageServer {
                 }
                 super::DiagnosticsSaveTimelineFastlaneProgress::Pending => {}
             }
+            let expected_text_hash = self
+                .latest_document_shadow_state_v2
+                .read()
+                .await
+                .get(&supersession_key.file_id)
+                .filter(|state| state.version == supersession_key.requested_version)
+                .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
+            if supersession_key.save_cycle_sequence.is_some()
+                && expected_text_hash.is_some()
+                && self
+                    .detached_diagnostics_ready_artifact_for_target_v2(
+                        supersession_key.file_id,
+                        supersession_key.requested_version,
+                        supersession_key.save_cycle_sequence,
+                        expected_text_hash,
+                    )
+                    .await
+                    .is_some()
+            {
+                return SaveFastlaneFirstPublishWaitOutcome::DetachedReadyArtifacts;
+            }
             if cancel_token.is_some_and(|token| token.is_cancelled()) {
                 return SaveFastlaneFirstPublishWaitOutcome::NotPublished;
             }
@@ -3250,6 +3351,7 @@ impl BslLanguageServer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn try_execute_save_followup_from_shadow_state_v2(
         &self,
         uri: &Url,
@@ -3397,6 +3499,7 @@ impl BslLanguageServer {
                     );
                 }),
                 move || {
+                    let setup_started = Instant::now();
                     let mut host = bsl_analysis_v2::AnalysisHostV2::default();
                     host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
                         deps_id: deps_id.clone(),
@@ -3431,6 +3534,7 @@ impl BslLanguageServer {
                         file_text.as_ref(),
                         line_index.as_ref(),
                     ));
+                    let snapshot_with_deps_elapsed = setup_started.elapsed();
 
                     let semantic_started = Instant::now();
                     let mut semantic_parse_source = None;
@@ -3513,6 +3617,7 @@ impl BslLanguageServer {
                         observed_settings_id: settings_id.as_str().to_string(),
                         runtime_queue_wait: None,
                         apply_lag: None,
+                        snapshot_with_deps_elapsed: Some(snapshot_with_deps_elapsed),
                         syntax_elapsed: None,
                         semantic_elapsed: Some(semantic_elapsed),
                         syntax_work_mode,
@@ -3593,7 +3698,7 @@ impl BslLanguageServer {
                     reply.apply_lag,
                     None,
                     None,
-                    None,
+                    reply.snapshot_with_deps_elapsed,
                     reply.syntax_elapsed,
                     reply.semantic_elapsed,
                     reply.semantic_query_breakdown,
@@ -3654,7 +3759,7 @@ impl BslLanguageServer {
                 reply.apply_lag,
                 None,
                 None,
-                None,
+                reply.snapshot_with_deps_elapsed,
                 reply.syntax_elapsed,
                 reply.semantic_elapsed,
                 reply.semantic_query_breakdown,
@@ -3670,6 +3775,7 @@ impl BslLanguageServer {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn execute_save_followup_from_parse_snapshot_artifact_v2(
         &self,
         uri: &Url,
@@ -3684,6 +3790,7 @@ impl BslLanguageServer {
     ) -> bsl_runtime::application::DiagnosticsDisposition {
         self.coordinator
             .record_intellisense_v2_diagnostics_save_followup_semantic_path(artifact.semantic_path);
+        let outer_setup_started = Instant::now();
         let apply_lag = self
             .diagnostics_followup_apply_lag_v2(supersession_key)
             .await;
@@ -3743,169 +3850,180 @@ impl BslLanguageServer {
         let exec_started_uri = uri.clone();
         let exec_started_supersession_key = *supersession_key;
         let exec_started_apply_lag = apply_lag;
-        let followup_call =
-            bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
-                bsl_runtime::application::CpuWorkClass::Background,
-                context.origin.as_str(),
-                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
-                Some(self.coordinator.as_ref()),
-                Some(move || {
-                    queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
-                        &queued_wait_uri,
-                        &queued_wait_supersession_key,
-                        "runtime_queue_wait",
-                        None,
-                        queued_wait_apply_lag,
-                        None,
-                        None,
-                        Some("reused"),
-                        semantic_path,
-                        None,
-                        None,
-                    );
-                }),
-                Some(move |queue_wait_elapsed| {
-                    exec_started_server.record_diagnostics_save_followup_wait_state_v2(
-                        &exec_started_uri,
-                        &exec_started_supersession_key,
-                        "semantic_work",
-                        (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
-                        exec_started_apply_lag,
-                        None,
-                        None,
-                        Some("reused"),
-                        semantic_path,
-                        None,
-                        None,
-                    );
-                }),
-                move || {
-                    let mut host = bsl_analysis_v2::AnalysisHostV2::default();
-                    host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
-                        deps_id: deps_id.clone(),
-                        deps,
-                    });
-                    host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
-                        settings_id: settings_id.clone(),
-                        diagnostics_detail_level,
-                    });
-                    host.apply_change(bsl_analysis_v2::Change::SetFileWithSnapshot {
-                        file_id,
-                        text: artifact_text.clone(),
-                        version: requested_version,
-                        path: path_for_blocking,
-                        parse_snapshot,
-                    });
+        let pre_semantic_setup_base_elapsed =
+            artifact.pre_exec_elapsed + outer_setup_started.elapsed();
+        let run_followup = move || {
+            let setup_started = Instant::now();
+            let mut host = bsl_analysis_v2::AnalysisHostV2::default();
+            host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
+                deps_id: deps_id.clone(),
+                deps,
+            });
+            host.apply_change(bsl_analysis_v2::Change::SetSettingsSnapshot {
+                settings_id: settings_id.clone(),
+                diagnostics_detail_level,
+            });
+            host.apply_change(bsl_analysis_v2::Change::SetFileWithSnapshot {
+                file_id,
+                text: artifact_text.clone(),
+                version: requested_version,
+                path: path_for_blocking,
+                parse_snapshot,
+            });
 
-                    let analysis = host.snapshot();
-                    let file_text = artifact_text.clone();
-                    let line_index = artifact_line_index.clone();
+            let analysis = host.snapshot();
+            let file_text = artifact_text.clone();
+            let line_index = artifact_line_index.clone();
 
-                    let mut diagnostics = Vec::new();
-                    diagnostics.extend(syntax_errors_to_diagnostics(
-                        artifact_syntax_errors.as_ref(),
-                        &uri_for_blocking,
+            let mut diagnostics = Vec::new();
+            diagnostics.extend(syntax_errors_to_diagnostics(
+                artifact_syntax_errors.as_ref(),
+                &uri_for_blocking,
+                file_text.as_ref(),
+                line_index.as_ref(),
+            ));
+            let snapshot_with_deps_elapsed =
+                pre_semantic_setup_base_elapsed + setup_started.elapsed();
+
+            let semantic_started = Instant::now();
+            let mut semantic_parse_source = None;
+            let mut semantic_ir_source = None;
+            let mut semantic_materialization_path = None;
+            let mut semantic_query_breakdown = None;
+            let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
+                &context_for_blocking,
+                bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
+                &analysis,
+                Some(coordinator_for_blocking.as_ref()),
+                |analysis| {
+                    if flow_sensitive_semantic {
+                        analysis.semantic_diagnostics_flow_sensitive_profiled(file_id)
+                    } else {
+                        analysis.semantic_diagnostics_profiled(file_id)
+                    }
+                },
+            )
+            .map_err(|_| ())?;
+            let semantic_elapsed = semantic_started.elapsed();
+            let duration_from_profile_ms =
+                |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
+            if let Some(profiled) = query {
+                semantic_query_breakdown = Some(
+                    SemanticDiagnosticsQueryBreakdownV2::from_profiled_result(&profiled),
+                );
+                coordinator_for_blocking
+                    .record_intellisense_v2_semantic_diagnostics_query_breakdown(
+                        duration_from_profile_ms(profiled.profile.inputs_ms),
+                        duration_from_profile_ms(profiled.profile.parse_result_ms),
+                        duration_from_profile_ms(profiled.profile.ir_ms),
+                        duration_from_profile_ms(profiled.profile.collect_ms),
+                        (profiled.profile.flow_sensitive_ms > 0)
+                            .then(|| duration_from_profile_ms(profiled.profile.flow_sensitive_ms)),
+                    );
+                if let Some(profile) = profiled.diagnostics_only_semantic_facts_build_profile {
+                    coordinator_for_blocking
+                        .record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
+                            profile,
+                        );
+                }
+                if let Some(path) = profiled.profile.materialization_path {
+                    coordinator_for_blocking
+                        .record_intellisense_v2_semantic_diagnostics_materialization_path(
+                            path.as_str(),
+                        );
+                }
+                semantic_parse_source = profiled.profile.parse_source.map(|source| source.as_str());
+                semantic_ir_source = profiled.profile.ir_source.map(|source| source.as_str());
+                semantic_materialization_path = profiled
+                    .profile
+                    .materialization_path
+                    .map(|path| path.as_str());
+                for error in profiled.diagnostics.iter() {
+                    if !show_hints
+                        && matches!(
+                            error.severity,
+                            bsl_shared::domain::types::DiagnosticSeverity::Hint
+                        )
+                    {
+                        continue;
+                    }
+                    diagnostics.push(semantic_error_to_diagnostic(
+                        error,
                         file_text.as_ref(),
                         line_index.as_ref(),
                     ));
+                }
+            }
 
-                    let semantic_started = Instant::now();
-                    let mut semantic_parse_source = None;
-                    let mut semantic_ir_source = None;
-                    let mut semantic_materialization_path = None;
-                    let mut semantic_query_breakdown = None;
-                    let query = bsl_runtime::application::IntellisenseV2Facade::run_optional_query(
-                        &context_for_blocking,
-                        bsl_runtime::application::ObservabilityStage::SemanticDiagnosticsQuery,
-                        &analysis,
-                        Some(coordinator_for_blocking.as_ref()),
-                        |analysis| {
-                            if flow_sensitive_semantic {
-                                analysis.semantic_diagnostics_flow_sensitive_profiled(file_id)
-                            } else {
-                                analysis.semantic_diagnostics_profiled(file_id)
-                            }
-                        },
-                    )
-                    .map_err(|_| ())?;
-                    let semantic_elapsed = semantic_started.elapsed();
-                    let duration_from_profile_ms =
-                        |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
-                    if let Some(profiled) = query {
-                        semantic_query_breakdown =
-                            Some(SemanticDiagnosticsQueryBreakdownV2::from_profiled_result(
-                                &profiled,
-                            ));
-                        coordinator_for_blocking
-                            .record_intellisense_v2_semantic_diagnostics_query_breakdown(
-                                duration_from_profile_ms(profiled.profile.inputs_ms),
-                                duration_from_profile_ms(profiled.profile.parse_result_ms),
-                                duration_from_profile_ms(profiled.profile.ir_ms),
-                                duration_from_profile_ms(profiled.profile.collect_ms),
-                                (profiled.profile.flow_sensitive_ms > 0).then(|| {
-                                    duration_from_profile_ms(profiled.profile.flow_sensitive_ms)
-                                }),
-                            );
-                        if let Some(profile) = profiled.diagnostics_only_semantic_facts_build_profile
-                        {
-                            coordinator_for_blocking
-                                .record_intellisense_v2_semantic_diagnostics_diagnostics_only_semantic_facts_breakdown(
-                                    profile,
-                                );
-                        }
-                        if let Some(path) = profiled.profile.materialization_path {
-                            coordinator_for_blocking
-                                .record_intellisense_v2_semantic_diagnostics_materialization_path(
-                                    path.as_str(),
-                                );
-                        }
-                        semantic_parse_source =
-                            profiled.profile.parse_source.map(|source| source.as_str());
-                        semantic_ir_source =
-                            profiled.profile.ir_source.map(|source| source.as_str());
-                        semantic_materialization_path = profiled
-                            .profile
-                            .materialization_path
-                            .map(|path| path.as_str());
-                        for error in profiled.diagnostics.iter() {
-                            if !show_hints
-                                && matches!(
-                                    error.severity,
-                                    bsl_shared::domain::types::DiagnosticSeverity::Hint
-                                )
-                            {
-                                continue;
-                            }
-                            diagnostics.push(semantic_error_to_diagnostic(
-                                error,
-                                file_text.as_ref(),
-                                line_index.as_ref(),
-                            ));
-                        }
-                    }
-
-                    Ok::<SaveFollowupReadyArtifactsReply, ()>(SaveFollowupReadyArtifactsReply {
-                        diagnostics,
-                        observed_deps_id: deps_id.as_str().to_string(),
-                        observed_settings_id: settings_id.as_str().to_string(),
-                        runtime_queue_wait: None,
-                        apply_lag: None,
-                        syntax_elapsed: None,
-                        semantic_elapsed: Some(semantic_elapsed),
-                        syntax_work_mode: Some("reused"),
-                        semantic_path,
-                        semantic_parse_source,
-                        semantic_ir_source,
-                        semantic_materialization_path,
-                        semantic_query_breakdown,
-                    })
-                },
+            Ok::<SaveFollowupReadyArtifactsReply, ()>(SaveFollowupReadyArtifactsReply {
+                diagnostics,
+                observed_deps_id: deps_id.as_str().to_string(),
+                observed_settings_id: settings_id.as_str().to_string(),
+                runtime_queue_wait: None,
+                apply_lag: None,
+                snapshot_with_deps_elapsed: Some(snapshot_with_deps_elapsed),
+                syntax_elapsed: None,
+                semantic_elapsed: Some(semantic_elapsed),
+                syntax_work_mode: Some("reused"),
+                semantic_path,
+                semantic_parse_source,
+                semantic_ir_source,
+                semantic_materialization_path,
+                semantic_query_breakdown,
+            })
+        };
+        let (followup_join_result, runtime_queue_wait) = if matches!(
+            tokio::runtime::Handle::current().runtime_flavor(),
+            tokio::runtime::RuntimeFlavor::MultiThread
+        ) {
+            (Ok(tokio::task::block_in_place(run_followup)), None)
+        } else {
+            let followup_call =
+                bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
+                    bsl_runtime::application::CpuWorkClass::Background,
+                    context.origin.as_str(),
+                    Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
+                    Some(self.coordinator.as_ref()),
+                    Some(move || {
+                        queued_wait_server.record_diagnostics_save_followup_wait_state_v2(
+                            &queued_wait_uri,
+                            &queued_wait_supersession_key,
+                            "runtime_queue_wait",
+                            None,
+                            queued_wait_apply_lag,
+                            None,
+                            None,
+                            Some("reused"),
+                            semantic_path,
+                            None,
+                            None,
+                        );
+                    }),
+                    Some(move |queue_wait_elapsed| {
+                        exec_started_server.record_diagnostics_save_followup_wait_state_v2(
+                            &exec_started_uri,
+                            &exec_started_supersession_key,
+                            "semantic_work",
+                            (queue_wait_elapsed > Duration::ZERO).then_some(queue_wait_elapsed),
+                            exec_started_apply_lag,
+                            None,
+                            None,
+                            Some("reused"),
+                            semantic_path,
+                            None,
+                            None,
+                        );
+                    }),
+                    run_followup,
+                )
+                .await;
+            (
+                followup_call.join_result,
+                Self::sum_nonzero_durations([Some(followup_call.queue_wait_elapsed)]),
             )
-            .await;
-        let runtime_queue_wait =
-            Self::sum_nonzero_durations([Some(followup_call.queue_wait_elapsed)]);
+        };
 
-        let mut reply = match followup_call.join_result {
+        let mut reply = match followup_join_result {
             Ok(Ok(reply)) => reply,
             Ok(Err(())) | Err(_) => {
                 return self
@@ -3969,7 +4087,7 @@ impl BslLanguageServer {
                     reply.apply_lag,
                     None,
                     None,
-                    None,
+                    reply.snapshot_with_deps_elapsed,
                     reply.syntax_elapsed,
                     reply.semantic_elapsed,
                     reply.semantic_query_breakdown,
@@ -4021,7 +4139,7 @@ impl BslLanguageServer {
             reply.apply_lag,
             None,
             None,
-            None,
+            reply.snapshot_with_deps_elapsed,
             reply.syntax_elapsed,
             reply.semantic_elapsed,
             reply.semantic_query_breakdown,
@@ -4036,6 +4154,7 @@ impl BslLanguageServer {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn try_execute_save_followup_from_ready_artifacts_v2(
         &self,
         uri: &Url,
@@ -4049,6 +4168,7 @@ impl BslLanguageServer {
         flow_sensitive_semantic: bool,
         followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
     ) -> SaveFollowupReadyArtifactsAttemptV2 {
+        let attempt_started = Instant::now();
         if !matches!(
             (trigger, supersession_key.profile),
             (
@@ -4134,6 +4254,7 @@ impl BslLanguageServer {
                 ReadyParseSnapshotProbeSlotV2::ReliefValve => None,
             },
             Some(branch_context.ready_snapshot_task_state),
+            branch_context.producer_lifecycle_state,
             Some(branch_context.shadow_state_available),
             ready_snapshot_phase_attribution,
         );
@@ -4153,6 +4274,7 @@ impl BslLanguageServer {
                         parse_snapshot: ready_state.parse_snapshot,
                         syntax_errors_complete: ready_state.syntax_errors_complete,
                         semantic_path: "ready_artifacts",
+                        pre_exec_elapsed: attempt_started.elapsed(),
                     },
                 )
                 .await,
@@ -4174,6 +4296,7 @@ impl BslLanguageServer {
                         parse_snapshot: detached_artifact.parse_snapshot,
                         syntax_errors_complete: detached_artifact.syntax_errors_complete,
                         semantic_path: "detached_ready_artifacts",
+                        pre_exec_elapsed: attempt_started.elapsed(),
                     },
                 )
                 .await,
@@ -4182,6 +4305,7 @@ impl BslLanguageServer {
         SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(probe_outcome)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
         &self,
         uri: &Url,
@@ -4422,7 +4546,13 @@ impl BslLanguageServer {
         let wait_for_file_version_elapsed = None;
         let snapshot_with_deps_elapsed = None;
 
-        let (diagnostics, syntax_errors, syntax_mode, syntax_elapsed) = if let Some(result) = self
+        let (
+            diagnostics,
+            syntax_errors,
+            syntax_mode,
+            syntax_elapsed,
+            syntax_runtime_queue_wait_elapsed,
+        ) = if let Some(result) = self
             .try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
                 uri,
                 file_id,
@@ -4430,7 +4560,7 @@ impl BslLanguageServer {
             )
             .await
         {
-            result
+            (result.0, result.1, result.2, result.3, None)
         } else if let Some(result) = self
             .try_collect_save_fastlane_diagnostics_from_ready_parse_snapshot_v2(
                 uri,
@@ -4439,7 +4569,7 @@ impl BslLanguageServer {
             )
             .await
         {
-            result
+            (result.0, result.1, result.2, result.3, None)
         } else {
             let Some(shadow_state) = self
                 .latest_document_shadow_state_v2
@@ -4519,7 +4649,7 @@ impl BslLanguageServer {
             let uri_for_parse = uri.clone();
             let shadow_text = shadow_state.text;
             // Save freshness must not sit behind unrelated shared interactive blocking work.
-            let syntax_result = tokio::task::spawn_blocking(move || {
+            let run_syntax_parse = move || {
                 maybe_inject_save_fastlane_shadow_parse_delay_for_test();
                 let started = Instant::now();
                 let syntax_errors = bsl_syntax::syntax_errors_only(shadow_text.as_ref());
@@ -4537,13 +4667,38 @@ impl BslLanguageServer {
                     }
                     Err(err) => Err((err, elapsed)),
                 }
-            })
-            .await;
+            };
+            let (syntax_result, syntax_runtime_queue_wait_elapsed) = if matches!(
+                tokio::runtime::Handle::current().runtime_flavor(),
+                tokio::runtime::RuntimeFlavor::MultiThread
+            ) {
+                (Ok(tokio::task::block_in_place(run_syntax_parse)), None)
+            } else {
+                let syntax_call =
+                        bsl_runtime::application::spawn_bounded_blocking_with_class_observed_call_origin_lane_hooks(
+                    bsl_runtime::application::CpuWorkClass::Interactive,
+                    "lsp",
+                    Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup),
+                    Some(self.coordinator.as_ref()),
+                    None::<fn()>,
+                    None::<fn(Duration)>,
+                    run_syntax_parse
+                )
+                .await;
+                (
+                    syntax_call.join_result,
+                    Some(syntax_call.queue_wait_elapsed),
+                )
+            };
 
             match syntax_result {
-                Ok(Ok((syntax_errors, diagnostics, syntax_elapsed))) => {
-                    (diagnostics, syntax_errors, "other", syntax_elapsed)
-                }
+                Ok(Ok((syntax_errors, diagnostics, syntax_elapsed))) => (
+                    diagnostics,
+                    syntax_errors,
+                    "other",
+                    syntax_elapsed,
+                    syntax_runtime_queue_wait_elapsed,
+                ),
                 Ok(Err((err, syntax_elapsed))) => {
                     self.coordinator
                         .record_intellisense_v2_syntax_diagnostics_query_latency_with_origin_and_mode(
@@ -4569,7 +4724,7 @@ impl BslLanguageServer {
                             trigger,
                             disposition,
                             None,
-                            None,
+                            syntax_runtime_queue_wait_elapsed,
                             None,
                             blocking_queue_wait_elapsed,
                             wait_for_file_version_elapsed,
@@ -4616,7 +4771,7 @@ impl BslLanguageServer {
                             trigger,
                             disposition,
                             None,
-                            None,
+                            syntax_runtime_queue_wait_elapsed,
                             None,
                             blocking_queue_wait_elapsed,
                             wait_for_file_version_elapsed,
@@ -4658,7 +4813,7 @@ impl BslLanguageServer {
                     trigger,
                     disposition,
                     None,
-                    None,
+                    syntax_runtime_queue_wait_elapsed,
                     None,
                     blocking_queue_wait_elapsed,
                     wait_for_file_version_elapsed,
@@ -4694,7 +4849,7 @@ impl BslLanguageServer {
             trigger,
             disposition,
             Some("syntax_only"),
-            None,
+            syntax_runtime_queue_wait_elapsed,
             None,
             blocking_queue_wait_elapsed,
             wait_for_file_version_elapsed,
@@ -4786,6 +4941,32 @@ impl BslLanguageServer {
             .await;
     }
 
+    pub(crate) async fn run_diagnostics_save_profile_immediate_v2(
+        &self,
+        uri: Url,
+        file_id: V2FileId,
+        expected_version: i32,
+        diagnostics_generation: u64,
+        save_cycle_sequence: u64,
+        profile: bsl_runtime::application::DiagnosticsProfile,
+    ) {
+        let supersession_key = super::super::DiagnosticsSupersessionKeyV2 {
+            file_id,
+            profile,
+            diagnostics_generation,
+            save_cycle_sequence: Some(save_cycle_sequence),
+            requested_version: expected_version,
+        };
+        let _ = self
+            .execute_diagnostics_profile_once_v2(
+                &uri,
+                supersession_key,
+                bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                None,
+            )
+            .await;
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn schedule_diagnostics_profile_v2(
         &self,
@@ -4807,6 +4988,47 @@ impl BslLanguageServer {
             requested_version: expected_version,
         };
         let mut tasks = self.diagnostics_tasks_v2.lock().await;
+        let preempt_existing_for_save_followup = tasks.get(&slot_key).is_some_and(|task| {
+            matches!(
+                (trigger, profile),
+                (
+                    bsl_runtime::application::DiagnosticsTrigger::DidSave,
+                    bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+                )
+            ) && !matches!(
+                task.trigger,
+                bsl_runtime::application::DiagnosticsTrigger::DidSave
+            )
+        });
+        if preempt_existing_for_save_followup {
+            if let Some(task) = tasks.remove(&slot_key) {
+                let reason = super::super::DiagnosticsCancellationReasonV2::for_supersession(
+                    task.supersession_key,
+                    diagnostics_generation,
+                    expected_version,
+                );
+                task.cancel_token.cancel(reason);
+                self.record_diagnostics_pipeline_event_v2(
+                    task.trigger,
+                    task.supersession_key.profile,
+                    reason.to_disposition(),
+                );
+                if let Some(save_cycle_sequence) = task.supersession_key.save_cycle_sequence {
+                    self.record_diagnostics_save_timeline_profile_disposition(
+                        &uri,
+                        super::super::DiagnosticsSaveTimelineCycleKey {
+                            file_id: task.supersession_key.file_id,
+                            diagnostics_generation: task.supersession_key.diagnostics_generation,
+                            save_cycle_sequence,
+                            requested_version: task.supersession_key.requested_version,
+                        },
+                        task.supersession_key.profile,
+                        reason.to_disposition(),
+                    );
+                }
+                task.handle.abort();
+            }
+        }
         if let Some(task) = tasks.get_mut(&slot_key) {
             if task.supersession_key != supersession_key {
                 let reason = super::super::DiagnosticsCancellationReasonV2::for_supersession(
@@ -5035,10 +5257,31 @@ impl BslLanguageServer {
                 None,
                 None,
             );
+            let save_fastlane_gate_wait_started = Instant::now();
+            let save_fastlane_first_publish_outcome = self
+                .wait_for_save_fastlane_first_publish_v2(uri, &supersession_key, cancel_token)
+                .await;
+            self.record_diagnostics_save_timeline_followup_save_fastlane_gate_result(
+                uri,
+                super::super::DiagnosticsSaveTimelineCycleKey {
+                    file_id: supersession_key.file_id,
+                    diagnostics_generation: supersession_key.diagnostics_generation,
+                    save_cycle_sequence: supersession_key
+                        .save_cycle_sequence
+                        .expect("didSave follow-up cycle sequence"),
+                    requested_version: supersession_key.requested_version,
+                },
+                save_fastlane_first_publish_outcome.as_str(),
+                save_fastlane_gate_wait_started.elapsed(),
+            );
             let save_fastlane_first_publish_completed = matches!(
-                self.wait_for_save_fastlane_first_publish_v2(uri, &supersession_key, cancel_token)
-                    .await,
+                save_fastlane_first_publish_outcome,
                 SaveFastlaneFirstPublishWaitOutcome::Published
+            );
+            let save_fastlane_gate_open = matches!(
+                save_fastlane_first_publish_outcome,
+                SaveFastlaneFirstPublishWaitOutcome::Published
+                    | SaveFastlaneFirstPublishWaitOutcome::DetachedReadyArtifacts
             );
             match self
                 .acquire_did_save_followup_lane_v2(uri, &supersession_key, trigger, cancel_token)
@@ -5048,8 +5291,22 @@ impl BslLanguageServer {
                     guard,
                     queue_wait_elapsed,
                 } => {
+                    if let Some(queue_wait_elapsed) = queue_wait_elapsed {
+                        self.record_diagnostics_save_timeline_followup_admission_queue_wait(
+                            uri,
+                            super::super::DiagnosticsSaveTimelineCycleKey {
+                                file_id: supersession_key.file_id,
+                                diagnostics_generation: supersession_key.diagnostics_generation,
+                                save_cycle_sequence: supersession_key
+                                    .save_cycle_sequence
+                                    .expect("didSave follow-up cycle sequence"),
+                                requested_version: supersession_key.requested_version,
+                            },
+                            queue_wait_elapsed,
+                        );
+                    }
                     followup_admission_queue_wait_elapsed = queue_wait_elapsed;
-                    did_save_followup_lane_guard = Some(guard);
+                    did_save_followup_lane_guard = Some(*guard);
                 }
                 DidSaveFollowupAdmissionOutcome::Disposition {
                     disposition,
@@ -5094,7 +5351,7 @@ impl BslLanguageServer {
                     .await
                     .is_some();
 
-            if save_fastlane_first_publish_completed {
+            if save_fastlane_gate_open {
                 let branch_context = self
                     .diagnostics_save_followup_branch_context_v2(&supersession_key)
                     .await;
@@ -5108,6 +5365,7 @@ impl BslLanguageServer {
                     None,
                     None,
                     Some(branch_context.ready_snapshot_task_state),
+                    branch_context.producer_lifecycle_state,
                     Some(branch_context.shadow_state_available),
                     branch_context.ready_snapshot_phase_attribution,
                 );

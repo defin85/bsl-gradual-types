@@ -344,6 +344,8 @@ pub struct BslLanguageServer {
         Arc<RwLock<HashMap<V2FileId, ReadyParseSnapshotStateV2>>>,
     pub(crate) latest_detached_diagnostics_ready_artifacts_v2:
         Arc<RwLock<HashMap<V2FileId, DetachedDiagnosticsReadyArtifactV2>>>,
+    pub(crate) did_save_exact_producer_lifecycle_v2:
+        Arc<RwLock<HashMap<DidSaveExactProducerKeyV2, DidSaveExactProducerLifecycleEntryV2>>>,
     pub(crate) latest_snapshot_failures_v2:
         Arc<RwLock<HashMap<V2FileId, SnapshotBuildFailureStateV2>>>,
     pub(crate) latest_snapshot_status_v2: Arc<RwLock<HashMap<V2FileId, SnapshotReadinessDto>>>,
@@ -415,6 +417,54 @@ pub(crate) struct DiagnosticsSaveTimelineCycleKey {
     pub diagnostics_generation: u64,
     pub save_cycle_sequence: u64,
     pub requested_version: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct DidSaveExactProducerKeyV2 {
+    pub file_id: V2FileId,
+    pub requested_version: i32,
+    pub text_hash: [u8; 32],
+    pub save_cycle_sequence: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DidSaveExactProducerLifecycleStateV2 {
+    Admitted,
+    Started,
+    DetachedDiagnosticsReadyPublished,
+    FullyMaterialized,
+    Superseded,
+    Cancelled,
+    Failed,
+}
+
+impl DidSaveExactProducerLifecycleStateV2 {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Admitted => "admitted",
+            Self::Started => "started",
+            Self::DetachedDiagnosticsReadyPublished => "detached_diagnostics_ready_published",
+            Self::FullyMaterialized => "fully_materialized",
+            Self::Superseded => "superseded",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn is_still_current_producer(self) -> bool {
+        matches!(self, Self::Admitted | Self::Started)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct DidSaveExactProducerLifecycleEntryV2 {
+    pub state: DidSaveExactProducerLifecycleStateV2,
+}
+
+impl DidSaveExactProducerLifecycleEntryV2 {
+    pub(crate) fn new(state: DidSaveExactProducerLifecycleStateV2) -> Self {
+        Self { state }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -544,7 +594,7 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionV2 {
 }
 
 impl ReadyParseSnapshotPhaseAttributionV2 {
-    pub(crate) fn dominant_phase(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_phase(&self) -> Option<(&'static str, u64)> {
         [
             ("parse_exec", self.parse_exec_ms),
             (
@@ -562,7 +612,7 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
         .max_by_key(|(_, duration_ms)| *duration_ms)
     }
 
-    pub(crate) fn dominant_parse_exec_subphase(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_parse_exec_subphase(&self) -> Option<(&'static str, u64)> {
         [
             ("core_parse_build", self.parse_exec_core_parse_build_ms),
             (
@@ -575,7 +625,7 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
         .max_by_key(|(_, duration_ms)| *duration_ms)
     }
 
-    pub(crate) fn dominant_core_build_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_core_build_checkpoint(&self) -> Option<(&'static str, u64)> {
         [
             (
                 "pre_parse_setup",
@@ -603,7 +653,7 @@ impl ReadyParseSnapshotPhaseAttributionV2 {
         .max_by_key(|(_, duration_ms)| *duration_ms)
     }
 
-    pub(crate) fn dominant_assembly_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_assembly_checkpoint(&self) -> Option<(&'static str, u64)> {
         [
             (
                 "program_lowering",
@@ -653,7 +703,7 @@ pub(crate) struct ReadyParseSnapshotPhaseAttributionSnapshotV2 {
 }
 
 impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
-    pub(crate) fn current_program_conversion_ms(self: &Self) -> Option<u64> {
+    pub(crate) fn current_program_conversion_ms(&self) -> Option<u64> {
         let lowering_ms = match self.current_assembly_checkpoint {
             Some(ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering) => Some(
                 self.completed
@@ -685,7 +735,7 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
         }
     }
 
-    pub(crate) fn dominant_phase(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_phase(&self) -> Option<(&'static str, u64)> {
         let completed = self.completed.dominant_phase();
         let current = self
             .current_phase
@@ -700,7 +750,7 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
         }
     }
 
-    pub(crate) fn dominant_parse_exec_subphase(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_parse_exec_subphase(&self) -> Option<(&'static str, u64)> {
         let completed = self.completed.dominant_parse_exec_subphase();
         let current = matches!(
             self.current_phase,
@@ -720,7 +770,7 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
         }
     }
 
-    pub(crate) fn dominant_core_build_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_core_build_checkpoint(&self) -> Option<(&'static str, u64)> {
         let completed = self.completed.dominant_core_build_checkpoint();
         let current = matches!(
             (self.current_phase, self.current_parse_exec_subphase,),
@@ -743,7 +793,7 @@ impl ReadyParseSnapshotPhaseAttributionSnapshotV2 {
         }
     }
 
-    pub(crate) fn dominant_assembly_checkpoint(self: &Self) -> Option<(&'static str, u64)> {
+    pub(crate) fn dominant_assembly_checkpoint(&self) -> Option<(&'static str, u64)> {
         let completed = self.completed.dominant_assembly_checkpoint();
         let current = matches!(
             (
@@ -1206,6 +1256,7 @@ pub(crate) struct CurrentRevisionHeadPrecomputeTaskV2 {
 
 type CurrentRevisionHeadPrecomputeTasksV2 = HashMap<V2FileId, CurrentRevisionHeadPrecomputeTaskV2>;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BackgroundParseSnapshotApplyTaskSourceV2 {
     DidOpen,
@@ -1259,6 +1310,34 @@ pub(crate) struct BackgroundParseSnapshotApplyTargetV2 {
     pub epoch: u64,
 }
 
+impl DidSaveExactProducerKeyV2 {
+    pub(crate) fn from_parts(
+        file_id: V2FileId,
+        requested_version: i32,
+        text_hash: [u8; 32],
+        save_cycle_sequence: Option<u64>,
+    ) -> Option<Self> {
+        Some(Self {
+            file_id,
+            requested_version,
+            text_hash,
+            save_cycle_sequence: save_cycle_sequence?,
+        })
+    }
+
+    pub(crate) fn from_target(
+        file_id: V2FileId,
+        target: &BackgroundParseSnapshotApplyTargetV2,
+    ) -> Option<Self> {
+        Self::from_parts(
+            file_id,
+            target.requested_version,
+            target.text_hash,
+            target.save_cycle_sequence,
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BackgroundParseSnapshotApplyTaskPhaseV2 {
     Waiting = 1,
@@ -1293,6 +1372,7 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
 }
 
 impl BackgroundParseSnapshotApplyTaskControlV2 {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::new_with_work_class(bsl_runtime::application::CpuWorkClass::Background)
     }

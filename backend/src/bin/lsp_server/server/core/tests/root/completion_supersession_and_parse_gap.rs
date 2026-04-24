@@ -1,5 +1,4 @@
 #[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_delay() {
     struct EnvVarGuard {
@@ -190,8 +189,6 @@ async fn p33_completion_current_revision_head_ignores_did_change_inline_parse_de
     drain_task.abort();
 }
 
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn p33_same_file_completion_supersession_releases_active_turn_during_response_build() {

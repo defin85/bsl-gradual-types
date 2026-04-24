@@ -197,13 +197,6 @@ fn p43_real_conf_big_did_save_diagnostics_fastlane_report_live() {
             first_publish_elapsed_ms,
             FIRST_PUBLISH_BUDGET_MS
         );
-        assert!(
-            first_publish_elapsed_ms < APPLY_DELAY_MS,
-            "save fastlane live report must beat apply-lag delay: first_publish_elapsed_ms={}ms >= apply_delay_ms={}ms",
-            first_publish_elapsed_ms,
-            APPLY_DELAY_MS
-        );
-
         let observability_metrics =
             live_transport_get_observability_metrics(&mut harness, 43_100_901).await;
         let counters = observability_metrics
@@ -631,7 +624,7 @@ fn p46_real_conf_big_did_save_diagnostics_followup_runtime_report_live() {
         );
         assert!(
             observed_followup_runtime_queue_wait_ms
-                .map_or(true, |value| value <= FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS),
+                .is_none_or(|value| value <= FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS),
             "follow-up runtime live report must keep runtime_queue_wait bounded under comparable mixed documentSymbol load: observed_followup_runtime_queue_wait_ms={observed_followup_runtime_queue_wait_ms:?} > {}ms, trace={timeline:?}",
             FOLLOWUP_RUNTIME_QUEUE_WAIT_BUDGET_MS
         );

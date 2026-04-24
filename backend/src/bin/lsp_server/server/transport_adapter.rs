@@ -1463,9 +1463,7 @@ fn completion_queue_insert_position(
         return None;
     }
     let uri = request_text_document_uri(&scheduled_request.request)?;
-    if super::request_context::same_file_ingress_token_publication_for_uri(uri).is_none() {
-        return None;
-    }
+    super::request_context::same_file_ingress_token_publication_for_uri(uri)?;
     Some(
         queued_requests
             .iter()
@@ -1485,9 +1483,7 @@ fn token_ready_completion_position(
                 return None;
             }
             let uri = request_text_document_uri(&scheduled.request)?;
-            if super::request_context::same_file_ingress_token_publication_for_uri(uri).is_none() {
-                return None;
-            }
+            super::request_context::same_file_ingress_token_publication_for_uri(uri)?;
             let has_earlier_related_work = queued_requests
                 .iter()
                 .take(position)

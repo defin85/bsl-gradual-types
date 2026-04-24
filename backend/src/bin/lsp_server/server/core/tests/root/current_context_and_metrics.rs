@@ -1,12 +1,4 @@
 #[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
 async fn p33_get_current_context_parse_delay_does_not_delay_concurrent_completion_live_transport() {
     struct EnvVarGuard {

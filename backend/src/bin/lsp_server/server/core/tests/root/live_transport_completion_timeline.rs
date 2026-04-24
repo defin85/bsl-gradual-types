@@ -1,16 +1,3 @@
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-
 fn create_diagnostics_save_timeline_test_server() -> BslLanguageServer {
     let coordinator = Arc::new(SystemCoordinator::new());
     let holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
@@ -52,21 +39,7 @@ async fn diagnostics_save_timeline_trace_for_test(
         .expect("matching diagnostics save timeline trace")
 }
 
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[cfg(unix)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
-#[allow(clippy::await_holding_lock)]
 #[allow(clippy::await_holding_lock)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn p24_live_transport_completion_timeline_exposes_handoff_aware_server_edge_split() {

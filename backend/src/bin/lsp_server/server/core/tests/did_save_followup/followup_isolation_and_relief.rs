@@ -299,14 +299,14 @@ async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_res
         full_publish
             .get("runtime_queue_wait_ms")
             .and_then(|value| value.as_u64())
-            .map_or(true, |value| value < 250),
+            .is_none_or(|value| value < 250),
         "isolated didSave follow-up must keep any residual runtime queue wait bounded while publishing under generic background pressure, trace={trace:?}"
     );
     assert!(
         trace
             .get("followup_runtime_queue_wait_ms")
             .and_then(|value| value.as_u64())
-            .map_or(true, |value| value < 250),
+            .is_none_or(|value| value < 250),
         "top-level didSave follow-up trace must not surface large generic runtime queue wait after isolation, trace={trace:?}"
     );
     assert!(

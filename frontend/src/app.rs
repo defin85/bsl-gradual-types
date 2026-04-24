@@ -742,56 +742,58 @@ pub fn App() -> impl IntoView {
 mod tests {
     use super::*;
 
-    fn snapshot_entry(
+    struct SnapshotEntryFixture {
         state: SnapshotReadinessStateDto,
         exact: bool,
         requested_version: Option<i64>,
         ready_version: Option<i64>,
         analysis_revision: Option<u64>,
         trigger: Option<SnapshotTriggerDto>,
-        fallback_reason: Option<&str>,
+        fallback_reason: Option<&'static str>,
         updated_at_ms: u64,
-    ) -> SnapshotReadinessDto {
+    }
+
+    fn snapshot_entry(fixture: SnapshotEntryFixture) -> SnapshotReadinessDto {
         SnapshotReadinessDto {
             schema_version: SNAPSHOT_READINESS_SCHEMA_VERSION,
             uri: None,
             path: Some("src/CommonModules/Test/Module.bsl".to_string()),
             session_id: Some("session-1".to_string()),
-            requested_version,
-            ready_version,
-            analysis_revision,
-            state,
-            exact,
+            requested_version: fixture.requested_version,
+            ready_version: fixture.ready_version,
+            analysis_revision: fixture.analysis_revision,
+            state: fixture.state,
+            exact: fixture.exact,
             task_state: SnapshotTaskStateDto::NotApplicable,
             phase: None,
-            trigger,
-            updated_at_ms,
-            fallback_reason: fallback_reason.map(str::to_string),
+            trigger: fixture.trigger,
+            updated_at_ms: fixture.updated_at_ms,
+            fallback_reason: fixture.fallback_reason.map(str::to_string),
         }
     }
 
     #[test]
     fn mcp_snapshot_helpers_distinguish_exact_ready_from_shadow_only() {
-        let ready = snapshot_entry(
-            SnapshotReadinessStateDto::Ready,
-            true,
-            Some(7),
-            Some(7),
-            Some(42),
-            Some(SnapshotTriggerDto::Job),
-            None,
-            100,
-        );
-        let shadow_only = snapshot_entry(
-            SnapshotReadinessStateDto::ShadowOnly,
-            false,
-            Some(8),
-            None,
-            Some(42),
-            Some(SnapshotTriggerDto::DocumentsSet),
-            Some("overlay"),
-            101,
-        );
+        let ready = snapshot_entry(SnapshotEntryFixture {
+            state: SnapshotReadinessStateDto::Ready,
+            exact: true,
+            requested_version: Some(7),
+            ready_version: Some(7),
+            analysis_revision: Some(42),
+            trigger: Some(SnapshotTriggerDto::Job),
+            fallback_reason: None,
+            updated_at_ms: 100,
+        });
+        let shadow_only = snapshot_entry(SnapshotEntryFixture {
+            state: SnapshotReadinessStateDto::ShadowOnly,
+            exact: false,
+            requested_version: Some(8),
+            ready_version: None,
+            analysis_revision: Some(42),
+            trigger: Some(SnapshotTriggerDto::DocumentsSet),
+            fallback_reason: Some("overlay"),
+            updated_at_ms: 101,
+        });
 
         assert_eq!(
             mcp_snapshot_entry_facts(&ready),

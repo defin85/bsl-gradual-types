@@ -1672,12 +1672,20 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
     const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
     const V2_FIXTURE: &str =
         "Процедура Тест()\n    Сообщить(необъявленнаяQueued);\nКонецПроцедуры\n";
+    const DID_CHANGE_PARSE_DELAY_MS: u64 = 500;
+    const TYPE_INDEX_PRECOMPUTE_DELAY_MS: u64 = 1_000;
     const FIRST_PUBLISH_BUDGET_MS: u64 = 2_500;
     const FOLLOWUP_READY_ARTIFACT_BUDGET_MS: u64 = 2_000;
 
     let _env_lock = lock_test_env().await;
-    let _background_reserved_only_guard =
-        EnvVarGuard::set("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY", "1");
+    let _did_change_parse_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_DID_CHANGE_BLOCKING_PARSE_DELAY_MS",
+        &DID_CHANGE_PARSE_DELAY_MS.to_string(),
+    );
+    let _type_index_precompute_delay_guard = EnvVarGuard::set(
+        "BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS",
+        &TYPE_INDEX_PRECOMPUTE_DELAY_MS.to_string(),
+    );
     let _debounce_guard =
         EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
 
@@ -1718,27 +1726,6 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
         .expect("server holder lock")
         .clone()
         .expect("server must be captured");
-
-    let background_holder_barrier = Arc::new(std::sync::Barrier::new(2));
-    let (background_holder_ready_tx, background_holder_ready_rx) = tokio::sync::oneshot::channel();
-    let background_holder_barrier_for_task = background_holder_barrier.clone();
-    let background_holder_coordinator = coordinator.clone();
-    let background_holder = tokio::spawn(async move {
-        let _ = bsl_runtime::application::spawn_bounded_blocking_with_class_observed_origin(
-            bsl_runtime::application::CpuWorkClass::Background,
-            bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
-            Some(background_holder_coordinator.as_ref()),
-            move || {
-                let _ = background_holder_ready_tx.send(());
-                background_holder_barrier_for_task.wait();
-            },
-        )
-        .await;
-    });
-    tokio::time::timeout(Duration::from_secs(3), background_holder_ready_rx)
-        .await
-        .expect("background holder must seize generic background reserved permit")
-        .expect("background holder ready signal");
 
     let uri =
         Url::parse("file:///did_save_followup_queued_exact_worker_fixture.bsl").expect("fixture");
@@ -1823,7 +1810,7 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
             .get(&file_id)
             .map(|state| state.parse_snapshot.file_version),
         Some(2),
-        "ready snapshot must still be absent while generic background reserved permit is held"
+        "ready snapshot must still be absent while the didChange producer is blocked"
     );
     while published_rx.try_recv().is_ok() {}
 
@@ -1892,10 +1879,6 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
     )
     .await
     .expect("promoted exact worker must win before shadow-state fallback wait budget elapses");
-    assert!(
-        !background_holder.is_finished(),
-        "full publish must arrive while the generic background reserved permit is still blocked; otherwise the queued exact worker was not actually promoted"
-    );
 
     let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_716, 8).await;
     let traces = timeline
@@ -1923,7 +1906,7 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
         full_publish_trace
             .get("semantic_path")
             .and_then(|value| value.as_str()),
-        Some("ready_artifacts")
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         trace
@@ -1935,7 +1918,13 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
         trace
             .get("followup_ready_snapshot_wait_probe")
             .and_then(|value| value.as_str()),
-        Some("ready")
+        Some("not_ready")
+    );
+    assert_eq!(
+        trace
+            .get("followup_ready_snapshot_bounded_wait_winner")
+            .and_then(|value| value.as_str()),
+        Some("detached_ready_artifacts")
     );
     assert_eq!(
         trace
@@ -1947,11 +1936,40 @@ async fn p7_did_save_followup_promotes_already_queued_exact_worker_before_shadow
         trace
             .get("followup_semantic_path")
             .and_then(|value| value.as_str()),
-        Some("ready_artifacts")
+        Some("detached_ready_artifacts")
+    );
+    assert!(
+        matches!(
+            trace
+                .get("followup_did_save_exact_producer_lifecycle_state")
+                .and_then(|value| value.as_str()),
+            Some("detached_diagnostics_ready_published" | "fully_materialized")
+        ),
+        "timeline must expose didSave exact producer lifecycle state, trace={trace:?}"
+    );
+    let producer_key = crate::server::DidSaveExactProducerKeyV2 {
+        file_id,
+        requested_version: 2,
+        text_hash: *blake3::hash(V2_FIXTURE.as_bytes()).as_bytes(),
+        save_cycle_sequence: 1,
+    };
+    let producer_state = server
+        .did_save_exact_producer_lifecycle_v2
+        .read()
+        .await
+        .get(&producer_key)
+        .map(|entry| entry.state);
+    assert!(
+        matches!(
+            producer_state,
+            Some(
+                crate::server::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished
+                    | crate::server::DidSaveExactProducerLifecycleStateV2::FullyMaterialized
+            )
+        ),
+        "didSave exact producer lifecycle must reach detached-ready or full materialized state, state={producer_state:?}"
     );
 
-    background_holder_barrier.wait();
-    let _ = background_holder.await;
     let _ = full_publish;
     drain_task.abort();
 }

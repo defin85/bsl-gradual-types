@@ -509,8 +509,10 @@ pub fn cpu_work_class_for_operation(operation: SemanticOperation) -> CpuWorkClas
 struct CpuBudgetSaturationSnapshot {
     interactive_waiters: usize,
     background_waiters: usize,
+    did_save_followup_waiters: usize,
     interactive_permits: usize,
     background_permits: usize,
+    did_save_followup_permits: usize,
     shared_permits: usize,
 }
 
@@ -523,6 +525,8 @@ impl CpuBudgetSaturationSnapshot {
 struct CpuBoundBudget {
     interactive_reserved: Arc<Semaphore>,
     background_reserved: Arc<Semaphore>,
+    did_save_followup_reserved: Arc<Semaphore>,
+    did_save_followup_reserved_capacity: usize,
     shared: Arc<Semaphore>,
     interactive_waiters: AtomicUsize,
     background_waiters: AtomicUsize,
@@ -532,15 +536,23 @@ struct CpuBoundBudget {
 impl CpuBoundBudget {
     fn with_total_permits(permits: usize) -> Self {
         let permits = permits.max(2);
-        // Keep one dedicated background permit, but reserve an extra interactive
-        // permit when capacity allows to reduce interactive tail under batch load.
-        let interactive_reserved_permits = if permits >= 4 { 2 } else { 1 };
+        let did_save_followup_reserved_permits = usize::from(permits >= 4);
+        // Keep one dedicated background permit and reserve an extra interactive
+        // permit once capacity still leaves room for the save-critical tier.
+        let interactive_reserved_permits = if permits >= 5 { 2 } else { 1 };
         let background_reserved_permits = 1;
-        let shared_permits =
-            permits.saturating_sub(interactive_reserved_permits + background_reserved_permits);
+        let shared_permits = permits.saturating_sub(
+            interactive_reserved_permits
+                + background_reserved_permits
+                + did_save_followup_reserved_permits,
+        );
         Self {
             interactive_reserved: Arc::new(Semaphore::new(interactive_reserved_permits)),
             background_reserved: Arc::new(Semaphore::new(background_reserved_permits)),
+            did_save_followup_reserved: Arc::new(Semaphore::new(
+                did_save_followup_reserved_permits,
+            )),
+            did_save_followup_reserved_capacity: did_save_followup_reserved_permits,
             shared: Arc::new(Semaphore::new(shared_permits)),
             interactive_waiters: AtomicUsize::new(0),
             background_waiters: AtomicUsize::new(0),
@@ -598,13 +610,7 @@ impl CpuBoundBudget {
             }
         }
 
-        let is_did_save_followup = matches!(
-            (class, lane),
-            (
-                CpuWorkClass::Background,
-                Some(AdmissionLane::DidSaveFollowup)
-            )
-        );
+        let is_did_save_followup = matches!(lane, Some(AdmissionLane::DidSaveFollowup));
         let (own_reserved, other_reserved, own_waiters, other_waiters) = match class {
             CpuWorkClass::Interactive => (
                 self.interactive_reserved.clone(),
@@ -623,7 +629,14 @@ impl CpuBoundBudget {
         let own_waiter_guard = WaiterCountGuard::new(own_waiters);
         let lane_waiter_guard =
             is_did_save_followup.then(|| WaiterCountGuard::new(&self.did_save_followup_waiters));
-        let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
+        let other_has_waiters = if is_did_save_followup {
+            self.interactive_waiters
+                .load(Ordering::Acquire)
+                .saturating_add(self.background_waiters.load(Ordering::Acquire))
+                > 1
+        } else {
+            other_waiters.load(Ordering::Acquire) > 0
+        };
         let competing_did_save_waiters = self.did_save_followup_waiters.load(Ordering::Acquire)
             > usize::from(is_did_save_followup);
         let background_reserved_only = matches!(class, CpuWorkClass::Background)
@@ -646,7 +659,29 @@ impl CpuBoundBudget {
         };
 
         let permit = if is_did_save_followup {
-            if can_take_shared {
+            let lane_reserved = self.did_save_followup_reserved.clone();
+            if self.did_save_followup_reserved_capacity > 0 {
+                if let Ok(permit) = lane_reserved.clone().try_acquire_owned() {
+                    permit
+                } else if can_take_shared {
+                    if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                        permit
+                    } else {
+                        mark_queue_wait_started();
+                        tokio::select! {
+                            permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
+                            permit = lane_reserved.clone().acquire_owned() => permit.expect("didSave follow-up reserved semaphore closed"),
+                        }
+                    }
+                } else {
+                    mark_queue_wait_started();
+                    lane_reserved
+                        .clone()
+                        .acquire_owned()
+                        .await
+                        .expect("didSave follow-up reserved semaphore closed")
+                }
+            } else if can_take_shared {
                 if let Ok(permit) = self.shared.clone().try_acquire_owned() {
                     permit
                 } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
@@ -655,20 +690,18 @@ impl CpuBoundBudget {
                     mark_queue_wait_started();
                     tokio::select! {
                         permit = self.shared.clone().acquire_owned() => permit.expect("shared semaphore closed"),
-                        permit = own_reserved.clone().acquire_owned() => permit.expect("background reserved semaphore closed"),
+                        permit = own_reserved.clone().acquire_owned() => permit.expect("interactive/background reserved semaphore closed"),
                     }
                 }
+            } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
+                permit
             } else {
-                if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
-                    permit
-                } else {
-                    mark_queue_wait_started();
-                    own_reserved
-                        .clone()
-                        .acquire_owned()
-                        .await
-                        .expect("background reserved semaphore closed")
-                }
+                mark_queue_wait_started();
+                own_reserved
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .expect("interactive/background reserved semaphore closed")
             }
         } else {
             if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
@@ -779,13 +812,7 @@ impl CpuBoundBudget {
             }
         }
 
-        let is_did_save_followup = matches!(
-            (class, lane),
-            (
-                CpuWorkClass::Background,
-                Some(AdmissionLane::DidSaveFollowup)
-            )
-        );
+        let is_did_save_followup = matches!(lane, Some(AdmissionLane::DidSaveFollowup));
         let (own_reserved, other_reserved, own_waiters, other_waiters) = match class {
             CpuWorkClass::Interactive => (
                 self.interactive_reserved.clone(),
@@ -804,7 +831,14 @@ impl CpuBoundBudget {
         let own_waiter_guard = WaiterCountGuard::new(own_waiters);
         let lane_waiter_guard =
             is_did_save_followup.then(|| WaiterCountGuard::new(&self.did_save_followup_waiters));
-        let other_has_waiters = other_waiters.load(Ordering::Acquire) > 0;
+        let other_has_waiters = if is_did_save_followup {
+            self.interactive_waiters
+                .load(Ordering::Acquire)
+                .saturating_add(self.background_waiters.load(Ordering::Acquire))
+                > 1
+        } else {
+            other_waiters.load(Ordering::Acquire) > 0
+        };
         let competing_did_save_waiters = self.did_save_followup_waiters.load(Ordering::Acquire)
             > usize::from(is_did_save_followup);
         let background_reserved_only = matches!(class, CpuWorkClass::Background)
@@ -820,7 +854,47 @@ impl CpuBoundBudget {
         };
 
         if is_did_save_followup {
-            let permit = if can_take_shared {
+            let lane_reserved = self.did_save_followup_reserved.clone();
+            let permit = if self.did_save_followup_reserved_capacity > 0 {
+                if let Ok(permit) = lane_reserved.clone().try_acquire_owned() {
+                    permit
+                } else if can_take_shared {
+                    if let Ok(permit) = self.shared.clone().try_acquire_owned() {
+                        permit
+                    } else {
+                        mark_queue_wait_started(on_queue_wait_started);
+                        let shared = self.shared.clone().acquire_owned();
+                        let own = lane_reserved.clone().acquire_owned();
+                        let lane_changed = lane_change_notify.notified();
+                        tokio::pin!(shared);
+                        tokio::pin!(own);
+                        tokio::pin!(lane_changed);
+                        tokio::select! {
+                            _ = &mut lane_changed => {
+                                drop(lane_waiter_guard);
+                                drop(own_waiter_guard);
+                                return AcquireWithLaneQueueWaitOutcome::Retry;
+                            }
+                            permit = &mut shared => permit.expect("shared semaphore closed"),
+                            permit = &mut own => permit.expect("didSave follow-up reserved semaphore closed"),
+                        }
+                    }
+                } else {
+                    mark_queue_wait_started(on_queue_wait_started);
+                    let own = lane_reserved.clone().acquire_owned();
+                    let lane_changed = lane_change_notify.notified();
+                    tokio::pin!(own);
+                    tokio::pin!(lane_changed);
+                    tokio::select! {
+                        _ = &mut lane_changed => {
+                            drop(lane_waiter_guard);
+                            drop(own_waiter_guard);
+                            return AcquireWithLaneQueueWaitOutcome::Retry;
+                        }
+                        permit = &mut own => permit.expect("didSave follow-up reserved semaphore closed"),
+                    }
+                }
+            } else if can_take_shared {
                 if let Ok(permit) = self.shared.clone().try_acquire_owned() {
                     permit
                 } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
@@ -840,7 +914,7 @@ impl CpuBoundBudget {
                             return AcquireWithLaneQueueWaitOutcome::Retry;
                         }
                         permit = &mut shared => permit.expect("shared semaphore closed"),
-                        permit = &mut own => permit.expect("background reserved semaphore closed"),
+                        permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
                     }
                 }
             } else if let Ok(permit) = own_reserved.clone().try_acquire_owned() {
@@ -855,9 +929,9 @@ impl CpuBoundBudget {
                     _ = &mut lane_changed => {
                         drop(lane_waiter_guard);
                         drop(own_waiter_guard);
-                        return AcquireWithLaneQueueWaitOutcome::Retry;
-                    }
-                    permit = &mut own => permit.expect("background reserved semaphore closed"),
+                            return AcquireWithLaneQueueWaitOutcome::Retry;
+                        }
+                    permit = &mut own => permit.expect("interactive/background reserved semaphore closed"),
                 }
             };
             drop(lane_waiter_guard);
@@ -957,8 +1031,10 @@ impl CpuBoundBudget {
         CpuBudgetSaturationSnapshot {
             interactive_waiters: self.interactive_waiters.load(Ordering::Acquire),
             background_waiters: self.background_waiters.load(Ordering::Acquire),
+            did_save_followup_waiters: self.did_save_followup_waiters.load(Ordering::Acquire),
             interactive_permits: self.interactive_reserved.available_permits(),
             background_permits: self.background_reserved.available_permits(),
+            did_save_followup_permits: self.did_save_followup_reserved.available_permits(),
             shared_permits: self.shared.available_permits(),
         }
     }
@@ -1282,8 +1358,10 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
         CpuBudgetSaturationSnapshot {
             interactive_waiters: 0,
             background_waiters: 0,
+            did_save_followup_waiters: 0,
             interactive_permits: 0,
             background_permits: 0,
+            did_save_followup_permits: 0,
             shared_permits: cpu_bound_semaphore().available_permits(),
         }
     };
@@ -1302,6 +1380,12 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
     );
     coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
         origin,
+        "waiters_did_save_followup",
+        snapshot.did_save_followup_waiters as f64,
+        "intellisense_v2_runtime_saturation_waiters_did_save_followup",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
         "permits_interactive",
         snapshot.interactive_permits as f64,
         "intellisense_v2_runtime_saturation_permits_interactive",
@@ -1311,6 +1395,12 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
         "permits_background",
         snapshot.background_permits as f64,
         "intellisense_v2_runtime_saturation_permits_background",
+    );
+    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        origin,
+        "permits_did_save_followup",
+        snapshot.did_save_followup_permits as f64,
+        "intellisense_v2_runtime_saturation_permits_did_save_followup",
     );
     coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
         origin,

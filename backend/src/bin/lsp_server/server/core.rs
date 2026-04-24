@@ -909,6 +909,7 @@ impl BslLanguageServer {
             latest_document_shadow_state_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_ready_parse_snapshots_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_detached_diagnostics_ready_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
+            did_save_exact_producer_lifecycle_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_snapshot_failures_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_snapshot_status_v2: Arc::new(RwLock::new(HashMap::new())),
             latest_save_fastlane_syntax_artifacts_v2: Arc::new(RwLock::new(HashMap::new())),
@@ -1076,11 +1077,15 @@ impl BslLanguageServer {
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
                 followup_semantic_materialization_path: None,
+                followup_save_fastlane_gate_outcome: None,
+                followup_save_fastlane_gate_wait_ms: None,
+                followup_admission_queue_wait_ms: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -1249,11 +1254,15 @@ impl BslLanguageServer {
                     followup_semantic_parse_source: None,
                     followup_semantic_ir_source: None,
                     followup_semantic_materialization_path: None,
+                    followup_save_fastlane_gate_outcome: None,
+                    followup_save_fastlane_gate_wait_ms: None,
+                    followup_admission_queue_wait_ms: None,
                     followup_ready_snapshot_zero_probe: None,
                     followup_ready_snapshot_wait_probe: None,
                     followup_ready_snapshot_bounded_wait_winner: None,
                     followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                     followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                     followup_ready_snapshot_timeout_phase: None,
                     followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                     followup_ready_snapshot_timeout_leaf: None,
@@ -1425,10 +1434,20 @@ impl BslLanguageServer {
                         publish.apply_lag_ms,
                     );
                 }
-                if trace.first_publish.is_none() {
-                    trace.first_publish = Some(publish);
-                } else if trace.followup_publish.is_none() {
-                    trace.followup_publish = Some(publish);
+                match result.profile {
+                    bsl_runtime::application::DiagnosticsProfile::SaveFastlane => {
+                        trace.first_publish = Some(publish);
+                    }
+                    bsl_runtime::application::DiagnosticsProfile::IdleHeavy => {
+                        trace.followup_publish = Some(publish);
+                    }
+                    _ if trace.first_publish.is_none() => {
+                        trace.first_publish = Some(publish);
+                    }
+                    _ if trace.followup_publish.is_none() => {
+                        trace.followup_publish = Some(publish);
+                    }
+                    _ => {}
                 }
             }
 
@@ -1469,6 +1488,7 @@ impl BslLanguageServer {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_diagnostics_save_timeline_followup_probe_state(
         &self,
         uri: &Url,
@@ -1510,11 +1530,15 @@ impl BslLanguageServer {
                     followup_semantic_parse_source: None,
                     followup_semantic_ir_source: None,
                     followup_semantic_materialization_path: None,
+                    followup_save_fastlane_gate_outcome: None,
+                    followup_save_fastlane_gate_wait_ms: None,
+                    followup_admission_queue_wait_ms: None,
                     followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -1692,6 +1716,68 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) fn record_diagnostics_save_timeline_followup_producer_lifecycle_state(
+        &self,
+        _uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        producer_lifecycle_state: &'static str,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        if let Some(trace) = store.active_cycles.get_mut(&key) {
+            trace.followup_did_save_exact_producer_lifecycle_state =
+                Some(producer_lifecycle_state.to_string());
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_save_fastlane_gate_result(
+        &self,
+        _uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        outcome: &'static str,
+        elapsed: Duration,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        if let Some(trace) = store.active_cycles.get_mut(&key) {
+            trace.followup_save_fastlane_gate_outcome = Some(outcome.to_string());
+            trace.followup_save_fastlane_gate_wait_ms =
+                Some(elapsed.as_millis().min(u64::MAX as u128) as u64);
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_admission_queue_wait(
+        &self,
+        _uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        elapsed: Duration,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        if let Some(trace) = store.active_cycles.get_mut(&key) {
+            let elapsed_ms = elapsed.as_millis().min(u64::MAX as u128) as u64;
+            update_followup_timing_max(
+                &mut trace.followup_admission_queue_wait_ms,
+                Some(elapsed_ms),
+            );
+        }
+    }
+
     pub(crate) fn record_diagnostics_save_timeline_followup_bounded_wait_result(
         &self,
         uri: &Url,
@@ -1755,11 +1841,15 @@ impl BslLanguageServer {
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
                 followup_semantic_materialization_path: None,
+                followup_save_fastlane_gate_outcome: None,
+                followup_save_fastlane_gate_wait_ms: None,
+                followup_admission_queue_wait_ms: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -1932,11 +2022,15 @@ impl BslLanguageServer {
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
                 followup_semantic_materialization_path: None,
+                followup_save_fastlane_gate_outcome: None,
+                followup_save_fastlane_gate_wait_ms: None,
+                followup_admission_queue_wait_ms: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2070,6 +2164,7 @@ impl BslLanguageServer {
         set_diagnostics_save_timeline_followup_ready_snapshot_continuation_inner(trace, reason);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_diagnostics_save_timeline_followup_wait_state(
         &self,
         uri: &Url,
@@ -2114,11 +2209,15 @@ impl BslLanguageServer {
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
                 followup_semantic_materialization_path: None,
+                followup_save_fastlane_gate_outcome: None,
+                followup_save_fastlane_gate_wait_ms: None,
+                followup_admission_queue_wait_ms: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2315,11 +2414,15 @@ impl BslLanguageServer {
                 followup_semantic_parse_source: None,
                 followup_semantic_ir_source: None,
                 followup_semantic_materialization_path: None,
+                followup_save_fastlane_gate_outcome: None,
+                followup_save_fastlane_gate_wait_ms: None,
+                followup_admission_queue_wait_ms: None,
                 followup_ready_snapshot_zero_probe: None,
                 followup_ready_snapshot_wait_probe: None,
                 followup_ready_snapshot_bounded_wait_winner: None,
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
+                followup_did_save_exact_producer_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2504,6 +2607,7 @@ impl BslLanguageServer {
             .retain(|key| key.file_id != file_id);
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn record_did_change_parse_snapshot_evidence(
         &self,
         uri: &Url,

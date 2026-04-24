@@ -228,7 +228,7 @@ fn p42_real_conf_big_warm_non_member_collect_breakdown_gate_live() {
             trace
                 .get("collect_breakdown")
                 .cloned()
-                .unwrap_or_else(|| serde_json::json!(null))
+                .unwrap_or(serde_json::Value::Null)
         };
         let trace_summaries_by_request_id = filtered_traces
             .iter()
@@ -273,7 +273,7 @@ fn p42_real_conf_big_warm_non_member_collect_breakdown_gate_live() {
                         .as_ref()
                         .and_then(|request_id| trace_summaries_by_request_id.get(request_id))
                         .cloned()
-                        .unwrap_or_else(|| serde_json::json!(null));
+                        .unwrap_or(serde_json::Value::Null);
                     let mut sample_object = sample
                         .as_object()
                         .cloned()

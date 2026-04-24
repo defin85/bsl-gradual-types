@@ -2106,22 +2106,8 @@ pub(crate) struct TestRequestServerEdgeTrace {
 }
 
 #[cfg(test)]
-#[derive(Debug, Clone)]
-pub(crate) struct TestRequestEntryTrace {
-    pub(crate) request_id: String,
-    pub(crate) method: String,
-}
-
-#[cfg(test)]
 fn test_request_server_edge_traces_cell() -> &'static Mutex<VecDeque<TestRequestServerEdgeTrace>> {
     static CELL: std::sync::OnceLock<Mutex<VecDeque<TestRequestServerEdgeTrace>>> =
-        std::sync::OnceLock::new();
-    CELL.get_or_init(|| Mutex::new(VecDeque::new()))
-}
-
-#[cfg(test)]
-fn test_request_entry_traces_cell() -> &'static Mutex<VecDeque<TestRequestEntryTrace>> {
-    static CELL: std::sync::OnceLock<Mutex<VecDeque<TestRequestEntryTrace>>> =
         std::sync::OnceLock::new();
     CELL.get_or_init(|| Mutex::new(VecDeque::new()))
 }
@@ -2154,43 +2140,10 @@ pub(crate) fn record_request_server_edge_trace_for_testing(
 }
 
 #[cfg(test)]
-pub(crate) fn record_request_entry_trace_for_testing(request_id: Option<&str>, method: &str) {
-    const MAX_STORED_TRACES: usize = 256;
-
-    let Some(request_id) = request_id else {
-        return;
-    };
-
-    let mut traces = test_request_entry_traces_cell()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    traces.push_back(TestRequestEntryTrace {
-        request_id: request_id.to_string(),
-        method: method.to_string(),
-    });
-    while traces.len() > MAX_STORED_TRACES {
-        let _ = traces.pop_front();
-    }
-}
-
-#[cfg(test)]
 pub(crate) fn take_request_server_edge_trace_for_testing(
     request_id: &str,
 ) -> Option<TestRequestServerEdgeTrace> {
     let mut traces = test_request_server_edge_traces_cell()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let position = traces
-        .iter()
-        .rposition(|trace| trace.request_id == request_id)?;
-    traces.remove(position)
-}
-
-#[cfg(test)]
-pub(crate) fn take_request_entry_trace_for_testing(
-    request_id: &str,
-) -> Option<TestRequestEntryTrace> {
-    let mut traces = test_request_entry_traces_cell()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let position = traces
@@ -2422,8 +2375,6 @@ where
             notify_cancel_request_hook(request_id);
         }
         let request_id = request_id_from_request(&request);
-        #[cfg(test)]
-        record_request_entry_trace_for_testing(request_id.as_deref(), request.method());
         let jsonrpc_dispatch_received_at_ms = request_id
             .as_deref()
             .and_then(pending_completion_jsonrpc_dispatch_received_at_ms);

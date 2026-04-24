@@ -150,6 +150,9 @@ impl Drop for EnvVarGuard {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cpu_budget_allows_borrow_when_other_queue_idle() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(2));
     let _first = budget.acquire(CpuWorkClass::Interactive).await;
 
@@ -166,11 +169,15 @@ async fn cpu_budget_allows_borrow_when_other_queue_idle() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cpu_budget_background_progresses_under_interactive_load() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(2));
     let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
 
     let (borrowed_ready_tx, borrowed_ready_rx) = oneshot::channel::<()>();
     let (borrowed_release_tx, borrowed_release_rx) = oneshot::channel::<()>();
+    let mut borrowed_release_tx = Some(borrowed_release_tx);
 
     let budget_for_borrowed = budget.clone();
     let borrowed_task = tokio::spawn(async move {
@@ -184,7 +191,7 @@ async fn cpu_budget_background_progresses_under_interactive_load() {
         .expect("borrowed interactive task should signal readiness");
 
     let budget_for_background = budget.clone();
-    let background_task = tokio::spawn(async move {
+    let mut background_task = tokio::spawn(async move {
         budget_for_background
             .acquire(CpuWorkClass::Background)
             .await
@@ -197,18 +204,32 @@ async fn cpu_budget_background_progresses_under_interactive_load() {
     );
 
     drop(interactive_reserved);
-    let background_permit = timeout(Duration::from_millis(250), background_task)
-        .await
-        .expect("background should make progress after one interactive permit is released")
-        .expect("background task join should succeed");
+    let background_permit = match timeout(Duration::from_secs(1), &mut background_task).await {
+        Ok(join_result) => join_result.expect("background task join should succeed"),
+        Err(_) => {
+            if let Some(borrowed_release_tx) = borrowed_release_tx.take() {
+                let _ = borrowed_release_tx.send(());
+            }
+            borrowed_task
+                .await
+                .expect("borrowed interactive task join after timeout cleanup");
+            background_task.abort();
+            panic!("background should make progress after one interactive permit is released");
+        }
+    };
     drop(background_permit);
 
-    let _ = borrowed_release_tx.send(());
+    if let Some(borrowed_release_tx) = borrowed_release_tx.take() {
+        let _ = borrowed_release_tx.send(());
+    }
     borrowed_task.await.expect("borrowed interactive task join");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cpu_budget_interactive_progresses_under_background_load() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(2));
     let background_reserved = budget.acquire(CpuWorkClass::Background).await;
 
@@ -252,6 +273,9 @@ async fn cpu_budget_interactive_progresses_under_background_load() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cpu_budget_background_does_not_take_shared_while_interactive_waits() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(3));
     let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
     let background_reserved = budget.acquire(CpuWorkClass::Background).await;
@@ -305,6 +329,9 @@ async fn cpu_budget_background_does_not_take_shared_while_interactive_waits() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cpu_budget_bidirectional_waiters_eventually_make_progress() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(3));
     let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
     let background_reserved = budget.acquire(CpuWorkClass::Background).await;
@@ -389,17 +416,56 @@ async fn cpu_budget_did_save_followup_progresses_while_generic_background_holds_
     .await;
     assert!(
         did_save_followup.is_ok(),
-        "didSave follow-up lane should not wait for the generic background reserved permit when shared non-interactive capacity exists"
+        "didSave follow-up lane should not wait for the generic background reserved permit because it owns a save-critical tier"
     );
 
     drop(background_reserved);
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_save_followup() {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cpu_budget_interactive_did_save_followup_uses_save_critical_tier_not_interactive_reserved()
+{
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
     let budget = Arc::new(CpuBoundBudget::with_total_permits(4));
     let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
-    let interactive_borrowed = budget.acquire(CpuWorkClass::Interactive).await;
+    let shared_taken_by_interactive = budget.acquire(CpuWorkClass::Interactive).await;
+
+    let budget_for_followup = budget.clone();
+    let did_save_followup = timeout(Duration::from_millis(150), async move {
+        let permit = budget_for_followup
+            .acquire_with_lane_queue_wait_hook(
+                CpuWorkClass::Interactive,
+                Some(AdmissionLane::DidSaveFollowup),
+                None::<fn()>,
+            )
+            .await;
+        drop(permit);
+    })
+    .await;
+    assert!(
+        did_save_followup.is_ok(),
+        "Interactive didSave follow-up lane must use the dedicated save-critical tier instead of waiting on generic interactive/shared permits"
+    );
+
+    drop(shared_taken_by_interactive);
+    drop(interactive_reserved);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_save_followup() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
+    let budget = Arc::new(CpuBoundBudget::with_total_permits(5));
+    let did_save_reserved = budget
+        .acquire_with_lane_queue_wait_hook(
+            CpuWorkClass::Interactive,
+            Some(AdmissionLane::DidSaveFollowup),
+            None::<fn()>,
+        )
+        .await;
     let background_reserved = budget.acquire(CpuWorkClass::Background).await;
     let shared_taken_by_background = budget.acquire(CpuWorkClass::Background).await;
 
@@ -407,7 +473,7 @@ async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_sa
     let did_save_followup_waiter = tokio::spawn(async move {
         budget_for_followup
             .acquire_with_lane_queue_wait_hook(
-                CpuWorkClass::Background,
+                CpuWorkClass::Interactive,
                 Some(AdmissionLane::DidSaveFollowup),
                 None::<fn()>,
             )
@@ -444,8 +510,7 @@ async fn cpu_budget_generic_background_does_not_steal_shared_from_waiting_did_sa
     );
 
     drop(did_save_followup_permit);
-    drop(interactive_reserved);
-    drop(interactive_borrowed);
+    drop(did_save_reserved);
     drop(background_reserved);
     let background_permit = timeout(Duration::from_millis(300), background_waiter)
         .await
@@ -515,6 +580,71 @@ async fn observed_spawn_dynamic_lane_reacquires_after_did_save_promotion_while_b
     );
 
     drop(background_reserved);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn observed_spawn_dynamic_lane_reacquires_after_interactive_did_save_promotion() {
+    let _env_lock = lock_test_env().await;
+    let _background_reserved_only_guard =
+        EnvVarGuard::unset("BSL_TEST_RUNTIME_BACKGROUND_RESERVED_ONLY");
+    let budget = Arc::new(CpuBoundBudget::with_total_permits(4));
+    let interactive_reserved = budget.acquire(CpuWorkClass::Interactive).await;
+    let shared_taken_by_interactive = budget.acquire(CpuWorkClass::Interactive).await;
+    let background_reserved = budget.acquire(CpuWorkClass::Background).await;
+    let promotion_requested = Arc::new(AtomicBool::new(false));
+    let promotion_notify = Arc::new(Notify::new());
+    let (queue_wait_started_tx, queue_wait_started_rx) = oneshot::channel();
+
+    let worker = tokio::spawn({
+        let promotion_requested = promotion_requested.clone();
+        let promotion_notify = promotion_notify.clone();
+        let budget = budget.clone();
+        async move {
+            let (permit, lane) = budget
+                .acquire_with_dynamic_lane_queue_wait_hook(
+                    CpuWorkClass::Interactive,
+                    move || {
+                        promotion_requested
+                            .load(Ordering::SeqCst)
+                            .then_some(AdmissionLane::DidSaveFollowup)
+                    },
+                    promotion_notify.as_ref(),
+                    Some(move || {
+                        let _ = queue_wait_started_tx.send(());
+                    }),
+                )
+                .await;
+            drop(permit);
+            lane
+        }
+    });
+
+    timeout(Duration::from_millis(300), queue_wait_started_rx)
+        .await
+        .expect("worker must reach queue wait before promotion")
+        .expect("queue wait signal must arrive");
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    assert!(
+        !worker.is_finished(),
+        "generic interactive worker must still be queued while interactive/shared/background permits are blocked"
+    );
+
+    promotion_requested.store(true, Ordering::SeqCst);
+    promotion_notify.notify_waiters();
+
+    let lane = timeout(Duration::from_millis(300), worker)
+        .await
+        .expect("promoted interactive worker should reacquire through didSave follow-up tier")
+        .expect("promoted worker join should succeed");
+    assert_eq!(
+        lane,
+        Some(AdmissionLane::DidSaveFollowup),
+        "promoted interactive worker must reacquire under didSave follow-up lane after queue-time promotion"
+    );
+
+    drop(background_reserved);
+    drop(shared_taken_by_interactive);
+    drop(interactive_reserved);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -623,15 +753,19 @@ async fn observed_spawn_records_runtime_class_metrics() {
 
 #[test]
 fn cpu_budget_reserves_extra_interactive_permit_when_capacity_allows() {
-    let budget = CpuBoundBudget::with_total_permits(4);
+    let budget = CpuBoundBudget::with_total_permits(5);
     let snapshot = budget.saturation_snapshot();
     assert_eq!(
         snapshot.interactive_permits, 2,
-        "interactive pool should get extra reserved permit on wider runtimes"
+        "interactive pool should get an extra reserved permit after the save-critical tier is funded"
     );
     assert_eq!(
         snapshot.background_permits, 1,
         "background pool should keep one dedicated permit"
+    );
+    assert_eq!(
+        snapshot.did_save_followup_permits, 1,
+        "didSave follow-up lane should have its own reserved save-critical permit"
     );
     assert_eq!(
         snapshot.shared_permits, 1,

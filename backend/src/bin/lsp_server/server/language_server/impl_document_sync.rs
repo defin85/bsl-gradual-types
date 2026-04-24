@@ -70,7 +70,7 @@ enum BuildParseSnapshotOutcomeV2 {
     Ready(
         bsl_analysis_v2::ParseSnapshot,
         DeferredParseSnapshotWorkV2,
-        bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+        Box<bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary>,
     ),
     Aborted(BuildParseSnapshotAbortReasonV2),
 }
@@ -433,7 +433,7 @@ fn late_ranged_did_change_parser_base_preservation_allowed(
     did_change_attribution: Option<&DidChangeParseSnapshotAttributionV2>,
     control: &super::super::BackgroundParseSnapshotApplyTaskControlV2,
 ) -> bool {
-    if !did_change_attribution.is_some_and(|attribution| attribution.change_shape == "ranged") {
+    if did_change_attribution.is_none_or(|attribution| attribution.change_shape != "ranged") {
         return false;
     }
     let snapshot = control.phase_attribution_snapshot();
@@ -498,7 +498,7 @@ fn background_parse_snapshot_task_matches_v2(
 ) -> bool {
     let target = background_parse_snapshot_task_target_v2(task);
     target.requested_version == requested_version
-        && expected_text_hash.map_or(true, |text_hash| target.text_hash == text_hash)
+        && expected_text_hash.is_none_or(|text_hash| target.text_hash == text_hash)
 }
 
 fn background_parse_snapshot_apply_source_label(
@@ -687,6 +687,53 @@ impl BslLanguageServer {
         }
     }
 
+    async fn record_did_save_exact_producer_lifecycle_state_v2(
+        &self,
+        key: super::super::DidSaveExactProducerKeyV2,
+        state: super::super::DidSaveExactProducerLifecycleStateV2,
+    ) {
+        self.did_save_exact_producer_lifecycle_v2
+            .write()
+            .await
+            .insert(
+                key,
+                super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
+            );
+    }
+
+    async fn record_did_save_exact_producer_lifecycle_events_v2(
+        &self,
+        events: Vec<(
+            super::super::DidSaveExactProducerKeyV2,
+            super::super::DidSaveExactProducerLifecycleStateV2,
+        )>,
+    ) {
+        if events.is_empty() {
+            return;
+        }
+        let mut lifecycles = self.did_save_exact_producer_lifecycle_v2.write().await;
+        for (key, state) in events {
+            lifecycles.insert(
+                key,
+                super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
+            );
+        }
+    }
+
+    async fn record_did_save_exact_producer_lifecycle_for_target_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+        target: &super::super::BackgroundParseSnapshotApplyTargetV2,
+        state: super::super::DidSaveExactProducerLifecycleStateV2,
+    ) {
+        let Some(key) = super::super::DidSaveExactProducerKeyV2::from_target(file_id, target)
+        else {
+            return;
+        };
+        self.record_did_save_exact_producer_lifecycle_state_v2(key, state)
+            .await;
+    }
+
     async fn record_ready_parse_snapshot_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -714,6 +761,7 @@ impl BslLanguageServer {
         self.refresh_snapshot_status_v2(file_id).await;
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn record_detached_diagnostics_ready_artifact_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -727,6 +775,12 @@ impl BslLanguageServer {
     ) {
         let Some(save_cycle_sequence) = save_cycle_sequence else {
             return;
+        };
+        let producer_key = super::super::DidSaveExactProducerKeyV2 {
+            file_id,
+            requested_version,
+            text_hash,
+            save_cycle_sequence,
         };
         self.latest_detached_diagnostics_ready_artifacts_v2
             .write()
@@ -742,6 +796,11 @@ impl BslLanguageServer {
                     syntax_errors_complete,
                 },
             );
+        self.record_did_save_exact_producer_lifecycle_state_v2(
+            producer_key,
+            super::super::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished,
+        )
+        .await;
         if let Some(task_control) = task_control {
             task_control.note_detached_ready_artifact_published();
         }
@@ -806,6 +865,7 @@ impl BslLanguageServer {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn spawn_deferred_parse_snapshot_post_publish_enrichment_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -1083,39 +1143,38 @@ impl BslLanguageServer {
         let parser_edits = request.parser_edits;
         let forced_full_parse_reason = request.forced_full_parse_reason;
         let initial_admission_lane = request.admission_lane;
-        let promoted_to_did_save_followup = task_control_for_parse.as_ref().is_some_and(|control| {
-            control.promotion_requested.load(Ordering::SeqCst)
-        });
-        let same_version_did_save_followup =
-            matches!(
-                initial_admission_lane,
-                Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
-            ) || promoted_to_did_save_followup;
+        let promoted_to_did_save_followup = task_control_for_parse
+            .as_ref()
+            .is_some_and(|control| control.promotion_requested.load(Ordering::SeqCst));
+        let same_version_did_save_followup = matches!(
+            initial_admission_lane,
+            Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
+        ) || promoted_to_did_save_followup;
         let same_version_previous_ready_seed_for_parse =
             if same_version_did_save_followup && !parser_edits.is_empty() {
-            self.latest_ready_parse_snapshots_v2
-                .read()
-                .await
-                .get(&file_id)
-                .and_then(|state| {
-                    derive_same_version_rebuild_previous_ready_seed_v2(
-                        state,
-                        version,
-                        &text_for_parse,
-                    )
-                })
+                self.latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .and_then(|state| {
+                        derive_same_version_rebuild_previous_ready_seed_v2(
+                            state,
+                            version,
+                            &text_for_parse,
+                        )
+                    })
             } else {
                 None
             };
         let same_version_rebuild_reuse_parse_result_for_parse =
             if same_version_did_save_followup && parser_edits.is_empty() {
-            derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
-                self,
-                file_id,
-                version,
-                text_for_parse.as_ref(),
-            )
-            .await
+                derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
+                    self,
+                    file_id,
+                    version,
+                    text_for_parse.as_ref(),
+                )
+                .await
             } else {
                 None
             };
@@ -1623,7 +1682,7 @@ impl BslLanguageServer {
         BuildParseSnapshotOutcomeV2::Ready(
             parse_snapshot_from_report(file_id, version, report),
             deferred_work,
-            program_lowering_summary,
+            Box::new(program_lowering_summary),
         )
     }
 
@@ -1736,21 +1795,39 @@ impl BslLanguageServer {
         &self,
         mut args: BackgroundParseSnapshotApplyArgs,
     ) {
-        let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
         let file_id = args.file_id;
         let text_hash = parse_snapshot_text_hash(args.text.as_ref());
+        if let Some(producer_key) = super::super::DidSaveExactProducerKeyV2::from_parts(
+            file_id,
+            args.requested_version,
+            text_hash,
+            args.save_cycle_sequence,
+        ) {
+            self.record_did_save_exact_producer_lifecycle_state_v2(
+                producer_key,
+                super::super::DidSaveExactProducerLifecycleStateV2::Admitted,
+            )
+            .await;
+        }
+        let mut tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
+        let mut lifecycle_events = Vec::new();
         if let Some(task) = tasks.get(&file_id) {
             let current_target = background_parse_snapshot_task_target_v2(task);
             let same_version = current_target.requested_version == args.requested_version;
             if same_version && current_target.text_hash == text_hash {
+                let did_save_parser_edit_upgrade = matches!(
+                    (current_target.source, args.source),
+                    (
+                        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                    )
+                ) && current_target.parser_edits.is_empty()
+                    && !args.parser_edits.is_empty();
                 if matches!(
                     args.source,
                     super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
                 ) {
-                    let pre_exec_waiting = task
-                        .control
-                        .phase_attribution_snapshot()
-                        .current_phase
+                    let pre_exec_waiting = task.control.phase_attribution_snapshot().current_phase
                         == Some(super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting);
                     let waiting_did_change_needs_respawn = pre_exec_waiting
                         && !matches!(
@@ -1785,13 +1862,25 @@ impl BslLanguageServer {
                             .target
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let previous_producer_key =
+                            super::super::DidSaveExactProducerKeyV2::from_target(file_id, &target);
                         target.save_cycle_sequence = args.save_cycle_sequence;
-                        if pre_exec_waiting
-                            && !matches!(
-                                target.source,
-                                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
-                            )
+                        let next_producer_key =
+                            super::super::DidSaveExactProducerKeyV2::from_target(file_id, &target);
+                        if previous_producer_key.is_some()
+                            && previous_producer_key != next_producer_key
                         {
+                            if let Some(previous_producer_key) = previous_producer_key {
+                                lifecycle_events.push((
+                                    previous_producer_key,
+                                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                                ));
+                            }
+                        }
+                        if !matches!(
+                            target.source,
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                        ) {
                             target.source =
                                 super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave;
                         }
@@ -1799,22 +1888,52 @@ impl BslLanguageServer {
                     }
                     if !waiting_did_change_needs_respawn
                         && !matches!(
-                        current_target.source,
-                        super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
-                    ) {
+                            current_target.source,
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                        )
+                    {
                         task.control
                             .promotion_requested
                             .store(true, Ordering::SeqCst);
                         task.control.control_notify.notify_waiters();
                     }
                     if !waiting_did_change_needs_respawn
-                        && (pre_exec_waiting
-                        || matches!(
+                        && matches!(
                             current_target.source,
-                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                            super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange
                         )
-                        || !args.force_reschedule_same_version)
+                        && !pre_exec_waiting
                     {
+                        if let Some(producer_key) =
+                            super::super::DidSaveExactProducerKeyV2::from_parts(
+                                file_id,
+                                args.requested_version,
+                                text_hash,
+                                args.save_cycle_sequence,
+                            )
+                        {
+                            lifecycle_events.push((
+                                producer_key,
+                                super::super::DidSaveExactProducerLifecycleStateV2::Started,
+                            ));
+                        }
+                    }
+                    if !waiting_did_change_needs_respawn
+                        && !did_save_parser_edit_upgrade
+                        && (pre_exec_waiting
+                            || matches!(
+                                current_target.source,
+                                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                            )
+                            || matches!(
+                                current_target.source,
+                                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange
+                            )
+                            || !args.force_reschedule_same_version)
+                    {
+                        drop(tasks);
+                        self.record_did_save_exact_producer_lifecycle_events_v2(lifecycle_events)
+                            .await;
                         return;
                     }
                 } else {
@@ -1868,6 +1987,17 @@ impl BslLanguageServer {
             }
         }
         if let Some(previous) = tasks.remove(&file_id) {
+            if let Some(previous_producer_key) =
+                super::super::DidSaveExactProducerKeyV2::from_target(
+                    file_id,
+                    &background_parse_snapshot_task_target_v2(&previous),
+                )
+            {
+                lifecycle_events.push((
+                    previous_producer_key,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                ));
+            }
             previous
                 .control
                 .cancel_requested
@@ -1908,6 +2038,8 @@ impl BslLanguageServer {
             },
         );
         drop(tasks);
+        self.record_did_save_exact_producer_lifecycle_events_v2(lifecycle_events)
+            .await;
         self.spawn_snapshot_status_refresh_v2(file_id);
     }
 
@@ -1949,7 +2081,14 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::Waiting,
             );
             self.refresh_snapshot_status_v2(file_id).await;
-            let debounce = parse_snapshot_apply_debounce_duration();
+            let debounce = if matches!(
+                target.source,
+                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+            ) {
+                Duration::ZERO
+            } else {
+                parse_snapshot_apply_debounce_duration()
+            };
             if debounce > Duration::ZERO
                 && !task_control.cancel_requested.load(Ordering::SeqCst)
                 && !task_control.promotion_requested.load(Ordering::SeqCst)
@@ -1966,17 +2105,35 @@ impl BslLanguageServer {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone();
             if refreshed_target.epoch != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
                 continue;
             }
             target = refreshed_target;
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
                 continue;
             }
             if task_control.cancel_requested.load(Ordering::SeqCst) {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Cancelled,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("superseded");
                 task_control.control_notify.notify_waiters();
                 break;
@@ -1989,6 +2146,12 @@ impl BslLanguageServer {
                 .copied()
                 != Some(target.requested_version)
             {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("latest_version_mismatch");
                 task_control.control_notify.notify_waiters();
                 break;
@@ -2007,17 +2170,35 @@ impl BslLanguageServer {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone();
             if refreshed_target.epoch != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
                 continue;
             }
             target = refreshed_target;
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("retargeted_before_parse");
                 task_control.control_notify.notify_waiters();
                 continue;
             }
             if task_control.cancel_requested.load(Ordering::SeqCst) {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Cancelled,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("superseded");
                 task_control.control_notify.notify_waiters();
                 break;
@@ -2030,11 +2211,23 @@ impl BslLanguageServer {
                 .copied()
                 != Some(target.requested_version)
             {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("latest_version_mismatch");
                 task_control.control_notify.notify_waiters();
                 break;
             }
 
+            self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                file_id,
+                &target,
+                super::super::DidSaveExactProducerLifecycleStateV2::Started,
+            )
+            .await;
             task_control.phase.store(
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
                 Ordering::SeqCst,
@@ -2088,10 +2281,16 @@ impl BslLanguageServer {
                     parse_snapshot,
                     deferred_work,
                     program_lowering_summary,
-                ) => (parse_snapshot, deferred_work, program_lowering_summary),
+                ) => (parse_snapshot, deferred_work, *program_lowering_summary),
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::RetargetedDuringParse,
                 ) => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                    )
+                    .await;
                     lifecycle_guard.set_terminal_reason("retargeted_during_parse");
                     task_control.control_notify.notify_waiters();
                     if target_epoch_state.load(Ordering::SeqCst) != target.epoch
@@ -2109,6 +2308,16 @@ impl BslLanguageServer {
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::Superseded,
                 ) => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
+                            super::super::DidSaveExactProducerLifecycleStateV2::Superseded
+                        } else {
+                            super::super::DidSaveExactProducerLifecycleStateV2::Cancelled
+                        },
+                    )
+                    .await;
                     lifecycle_guard.set_terminal_reason(
                         if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
                             "retargeted_before_materialization"
@@ -2132,6 +2341,12 @@ impl BslLanguageServer {
                 BuildParseSnapshotOutcomeV2::Aborted(
                     BuildParseSnapshotAbortReasonV2::BuildSnapshotAborted,
                 ) => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::Failed,
+                    )
+                    .await;
                     self.record_snapshot_build_failure_v2(
                         file_id,
                         target.requested_version,
@@ -2154,11 +2369,23 @@ impl BslLanguageServer {
                 maybe_inject_did_change_pre_materialization_delay().await;
             }
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("retargeted_before_materialization");
                 task_control.control_notify.notify_waiters();
                 continue;
             }
             if task_control.cancel_requested.load(Ordering::SeqCst) {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Cancelled,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("superseded");
                 task_control.control_notify.notify_waiters();
                 break;
@@ -2171,6 +2398,12 @@ impl BslLanguageServer {
                 .copied()
                 != Some(target.requested_version)
             {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
                 lifecycle_guard.set_terminal_reason("latest_version_mismatch");
                 task_control.control_notify.notify_waiters();
                 break;
@@ -2210,16 +2443,34 @@ impl BslLanguageServer {
             {
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready => {}
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                    )
+                    .await;
                     lifecycle_guard.set_terminal_reason("retargeted_before_exact_ready_install");
                     task_control.control_notify.notify_waiters();
                     continue;
                 }
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::Superseded => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::Cancelled,
+                    )
+                    .await;
                     lifecycle_guard.set_terminal_reason("superseded_before_exact_ready_install");
                     task_control.control_notify.notify_waiters();
                     break;
                 }
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::LatestVersionMismatch => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                    )
+                    .await;
                     lifecycle_guard
                         .set_terminal_reason("latest_version_mismatch_before_exact_ready_install");
                     task_control.control_notify.notify_waiters();
@@ -2235,6 +2486,18 @@ impl BslLanguageServer {
                 program_lowering_summary,
             )
             .await;
+            if let Some(producer_key) = super::super::DidSaveExactProducerKeyV2::from_parts(
+                file_id,
+                target.requested_version,
+                target.text_hash,
+                detached_save_cycle_sequence,
+            ) {
+                self.record_did_save_exact_producer_lifecycle_state_v2(
+                    producer_key,
+                    super::super::DidSaveExactProducerLifecycleStateV2::FullyMaterialized,
+                )
+                .await;
+            }
             let ready_phase_snapshot = task_control.finish_phase_attribution();
             self.update_ready_parse_snapshot_phase_attribution_v2(
                 file_id,
@@ -3056,6 +3319,7 @@ impl BslLanguageServer {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn apply_did_change_current_revision_fast_lane_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
@@ -3422,6 +3686,32 @@ impl BslLanguageServer {
                 latest_save_cycle_sequence,
                 "skip stale didChange follow-up scheduling after same-version didSave"
             );
+            self.schedule_background_parse_snapshot_apply_v2(BackgroundParseSnapshotApplyArgs {
+                file_id: work.file_id,
+                requested_version: work.version,
+                save_cycle_sequence: Some(latest_save_cycle_sequence),
+                path: work.path.clone(),
+                text: work.updated_text.clone(),
+                cpu_work_class: bsl_runtime::application::CpuWorkClass::Interactive,
+                parser_base_recovery_text,
+                parser_base_recovery_reuse_parse_result,
+                parser_edits: work.parser_edits,
+                forced_full_parse_reason,
+                async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
+                blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
+                force_reschedule_same_version: true,
+                source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                did_change_attribution: Some(DidChangeParseSnapshotAttributionV2 {
+                    uri: work.uri.clone(),
+                    base_text_source: work.parse_snapshot_base_text_source,
+                    change_shape: work.parse_snapshot_change_shape,
+                    content_changes_count: work.parse_snapshot_content_changes_count,
+                    replay_order: work.parse_snapshot_replay_order,
+                    base_document_version: work.parse_snapshot_base_document_version,
+                    stale_parser_base: parse_snapshot_stale_parser_base,
+                }),
+            })
+            .await;
             return;
         }
 
@@ -3919,6 +4209,21 @@ impl BslLanguageServer {
             ) {
                 continue;
             }
+            if matches!(
+                *profile,
+                bsl_runtime::application::DiagnosticsProfile::SaveFastlane
+            ) {
+                self.run_diagnostics_save_profile_immediate_v2(
+                    uri.clone(),
+                    file_id,
+                    version,
+                    diagnostics_generation,
+                    save_cycle_sequence,
+                    *profile,
+                )
+                .await;
+                continue;
+            }
             self.schedule_diagnostics_profile_v2(
                 uri.clone(),
                 file_id,
@@ -4011,6 +4316,10 @@ impl BslLanguageServer {
                 .write()
                 .await
                 .remove(&file_id);
+            self.did_save_exact_producer_lifecycle_v2
+                .write()
+                .await
+                .retain(|key, _| key.file_id != file_id);
             self.latest_snapshot_failures_v2
                 .write()
                 .await

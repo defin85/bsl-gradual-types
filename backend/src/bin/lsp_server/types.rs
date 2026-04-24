@@ -767,6 +767,12 @@ pub struct DiagnosticsSaveTimelineTrace {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_semantic_materialization_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_save_fastlane_gate_outcome: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_save_fastlane_gate_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_admission_queue_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_zero_probe: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_wait_probe: Option<String>,
@@ -776,6 +782,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_ready_snapshot_bounded_wait_elapsed_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_task_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_did_save_exact_producer_lifecycle_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_timeout_phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

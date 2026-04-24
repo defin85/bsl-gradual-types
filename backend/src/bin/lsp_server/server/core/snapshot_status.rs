@@ -211,9 +211,9 @@ impl BslLanguageServer {
         let ready_matches_requested = match (requested_version, ready_state.as_ref()) {
             (Some(requested_version), Some(ready_state)) => {
                 ready_state.parse_snapshot.file_version == requested_version
-                    && shadow_state.as_ref().map_or(true, |shadow| {
-                        ready_state.text.as_ref() == shadow.text.as_ref()
-                    })
+                    && shadow_state
+                        .as_ref()
+                        .is_none_or(|shadow| ready_state.text.as_ref() == shadow.text.as_ref())
             }
             _ => false,
         };
@@ -242,10 +242,10 @@ impl BslLanguageServer {
                     })
                     .and_then(|entry| entry.fallback_reason.clone())
             })
-        } else if let Some(failed_state) = failed_state.as_ref() {
-            Some(failed_state.reason.as_ref().to_string())
         } else {
-            None
+            failed_state
+                .as_ref()
+                .map(|failed_state| failed_state.reason.as_ref().to_string())
         };
 
         let (state, exact, task_state, phase, trigger) = if ready_matches_requested {

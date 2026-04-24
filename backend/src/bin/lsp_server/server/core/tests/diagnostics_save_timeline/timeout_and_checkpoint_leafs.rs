@@ -839,11 +839,11 @@ async fn p31_diagnostics_save_timeline_reentered_core_parse_build_keeps_first_bo
         )
         .expect("second core-parse-build attribution");
     assert_eq!(
-        second_attribution.timeout_leaf.as_deref(),
+        second_attribution.timeout_leaf,
         Some("before_first_core_build_checkpoint")
     );
     assert_eq!(
-        second_attribution.parse_exec_timeout_subphase.as_deref(),
+        second_attribution.parse_exec_timeout_subphase,
         Some("core_parse_build")
     );
     assert!(

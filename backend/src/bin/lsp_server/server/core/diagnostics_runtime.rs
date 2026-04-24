@@ -42,6 +42,74 @@ const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_LEASE_BUDGET: Duration =
     Duration::from_millis(250);
 const SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_MAX_RENEWALS: usize = 3;
 
+#[cfg(debug_assertions)]
+fn debug_did_save_followup_phase_v2(
+    key: &super::super::DiagnosticsSupersessionKeyV2,
+    pipeline_started: Instant,
+    phase: &str,
+) {
+    if std::env::var_os("BSL_DEBUG_DID_SAVE_FOLLOWUP_PHASES").is_none()
+        || !matches!(
+            key.profile,
+            bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+        )
+        || key.save_cycle_sequence.is_none()
+    {
+        return;
+    }
+    eprintln!(
+        "bsl_debug_did_save_followup_phase file_id={} generation={} sequence={} version={} elapsed_ms={} phase={}",
+        key.file_id.0,
+        key.diagnostics_generation,
+        key.save_cycle_sequence.unwrap_or_default(),
+        key.requested_version,
+        pipeline_started.elapsed().as_millis(),
+        phase
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_did_save_followup_phase_v2(
+    _key: &super::super::DiagnosticsSupersessionKeyV2,
+    _pipeline_started: Instant,
+    _phase: &str,
+) {
+}
+
+#[cfg(debug_assertions)]
+fn debug_did_save_followup_branch_context_phase_v2(
+    key: &super::super::DiagnosticsSupersessionKeyV2,
+    branch_context_started: Instant,
+    phase: &str,
+) {
+    if std::env::var_os("BSL_DEBUG_DID_SAVE_FOLLOWUP_PHASES").is_none()
+        || !matches!(
+            key.profile,
+            bsl_runtime::application::DiagnosticsProfile::IdleHeavy
+        )
+        || key.save_cycle_sequence.is_none()
+    {
+        return;
+    }
+    eprintln!(
+        "bsl_debug_did_save_followup_branch_context file_id={} generation={} sequence={} version={} branch_elapsed_ms={} phase={}",
+        key.file_id.0,
+        key.diagnostics_generation,
+        key.save_cycle_sequence.unwrap_or_default(),
+        key.requested_version,
+        branch_context_started.elapsed().as_millis(),
+        phase
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn debug_did_save_followup_branch_context_phase_v2(
+    _key: &super::super::DiagnosticsSupersessionKeyV2,
+    _branch_context_started: Instant,
+    _phase: &str,
+) {
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ReadyParseSnapshotProbeSlotV2 {
     ZeroBudget,
@@ -162,6 +230,21 @@ struct DiagnosticsSaveFollowupBranchContextV2 {
     shadow_state_available: bool,
     shadow_text_hash: Option<[u8; 32]>,
     ready_snapshot_phase_attribution: Option<DiagnosticsReadySnapshotPhaseAttributionV2>,
+}
+
+fn is_started_parser_base_recovery_same_family_contour_v2(
+    branch_context: DiagnosticsSaveFollowupBranchContextV2,
+    phase_attribution: Option<DiagnosticsReadySnapshotPhaseAttributionV2>,
+) -> bool {
+    branch_context.ready_snapshot_task_state == ReadySnapshotTaskStateV2::InFlightSameVersion
+        && matches!(
+            branch_context.producer_lifecycle_state,
+            Some(super::super::DidSaveExactProducerLifecycleStateV2::Started)
+        )
+        && phase_attribution.is_some_and(|attribution| {
+            attribution.timeout_phase == Some("parse_exec")
+                && attribution.timeout_leaf == Some("parser_base_recovery")
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2711,7 +2794,14 @@ impl BslLanguageServer {
     async fn diagnostics_save_followup_branch_context_v2(
         &self,
         supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        include_ready_state: bool,
     ) -> DiagnosticsSaveFollowupBranchContextV2 {
+        let branch_context_started = Instant::now();
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "start",
+        );
         let shadow_state = self
             .latest_document_shadow_state_v2
             .read()
@@ -2719,16 +2809,19 @@ impl BslLanguageServer {
             .get(&supersession_key.file_id)
             .cloned()
             .filter(|state| state.version == supersession_key.requested_version);
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_shadow_state_read",
+        );
         let shadow_text_hash = shadow_state
             .as_ref()
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
-        let ready_state = self
-            .ready_parse_snapshot_state_for_target_v2(
-                supersession_key.file_id,
-                supersession_key.requested_version,
-                shadow_text_hash,
-            )
-            .await;
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_shadow_hash",
+        );
         let producer_lifecycle_state =
             match (supersession_key.save_cycle_sequence, shadow_text_hash) {
                 (Some(save_cycle_sequence), Some(text_hash)) => self
@@ -2744,6 +2837,11 @@ impl BslLanguageServer {
                     .map(|entry| entry.state),
                 _ => None,
             };
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_lifecycle_read",
+        );
         let save_family_detached_artifact_available =
             match (supersession_key.save_cycle_sequence, shadow_text_hash) {
                 (Some(save_cycle_sequence), Some(text_hash)) => self
@@ -2757,20 +2855,58 @@ impl BslLanguageServer {
                     .is_some(),
                 _ => false,
             };
-        let mut exact_inflight_control = None;
-        let ready_snapshot_task_state = if save_family_detached_artifact_available
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_detached_artifact_read",
+        );
+        if save_family_detached_artifact_available
             && matches!(
                 producer_lifecycle_state,
                 Some(
                     super::super::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished
                         | super::super::DidSaveExactProducerLifecycleStateV2::FullyMaterialized
                 )
-            ) {
-            ReadySnapshotTaskStateV2::InFlightSameVersion
-        } else if ready_state.is_some() {
+            )
+        {
+            return DiagnosticsSaveFollowupBranchContextV2 {
+                ready_snapshot_task_state: ReadySnapshotTaskStateV2::InFlightSameVersion,
+                producer_lifecycle_state,
+                shadow_state_available: shadow_state.is_some(),
+                shadow_text_hash,
+                ready_snapshot_phase_attribution: None,
+            };
+        }
+        let ready_state = if include_ready_state {
+            self.ready_parse_snapshot_state_for_target_v2(
+                supersession_key.file_id,
+                supersession_key.requested_version,
+                shadow_text_hash,
+            )
+            .await
+        } else {
+            None
+        };
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_ready_state_read",
+        );
+        let mut exact_inflight_control = None;
+        let ready_snapshot_task_state = if ready_state.is_some() {
             ReadySnapshotTaskStateV2::ReadySameVersion
         } else {
+            debug_did_save_followup_branch_context_phase_v2(
+                supersession_key,
+                branch_context_started,
+                "before_tasks_lock",
+            );
             let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
+            debug_did_save_followup_branch_context_phase_v2(
+                supersession_key,
+                branch_context_started,
+                "after_tasks_lock",
+            );
             match tasks.get(&supersession_key.file_id) {
                 Some(task) => {
                     let target = task
@@ -2784,7 +2920,13 @@ impl BslLanguageServer {
                         exact_inflight_control = Some(Arc::clone(&task.control));
                         match target.source {
                             super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => {
-                                if target.save_cycle_sequence == supersession_key.save_cycle_sequence { ReadySnapshotTaskStateV2::InFlightSameVersion } else { ReadySnapshotTaskStateV2::Absent }
+                                if target.save_cycle_sequence
+                                    == supersession_key.save_cycle_sequence
+                                {
+                                    ReadySnapshotTaskStateV2::InFlightSameVersion
+                                } else {
+                                    ReadySnapshotTaskStateV2::Absent
+                                }
                             }
                             super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen
                             | super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => {
@@ -2805,6 +2947,11 @@ impl BslLanguageServer {
                 None => ReadySnapshotTaskStateV2::Absent,
             }
         };
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_task_state",
+        );
         let ready_snapshot_phase_attribution = ready_state
             .as_ref()
             .and_then(|state| {
@@ -2821,6 +2968,11 @@ impl BslLanguageServer {
                     )
                 })
             });
+        debug_did_save_followup_branch_context_phase_v2(
+            supersession_key,
+            branch_context_started,
+            "after_phase_attribution",
+        );
         DiagnosticsSaveFollowupBranchContextV2 {
             ready_snapshot_task_state,
             producer_lifecycle_state,
@@ -2843,6 +2995,26 @@ impl BslLanguageServer {
                     requested_version: supersession_key.requested_version,
                 },
             )
+    }
+
+    fn record_diagnostics_save_followup_profile_phase_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        phase: &'static str,
+        pipeline_started: Instant,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_profile_phase(
+            uri,
+            cycle_key,
+            phase,
+            pipeline_started.elapsed(),
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2929,7 +3101,32 @@ impl BslLanguageServer {
                 cycle_key,
                 producer_lifecycle_state.as_str(),
             );
+            if ready_snapshot_wait_probe == Some(ReadyParseSnapshotProbeOutcomeV2::Timeout) {
+                self.record_diagnostics_save_timeline_followup_producer_lifecycle_state_at_timeout(
+                    uri,
+                    cycle_key,
+                    producer_lifecycle_state.as_str(),
+                );
+            }
         }
+    }
+
+    fn record_diagnostics_save_followup_final_producer_lifecycle_state_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        producer_lifecycle_state: super::super::DidSaveExactProducerLifecycleStateV2,
+    ) {
+        let Some(cycle_key) =
+            Self::diagnostics_save_cycle_key_from_supersession_key_v2(supersession_key)
+        else {
+            return;
+        };
+        self.record_diagnostics_save_timeline_followup_producer_final_lifecycle_state(
+            uri,
+            cycle_key,
+            producer_lifecycle_state.as_str(),
+        );
     }
 
     fn record_diagnostics_save_followup_bounded_wait_result_v2(
@@ -3383,7 +3580,7 @@ impl BslLanguageServer {
             return None;
         }
         let branch_context = self
-            .diagnostics_save_followup_branch_context_v2(supersession_key)
+            .diagnostics_save_followup_branch_context_v2(supersession_key, false)
             .await;
         let ready_snapshot_phase_attribution = self
             .ready_snapshot_phase_attribution_for_probe_v2(
@@ -3788,12 +3985,28 @@ impl BslLanguageServer {
         followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
         artifact: SaveFollowupParseSnapshotExecutionInputV2,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_execute_start",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_execute_start",
+            pipeline_started,
+        );
         self.coordinator
             .record_intellisense_v2_diagnostics_save_followup_semantic_path(artifact.semantic_path);
         let outer_setup_started = Instant::now();
         let apply_lag = self
             .diagnostics_followup_apply_lag_v2(supersession_key)
             .await;
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_apply_lag",
+        );
         let context = self
             .build_execution_context_v2(
                 bsl_runtime::application::SemanticOperation::Diagnostics,
@@ -3802,7 +4015,17 @@ impl BslLanguageServer {
                 flow_sensitive_semantic,
             )
             .await;
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_execution_context",
+        );
         let support_bundle = self.analysis_v2.completion_support_bundle();
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_support_bundle",
+        );
         let path = match uri.to_file_path() {
             Ok(path) => path.to_string_lossy().to_string(),
             Err(_) => uri.to_string(),
@@ -3822,6 +4045,11 @@ impl BslLanguageServer {
                 .await
                 .unwrap_or_else(|| Arc::new(parse_snapshot.parse_result.syntax_errors.clone()))
         };
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_syntax_artifact",
+        );
         let deps_id = support_bundle.deps_id.clone();
         let deps = support_bundle.deps.clone();
         let settings_id = context.settings.settings_id.clone();
@@ -3852,7 +4080,14 @@ impl BslLanguageServer {
         let exec_started_apply_lag = apply_lag;
         let pre_semantic_setup_base_elapsed =
             artifact.pre_exec_elapsed + outer_setup_started.elapsed();
+        let debug_supersession_key = *supersession_key;
+        let debug_pipeline_started = pipeline_started;
         let run_followup = move || {
+            debug_did_save_followup_phase_v2(
+                &debug_supersession_key,
+                debug_pipeline_started,
+                "artifact_blocking_start",
+            );
             let setup_started = Instant::now();
             let mut host = bsl_analysis_v2::AnalysisHostV2::default();
             host.apply_change(bsl_analysis_v2::Change::SetDepsSnapshot {
@@ -3884,8 +4119,18 @@ impl BslLanguageServer {
             ));
             let snapshot_with_deps_elapsed =
                 pre_semantic_setup_base_elapsed + setup_started.elapsed();
+            debug_did_save_followup_phase_v2(
+                &debug_supersession_key,
+                debug_pipeline_started,
+                "artifact_after_blocking_setup",
+            );
 
             let semantic_started = Instant::now();
+            debug_did_save_followup_phase_v2(
+                &debug_supersession_key,
+                debug_pipeline_started,
+                "artifact_before_semantic_query",
+            );
             let mut semantic_parse_source = None;
             let mut semantic_ir_source = None;
             let mut semantic_materialization_path = None;
@@ -3905,6 +4150,11 @@ impl BslLanguageServer {
             )
             .map_err(|_| ())?;
             let semantic_elapsed = semantic_started.elapsed();
+            debug_did_save_followup_phase_v2(
+                &debug_supersession_key,
+                debug_pipeline_started,
+                "artifact_after_semantic_query",
+            );
             let duration_from_profile_ms =
                 |value: u128| Duration::from_millis(value.min(u64::MAX as u128) as u64);
             if let Some(profiled) = query {
@@ -3972,6 +4222,17 @@ impl BslLanguageServer {
                 semantic_query_breakdown,
             })
         };
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_before_blocking_dispatch",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_before_blocking_dispatch",
+            pipeline_started,
+        );
         let (followup_join_result, runtime_queue_wait) = if matches!(
             tokio::runtime::Handle::current().runtime_flavor(),
             tokio::runtime::RuntimeFlavor::MultiThread
@@ -4022,6 +4283,17 @@ impl BslLanguageServer {
                 Self::sum_nonzero_durations([Some(followup_call.queue_wait_elapsed)]),
             )
         };
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_blocking_dispatch",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_after_blocking_dispatch",
+            pipeline_started,
+        );
 
         let mut reply = match followup_join_result {
             Ok(Ok(reply)) => reply,
@@ -4066,6 +4338,17 @@ impl BslLanguageServer {
         reply.runtime_queue_wait = runtime_queue_wait;
         reply.apply_lag = apply_lag;
 
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_before_publish_checkpoint",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_before_publish_checkpoint",
+            pipeline_started,
+        );
         if let Some(disposition) = self
             .diagnostics_publish_checkpoint_v2(
                 supersession_key,
@@ -4101,6 +4384,17 @@ impl BslLanguageServer {
                 )
                 .await;
         }
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_publish_checkpoint",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_after_publish_checkpoint",
+            pipeline_started,
+        );
 
         self.record_diagnostics_save_followup_wait_state_v2(
             uri,
@@ -4118,6 +4412,17 @@ impl BslLanguageServer {
         if let Some(guard) = followup_lane_guard {
             guard.release();
         }
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_before_publish",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_before_publish",
+            pipeline_started,
+        );
         let publish_started = Instant::now();
         let disposition = self
             .publish_diagnostics_v2(
@@ -4129,6 +4434,17 @@ impl BslLanguageServer {
                 pipeline_started,
             )
             .await;
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "artifact_after_publish",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            supersession_key,
+            "artifact_after_publish",
+            pipeline_started,
+        );
         self.finalize_diagnostics_save_profile_result_v2(
             uri,
             supersession_key,
@@ -4169,6 +4485,11 @@ impl BslLanguageServer {
         followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
     ) -> SaveFollowupReadyArtifactsAttemptV2 {
         let attempt_started = Instant::now();
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "ready_artifacts_attempt_start",
+        );
         if !matches!(
             (trigger, supersession_key.profile),
             (
@@ -4188,6 +4509,11 @@ impl BslLanguageServer {
             .get(&supersession_key.file_id)
             .filter(|state| state.version == supersession_key.requested_version)
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "ready_artifacts_after_expected_hash",
+        );
         let probe = self
             .wait_for_ready_parse_snapshot_probe_v2(
                 probe_slot,
@@ -4197,6 +4523,11 @@ impl BslLanguageServer {
                 expected_text_hash,
             )
             .await;
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "ready_artifacts_after_probe",
+        );
         let probe_outcome = probe.outcome;
         self.coordinator
             .record_intellisense_v2_diagnostics_save_followup_ready_snapshot_probe(
@@ -4213,8 +4544,13 @@ impl BslLanguageServer {
             );
         }
         let branch_context = self
-            .diagnostics_save_followup_branch_context_v2(supersession_key)
+            .diagnostics_save_followup_branch_context_v2(supersession_key, false)
             .await;
+        debug_did_save_followup_phase_v2(
+            supersession_key,
+            pipeline_started,
+            "ready_artifacts_after_branch_context",
+        );
         let ready_snapshot_phase_attribution = if let Some(ready_state) = probe.state.as_ref() {
             self.ready_snapshot_phase_attribution_for_probe_v2(
                 supersession_key,
@@ -4259,6 +4595,11 @@ impl BslLanguageServer {
             ready_snapshot_phase_attribution,
         );
         if let Some(ready_state) = probe.state {
+            debug_did_save_followup_phase_v2(
+                supersession_key,
+                pipeline_started,
+                "ready_artifacts_before_ready_state_execute",
+            );
             return SaveFollowupReadyArtifactsAttemptV2::Executed(
                 self.execute_save_followup_from_parse_snapshot_artifact_v2(
                     uri,
@@ -4281,6 +4622,11 @@ impl BslLanguageServer {
             );
         }
         if let Some(detached_artifact) = probe.detached_artifact {
+            debug_did_save_followup_phase_v2(
+                supersession_key,
+                pipeline_started,
+                "ready_artifacts_before_detached_execute",
+            );
             return SaveFollowupReadyArtifactsAttemptV2::Executed(
                 self.execute_save_followup_from_parse_snapshot_artifact_v2(
                     uri,
@@ -4319,7 +4665,7 @@ impl BslLanguageServer {
         followup_admission_queue_wait_elapsed: Option<Duration>,
     ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
         let branch_context = self
-            .diagnostics_save_followup_branch_context_v2(supersession_key)
+            .diagnostics_save_followup_branch_context_v2(supersession_key, false)
             .await;
         let phase_attribution = self
             .ready_snapshot_phase_attribution_for_probe_v2(
@@ -4441,6 +4787,16 @@ impl BslLanguageServer {
                                 Some(disposition)
                             }
                             ReadySnapshotContinuationResultV2::FallbackExhaustedProof => {
+                                if is_started_parser_base_recovery_same_family_contour_v2(
+                                    branch_context,
+                                    phase_attribution,
+                                ) {
+                                    self.record_diagnostics_save_followup_final_producer_lifecycle_state_v2(
+                                        uri,
+                                        supersession_key,
+                                        super::super::DidSaveExactProducerLifecycleStateV2::ContinuityLost,
+                                    );
+                                }
                                 self.record_diagnostics_save_followup_continuation_reason_v2(
                                     uri,
                                     supersession_key,
@@ -5160,12 +5516,18 @@ impl BslLanguageServer {
         cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
     ) -> bsl_runtime::application::DiagnosticsDisposition {
         let pipeline_started = Instant::now();
+        debug_did_save_followup_phase_v2(&supersession_key, pipeline_started, "profile_start");
         if let Some(disposition) = self
             .diagnostics_checkpoint_v2(&supersession_key, trigger, cancel_token)
             .await
         {
             return disposition;
         }
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "after_initial_checkpoint",
+        );
         let file_id = supersession_key.file_id;
         let requested_version = supersession_key.requested_version;
         let requested_generation = supersession_key.diagnostics_generation;
@@ -5192,10 +5554,22 @@ impl BslLanguageServer {
                 settings.enable_flow_sensitive,
             )
         };
+        debug_did_save_followup_phase_v2(&supersession_key, pipeline_started, "after_settings");
         let plan =
             bsl_runtime::application::diagnostics_execution_plan(profile, flow_sensitive_enabled);
         let run_semantic =
             plan.run_semantic && self.should_run_semantic_diagnostics_for_uri_v2(uri).await;
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "after_semantic_eligibility",
+        );
+        self.record_diagnostics_save_followup_profile_phase_v2(
+            uri,
+            &supersession_key,
+            "after_semantic_eligibility",
+            pipeline_started,
+        );
         let save_followup_from_did_save = matches!(
             (trigger, profile),
             (
@@ -5239,6 +5613,17 @@ impl BslLanguageServer {
         let mut followup_admission_queue_wait_elapsed = None;
         let mut did_save_followup_lane_guard: Option<DidSaveFollowupSlotGuard> = None;
         if save_followup_from_did_save && run_semantic {
+            debug_did_save_followup_phase_v2(
+                &supersession_key,
+                pipeline_started,
+                "followup_before_pending_publish",
+            );
+            self.record_diagnostics_save_followup_profile_phase_v2(
+                uri,
+                &supersession_key,
+                "followup_before_pending_publish",
+                pipeline_started,
+            );
             let applied_revision_matches_requested = || {
                 self.analysis_v2
                     .cached_file_revision_state(file_id)
@@ -5261,6 +5646,17 @@ impl BslLanguageServer {
             let save_fastlane_first_publish_outcome = self
                 .wait_for_save_fastlane_first_publish_v2(uri, &supersession_key, cancel_token)
                 .await;
+            debug_did_save_followup_phase_v2(
+                &supersession_key,
+                pipeline_started,
+                "followup_after_save_fastlane_gate",
+            );
+            self.record_diagnostics_save_followup_profile_phase_v2(
+                uri,
+                &supersession_key,
+                "followup_after_save_fastlane_gate",
+                pipeline_started,
+            );
             self.record_diagnostics_save_timeline_followup_save_fastlane_gate_result(
                 uri,
                 super::super::DiagnosticsSaveTimelineCycleKey {
@@ -5307,11 +5703,27 @@ impl BslLanguageServer {
                     }
                     followup_admission_queue_wait_elapsed = queue_wait_elapsed;
                     did_save_followup_lane_guard = Some(*guard);
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_admission_admitted",
+                    );
+                    self.record_diagnostics_save_followup_profile_phase_v2(
+                        uri,
+                        &supersession_key,
+                        "followup_after_admission_admitted",
+                        pipeline_started,
+                    );
                 }
                 DidSaveFollowupAdmissionOutcome::Disposition {
                     disposition,
                     queue_wait_elapsed,
                 } => {
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_admission_disposition",
+                    );
                     self.record_diagnostics_pipeline_event_v2(
                         trigger,
                         supersession_key.profile,
@@ -5350,11 +5762,44 @@ impl BslLanguageServer {
                     .save_fastlane_syntax_artifacts_for_version_v2(file_id, requested_version)
                     .await
                     .is_some();
+            debug_did_save_followup_phase_v2(
+                &supersession_key,
+                pipeline_started,
+                "followup_after_fastlane_artifact_check",
+            );
+            self.record_diagnostics_save_followup_profile_phase_v2(
+                uri,
+                &supersession_key,
+                "followup_after_fastlane_artifact_check",
+                pipeline_started,
+            );
 
             if save_fastlane_gate_open {
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_before_branch_context",
+                );
+                self.record_diagnostics_save_followup_profile_phase_v2(
+                    uri,
+                    &supersession_key,
+                    "followup_before_branch_context",
+                    pipeline_started,
+                );
                 let branch_context = self
-                    .diagnostics_save_followup_branch_context_v2(&supersession_key)
+                    .diagnostics_save_followup_branch_context_v2(&supersession_key, false)
                     .await;
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_after_branch_context",
+                );
+                self.record_diagnostics_save_followup_profile_phase_v2(
+                    uri,
+                    &supersession_key,
+                    "followup_after_branch_context",
+                    pipeline_started,
+                );
                 let prefer_inflight_exact_wait = matches!(
                     branch_context.ready_snapshot_task_state,
                     ReadySnapshotTaskStateV2::InFlightSameVersion
@@ -5369,7 +5814,18 @@ impl BslLanguageServer {
                     Some(branch_context.shadow_state_available),
                     branch_context.ready_snapshot_phase_attribution,
                 );
-                if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_before_zero_probe",
+                );
+                self.record_diagnostics_save_followup_profile_phase_v2(
+                    uri,
+                    &supersession_key,
+                    "followup_before_zero_probe",
+                    pipeline_started,
+                );
+                let zero_probe_attempt = self
                     .try_execute_save_followup_from_ready_artifacts_v2(
                         uri,
                         &supersession_key,
@@ -5382,11 +5838,29 @@ impl BslLanguageServer {
                         plan.flow_sensitive_semantic,
                         did_save_followup_lane_guard.as_ref(),
                     )
-                    .await
+                    .await;
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_after_zero_probe",
+                );
+                self.record_diagnostics_save_followup_profile_phase_v2(
+                    uri,
+                    &supersession_key,
+                    "followup_after_zero_probe",
+                    pipeline_started,
+                );
+                if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) =
+                    zero_probe_attempt
                 {
                     return disposition;
                 }
                 if prefer_inflight_exact_wait {
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_before_promote_exact_producer",
+                    );
                     let _ = self
                         .promote_background_parse_snapshot_apply_task_for_did_save_v2(
                             file_id,
@@ -5394,7 +5868,23 @@ impl BslLanguageServer {
                             branch_context.shadow_text_hash,
                         )
                         .await;
-                    if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_promote_exact_producer",
+                    );
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_before_bounded_wait_probe",
+                    );
+                    self.record_diagnostics_save_followup_profile_phase_v2(
+                        uri,
+                        &supersession_key,
+                        "followup_before_bounded_wait_probe",
+                        pipeline_started,
+                    );
+                    let bounded_wait_attempt = self
                         .try_execute_save_followup_from_ready_artifacts_v2(
                             uri,
                             &supersession_key,
@@ -5407,10 +5897,28 @@ impl BslLanguageServer {
                             plan.flow_sensitive_semantic,
                             did_save_followup_lane_guard.as_ref(),
                         )
-                        .await
+                        .await;
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_bounded_wait_probe",
+                    );
+                    self.record_diagnostics_save_followup_profile_phase_v2(
+                        uri,
+                        &supersession_key,
+                        "followup_after_bounded_wait_probe",
+                        pipeline_started,
+                    );
+                    if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) =
+                        bounded_wait_attempt
                     {
                         return disposition;
                     }
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_before_relief_valve",
+                    );
                     if let Some(disposition) = self
                         .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
                             uri,
@@ -5425,9 +5933,24 @@ impl BslLanguageServer {
                         )
                         .await
                     {
+                        debug_did_save_followup_phase_v2(
+                            &supersession_key,
+                            pipeline_started,
+                            "followup_after_relief_valve_executed",
+                        );
                         return disposition;
                     }
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_relief_valve_none",
+                    );
                 }
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_before_shadow_state",
+                );
                 if let Some(disposition) = self
                     .try_execute_save_followup_from_shadow_state_v2(
                         uri,
@@ -5441,8 +5964,18 @@ impl BslLanguageServer {
                     )
                     .await
                 {
+                    debug_did_save_followup_phase_v2(
+                        &supersession_key,
+                        pipeline_started,
+                        "followup_after_shadow_state_executed",
+                    );
                     return disposition;
                 }
+                debug_did_save_followup_phase_v2(
+                    &supersession_key,
+                    pipeline_started,
+                    "followup_after_shadow_state_none",
+                );
             }
 
             let wait_reason = if applied_revision_matches_requested() {
@@ -5475,6 +6008,11 @@ impl BslLanguageServer {
             );
         }
 
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "generic_before_execution_context",
+        );
         let context = self
             .build_execution_context_v2(
                 bsl_runtime::application::SemanticOperation::Diagnostics,
@@ -5483,6 +6021,16 @@ impl BslLanguageServer {
                 plan.flow_sensitive_semantic,
             )
             .await;
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "generic_after_execution_context",
+        );
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "generic_before_prepare_stateful",
+        );
         let prepared = match if save_followup_from_did_save && run_semantic {
             self.analysis_v2
                 .prepare_stateful_operation_with_admission_lane(
@@ -5556,6 +6104,11 @@ impl BslLanguageServer {
                     .await;
             }
         };
+        debug_did_save_followup_phase_v2(
+            &supersession_key,
+            pipeline_started,
+            "generic_after_prepare_stateful",
+        );
 
         let wait_elapsed = prepared.wait_elapsed.unwrap_or(Duration::ZERO);
         let wait_for_file_version_runtime = prepared.wait_for_file_version_runtime;

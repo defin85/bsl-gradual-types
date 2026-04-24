@@ -436,6 +436,7 @@ pub(crate) enum DidSaveExactProducerLifecycleStateV2 {
     Superseded,
     Cancelled,
     Failed,
+    ContinuityLost,
 }
 
 impl DidSaveExactProducerLifecycleStateV2 {
@@ -448,6 +449,7 @@ impl DidSaveExactProducerLifecycleStateV2 {
             Self::Superseded => "superseded",
             Self::Cancelled => "cancelled",
             Self::Failed => "failed",
+            Self::ContinuityLost => "continuity_lost",
         }
     }
 

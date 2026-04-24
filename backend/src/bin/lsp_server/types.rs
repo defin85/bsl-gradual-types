@@ -740,6 +740,12 @@ pub struct DiagnosticsSaveTimelinePublishTrace {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DiagnosticsSaveTimelinePhaseMark {
+    pub phase: String,
+    pub elapsed_ms: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiagnosticsSaveTimelineTrace {
     pub trace_id: String,
     pub uri: String,
@@ -752,6 +758,8 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub first_publish: Option<DiagnosticsSaveTimelinePublishTrace>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_publish: Option<DiagnosticsSaveTimelinePublishTrace>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub followup_profile_phase_marks: Vec<DiagnosticsSaveTimelinePhaseMark>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub save_fastlane_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -784,6 +792,10 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_ready_snapshot_task_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_did_save_exact_producer_lifecycle_state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_did_save_exact_producer_lifecycle_state_at_timeout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_did_save_exact_producer_final_lifecycle_state: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_timeout_phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

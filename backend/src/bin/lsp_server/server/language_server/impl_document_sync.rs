@@ -1150,22 +1150,21 @@ impl BslLanguageServer {
             initial_admission_lane,
             Some(bsl_runtime::application::AdmissionLane::DidSaveFollowup)
         ) || promoted_to_did_save_followup;
-        let same_version_previous_ready_seed_for_parse =
-            if same_version_did_save_followup && !parser_edits.is_empty() {
-                self.latest_ready_parse_snapshots_v2
-                    .read()
-                    .await
-                    .get(&file_id)
-                    .and_then(|state| {
-                        derive_same_version_rebuild_previous_ready_seed_v2(
-                            state,
-                            version,
-                            &text_for_parse,
-                        )
-                    })
-            } else {
-                None
-            };
+        let same_version_previous_ready_seed_for_parse = if task_control_for_parse.is_some() {
+            self.latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .and_then(|state| {
+                    derive_same_version_rebuild_previous_ready_seed_v2(
+                        state,
+                        version,
+                        &text_for_parse,
+                    )
+                })
+        } else {
+            None
+        };
         let same_version_rebuild_reuse_parse_result_for_parse =
             if same_version_did_save_followup && parser_edits.is_empty() {
                 derive_same_version_rebuild_reuse_parse_result_from_current_state_v2(
@@ -4148,6 +4147,62 @@ impl BslLanguageServer {
                 Ok(path) => path.to_string_lossy().to_string(),
                 Err(_) => uri.to_string(),
             };
+            let (
+                save_parser_edits,
+                save_parser_base_recovery_text,
+                save_parser_base_recovery_reuse_parse_result,
+                save_forced_full_parse_reason,
+            ) = {
+                let ready_state = self
+                    .latest_ready_parse_snapshots_v2
+                    .read()
+                    .await
+                    .get(&file_id)
+                    .cloned()
+                    .filter(|state| {
+                        state.parse_snapshot.file_version < version
+                            && state.text.as_ref() != text.as_ref()
+                    });
+                if let Some(ready_state) = ready_state {
+                    let parser_edits =
+                        whole_text_change_to_parser_edit(ready_state.text.as_ref(), text.as_ref())
+                            .into_iter()
+                            .collect::<Vec<_>>();
+                    let can_reuse_ready_ast = ready_state.syntax_errors_complete
+                        && !ready_state.parse_snapshot.parse_result.has_errors()
+                        && !ready_state
+                            .parse_snapshot
+                            .parse_result
+                            .program
+                            .statements
+                            .is_empty();
+                    let tree_cache_matches_ready_text =
+                        self.coordinator.parser_coordinator().is_some_and(|parser| {
+                            parser.tree_cache_matches_source_for_file(
+                                Path::new(path.as_str()),
+                                ready_state.text.as_ref(),
+                            )
+                        });
+                    let forced_full_parse_reason = if !parser_edits.is_empty()
+                        && !tree_cache_matches_ready_text
+                    {
+                        Some(
+                                bsl_runtime::system::parser_coordinator::ParserCoordinator::parse_snapshot_fallback_stale_parser_base_reason(),
+                            )
+                    } else {
+                        None
+                    };
+                    (
+                        parser_edits,
+                        (!tree_cache_matches_ready_text).then(|| ready_state.text.clone()),
+                        can_reuse_ready_ast
+                            .then(|| ready_state.parse_snapshot.parse_result.clone()),
+                        forced_full_parse_reason,
+                    )
+                } else {
+                    (Vec::new(), None, None, None)
+                }
+            };
             // Save can be followed by an immediate outline refresh without a new version bump.
             // Coalesce identical same-version refresh behind the existing worker so save does
             // not restart the same cold/full parse for unchanged shadow text.
@@ -4158,10 +4213,11 @@ impl BslLanguageServer {
                 path: Arc::from(path),
                 text,
                 cpu_work_class: bsl_runtime::application::CpuWorkClass::Interactive,
-                parser_base_recovery_text: None,
-                parser_base_recovery_reuse_parse_result: None,
-                parser_edits: Vec::new(),
-                forced_full_parse_reason: None,
+                parser_base_recovery_text: save_parser_base_recovery_text,
+                parser_base_recovery_reuse_parse_result:
+                    save_parser_base_recovery_reuse_parse_result,
+                parser_edits: save_parser_edits,
+                forced_full_parse_reason: save_forced_full_parse_reason,
                 async_delay_mode: ParseSnapshotAsyncDelayMode::DidSaveTestOnly,
                 blocking_delay_env_key: Some("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS"),
                 force_reschedule_same_version: true,

@@ -159,6 +159,18 @@ fn diagnostics_save_timeline_trace_mut_inner<'a>(
     })
 }
 
+fn did_save_exact_producer_lifecycle_is_terminal_state(state: &str) -> bool {
+    matches!(
+        state,
+        "detached_diagnostics_ready_published"
+            | "fully_materialized"
+            | "superseded"
+            | "cancelled"
+            | "failed"
+            | "continuity_lost"
+    )
+}
+
 fn snapshot_diagnostics_save_timeline_traces_inner(
     store: &super::DiagnosticsSaveTimelineStore,
     limit: usize,
@@ -1070,6 +1082,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
@@ -1086,6 +1099,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -1247,6 +1262,7 @@ impl BslLanguageServer {
                     started_at_ms: super::unix_timestamp_ms(),
                     first_publish: None,
                     followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                     save_fastlane_outcome: None,
                     idle_heavy_outcome: None,
                     followup_syntax_work_mode: None,
@@ -1263,6 +1279,8 @@ impl BslLanguageServer {
                     followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                     followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                     followup_ready_snapshot_timeout_phase: None,
                     followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                     followup_ready_snapshot_timeout_leaf: None,
@@ -1470,6 +1488,44 @@ impl BslLanguageServer {
         }
     }
 
+    pub(crate) fn record_diagnostics_save_timeline_followup_profile_phase(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        phase: &'static str,
+        elapsed: Duration,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
+            return;
+        }
+        let trace = store.active_cycles.entry(key).or_insert_with(|| {
+            crate::types::DiagnosticsSaveTimelineTrace {
+                trace_id: next_diagnostics_save_timeline_trace_id_from(
+                    self.next_diagnostics_save_timeline_trace_id.as_ref(),
+                ),
+                uri: uri.to_string(),
+                requested_version: key.requested_version,
+                diagnostics_generation: key.diagnostics_generation,
+                save_cycle_sequence: key.save_cycle_sequence,
+                trigger: bsl_runtime::application::DiagnosticsTrigger::DidSave
+                    .as_str()
+                    .to_string(),
+                started_at_ms: super::unix_timestamp_ms(),
+                ..Default::default()
+            }
+        });
+        trace
+            .followup_profile_phase_marks
+            .push(crate::types::DiagnosticsSaveTimelinePhaseMark {
+                phase: phase.to_string(),
+                elapsed_ms: elapsed.as_millis().min(u64::MAX as u128) as u64,
+            });
+    }
+
     pub(crate) fn record_diagnostics_save_timeline_profile_disposition(
         &self,
         uri: &Url,
@@ -1523,6 +1579,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                     idle_heavy_outcome: None,
                     followup_syntax_work_mode: None,
@@ -1539,6 +1596,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -1718,7 +1777,7 @@ impl BslLanguageServer {
 
     pub(crate) fn record_diagnostics_save_timeline_followup_producer_lifecycle_state(
         &self,
-        _uri: &Url,
+        uri: &Url,
         key: super::DiagnosticsSaveTimelineCycleKey,
         producer_lifecycle_state: &'static str,
     ) {
@@ -1726,11 +1785,51 @@ impl BslLanguageServer {
             .diagnostics_save_timeline_store
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if diagnostics_save_timeline_terminal_key_is_recorded_inner(&store, key) {
-            return;
-        }
-        if let Some(trace) = store.active_cycles.get_mut(&key) {
+        if let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) {
             trace.followup_did_save_exact_producer_lifecycle_state =
+                Some(producer_lifecycle_state.to_string());
+            if did_save_exact_producer_lifecycle_is_terminal_state(producer_lifecycle_state) {
+                trace.followup_did_save_exact_producer_final_lifecycle_state =
+                    Some(producer_lifecycle_state.to_string());
+            }
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_producer_lifecycle_state_at_timeout(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        producer_lifecycle_state: &'static str,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) {
+            if trace
+                .followup_did_save_exact_producer_lifecycle_state_at_timeout
+                .is_none()
+            {
+                trace.followup_did_save_exact_producer_lifecycle_state_at_timeout =
+                    Some(producer_lifecycle_state.to_string());
+            }
+        }
+    }
+
+    pub(crate) fn record_diagnostics_save_timeline_followup_producer_final_lifecycle_state(
+        &self,
+        uri: &Url,
+        key: super::DiagnosticsSaveTimelineCycleKey,
+        producer_lifecycle_state: &'static str,
+    ) {
+        let mut store = self
+            .diagnostics_save_timeline_store
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(trace) = diagnostics_save_timeline_trace_mut_inner(&mut store, uri, key) {
+            trace.followup_did_save_exact_producer_lifecycle_state =
+                Some(producer_lifecycle_state.to_string());
+            trace.followup_did_save_exact_producer_final_lifecycle_state =
                 Some(producer_lifecycle_state.to_string());
         }
     }
@@ -1834,6 +1933,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
@@ -1850,6 +1950,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2015,6 +2117,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
@@ -2031,6 +2134,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2202,6 +2307,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
@@ -2218,6 +2324,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,
@@ -2407,6 +2515,7 @@ impl BslLanguageServer {
                 started_at_ms: super::unix_timestamp_ms(),
                 first_publish: None,
                 followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
                 save_fastlane_outcome: None,
                 idle_heavy_outcome: None,
                 followup_syntax_work_mode: None,
@@ -2423,6 +2532,8 @@ impl BslLanguageServer {
                 followup_ready_snapshot_bounded_wait_elapsed_ms: None,
                 followup_ready_snapshot_task_state: None,
                 followup_did_save_exact_producer_lifecycle_state: None,
+                followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+                followup_did_save_exact_producer_final_lifecycle_state: None,
                 followup_ready_snapshot_timeout_phase: None,
                 followup_ready_snapshot_timeout_phase_elapsed_ms: None,
                 followup_ready_snapshot_timeout_leaf: None,

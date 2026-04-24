@@ -256,6 +256,168 @@ async fn p32_diagnostics_save_timeline_relief_valve_treats_late_did_save_task_as
 }
 
 #[tokio::test]
+async fn p52_diagnostics_save_timeline_exports_continuity_loss_for_started_parser_base_timeout() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///p52-started-parser-base-continuity-loss.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(5252);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 520,
+        save_cycle_sequence: 52,
+        requested_version: 152,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> = Arc::from("Procedure Test()\n    Return 152;\nEndProcedure\n");
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let producer_key = crate::server::DidSaveExactProducerKeyV2 {
+        file_id,
+        requested_version: key.requested_version,
+        text_hash: exact_text_hash,
+        save_cycle_sequence: key.save_cycle_sequence,
+    };
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, key.requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: key.requested_version,
+            text: exact_text.clone(),
+        },
+    );
+    server
+        .did_save_exact_producer_lifecycle_v2
+        .write()
+        .await
+        .insert(
+            producer_key,
+            crate::server::DidSaveExactProducerLifecycleEntryV2::new(
+                crate::server::DidSaveExactProducerLifecycleStateV2::Started,
+            ),
+        );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        crate::server::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        crate::server::ReadyParseSnapshotCoreBuildCheckpointV2::ParserBaseRecovery,
+    );
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+
+    let bounded_wait_disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            Duration::from_millis(1),
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        bounded_wait_disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Timeout
+        )
+    ));
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    assert!(
+        disposition.is_none(),
+        "continuity-loss evidence should keep fallback open without publishing from ready artifacts"
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_leaf.as_deref(),
+        Some("parser_base_recovery")
+    );
+    assert_eq!(
+        trace
+            .followup_did_save_exact_producer_lifecycle_state_at_timeout
+            .as_deref(),
+        Some("started")
+    );
+    assert_eq!(
+        trace
+            .followup_did_save_exact_producer_final_lifecycle_state
+            .as_deref(),
+        Some("continuity_lost")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("exhausted_continuation_proof")
+    );
+}
+
+#[tokio::test]
 async fn p32_diagnostics_save_timeline_continuation_reports_superseded_generation() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p32-ready-snapshot-continuation-superseded-generation.bsl")
@@ -1187,9 +1349,7 @@ async fn p24c_diagnostics_save_timeline_bounded_wait_wakes_on_detached_ready_art
         Some("not_ready")
     );
     assert_eq!(
-        trace
-            .followup_ready_snapshot_bounded_wait_winner
-            .as_deref(),
+        trace.followup_ready_snapshot_bounded_wait_winner.as_deref(),
         Some("detached_ready_artifacts")
     );
     assert!(
@@ -1368,9 +1528,7 @@ async fn p24c_diagnostics_save_timeline_bounded_wait_prefers_ready_artifacts_whe
         Some("ready")
     );
     assert_eq!(
-        trace
-            .followup_ready_snapshot_bounded_wait_winner
-            .as_deref(),
+        trace.followup_ready_snapshot_bounded_wait_winner.as_deref(),
         Some("ready_artifacts")
     );
     assert_eq!(
@@ -1383,8 +1541,7 @@ async fn p24c_diagnostics_save_timeline_bounded_wait_prefers_ready_artifacts_whe
 async fn p24c_diagnostics_save_timeline_bounded_wait_ignores_stale_detached_publication_for_newer_target(
 ) {
     let server = create_diagnostics_save_timeline_test_server();
-    let uri =
-        Url::parse("file:///p24c-bounded-wait-stale-detached-publication.bsl").expect("uri");
+    let uri = Url::parse("file:///p24c-bounded-wait-stale-detached-publication.bsl").expect("uri");
     let file_id = bsl_analysis_v2::FileId(14604);
     let key = crate::server::DiagnosticsSaveTimelineCycleKey {
         file_id,
@@ -1519,9 +1676,7 @@ async fn p24c_diagnostics_save_timeline_bounded_wait_ignores_stale_detached_publ
         Some("timeout")
     );
     assert_eq!(
-        trace
-            .followup_ready_snapshot_bounded_wait_winner
-            .as_deref(),
+        trace.followup_ready_snapshot_bounded_wait_winner.as_deref(),
         Some("timeout")
     );
     assert!(
@@ -2165,9 +2320,7 @@ async fn p26_diagnostics_save_timeline_keeps_skipped_apply_lag_for_waiting_exact
         Some("engaged_timed_out")
     );
     assert_eq!(
-        trace
-            .followup_ready_snapshot_continuation_reason
-            .as_deref(),
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
         Some("exhausted_continuation_proof")
     );
 }
@@ -2433,8 +2586,7 @@ fn p7_ready_parse_snapshot_probe_wait_decision_classifies_cancellation_and_super
 #[tokio::test]
 async fn p7_diagnostics_save_timeline_fastlane_progress_reads_matching_archived_trace() {
     let server = create_diagnostics_save_timeline_test_server();
-    let uri =
-        Url::parse("file:///p7-fastlane-progress-reads-archived-trace.bsl").expect("uri");
+    let uri = Url::parse("file:///p7-fastlane-progress-reads-archived-trace.bsl").expect("uri");
     let key = crate::server::DiagnosticsSaveTimelineCycleKey {
         file_id: bsl_analysis_v2::FileId(93),
         diagnostics_generation: 12,
@@ -2481,7 +2633,10 @@ async fn p7_diagnostics_save_timeline_fastlane_progress_reads_matching_archived_
     let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
     assert_eq!(trace.save_fastlane_outcome.as_deref(), Some("published"));
     assert_eq!(
-        trace.first_publish.as_ref().map(|publish| publish.profile.as_str()),
+        trace
+            .first_publish
+            .as_ref()
+            .map(|publish| publish.profile.as_str()),
         Some("save_fastlane")
     );
 }

@@ -2005,6 +2005,7 @@ mod tests {
                 ..Default::default()
             }),
             followup_publish: None,
+                followup_profile_phase_marks: Vec::new(),
             save_fastlane_outcome: Some("published".to_string()),
             idle_heavy_outcome: Some("published".to_string()),
             followup_syntax_work_mode: Some("recomputed".to_string()),
@@ -2020,7 +2021,9 @@ mod tests {
             followup_ready_snapshot_bounded_wait_winner: Some("timeout".to_string()),
             followup_ready_snapshot_bounded_wait_elapsed_ms: Some(3500),
             followup_ready_snapshot_task_state: Some("in_flight_same_version".to_string()),
-                followup_did_save_exact_producer_lifecycle_state: None,
+            followup_did_save_exact_producer_lifecycle_state: None,
+            followup_did_save_exact_producer_lifecycle_state_at_timeout: None,
+            followup_did_save_exact_producer_final_lifecycle_state: None,
             followup_ready_snapshot_timeout_phase: Some("parse_exec".to_string()),
             followup_ready_snapshot_timeout_phase_elapsed_ms: Some(3500),
             followup_ready_snapshot_timeout_leaf: Some("parser_tree_build".to_string()),

@@ -1,0 +1,1000 @@
+{
+  "aggregate": {
+    "did_change_ready_snapshot_materialization_histogram_count": 4,
+    "did_change_ready_snapshot_materialization_p50_ms": 41171.0,
+    "did_change_ready_snapshot_materialization_p95_ms": 41809.0,
+    "max_first_publish_elapsed_ms": 209,
+    "max_followup_admission_queue_wait_ms": null,
+    "max_followup_publish_blocking_queue_wait_ms": null,
+    "max_followup_publish_elapsed_ms": 1384,
+    "max_followup_publish_publish_wait_ms": 4,
+    "max_followup_publish_runtime_queue_wait_ms": null,
+    "max_followup_publish_semantic_diagnostics_query_ms": 1375,
+    "max_followup_publish_snapshot_with_deps_ms": 60,
+    "max_followup_publish_wait_for_file_version_ms": null,
+    "max_followup_ready_snapshot_bounded_wait_elapsed_ms": 59,
+    "max_followup_ready_snapshot_parse_exec_ms": 184,
+    "max_followup_runtime_queue_wait_ms": null,
+    "max_followup_save_fastlane_gate_wait_ms": 0
+  },
+  "baseline": {
+    "captured_at": "2026-04-18T18:52:50Z",
+    "did_change_ready_snapshot_materialization_ms": {
+      "p50": 3226.0,
+      "p95": 3329.0
+    },
+    "followup_publish_elapsed_ms": [
+      5052,
+      5219
+    ],
+    "followup_ready_snapshot_parse_exec_ms": [
+      3222,
+      3327
+    ],
+    "followup_semantic_path_detached_ready_artifacts": 4,
+    "followup_semantic_path_ready_artifacts": 0,
+    "followup_semantic_path_shadow_state": 0
+  },
+  "change_id": "refactor-52-didsave-parser-base-recovery-detached-ready-bounding",
+  "comparison": {
+    "did_change_ready_snapshot_materialization_p50_vs_baseline_delta_ms": 37945.0,
+    "did_change_ready_snapshot_materialization_p95_vs_baseline_delta_ms": 38480.0,
+    "max_followup_publish_elapsed_vs_baseline_ceiling_delta_ms": -3835,
+    "max_followup_ready_snapshot_parse_exec_vs_baseline_ceiling_delta_ms": -3143
+  },
+  "cycle_count": 4,
+  "cycles": [
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": false
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": null,
+      "cycle": 1,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle1Stage2;",
+      "first_publish_elapsed_ms": 105,
+      "first_publish_publish_wait_ms": 0,
+      "first_publish_runtime_queue_wait_ms": null,
+      "first_publish_syntax_query_ms": 78,
+      "followup_admission_queue_wait_ms": null,
+      "followup_apply_lag_ms": 178,
+      "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state_at_timeout": null,
+      "followup_profile_phase_marks": [
+        {
+          "elapsed_ms": 0,
+          "phase": "after_semantic_eligibility"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_pending_publish"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_save_fastlane_gate"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_admission_admitted"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_fastlane_artifact_check"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_after_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_before_bounded_wait_probe"
+        },
+        {
+          "elapsed_ms": 56,
+          "phase": "artifact_execute_start"
+        },
+        {
+          "elapsed_ms": 56,
+          "phase": "artifact_before_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1152,
+          "phase": "artifact_after_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1152,
+          "phase": "artifact_before_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1152,
+          "phase": "artifact_after_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1152,
+          "phase": "artifact_before_publish"
+        },
+        {
+          "elapsed_ms": 1155,
+          "phase": "artifact_after_publish"
+        }
+      ],
+      "followup_publish_blocking_queue_wait_ms": null,
+      "followup_publish_elapsed_ms": 1155,
+      "followup_publish_non_query_residual_ms": 62,
+      "followup_publish_publish_wait_ms": 2,
+      "followup_publish_runtime_queue_wait_ms": null,
+      "followup_publish_semantic_diagnostics_collect_ms": 392,
+      "followup_publish_semantic_diagnostics_ir_ms": 697,
+      "followup_publish_semantic_diagnostics_query_ms": 1093,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_publish_snapshot_with_deps_ms": 56,
+      "followup_publish_wait_for_file_version_ms": null,
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 54,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 175,
+      "followup_ready_snapshot_program_lowering_ms": 162,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_timeout_leaf_elapsed_ms": null,
+      "followup_ready_snapshot_timeout_phase": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_runtime_queue_wait_ms": null,
+      "followup_save_fastlane_gate_outcome": "published",
+      "followup_save_fastlane_gate_wait_ms": 0,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_snapshot_with_deps_ms": null,
+      "followup_wait_for_file_version_ms": null,
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 3,
+      "program_lowering_rebuild_dispatch_ms": 156,
+      "program_lowering_rebuilt_lowering_units": 9,
+      "program_lowering_rebuilt_window_count": 1,
+      "program_lowering_reuse_outcome": "routine_body_reuse",
+      "program_lowering_reuse_plan_borrowed_cache_hit": true,
+      "program_lowering_reuse_plan_build_ms": 2,
+      "program_lowering_reuse_plan_build_source": "borrowed",
+      "program_lowering_reuse_plan_take_if_unique_hit": false,
+      "program_lowering_reused_lowering_units": 2079,
+      "program_lowering_reused_progress_ms": 0,
+      "program_lowering_reused_window_count": 4,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 2,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 3,
+      "save_cycle_sequence": 1,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 2,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 2,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 171.0,
+        "p95": 171.0,
+        "p99": 171.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 2,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 3,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 3,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": false
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": null,
+      "cycle": 2,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle2Stage2;",
+      "first_publish_elapsed_ms": 209,
+      "first_publish_publish_wait_ms": 0,
+      "first_publish_runtime_queue_wait_ms": null,
+      "first_publish_syntax_query_ms": 68,
+      "followup_admission_queue_wait_ms": null,
+      "followup_apply_lag_ms": 225,
+      "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state_at_timeout": null,
+      "followup_profile_phase_marks": [
+        {
+          "elapsed_ms": 0,
+          "phase": "after_semantic_eligibility"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_pending_publish"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_save_fastlane_gate"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_admission_admitted"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_fastlane_artifact_check"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_after_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_before_bounded_wait_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "artifact_execute_start"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "artifact_before_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1380,
+          "phase": "artifact_after_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1380,
+          "phase": "artifact_before_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1380,
+          "phase": "artifact_after_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1380,
+          "phase": "artifact_before_publish"
+        },
+        {
+          "elapsed_ms": 1384,
+          "phase": "artifact_after_publish"
+        }
+      ],
+      "followup_publish_blocking_queue_wait_ms": null,
+      "followup_publish_elapsed_ms": 1384,
+      "followup_publish_non_query_residual_ms": 9,
+      "followup_publish_publish_wait_ms": 4,
+      "followup_publish_runtime_queue_wait_ms": null,
+      "followup_publish_semantic_diagnostics_collect_ms": 534,
+      "followup_publish_semantic_diagnostics_ir_ms": 833,
+      "followup_publish_semantic_diagnostics_query_ms": 1375,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_publish_snapshot_with_deps_ms": 0,
+      "followup_publish_wait_for_file_version_ms": null,
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 0,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 147,
+      "followup_ready_snapshot_program_lowering_ms": 137,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_timeout_leaf_elapsed_ms": null,
+      "followup_ready_snapshot_timeout_phase": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_runtime_queue_wait_ms": null,
+      "followup_save_fastlane_gate_outcome": "published",
+      "followup_save_fastlane_gate_wait_ms": 0,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_snapshot_with_deps_ms": null,
+      "followup_wait_for_file_version_ms": null,
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 5,
+      "program_lowering_rebuild_dispatch_ms": 131,
+      "program_lowering_rebuilt_lowering_units": 9,
+      "program_lowering_rebuilt_window_count": 1,
+      "program_lowering_reuse_outcome": "routine_body_reuse",
+      "program_lowering_reuse_plan_borrowed_cache_hit": true,
+      "program_lowering_reuse_plan_build_ms": 1,
+      "program_lowering_reuse_plan_build_source": "borrowed",
+      "program_lowering_reuse_plan_take_if_unique_hit": false,
+      "program_lowering_reused_lowering_units": 2079,
+      "program_lowering_reused_progress_ms": 0,
+      "program_lowering_reused_window_count": 4,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 4,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 5,
+      "save_cycle_sequence": 2,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 4,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 4,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 145.0,
+        "p95": 171.0,
+        "p99": 171.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 4,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 5,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 5,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": false
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": null,
+      "cycle": 3,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle3Stage2;",
+      "first_publish_elapsed_ms": 101,
+      "first_publish_publish_wait_ms": 0,
+      "first_publish_runtime_queue_wait_ms": null,
+      "first_publish_syntax_query_ms": 76,
+      "followup_admission_queue_wait_ms": null,
+      "followup_apply_lag_ms": 189,
+      "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state_at_timeout": null,
+      "followup_profile_phase_marks": [
+        {
+          "elapsed_ms": 0,
+          "phase": "after_semantic_eligibility"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_pending_publish"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_save_fastlane_gate"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_admission_admitted"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_fastlane_artifact_check"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_after_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_before_bounded_wait_probe"
+        },
+        {
+          "elapsed_ms": 60,
+          "phase": "artifact_execute_start"
+        },
+        {
+          "elapsed_ms": 61,
+          "phase": "artifact_before_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1209,
+          "phase": "artifact_after_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1209,
+          "phase": "artifact_before_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1209,
+          "phase": "artifact_after_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1209,
+          "phase": "artifact_before_publish"
+        },
+        {
+          "elapsed_ms": 1212,
+          "phase": "artifact_after_publish"
+        }
+      ],
+      "followup_publish_blocking_queue_wait_ms": null,
+      "followup_publish_elapsed_ms": 1212,
+      "followup_publish_non_query_residual_ms": 68,
+      "followup_publish_publish_wait_ms": 3,
+      "followup_publish_runtime_queue_wait_ms": null,
+      "followup_publish_semantic_diagnostics_collect_ms": 470,
+      "followup_publish_semantic_diagnostics_ir_ms": 669,
+      "followup_publish_semantic_diagnostics_query_ms": 1144,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_publish_snapshot_with_deps_ms": 60,
+      "followup_publish_wait_for_file_version_ms": null,
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 59,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 184,
+      "followup_ready_snapshot_program_lowering_ms": 152,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_timeout_leaf_elapsed_ms": null,
+      "followup_ready_snapshot_timeout_phase": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_runtime_queue_wait_ms": null,
+      "followup_save_fastlane_gate_outcome": "published",
+      "followup_save_fastlane_gate_wait_ms": 0,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_snapshot_with_deps_ms": null,
+      "followup_wait_for_file_version_ms": null,
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 7,
+      "program_lowering_rebuild_dispatch_ms": 147,
+      "program_lowering_rebuilt_lowering_units": 9,
+      "program_lowering_rebuilt_window_count": 1,
+      "program_lowering_reuse_outcome": "routine_body_reuse",
+      "program_lowering_reuse_plan_borrowed_cache_hit": true,
+      "program_lowering_reuse_plan_build_ms": 2,
+      "program_lowering_reuse_plan_build_source": "borrowed",
+      "program_lowering_reuse_plan_take_if_unique_hit": false,
+      "program_lowering_reused_lowering_units": 2079,
+      "program_lowering_reused_progress_ms": 0,
+      "program_lowering_reused_window_count": 4,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 6,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 7,
+      "save_cycle_sequence": 3,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 6,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 6,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 108.0,
+        "p95": 171.0,
+        "p99": 171.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 6,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 7,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 7,
+        "work_class": "Interactive"
+      }
+    },
+    {
+      "background_parse_task_state_after_timeout": {
+        "materialized": false,
+        "phase": "Some(Materializing)",
+        "promotion_requested": false
+      },
+      "completion_head_ready_after_timeout": false,
+      "current_revision_head_precompute_task_state_after_timeout": null,
+      "cycle": 4,
+      "exact_ready_after_timeout": false,
+      "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle4Stage2;",
+      "first_publish_elapsed_ms": 201,
+      "first_publish_publish_wait_ms": 0,
+      "first_publish_runtime_queue_wait_ms": null,
+      "first_publish_syntax_query_ms": 67,
+      "followup_admission_queue_wait_ms": null,
+      "followup_apply_lag_ms": 227,
+      "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state": "detached_diagnostics_ready_published",
+      "followup_did_save_exact_producer_lifecycle_state_at_timeout": null,
+      "followup_profile_phase_marks": [
+        {
+          "elapsed_ms": 0,
+          "phase": "after_semantic_eligibility"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_pending_publish"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_save_fastlane_gate"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_admission_admitted"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_fastlane_artifact_check"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_after_branch_context"
+        },
+        {
+          "elapsed_ms": 0,
+          "phase": "followup_before_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_after_zero_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "followup_before_bounded_wait_probe"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "artifact_execute_start"
+        },
+        {
+          "elapsed_ms": 1,
+          "phase": "artifact_before_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1225,
+          "phase": "artifact_after_blocking_dispatch"
+        },
+        {
+          "elapsed_ms": 1225,
+          "phase": "artifact_before_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1225,
+          "phase": "artifact_after_publish_checkpoint"
+        },
+        {
+          "elapsed_ms": 1225,
+          "phase": "artifact_before_publish"
+        },
+        {
+          "elapsed_ms": 1228,
+          "phase": "artifact_after_publish"
+        }
+      ],
+      "followup_publish_blocking_queue_wait_ms": null,
+      "followup_publish_elapsed_ms": 1228,
+      "followup_publish_non_query_residual_ms": 7,
+      "followup_publish_publish_wait_ms": 3,
+      "followup_publish_runtime_queue_wait_ms": null,
+      "followup_publish_semantic_diagnostics_collect_ms": 463,
+      "followup_publish_semantic_diagnostics_ir_ms": 753,
+      "followup_publish_semantic_diagnostics_query_ms": 1221,
+      "followup_publish_semantic_path": "detached_ready_artifacts",
+      "followup_publish_snapshot_with_deps_ms": 1,
+      "followup_publish_wait_for_file_version_ms": null,
+      "followup_ready_snapshot_bounded_wait_elapsed_ms": 0,
+      "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+      "followup_ready_snapshot_continuation_reason": null,
+      "followup_ready_snapshot_parse_exec_ms": 150,
+      "followup_ready_snapshot_program_lowering_ms": 134,
+      "followup_ready_snapshot_relief_valve_outcome": null,
+      "followup_ready_snapshot_task_state": "in_flight_same_version",
+      "followup_ready_snapshot_timeout_leaf": null,
+      "followup_ready_snapshot_timeout_leaf_elapsed_ms": null,
+      "followup_ready_snapshot_timeout_phase": null,
+      "followup_ready_snapshot_wait_probe": "not_ready",
+      "followup_ready_snapshot_zero_probe": "not_ready",
+      "followup_runtime_queue_wait_ms": null,
+      "followup_save_fastlane_gate_outcome": "published",
+      "followup_save_fastlane_gate_wait_ms": 0,
+      "followup_semantic_path": "detached_ready_artifacts",
+      "followup_snapshot_with_deps_ms": null,
+      "followup_wait_for_file_version_ms": null,
+      "followup_wait_reason": null,
+      "ir_singleflight_counters_after_timeout": {
+        "key_unavailable_total": 0,
+        "leader_total": 0,
+        "shared_total": 0
+      },
+      "ir_singleflight_wait_histogram_after_timeout": {
+        "count": 0,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "observed_version_after_timeout": 9,
+      "program_lowering_rebuild_dispatch_ms": 128,
+      "program_lowering_rebuilt_lowering_units": 9,
+      "program_lowering_rebuilt_window_count": 1,
+      "program_lowering_reuse_outcome": "routine_body_reuse",
+      "program_lowering_reuse_plan_borrowed_cache_hit": true,
+      "program_lowering_reuse_plan_build_ms": 2,
+      "program_lowering_reuse_plan_build_source": "borrowed",
+      "program_lowering_reuse_plan_take_if_unique_hit": false,
+      "program_lowering_reused_lowering_units": 2079,
+      "program_lowering_reused_progress_ms": 0,
+      "program_lowering_reused_window_count": 4,
+      "ready_snapshot_state_after_timeout": {
+        "file_version": 8,
+        "source": "DidChange",
+        "syntax_errors_complete": true
+      },
+      "requested_version": 9,
+      "save_cycle_sequence": 4,
+      "semantic_query_dominates_parse_exec": true,
+      "stage1_version": 8,
+      "type_index_counters_after_timeout": {
+        "cancelled_total": 0,
+        "exact_stored_total": 8,
+        "exact_wait_deadline_total": 0,
+        "exact_wait_ready_total": 0,
+        "superseded_total": 0
+      },
+      "type_index_parse_snapshot_meta_after_timeout": null,
+      "type_index_precompute_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 108.0,
+        "p95": 171.0,
+        "p99": 171.0
+      },
+      "type_index_precompute_ir_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+        "count": 8,
+        "p50": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "type_index_task_state_after_timeout": {
+        "active_requested_version": 9,
+        "finished": false,
+        "phase": "computing",
+        "requested_version": 9,
+        "work_class": "Interactive"
+      }
+    }
+  ],
+  "module_path": "/home/egor/code/bsl-gradual-types/examples/conf_big/Documents/РеализацияТоваровУслуг/Forms/ФормаДокументаОбщая/Ext/Form/Module.bsl",
+  "profile": "p56_real_conf_big_diagnostics_representative_save_followup_bundle_live",
+  "representative_cycle": {
+    "background_parse_task_state_after_timeout": {
+      "materialized": false,
+      "phase": "Some(Materializing)",
+      "promotion_requested": false
+    },
+    "completion_head_ready_after_timeout": false,
+    "current_revision_head_precompute_task_state_after_timeout": null,
+    "cycle": 2,
+    "exact_ready_after_timeout": false,
+    "final_statement": "СтруктураВозврата = НеобъявленнаяПеременнаяP56Cycle2Stage2;",
+    "first_publish_elapsed_ms": 209,
+    "first_publish_publish_wait_ms": 0,
+    "first_publish_runtime_queue_wait_ms": null,
+    "first_publish_syntax_query_ms": 68,
+    "followup_admission_queue_wait_ms": null,
+    "followup_apply_lag_ms": 225,
+    "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+    "followup_did_save_exact_producer_lifecycle_state": "detached_diagnostics_ready_published",
+    "followup_did_save_exact_producer_lifecycle_state_at_timeout": null,
+    "followup_profile_phase_marks": [
+      {
+        "elapsed_ms": 0,
+        "phase": "after_semantic_eligibility"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_before_pending_publish"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_after_save_fastlane_gate"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_after_admission_admitted"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_after_fastlane_artifact_check"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_before_branch_context"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_after_branch_context"
+      },
+      {
+        "elapsed_ms": 0,
+        "phase": "followup_before_zero_probe"
+      },
+      {
+        "elapsed_ms": 1,
+        "phase": "followup_after_zero_probe"
+      },
+      {
+        "elapsed_ms": 1,
+        "phase": "followup_before_bounded_wait_probe"
+      },
+      {
+        "elapsed_ms": 1,
+        "phase": "artifact_execute_start"
+      },
+      {
+        "elapsed_ms": 1,
+        "phase": "artifact_before_blocking_dispatch"
+      },
+      {
+        "elapsed_ms": 1380,
+        "phase": "artifact_after_blocking_dispatch"
+      },
+      {
+        "elapsed_ms": 1380,
+        "phase": "artifact_before_publish_checkpoint"
+      },
+      {
+        "elapsed_ms": 1380,
+        "phase": "artifact_after_publish_checkpoint"
+      },
+      {
+        "elapsed_ms": 1380,
+        "phase": "artifact_before_publish"
+      },
+      {
+        "elapsed_ms": 1384,
+        "phase": "artifact_after_publish"
+      }
+    ],
+    "followup_publish_blocking_queue_wait_ms": null,
+    "followup_publish_elapsed_ms": 1384,
+    "followup_publish_non_query_residual_ms": 9,
+    "followup_publish_publish_wait_ms": 4,
+    "followup_publish_runtime_queue_wait_ms": null,
+    "followup_publish_semantic_diagnostics_collect_ms": 534,
+    "followup_publish_semantic_diagnostics_ir_ms": 833,
+    "followup_publish_semantic_diagnostics_query_ms": 1375,
+    "followup_publish_semantic_path": "detached_ready_artifacts",
+    "followup_publish_snapshot_with_deps_ms": 0,
+    "followup_publish_wait_for_file_version_ms": null,
+    "followup_ready_snapshot_bounded_wait_elapsed_ms": 0,
+    "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+    "followup_ready_snapshot_continuation_reason": null,
+    "followup_ready_snapshot_parse_exec_ms": 147,
+    "followup_ready_snapshot_program_lowering_ms": 137,
+    "followup_ready_snapshot_relief_valve_outcome": null,
+    "followup_ready_snapshot_task_state": "in_flight_same_version",
+    "followup_ready_snapshot_timeout_leaf": null,
+    "followup_ready_snapshot_timeout_leaf_elapsed_ms": null,
+    "followup_ready_snapshot_timeout_phase": null,
+    "followup_ready_snapshot_wait_probe": "not_ready",
+    "followup_ready_snapshot_zero_probe": "not_ready",
+    "followup_runtime_queue_wait_ms": null,
+    "followup_save_fastlane_gate_outcome": "published",
+    "followup_save_fastlane_gate_wait_ms": 0,
+    "followup_semantic_path": "detached_ready_artifacts",
+    "followup_snapshot_with_deps_ms": null,
+    "followup_wait_for_file_version_ms": null,
+    "followup_wait_reason": null,
+    "ir_singleflight_counters_after_timeout": {
+      "key_unavailable_total": 0,
+      "leader_total": 0,
+      "shared_total": 0
+    },
+    "ir_singleflight_wait_histogram_after_timeout": {
+      "count": 0,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "observed_version_after_timeout": 5,
+    "program_lowering_rebuild_dispatch_ms": 131,
+    "program_lowering_rebuilt_lowering_units": 9,
+    "program_lowering_rebuilt_window_count": 1,
+    "program_lowering_reuse_outcome": "routine_body_reuse",
+    "program_lowering_reuse_plan_borrowed_cache_hit": true,
+    "program_lowering_reuse_plan_build_ms": 1,
+    "program_lowering_reuse_plan_build_source": "borrowed",
+    "program_lowering_reuse_plan_take_if_unique_hit": false,
+    "program_lowering_reused_lowering_units": 2079,
+    "program_lowering_reused_progress_ms": 0,
+    "program_lowering_reused_window_count": 4,
+    "ready_snapshot_state_after_timeout": {
+      "file_version": 4,
+      "source": "DidChange",
+      "syntax_errors_complete": true
+    },
+    "requested_version": 5,
+    "save_cycle_sequence": 2,
+    "semantic_query_dominates_parse_exec": true,
+    "stage1_version": 4,
+    "type_index_counters_after_timeout": {
+      "cancelled_total": 0,
+      "exact_stored_total": 4,
+      "exact_wait_deadline_total": 0,
+      "exact_wait_ready_total": 0,
+      "superseded_total": 0
+    },
+    "type_index_parse_snapshot_meta_after_timeout": null,
+    "type_index_precompute_exec_histogram_after_timeout": {
+      "count": 4,
+      "p50": 145.0,
+      "p95": 171.0,
+      "p99": 171.0
+    },
+    "type_index_precompute_ir_exec_histogram_after_timeout": {
+      "count": 4,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": {
+      "count": 4,
+      "p50": 0.0,
+      "p95": 0.0,
+      "p99": 0.0
+    },
+    "type_index_task_state_after_timeout": {
+      "active_requested_version": 5,
+      "finished": false,
+      "phase": "computing",
+      "requested_version": 5,
+      "work_class": "Interactive"
+    }
+  },
+  "summary": {
+    "followup_did_save_exact_producer_lifecycle_detached_or_materialized": 4,
+    "followup_ready_snapshot_bounded_wait_winner_detached_ready_artifacts": 4,
+    "followup_ready_snapshot_continuation_reason_count": 0,
+    "followup_ready_snapshot_rebuild_dominated_shadow_state_count": 0,
+    "followup_ready_snapshot_started_parser_base_shadow_without_terminal_reason_count": 0,
+    "followup_ready_snapshot_timeout_leaf_ready_install_count": 0,
+    "followup_ready_snapshot_wait_probe_not_ready": 4,
+    "followup_ready_snapshot_wait_probe_timeout": 0,
+    "followup_ready_snapshot_zero_probe_not_ready": 4,
+    "followup_semantic_path_detached_ready_artifacts": 4,
+    "followup_semantic_path_ready_artifacts": 0,
+    "followup_semantic_path_shadow_state": 0,
+    "followup_semantic_path_shadow_state_waiting": 0,
+    "post_detached_publish_shape": "semantic_query_dominates_parse_exec_with_additional_publish_tail",
+    "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
+    "representative_canonical_residual_mix": "producer_lifecycle_reaches_detached_ready_without_shadow_state",
+    "semantic_query_dominates_parse_exec_count": 4
+  },
+  "uri": "file:///home/egor/code/bsl-gradual-types/examples/conf_big/Documents/%D0%A0%D0%B5%D0%B0%D0%BB%D0%B8%D0%B7%D0%B0%D1%86%D0%B8%D1%8F%D0%A2%D0%BE%D0%B2%D0%B0%D1%80%D0%BE%D0%B2%D0%A3%D1%81%D0%BB%D1%83%D0%B3/Forms/%D0%A4%D0%BE%D1%80%D0%BC%D0%B0%D0%94%D0%BE%D0%BA%D1%83%D0%BC%D0%B5%D0%BD%D1%82%D0%B0%D0%9E%D0%B1%D1%89%D0%B0%D1%8F/Ext/Form/Module.bsl"
+}

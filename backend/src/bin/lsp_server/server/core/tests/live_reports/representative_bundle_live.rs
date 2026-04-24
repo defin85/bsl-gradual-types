@@ -448,6 +448,12 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let followup_did_save_exact_producer_lifecycle_state = timeline
                 .get("followup_did_save_exact_producer_lifecycle_state")
                 .and_then(|value| value.as_str());
+            let followup_did_save_exact_producer_lifecycle_state_at_timeout = timeline
+                .get("followup_did_save_exact_producer_lifecycle_state_at_timeout")
+                .and_then(|value| value.as_str());
+            let followup_did_save_exact_producer_final_lifecycle_state = timeline
+                .get("followup_did_save_exact_producer_final_lifecycle_state")
+                .and_then(|value| value.as_str());
             let followup_save_fastlane_gate_outcome = timeline
                 .get("followup_save_fastlane_gate_outcome")
                 .and_then(|value| value.as_str());
@@ -790,6 +796,11 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path": followup_semantic_path,
                 "followup_publish_semantic_path": ready_artifacts_publish
                     .and_then(|publish| publish.get("semantic_path").and_then(|value| value.as_str())),
+                "followup_profile_phase_marks": timeline
+                    .get("followup_profile_phase_marks")
+                    .and_then(|value| value.as_array())
+                    .cloned()
+                    .unwrap_or_default(),
                 "followup_ready_snapshot_task_state": timeline
                     .get("followup_ready_snapshot_task_state")
                     .and_then(|value| value.as_str()),
@@ -799,6 +810,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_ready_snapshot_wait_probe": followup_ready_snapshot_wait_probe,
                 "followup_ready_snapshot_bounded_wait_winner": followup_ready_snapshot_bounded_wait_winner,
                 "followup_did_save_exact_producer_lifecycle_state": followup_did_save_exact_producer_lifecycle_state,
+                "followup_did_save_exact_producer_lifecycle_state_at_timeout": followup_did_save_exact_producer_lifecycle_state_at_timeout,
+                "followup_did_save_exact_producer_final_lifecycle_state": followup_did_save_exact_producer_final_lifecycle_state,
                 "followup_save_fastlane_gate_outcome": followup_save_fastlane_gate_outcome,
                 "followup_save_fastlane_gate_wait_ms": followup_save_fastlane_gate_wait_ms,
                 "followup_admission_queue_wait_ms": followup_admission_queue_wait_ms,
@@ -976,6 +989,45 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         .get("followup_ready_snapshot_timeout_phase")
                         .and_then(|value| value.as_str())
                         == Some("parse_exec")
+            })
+            .count() as u64;
+        let started_parser_base_shadow_without_terminal_reason_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+                    == Some("shadow_state")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_leaf")
+                        .and_then(|value| value.as_str())
+                        == Some("parser_base_recovery")
+                    && matches!(
+                        cycle
+                            .get("followup_did_save_exact_producer_lifecycle_state_at_timeout")
+                            .or_else(|| {
+                                cycle.get("followup_did_save_exact_producer_lifecycle_state")
+                            })
+                            .and_then(|value| value.as_str()),
+                        Some("started")
+                    )
+                    && cycle
+                        .get("semantic_query_dominates_parse_exec")
+                        .and_then(|value| value.as_bool())
+                        == Some(true)
+                    && !matches!(
+                        cycle
+                            .get("followup_did_save_exact_producer_final_lifecycle_state")
+                            .and_then(|value| value.as_str()),
+                        Some(
+                            "detached_diagnostics_ready_published"
+                                | "fully_materialized"
+                                | "superseded"
+                                | "cancelled"
+                                | "failed"
+                                | "continuity_lost"
+                        )
+                    )
             })
             .count() as u64;
         let bounded_wait_winner_detached_ready_artifacts_count = cycles
@@ -1217,6 +1269,11 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 representative bundle must fail closed on any rebuild-dominated parse_exec/program_lowering shadow_state residual, cycles={cycles:?}"
         );
         assert_eq!(
+            started_parser_base_shadow_without_terminal_reason_count,
+            0,
+            "p56 representative bundle must fail refactor-52 started parser_base_recovery shadow_state residuals without final producer lifecycle evidence, cycles={cycles:?}"
+        );
+        assert_eq!(
             bounded_wait_winner_detached_ready_artifacts_count,
             detached_ready_artifacts_count,
             "p56 representative bundle must attribute bounded wait completion to detached_ready_artifacts on every still-current detached cycle, cycles={cycles:?}"
@@ -1342,6 +1399,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_ready_snapshot_continuation_reason_count": continuation_reason_count,
                 "followup_ready_snapshot_timeout_leaf_ready_install_count": timeout_leaf_ready_install_count,
                 "followup_ready_snapshot_rebuild_dominated_shadow_state_count": rebuild_dominated_shadow_state_count,
+                "followup_ready_snapshot_started_parser_base_shadow_without_terminal_reason_count": started_parser_base_shadow_without_terminal_reason_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
                 "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
                 "representative_canonical_residual_mix": "producer_lifecycle_reaches_detached_ready_without_shadow_state",

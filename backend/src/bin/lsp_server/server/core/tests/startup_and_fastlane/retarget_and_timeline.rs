@@ -1599,7 +1599,7 @@ async fn p29_parsed_did_change_revision_is_retargeted_during_syntax_error_collec
 }
 
 #[tokio::test]
-async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_without_ready_artifacts(
+async fn p7_diagnostics_save_timeline_marks_semantic_work_for_generic_followup_without_ready_artifacts(
 ) {
     struct EnvVarGuard {
         key: &'static str,
@@ -1608,10 +1608,6 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     }
 
     impl EnvVarGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            Self::set_with_reload(key, value, false)
-        }
-
         fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
             let previous = std::env::var(key).ok();
             std::env::set_var(key, value);
@@ -1643,9 +1639,6 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     const V2_FIXTURE: &str = "Процедура Тест(\n    Возврат 1;\nКонецПроцедуры\n";
 
     let _env_lock = lock_test_env().await;
-    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "4000");
-    let _did_save_parse_delay_guard =
-        EnvVarGuard::set("BSL_TEST_DID_SAVE_BLOCKING_PARSE_DELAY_MS", "4000");
     let _debounce_guard =
         EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
 
@@ -1759,11 +1752,19 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         }
     })
     .await
-    .expect(
-        "didChange must materialize ready parse snapshot before shadow-state fallback is disabled",
-    );
+    .expect("didChange must materialize ready parse snapshot before generic fallback probe");
     server
         .latest_document_shadow_state_v2
+        .write()
+        .await
+        .remove(&file_id);
+    server
+        .latest_ready_parse_snapshots_v2
+        .write()
+        .await
+        .remove(&file_id);
+    server
+        .latest_detached_diagnostics_ready_artifacts_v2
         .write()
         .await
         .remove(&file_id);
@@ -1802,12 +1803,6 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     })
     .await
     .expect("save_fastlane must still publish before stalled follow-up attribution");
-    server
-        .latest_ready_parse_snapshots_v2
-        .write()
-        .await
-        .remove(&file_id);
-
     let trace = tokio::time::timeout(Duration::from_secs(6), async {
         loop {
             let timeline = lsp_get_diagnostics_save_timeline(&mut service, 50_707, 8).await;
@@ -1842,41 +1837,42 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
     );
     assert!(
         trace.get("followup_publish").is_none(),
-        "apply-lagged heavy follow-up must not look published yet, trace={trace:?}"
+        "active generic heavy follow-up must not look published yet, trace={trace:?}"
     );
     let followup_wait_reason = trace
         .get("followup_wait_reason")
         .and_then(|value| value.as_str());
     assert_eq!(
         followup_wait_reason,
-        Some("apply_lag"),
-        "when shadow-state and ready-artifact follow-up paths are unavailable, in-flight heavy follow-up must expose apply_lag until writer-owned requested version is actually applied, trace={trace:?}"
+        Some("semantic_work"),
+        "when writer-owned state is applied but shadow-state and ready-artifact follow-up paths are unavailable, generic heavy follow-up must expose semantic_work, trace={trace:?}"
     );
     assert_eq!(
         trace
             .get("followup_semantic_path")
             .and_then(|value| value.as_str()),
         Some("generic_pipeline"),
-        "apply-lag fallback must identify generic pipeline path before publish, trace={trace:?}"
+        "generic fallback must identify generic pipeline path before publish, trace={trace:?}"
     );
     assert_eq!(
         trace
             .get("followup_ready_snapshot_zero_probe")
             .and_then(|value| value.as_str()),
         Some("not_ready"),
-        "superseded path must retain zero-budget probe attribution before the bounded wait observes supersession, trace={trace:?}"
+        "generic fallback must retain zero-budget probe attribution, trace={trace:?}"
     );
-    assert_eq!(
+    assert!(
         trace
             .get("followup_ready_snapshot_wait_probe")
-            .and_then(|value| value.as_str()),
-        Some("timeout")
+            .and_then(|value| value.as_str())
+            .is_none(),
+        "absent exact producer must not export a bounded-wait result, trace={trace:?}"
     );
     assert_eq!(
         trace
             .get("followup_ready_snapshot_task_state")
             .and_then(|value| value.as_str()),
-        Some("in_flight_same_version")
+        Some("absent")
     );
     assert_eq!(
         trace
@@ -1884,33 +1880,16 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
             .and_then(|value| value.as_bool()),
         Some(false)
     );
-    assert_eq!(
-        trace
-            .get("followup_ready_snapshot_relief_valve_outcome")
-            .and_then(|value| value.as_str()),
-        Some("skipped_apply_lag"),
-        "apply-lag path must refuse temporary relief valve, trace={trace:?}"
-    );
-    assert_eq!(
-        trace
-            .get("followup_ready_snapshot_relief_valve_budget_ms")
-            .and_then(|value| value.as_u64()),
-        Some(
-            diagnostics_runtime::SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_RELIEF_VALVE_BUDGET
-                .as_millis()
-                .min(u64::MAX as u128) as u64
-        )
-    );
     assert!(
         trace
             .get("followup_apply_lag_ms")
             .and_then(|value| value.as_u64())
-            .is_some_and(|value| value > 0),
-        "apply-lag fallback trace must expose explicit followup_apply_lag_ms, trace={trace:?}"
+            .is_none(),
+        "generic semantic work after applied writer state must not expose apply lag, trace={trace:?}"
     );
     assert!(
         trace.get("idle_heavy_outcome").is_none(),
-        "idle_heavy must still be in-flight while apply lag is the primary blocker, trace={trace:?}"
+        "idle_heavy must still be in-flight while generic semantic work is active, trace={trace:?}"
     );
     assert!(
         trace.get("terminal_outcome").is_none(),
@@ -1922,54 +1901,30 @@ async fn p7_diagnostics_save_timeline_marks_apply_lag_for_inflight_idle_heavy_wi
         .get("counters")
         .and_then(|value| value.as_object())
         .expect("metrics.counters object");
-    let histograms = metrics
-        .get("histograms")
-        .and_then(|value| value.as_object())
-        .expect("metrics.histograms object");
     assert!(
         read_u64_metric(counters.get(
             "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
         )) > 0,
-        "apply-lag didSave path must retain worker-start attribution for the same-version didChange snapshot worker it waited on, counters={counters:?}"
+        "generic didSave path must retain worker-start attribution for the same-version didChange snapshot worker it follows, counters={counters:?}"
     );
     assert!(
         read_u64_metric(counters.get(
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_zero_budget_outcome_not_ready"
         )) > 0,
-        "apply-lag didSave path must export zero-budget probe miss counter, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(counters.get(
-            "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_timeout"
-        )) > 0,
-        "apply-lag didSave path must export bounded-wait timeout counter, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(
-            histograms
-                .get("intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_ms_slot_bounded_wait_outcome_timeout")
-                .and_then(|value| value.get("count"))
-        ) > 0,
-        "apply-lag didSave path must export bounded-wait timeout latency histogram, histograms={histograms:?}"
+        "generic didSave path must export zero-budget probe miss counter, counters={counters:?}"
     );
     assert!(
         read_u64_metric(counters.get(
             "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save"
         )) == 0,
-        "apply-lag didSave path should still have no didSave ready snapshot materialization at capture time, counters={counters:?}"
+        "generic fallback path should have no didSave ready snapshot materialization at capture time, counters={counters:?}"
     );
     assert!(
         read_u64_metric(
             counters
-                .get("intellisense_v2_diagnostics_save_followup_wait_state_total_reason_apply_lag")
+                .get("intellisense_v2_diagnostics_save_followup_wait_state_total_reason_semantic_work")
         ) > 0,
-        "apply-lag didSave path must export apply_lag wait-state counter before generic pipeline starts, counters={counters:?}"
-    );
-    assert!(
-        read_u64_metric(counters.get(
-            "intellisense_v2_diagnostics_save_followup_ready_snapshot_relief_valve_total_outcome_skipped_apply_lag"
-        )) > 0,
-        "apply-lag path must export explicit relief-valve skip attribution, counters={counters:?}"
+        "generic didSave path must export semantic_work wait-state counter, counters={counters:?}"
     );
 
     drain_task.abort();

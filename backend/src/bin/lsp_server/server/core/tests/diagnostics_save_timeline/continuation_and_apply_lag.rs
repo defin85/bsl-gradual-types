@@ -1,3 +1,122 @@
+fn p53_full_rebuild_program_lowering_summary_for_test(
+) -> bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary {
+    use bsl_runtime::system::parser_coordinator::{
+        ParseSnapshotProgramLoweringReuseOutcome, ParseSnapshotProgramLoweringSummary,
+    };
+
+    ParseSnapshotProgramLoweringSummary {
+        reuse_outcome: ParseSnapshotProgramLoweringReuseOutcome::FullRebuild,
+        reused_lowering_units: 0,
+        rebuilt_lowering_units: 2088,
+        reused_window_count: 0,
+        rebuilt_window_count: 1,
+        largest_rebuilt_window_lowering_units: 2088,
+        fully_reused_top_level_node_count: 0,
+        fully_rebuilt_top_level_node_count: 1,
+        routine_body_reuse_node_count: 0,
+        fully_reused_top_level_lowering_units: 0,
+        fully_rebuilt_top_level_lowering_units: 2088,
+        routine_body_reused_prefix_lowering_units: 0,
+        routine_body_reused_suffix_lowering_units: 0,
+        routine_body_rebuilt_lowering_units: 0,
+        reuse_plan_build_source: None,
+        reuse_plan_take_if_unique_hit: Some(false),
+        reuse_plan_borrowed_cache_hit: Some(false),
+        reuse_plan_build_ms: Some(0),
+        reuse_plan_owned_build_ms: None,
+        reuse_plan_borrowed_build_ms: None,
+        reuse_plan_rebase_ms: None,
+        reuse_plan_rebase_statement_count: None,
+        reused_progress_ms: Some(0),
+        reused_progress_call_count: Some(0),
+        rebuild_dispatch_ms: Some(3792),
+        rebuild_dispatch_call_count: Some(1),
+        rebuild_dispatch_callable_ms: Some(3792),
+        rebuild_dispatch_callable_call_count: Some(1),
+        rebuild_dispatch_callable_body_dispatch_ms: Some(3792),
+        rebuild_dispatch_callable_body_dispatch_call_count: Some(1),
+        rebuild_dispatch_callable_non_body_dispatch_ms: Some(0),
+        rebuild_dispatch_control_flow_ms: Some(0),
+        rebuild_dispatch_control_flow_call_count: Some(0),
+        rebuild_dispatch_simple_ms: Some(0),
+        rebuild_dispatch_simple_call_count: Some(0),
+        rebuild_dispatch_other_ms: Some(0),
+        rebuild_dispatch_other_call_count: Some(0),
+    }
+}
+
+async fn p53_insert_program_lowering_full_rebuild_did_save_task_for_test(
+    server: &BslLanguageServer,
+    uri: &Url,
+    file_id: bsl_analysis_v2::FileId,
+    key: crate::server::DiagnosticsSaveTimelineCycleKey,
+    exact_text: Arc<str>,
+    control: Arc<crate::server::BackgroundParseSnapshotApplyTaskControlV2>,
+) -> [u8; 32] {
+    let exact_text_hash = *blake3::hash(exact_text.as_bytes()).as_bytes();
+    let producer_key = crate::server::DidSaveExactProducerKeyV2 {
+        file_id,
+        requested_version: key.requested_version,
+        text_hash: exact_text_hash,
+        save_cycle_sequence: key.save_cycle_sequence,
+    };
+    server
+        .did_save_exact_producer_lifecycle_v2
+        .write()
+        .await
+        .insert(
+            producer_key,
+            crate::server::DidSaveExactProducerLifecycleEntryV2::new(
+                crate::server::DidSaveExactProducerLifecycleStateV2::Started,
+            ),
+        );
+    control.transition_phase_attribution(
+        crate::server::ReadyParseSnapshotAttributionPhaseV2::ParseExec,
+    );
+    control.transition_parse_exec_subphase_attribution(
+        crate::server::ReadyParseSnapshotParseExecSubphaseV2::CoreParseBuild,
+    );
+    control.transition_core_build_checkpoint_attribution(
+        crate::server::ReadyParseSnapshotCoreBuildCheckpointV2::ExactReadySnapshotAssembly,
+    );
+    control.transition_assembly_checkpoint_attribution(
+        crate::server::ReadyParseSnapshotAssemblyCheckpointV2::ProgramLowering,
+    );
+    control.set_program_lowering_summary(p53_full_rebuild_program_lowering_summary_for_test());
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version: key.requested_version,
+                        text_hash: exact_text_hash,
+                        save_cycle_sequence: Some(key.save_cycle_sequence),
+                        source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
+                        path: Arc::<str>::from(uri.path().to_string()),
+                        text: exact_text,
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control,
+                handle: tokio::spawn(async {}),
+            },
+        );
+    exact_text_hash
+}
+
 #[tokio::test]
 async fn p24_diagnostics_save_timeline_skips_relief_valve_for_non_exact_current_producer() {
     let server = create_diagnostics_save_timeline_test_server();
@@ -414,6 +533,322 @@ async fn p52_diagnostics_save_timeline_exports_continuity_loss_for_started_parse
     assert_eq!(
         trace.followup_ready_snapshot_continuation_reason.as_deref(),
         Some("exhausted_continuation_proof")
+    );
+}
+
+#[tokio::test]
+async fn p53_diagnostics_save_timeline_blocks_shadow_state_after_program_lowering_full_rebuild_timeout(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    prime_server_with_syntax_helper_deps(&server).await;
+    let uri =
+        Url::parse("file:///p53-program-lowering-full-rebuild-shadow-guard.bsl").expect("uri");
+    let file_id = bsl_analysis_v2::FileId(5353);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 530,
+        save_cycle_sequence: 53,
+        requested_version: 153,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    let _exact_text_hash = p53_insert_program_lowering_full_rebuild_did_save_task_for_test(
+        &server,
+        &uri,
+        file_id,
+        key,
+        exact_text,
+        control,
+    )
+    .await;
+    server
+        .latest_save_fastlane_syntax_artifacts_v2
+        .write()
+        .await
+        .insert(
+            file_id,
+            crate::server::SaveFastlaneSyntaxArtifactsV2 {
+                version: key.requested_version,
+                syntax_errors: Arc::new(Vec::new()),
+            },
+        );
+
+    let bounded_wait_disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            Duration::from_millis(1),
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        bounded_wait_disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Timeout
+        )
+    ));
+
+    let shadow_disposition = server
+        .try_execute_save_followup_from_shadow_state_for_test_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(
+        shadow_disposition.is_none(),
+        "program_lowering full_rebuild timeout must not publish same-family didSave follow-up through shadow_state"
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_phase.as_deref(),
+        Some("parse_exec")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_leaf.as_deref(),
+        Some("program_lowering")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome
+            .as_deref(),
+        Some("full_rebuild")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units,
+        Some(0)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units,
+        Some(2088)
+    );
+    assert_ne!(
+        trace.followup_semantic_path.as_deref(),
+        Some("shadow_state"),
+        "full_rebuild timeout must stay uncommitted to shadow_state until detached-ready or truthful terminal proof"
+    );
+}
+
+#[tokio::test]
+async fn p53_diagnostics_save_timeline_continuation_consumes_detached_ready_after_program_lowering_full_rebuild_relief_timeout(
+) {
+    let server = create_diagnostics_save_timeline_test_server();
+    prime_server_with_syntax_helper_deps(&server).await;
+    let uri =
+        Url::parse("file:///p53-program-lowering-full-rebuild-detached-continuation.bsl")
+            .expect("uri");
+    let file_id = bsl_analysis_v2::FileId(5354);
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id,
+        diagnostics_generation: 531,
+        save_cycle_sequence: 54,
+        requested_version: 154,
+    };
+    let supersession_key = crate::server::DiagnosticsSupersessionKeyV2 {
+        file_id,
+        profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+        diagnostics_generation: key.diagnostics_generation,
+        save_cycle_sequence: Some(key.save_cycle_sequence),
+        requested_version: key.requested_version,
+    };
+    let exact_text: Arc<str> =
+        Arc::from("Procedure Test()\n    UndefinedValue = UnknownIdentifier;\nEndProcedure\n");
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server
+        .diagnostics_generation_v2
+        .write()
+        .await
+        .insert(file_id, key.diagnostics_generation);
+    force_current_revision_without_exact_type_index(
+        &server,
+        file_id,
+        &uri,
+        exact_text.as_ref(),
+        key.requested_version,
+    )
+    .await;
+    let exact_text_hash = p53_insert_program_lowering_full_rebuild_did_save_task_for_test(
+        &server,
+        &uri,
+        file_id,
+        key,
+        exact_text.clone(),
+        control.clone(),
+    )
+    .await;
+    let producer_key = crate::server::DidSaveExactProducerKeyV2 {
+        file_id,
+        requested_version: key.requested_version,
+        text_hash: exact_text_hash,
+        save_cycle_sequence: key.save_cycle_sequence,
+    };
+
+    let bounded_wait_disposition = server
+        .try_execute_save_followup_from_ready_artifacts_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeSlotV2::BoundedWait,
+            Duration::from_millis(1),
+            Instant::now(),
+            false,
+            false,
+            None,
+        )
+        .await;
+    assert!(matches!(
+        bounded_wait_disposition,
+        crate::server::core::diagnostics_runtime::SaveFollowupReadyArtifactsAttemptV2::ProbeMiss(
+            crate::server::core::diagnostics_runtime::ReadyParseSnapshotProbeOutcomeV2::Timeout
+        )
+    ));
+
+    let server_for_detached = server.clone();
+    let control_for_detached = control.clone();
+    let detached_text = exact_text.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(650)).await;
+        server_for_detached
+            .latest_detached_diagnostics_ready_artifacts_v2
+            .write()
+            .await
+            .insert(
+                file_id,
+                crate::server::DetachedDiagnosticsReadyArtifactV2 {
+                    requested_version: key.requested_version,
+                    text_hash: exact_text_hash,
+                    save_cycle_sequence: key.save_cycle_sequence,
+                    text: detached_text.clone(),
+                    parse_snapshot: parse_snapshot_for_test(
+                        file_id,
+                        key.requested_version,
+                        detached_text.as_ref(),
+                        Vec::new(),
+                        true,
+                        None,
+                    ),
+                    syntax_errors_complete: true,
+                },
+            );
+        server_for_detached
+            .did_save_exact_producer_lifecycle_v2
+            .write()
+            .await
+            .insert(
+                producer_key,
+                crate::server::DidSaveExactProducerLifecycleEntryV2::new(
+                    crate::server::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished,
+                ),
+            );
+        control_for_detached.note_detached_ready_artifact_published();
+    });
+
+    let disposition = server
+        .maybe_execute_save_followup_ready_snapshot_relief_valve_v2(
+            &uri,
+            &supersession_key,
+            bsl_runtime::application::DiagnosticsTrigger::DidSave,
+            None,
+            Instant::now(),
+            false,
+            false,
+            None,
+            None,
+        )
+        .await;
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        disposition,
+        Some(bsl_runtime::application::DiagnosticsDisposition::Published),
+        "program_lowering full_rebuild continuation must consume later detached-ready, trace={trace:?}"
+    );
+
+    assert_eq!(
+        trace.followup_ready_snapshot_wait_probe.as_deref(),
+        Some("timeout")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_timeout_leaf.as_deref(),
+        Some("program_lowering")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome
+            .as_deref(),
+        Some("full_rebuild")
+    );
+    assert_eq!(
+        trace
+            .followup_ready_snapshot_relief_valve_outcome
+            .as_deref(),
+        Some("engaged_timed_out")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_continuation_reason.as_deref(),
+        Some("continued_still_current")
+    );
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("detached_ready_artifacts")
+    );
+    assert_eq!(
+        trace
+            .followup_did_save_exact_producer_lifecycle_state_at_timeout
+            .as_deref(),
+        Some("started")
+    );
+    assert_eq!(
+        trace
+            .followup_did_save_exact_producer_final_lifecycle_state
+            .as_deref(),
+        Some("detached_diagnostics_ready_published")
+    );
+    assert_ne!(
+        trace
+            .followup_did_save_exact_producer_final_lifecycle_state
+            .as_deref(),
+        Some("continuity_lost"),
+        "bounded timeout plus full_rebuild is not a truthful terminal reason once same-family detached-ready arrives"
     );
 }
 

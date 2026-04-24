@@ -127,7 +127,7 @@ impl ReadyParseSnapshotProbeSlotV2 {
     }
 
     fn allows_detached_ready_artifact(self) -> bool {
-        matches!(self, Self::BoundedWait)
+        matches!(self, Self::BoundedWait | Self::ReliefValve)
     }
 }
 
@@ -245,6 +245,23 @@ fn is_started_parser_base_recovery_same_family_contour_v2(
             attribution.timeout_phase == Some("parse_exec")
                 && attribution.timeout_leaf == Some("parser_base_recovery")
         })
+}
+
+fn is_program_lowering_full_rebuild_same_family_contour_v2(
+    branch_context: DiagnosticsSaveFollowupBranchContextV2,
+    phase_attribution: Option<DiagnosticsReadySnapshotPhaseAttributionV2>,
+) -> bool {
+    branch_context.ready_snapshot_task_state == ReadySnapshotTaskStateV2::InFlightSameVersion
+        && branch_context.producer_lifecycle_state.is_none_or(|state| {
+            state.is_still_current_producer()
+                || matches!(
+                    state,
+                    super::super::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished
+                        | super::super::DidSaveExactProducerLifecycleStateV2::FullyMaterialized
+                )
+        })
+        && phase_attribution
+            .is_some_and(DiagnosticsReadySnapshotPhaseAttributionV2::is_program_lowering_full_rebuild_timeout)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1137,6 +1154,16 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 | Some("ready_install")
                 | Some("document_symbol_side_work")
         )
+    }
+
+    fn is_program_lowering_full_rebuild_timeout(self) -> bool {
+        self.timeout_phase == Some("parse_exec")
+            && self.timeout_leaf == Some("program_lowering")
+            && self.program_lowering_reuse_outcome == Some("full_rebuild")
+            && self.program_lowering_reused_lowering_units.unwrap_or(0) == 0
+            && self
+                .program_lowering_rebuilt_lowering_units
+                .is_some_and(|units| units > 0)
     }
 }
 
@@ -3363,32 +3390,22 @@ impl BslLanguageServer {
 
         let mut renewals = 0usize;
         loop {
-            if self
-                .ready_parse_snapshot_state_for_target_v2(
-                    supersession_key.file_id,
-                    supersession_key.requested_version,
-                    expected_text_hash,
+            if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
+                .try_execute_save_followup_from_ready_artifacts_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    cancel_token,
+                    ReadyParseSnapshotProbeSlotV2::ReliefValve,
+                    Duration::ZERO,
+                    pipeline_started,
+                    show_hints,
+                    flow_sensitive_semantic,
+                    followup_lane_guard,
                 )
                 .await
-                .is_some()
             {
-                if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
-                    .try_execute_save_followup_from_ready_artifacts_v2(
-                        uri,
-                        supersession_key,
-                        trigger,
-                        cancel_token,
-                        ReadyParseSnapshotProbeSlotV2::ReliefValve,
-                        Duration::ZERO,
-                        pipeline_started,
-                        show_hints,
-                        flow_sensitive_semantic,
-                        followup_lane_guard,
-                    )
-                    .await
-                {
-                    return ReadySnapshotContinuationResultV2::Executed(disposition);
-                }
+                return ReadySnapshotContinuationResultV2::Executed(disposition);
             }
 
             if let Some((disposition, reason)) = self
@@ -3415,12 +3432,33 @@ impl BslLanguageServer {
             };
             let materialized = task_control.materialized_notify.notified();
             let control = task_control.control_notify.notified();
+            let detached = task_control.detached_ready_artifact_notify.notified();
             tokio::pin!(materialized);
             tokio::pin!(control);
+            tokio::pin!(detached);
             tokio::select! {
                 _ = tokio::time::sleep(SAVE_FOLLOWUP_READY_PARSE_SNAPSHOT_CONTINUATION_LEASE_BUDGET) => {}
                 _ = &mut materialized => {}
                 _ = &mut control => {}
+                _ = &mut detached => {}
+            }
+
+            if let SaveFollowupReadyArtifactsAttemptV2::Executed(disposition) = self
+                .try_execute_save_followup_from_ready_artifacts_v2(
+                    uri,
+                    supersession_key,
+                    trigger,
+                    cancel_token,
+                    ReadyParseSnapshotProbeSlotV2::ReliefValve,
+                    Duration::ZERO,
+                    pipeline_started,
+                    show_hints,
+                    flow_sensitive_semantic,
+                    followup_lane_guard,
+                )
+                .await
+            {
+                return ReadySnapshotContinuationResultV2::Executed(disposition);
             }
 
             if let Some((disposition, reason)) = self
@@ -3595,6 +3633,12 @@ impl BslLanguageServer {
             && ready_snapshot_phase_attribution
                 .is_some_and(|attribution| attribution.timeout_phase == Some("waiting"))
         {
+            return None;
+        }
+        if is_program_lowering_full_rebuild_same_family_contour_v2(
+            branch_context,
+            ready_snapshot_phase_attribution,
+        ) {
             return None;
         }
 
@@ -4466,6 +4510,32 @@ impl BslLanguageServer {
             reply.semantic_ir_source,
             reply.semantic_materialization_path,
             pipeline_started,
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn try_execute_save_followup_from_shadow_state_for_test_v2(
+        &self,
+        uri: &Url,
+        supersession_key: &super::super::DiagnosticsSupersessionKeyV2,
+        trigger: bsl_runtime::application::DiagnosticsTrigger,
+        cancel_token: Option<&super::super::DiagnosticsCancellationTokenV2>,
+        pipeline_started: Instant,
+        show_hints: bool,
+        flow_sensitive_semantic: bool,
+        followup_lane_guard: Option<&DidSaveFollowupSlotGuard>,
+    ) -> Option<bsl_runtime::application::DiagnosticsDisposition> {
+        self.try_execute_save_followup_from_shadow_state_v2(
+            uri,
+            supersession_key,
+            trigger,
+            cancel_token,
+            pipeline_started,
+            show_hints,
+            flow_sensitive_semantic,
+            followup_lane_guard,
         )
         .await
     }

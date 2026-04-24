@@ -978,7 +978,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         == Some("waiting")
             })
             .count() as u64;
-        let rebuild_dominated_shadow_state_count = cycles
+        let program_lowering_full_rebuild_shadow_state_later_detached_count = cycles
             .iter()
             .filter(|cycle| {
                 cycle
@@ -989,6 +989,28 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         .get("followup_ready_snapshot_timeout_phase")
                         .and_then(|value| value.as_str())
                         == Some("parse_exec")
+                    && cycle
+                        .get("followup_ready_snapshot_timeout_leaf")
+                        .and_then(|value| value.as_str())
+                        == Some("program_lowering")
+                    && cycle
+                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome")
+                        .and_then(|value| value.as_str())
+                        == Some("full_rebuild")
+                    && cycle
+                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units")
+                        .and_then(|value| value.as_u64())
+                        == Some(0)
+                    && cycle
+                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units")
+                        .and_then(|value| value.as_u64())
+                        .is_some_and(|units| units > 0)
+                    && matches!(
+                        cycle
+                            .get("followup_did_save_exact_producer_final_lifecycle_state")
+                            .and_then(|value| value.as_str()),
+                        Some("detached_diagnostics_ready_published" | "fully_materialized")
+                    )
             })
             .count() as u64;
         let started_parser_base_shadow_without_terminal_reason_count = cycles
@@ -1264,9 +1286,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 representative bundle must only allow shadow_state when the still-current exact worker is separately attributed to the waiting bucket, cycles={cycles:?}"
         );
         assert_eq!(
-            rebuild_dominated_shadow_state_count,
+            program_lowering_full_rebuild_shadow_state_later_detached_count,
             0,
-            "p56 representative bundle must fail closed on any rebuild-dominated parse_exec/program_lowering shadow_state residual, cycles={cycles:?}"
+            "p56 representative bundle must fail the 2026-04-24 contour: parse_exec/program_lowering full_rebuild shadow_state before later detached-ready/full materialization, cycles={cycles:?}"
         );
         assert_eq!(
             started_parser_base_shadow_without_terminal_reason_count,
@@ -1398,7 +1420,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_did_save_exact_producer_lifecycle_detached_or_materialized": producer_lifecycle_detached_or_materialized_count,
                 "followup_ready_snapshot_continuation_reason_count": continuation_reason_count,
                 "followup_ready_snapshot_timeout_leaf_ready_install_count": timeout_leaf_ready_install_count,
-                "followup_ready_snapshot_rebuild_dominated_shadow_state_count": rebuild_dominated_shadow_state_count,
+                "followup_ready_snapshot_rebuild_dominated_shadow_state_count": program_lowering_full_rebuild_shadow_state_later_detached_count,
+                "followup_ready_snapshot_program_lowering_full_rebuild_shadow_state_later_detached_count": program_lowering_full_rebuild_shadow_state_later_detached_count,
                 "followup_ready_snapshot_started_parser_base_shadow_without_terminal_reason_count": started_parser_base_shadow_without_terminal_reason_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
                 "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",

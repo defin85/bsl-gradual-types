@@ -1,3 +1,147 @@
+const REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS: u64 = 1_000;
+const REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS: u64 = 1_000;
+
+fn p56_cycle_u64(cycle: &serde_json::Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .find_map(|key| cycle.get(*key).and_then(|value| value.as_u64()))
+}
+
+fn p56_cycle_str<'a>(cycle: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter()
+        .find_map(|key| cycle.get(*key).and_then(|value| value.as_str()))
+}
+
+fn p56_program_lowering_reuse_outcome(cycle: &serde_json::Value) -> Option<&str> {
+    p56_cycle_str(
+        cycle,
+        &[
+            "program_lowering_reuse_outcome",
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome",
+        ],
+    )
+}
+
+fn p56_program_lowering_reused_lowering_units(cycle: &serde_json::Value) -> Option<u64> {
+    p56_cycle_u64(
+        cycle,
+        &[
+            "program_lowering_reused_lowering_units",
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units",
+        ],
+    )
+}
+
+fn p56_program_lowering_rebuilt_lowering_units(cycle: &serde_json::Value) -> Option<u64> {
+    p56_cycle_u64(
+        cycle,
+        &[
+            "program_lowering_rebuilt_lowering_units",
+            "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units",
+        ],
+    )
+}
+
+fn p56_cycle_has_slow_first_publish(cycle: &serde_json::Value) -> bool {
+    p56_cycle_u64(cycle, &["first_publish_elapsed_ms"])
+        .is_some_and(|value| value > REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS)
+        || p56_cycle_u64(cycle, &["first_publish_syntax_query_ms"])
+            .is_some_and(|value| value > REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS)
+}
+
+fn p56_cycle_has_late_detached_program_lowering_full_rebuild(cycle: &serde_json::Value) -> bool {
+    p56_cycle_str(cycle, &["followup_semantic_path"]) == Some("detached_ready_artifacts")
+        && p56_cycle_str(cycle, &["followup_ready_snapshot_timeout_phase"]) == Some("parse_exec")
+        && p56_cycle_str(cycle, &["followup_ready_snapshot_timeout_leaf"])
+            == Some("program_lowering")
+        && (p56_cycle_str(cycle, &["followup_ready_snapshot_wait_probe"]) == Some("timeout")
+            || p56_cycle_str(cycle, &["followup_ready_snapshot_bounded_wait_winner"])
+                == Some("timeout")
+            || p56_cycle_str(cycle, &["followup_ready_snapshot_relief_valve_outcome"])
+                == Some("engaged_timed_out"))
+        && p56_program_lowering_reuse_outcome(cycle) == Some("full_rebuild")
+        && p56_program_lowering_reused_lowering_units(cycle) == Some(0)
+        && p56_program_lowering_rebuilt_lowering_units(cycle).is_some_and(|units| units > 0)
+        && matches!(
+            p56_cycle_str(
+                cycle,
+                &[
+                    "followup_did_save_exact_producer_final_lifecycle_state",
+                    "followup_did_save_exact_producer_lifecycle_state",
+                ],
+            ),
+            Some("detached_diagnostics_ready_published" | "fully_materialized")
+        )
+}
+
+#[test]
+fn p56_refactor54_gate_predicates_reject_incident_contours() {
+    let slow_first_publish = serde_json::json!({
+        "followup_semantic_path": "detached_ready_artifacts",
+        "followup_ready_snapshot_wait_probe": "not_ready",
+        "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+        "first_publish_elapsed_ms": 3397,
+        "first_publish_syntax_query_ms": 3397,
+        "program_lowering_reuse_outcome": "routine_body_reuse",
+        "program_lowering_reused_lowering_units": 2079,
+        "program_lowering_rebuilt_lowering_units": 9,
+        "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+    });
+    assert!(p56_cycle_has_slow_first_publish(&slow_first_publish));
+    assert!(!p56_cycle_has_late_detached_program_lowering_full_rebuild(
+        &slow_first_publish
+    ));
+
+    let late_full_rebuild = serde_json::json!({
+        "followup_semantic_path": "detached_ready_artifacts",
+        "followup_ready_snapshot_wait_probe": "timeout",
+        "followup_ready_snapshot_bounded_wait_winner": "timeout",
+        "followup_ready_snapshot_relief_valve_outcome": "engaged_timed_out",
+        "followup_ready_snapshot_timeout_phase": "parse_exec",
+        "followup_ready_snapshot_timeout_leaf": "program_lowering",
+        "first_publish_elapsed_ms": 55,
+        "first_publish_syntax_query_ms": 55,
+        "program_lowering_reuse_outcome": "full_rebuild",
+        "program_lowering_reused_lowering_units": 0,
+        "program_lowering_rebuilt_lowering_units": 2088,
+        "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+    });
+    assert!(!p56_cycle_has_slow_first_publish(&late_full_rebuild));
+    assert!(p56_cycle_has_late_detached_program_lowering_full_rebuild(
+        &late_full_rebuild
+    ));
+
+    let raw_timeline_keys_late_full_rebuild = serde_json::json!({
+        "followup_semantic_path": "detached_ready_artifacts",
+        "followup_ready_snapshot_wait_probe": "timeout",
+        "followup_ready_snapshot_relief_valve_outcome": "engaged_timed_out",
+        "followup_ready_snapshot_timeout_phase": "parse_exec",
+        "followup_ready_snapshot_timeout_leaf": "program_lowering",
+        "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome": "full_rebuild",
+        "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units": 0,
+        "followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units": 2088,
+        "followup_did_save_exact_producer_lifecycle_state": "fully_materialized",
+    });
+    assert!(p56_cycle_has_late_detached_program_lowering_full_rebuild(
+        &raw_timeline_keys_late_full_rebuild
+    ));
+
+    let healthy_current_contour = serde_json::json!({
+        "followup_semantic_path": "detached_ready_artifacts",
+        "followup_ready_snapshot_wait_probe": "not_ready",
+        "followup_ready_snapshot_bounded_wait_winner": "detached_ready_artifacts",
+        "first_publish_elapsed_ms": 208,
+        "first_publish_syntax_query_ms": 83,
+        "program_lowering_reuse_outcome": "routine_body_reuse",
+        "program_lowering_reused_lowering_units": 2079,
+        "program_lowering_rebuilt_lowering_units": 9,
+        "followup_did_save_exact_producer_final_lifecycle_state": "detached_diagnostics_ready_published",
+    });
+    assert!(!p56_cycle_has_slow_first_publish(&healthy_current_contour));
+    assert!(!p56_cycle_has_late_detached_program_lowering_full_rebuild(
+        &healthy_current_contour
+    ));
+}
+
 #[test]
 fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -993,17 +1137,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         .get("followup_ready_snapshot_timeout_leaf")
                         .and_then(|value| value.as_str())
                         == Some("program_lowering")
-                    && cycle
-                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome")
-                        .and_then(|value| value.as_str())
-                        == Some("full_rebuild")
-                    && cycle
-                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units")
-                        .and_then(|value| value.as_u64())
-                        == Some(0)
-                    && cycle
-                        .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units")
-                        .and_then(|value| value.as_u64())
+                    && p56_program_lowering_reuse_outcome(cycle) == Some("full_rebuild")
+                    && p56_program_lowering_reused_lowering_units(cycle) == Some(0)
+                    && p56_program_lowering_rebuilt_lowering_units(cycle)
                         .is_some_and(|units| units > 0)
                     && matches!(
                         cycle
@@ -1012,6 +1148,10 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         Some("detached_diagnostics_ready_published" | "fully_materialized")
                     )
             })
+            .count() as u64;
+        let program_lowering_full_rebuild_detached_ready_late_count = cycles
+            .iter()
+            .filter(|cycle| p56_cycle_has_late_detached_program_lowering_full_rebuild(cycle))
             .count() as u64;
         let started_parser_base_shadow_without_terminal_reason_count = cycles
             .iter()
@@ -1097,6 +1237,26 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some(true)
             })
             .count() as u64;
+        let slow_first_publish_elapsed_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_cycle_u64(cycle, &["first_publish_elapsed_ms"]).is_some_and(|value| {
+                    value > REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS
+                })
+            })
+            .count() as u64;
+        let slow_first_publish_syntax_query_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_cycle_u64(cycle, &["first_publish_syntax_query_ms"]).is_some_and(|value| {
+                    value > REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS
+                })
+            })
+            .count() as u64;
+        let slow_first_publish_count = cycles
+            .iter()
+            .filter(|cycle| p56_cycle_has_slow_first_publish(cycle))
+            .count() as u64;
         let producer_lifecycle_detached_or_materialized_count = cycles
             .iter()
             .filter(|cycle| {
@@ -1163,6 +1323,14 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .filter_map(|cycle| {
                 cycle
                     .get("first_publish_elapsed_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .max();
+        let max_first_publish_syntax_query_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("first_publish_syntax_query_ms")
                     .and_then(|value| value.as_u64())
             })
             .max();
@@ -1271,6 +1439,12 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 representative bundle must not time out the bounded wait before detached-ready publication on still-current save families, cycles={cycles:?}"
         );
         assert_eq!(
+            slow_first_publish_count, 0,
+            "p56 representative bundle must fail the 2026-04-24 contour: a later detached-ready follow-up cannot hide slow save_fastlane first publish, elapsed_ceiling={}ms, syntax_query_ceiling={}ms, elapsed_slow_count={slow_first_publish_elapsed_count}, syntax_query_slow_count={slow_first_publish_syntax_query_count}, cycles={cycles:?}",
+            REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS,
+            REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS
+        );
+        assert_eq!(
             producer_lifecycle_detached_or_materialized_count,
             SAVE_CYCLE_COUNT as u64,
             "p56 representative bundle must expose didSave producer lifecycle at detached-ready/full-materialized for every cycle, cycles={cycles:?}"
@@ -1289,6 +1463,11 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             program_lowering_full_rebuild_shadow_state_later_detached_count,
             0,
             "p56 representative bundle must fail the 2026-04-24 contour: parse_exec/program_lowering full_rebuild shadow_state before later detached-ready/full materialization, cycles={cycles:?}"
+        );
+        assert_eq!(
+            program_lowering_full_rebuild_detached_ready_late_count,
+            0,
+            "p56 representative bundle must fail the 2026-04-24 contour: terminal detached_ready_artifacts arrived only after bounded-wait/relief timeout on parse_exec/program_lowering full_rebuild, cycles={cycles:?}"
         );
         assert_eq!(
             started_parser_base_shadow_without_terminal_reason_count,
@@ -1334,6 +1513,28 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             max_followup_ready_snapshot_bounded_wait_elapsed_ms
                 .is_some(),
             "p56 representative bundle must export bounded wait elapsed samples, observed_max={max_followup_ready_snapshot_bounded_wait_elapsed_ms:?}, cycles={cycles:?}"
+        );
+        assert!(
+            max_first_publish_elapsed_ms.is_some(),
+            "p56 representative bundle must export save_fastlane first-publish elapsed samples, cycles={cycles:?}"
+        );
+        assert!(
+            max_first_publish_syntax_query_ms.is_some(),
+            "p56 representative bundle must export save_fastlane syntax_diagnostics_query samples, cycles={cycles:?}"
+        );
+        assert!(
+            max_first_publish_elapsed_ms
+                .map(|value| value <= REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS)
+                .unwrap_or(false),
+            "p56 representative bundle must keep save_fastlane first publish at or below {}ms so a later detached-ready follow-up cannot mask first-publish latency, observed_max={max_first_publish_elapsed_ms:?}, cycles={cycles:?}",
+            REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS
+        );
+        assert!(
+            max_first_publish_syntax_query_ms
+                .map(|value| value <= REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS)
+                .unwrap_or(false),
+            "p56 representative bundle must keep save_fastlane syntax_diagnostics_query at or below {}ms, observed_max={max_first_publish_syntax_query_ms:?}, cycles={cycles:?}",
+            REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS
         );
         assert!(
             max_followup_publish_elapsed_ms
@@ -1398,6 +1599,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "cycle_count": SAVE_CYCLE_COUNT,
             "baseline": {
                 "captured_at": BASELINE_CAPTURED_AT,
+                "save_fastlane_first_publish_elapsed_ms_ceiling": REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS,
+                "save_fastlane_first_publish_syntax_query_ms_ceiling": REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS,
                 "followup_publish_elapsed_ms": [BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MIN_MS, BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS],
                 "followup_ready_snapshot_parse_exec_ms": [BASELINE_READY_SNAPSHOT_PARSE_EXEC_MIN_MS, BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS],
                 "did_change_ready_snapshot_materialization_ms": {
@@ -1422,7 +1625,11 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_ready_snapshot_timeout_leaf_ready_install_count": timeout_leaf_ready_install_count,
                 "followup_ready_snapshot_rebuild_dominated_shadow_state_count": program_lowering_full_rebuild_shadow_state_later_detached_count,
                 "followup_ready_snapshot_program_lowering_full_rebuild_shadow_state_later_detached_count": program_lowering_full_rebuild_shadow_state_later_detached_count,
+                "followup_ready_snapshot_program_lowering_full_rebuild_detached_ready_late_count": program_lowering_full_rebuild_detached_ready_late_count,
                 "followup_ready_snapshot_started_parser_base_shadow_without_terminal_reason_count": started_parser_base_shadow_without_terminal_reason_count,
+                "save_fastlane_slow_first_publish_count": slow_first_publish_count,
+                "save_fastlane_slow_first_publish_elapsed_count": slow_first_publish_elapsed_count,
+                "save_fastlane_slow_first_publish_syntax_query_count": slow_first_publish_syntax_query_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
                 "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
                 "representative_canonical_residual_mix": "producer_lifecycle_reaches_detached_ready_without_shadow_state",
@@ -1438,6 +1645,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "max_followup_publish_semantic_diagnostics_query_ms": max_followup_publish_semantic_diagnostics_query_ms,
                 "max_followup_ready_snapshot_parse_exec_ms": max_followup_ready_snapshot_parse_exec_ms,
                 "max_first_publish_elapsed_ms": max_first_publish_elapsed_ms,
+                "max_first_publish_syntax_query_ms": max_first_publish_syntax_query_ms,
                 "max_followup_save_fastlane_gate_wait_ms": max_followup_save_fastlane_gate_wait_ms,
                 "max_followup_admission_queue_wait_ms": max_followup_admission_queue_wait_ms,
                 "max_followup_runtime_queue_wait_ms": max_followup_runtime_queue_wait_ms,
@@ -1451,6 +1659,10 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "did_change_ready_snapshot_materialization_p95_ms": did_change_materialization_p95_ms,
             },
             "comparison": {
+                "max_first_publish_elapsed_vs_ceiling_delta_ms": max_first_publish_elapsed_ms
+                    .map(|value| value as i64 - REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS as i64),
+                "max_first_publish_syntax_query_vs_ceiling_delta_ms": max_first_publish_syntax_query_ms
+                    .map(|value| value as i64 - REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS as i64),
                 "max_followup_publish_elapsed_vs_baseline_ceiling_delta_ms": max_followup_publish_elapsed_ms
                     .map(|value| value as i64 - BASELINE_FOLLOWUP_PUBLISH_ELAPSED_MAX_MS as i64),
                 "max_followup_ready_snapshot_parse_exec_vs_baseline_ceiling_delta_ms": max_followup_ready_snapshot_parse_exec_ms

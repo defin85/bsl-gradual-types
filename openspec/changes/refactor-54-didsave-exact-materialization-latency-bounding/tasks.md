@@ -20,36 +20,36 @@
 
 ## 3. Implementation
 
-- [ ] 3.1 Inspect the `save_fastlane` syntax-only publish path and identify why the representative
+- [x] 3.1 Inspect the `save_fastlane` syntax-only publish path and identify why the representative
       cycle can spend `3397ms` in `syntax_diagnostics_query_ms` while exact producer
       `parser_base_recovery` is also active.
-- [ ] 3.2 Add targeted regression coverage for slow first-publish syntax query attribution and the
+- [x] 3.2 Add targeted regression coverage for slow first-publish syntax query attribution and the
       requirement that a later detached-ready follow-up does not hide first-publish latency.
-- [ ] 3.3 Inspect the same-version exact producer path that led to
+- [x] 3.3 Inspect the same-version exact producer path that led to
       `program_lowering_reuse_outcome=full_rebuild`, `2088` rebuilt units, and `0` reused units in
       the fresh bundle.
-- [ ] 3.4 Implement the root fix so a still-current representative `didSave` producer either avoids
+- [x] 3.4 Implement the root fix so a still-current representative `didSave` producer either avoids
       the full rebuild, reaches detached diagnostics-ready within the existing envelope, or exports
       a truthful non-exact terminal reason independent of bounded-wait expiry and full-rebuild reuse
       miss.
-- [ ] 3.5 Preserve or extend diagnostics-save timeline and incident-bundle projections for
+- [x] 3.5 Preserve or extend diagnostics-save timeline and incident-bundle projections for
       first-publish syntax timing, parser-base and program-lowering phase timings,
       `program_lowering` reuse/rebuild evidence, bounded wait and relief-valve outcomes, terminal
       semantic path, and final lifecycle.
-- [ ] 3.6 Update the representative `examples/conf_big` live/perf gate so the
+- [x] 3.6 Update the representative `examples/conf_big` live/perf gate so the
       2026-04-24T14:22:42Z contours fail until first-publish and detached-ready materialization
       latency are repaired or truthfully classified.
 
 ## 4. Validation
 
-- [ ] 4.1 Run targeted backend diagnostics-save timeline regressions for first-publish syntax
+- [x] 4.1 Run targeted backend diagnostics-save timeline regressions for first-publish syntax
       latency and detached-ready materialization latency.
-- [ ] 4.2 Run targeted `program_lowering` reuse/rebuild regressions if the implementation changes
+- [x] 4.2 Run targeted `program_lowering` reuse/rebuild regressions if the implementation changes
       reuse planning, parser-edit continuity, or ownership-based materialization.
-- [ ] 4.3 Run representative live validation on `examples/conf_big` and record whether all captured
+- [x] 4.3 Run representative live validation on `examples/conf_big` and record whether all captured
       save cycles satisfy first-publish and heavy-follow-up latency gates while preserving
       `detached_ready_artifacts`.
-- [ ] 4.4 Run `cargo check --workspace --all-targets` and
+- [x] 4.4 Run `cargo check --workspace --all-targets` and
       `cargo clippy --workspace --all-targets -- -D warnings` if production code changes.
 - [x] 4.5 Run
       `openspec validate refactor-54-didsave-exact-materialization-latency-bounding --strict --no-interactive`.

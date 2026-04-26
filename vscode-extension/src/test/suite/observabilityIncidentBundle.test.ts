@@ -239,6 +239,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_save: 3,
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_parse: 2,
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_retargeted_before_materialization: 1,
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_exact_type_index_deadline_before_ready_install: 1,
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_aborted: 1,
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_superseded: 1,
                         intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change: 3,
@@ -270,6 +271,10 @@ suite('Observability Incident Bundle Test Suite', () => {
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_retargeted_before_materialization: {
                             count: 1,
                             p95: 1600,
+                        },
+                        intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_change_reason_exact_type_index_deadline_before_ready_install: {
+                            count: 1,
+                            p95: 5000,
                         },
                         intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_ms_origin_lsp_source_did_save_reason_superseded: {
                             count: 1,
@@ -1116,7 +1121,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(
             bundle.summaryMarkdown.includes(
-                'ready_snapshot_worker_terminated_without_materialization | source=did_change | retargeted_before_parse=2 p95_ms=800 | retargeted_before_materialization=1 p95_ms=1600'
+                'ready_snapshot_worker_terminated_without_materialization | source=did_change | retargeted_before_parse=2 p95_ms=800 | retargeted_before_materialization=1 p95_ms=1600 | exact_type_index_deadline_before_ready_install=1 p95_ms=5000'
             )
         );
         assert.ok(

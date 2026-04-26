@@ -16,6 +16,14 @@ fn normalize_ready_parse_snapshot_worker_termination_reason_label(reason: &str) 
         "retargeted_before_parse" => "retargeted_before_parse",
         "retargeted_during_parse" => "retargeted_during_parse",
         "retargeted_before_materialization" => "retargeted_before_materialization",
+        "retargeted_before_exact_ready_install" => "retargeted_before_exact_ready_install",
+        "superseded_before_exact_ready_install" => "superseded_before_exact_ready_install",
+        "latest_version_mismatch_before_exact_ready_install" => {
+            "latest_version_mismatch_before_exact_ready_install"
+        }
+        "exact_type_index_deadline_before_ready_install" => {
+            "exact_type_index_deadline_before_ready_install"
+        }
         "latest_version_mismatch" => "latest_version_mismatch",
         "build_snapshot_aborted" => "build_snapshot_aborted",
         _ => "other",

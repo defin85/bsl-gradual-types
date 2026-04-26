@@ -221,7 +221,14 @@ impl AnalysisHostV2 {
         path: Arc<str>,
         parse_snapshot: ParseSnapshot,
     ) -> TypeIndexStoreOutcome {
-        let outcome = self.set_file_with_outcome(file_id, text, version, path);
+        let outcome = match self.files.get(&file_id).copied() {
+            Some(file) if file.version(&self.db) == version => self
+                .derived_cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .retain_versions_for_file(file_id, version),
+            _ => self.set_file_with_outcome(file_id, text, version, path),
+        };
         if parse_snapshot.file_id != file_id || parse_snapshot.file_version != version {
             return outcome;
         }

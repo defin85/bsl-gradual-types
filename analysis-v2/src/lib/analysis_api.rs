@@ -532,8 +532,8 @@ impl AnalysisV2 {
         let file_path = file.path(&self.db).clone();
         let exec_started = Instant::now();
         let profiled = cancellable(|| {
-            type_inference_v2::build_type_index_from_semantic_program_with_path_profiled(
-                program.as_ref(),
+            type_inference_v2::build_type_index_from_semantic_program_arc_with_path_profiled(
+                program,
                 file_path.as_ref(),
                 deps_data,
             )

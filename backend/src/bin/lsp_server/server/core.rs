@@ -40,6 +40,8 @@ mod deps_and_precompute;
 pub(crate) use deps_and_precompute::CompletionArtifactPollTraceV2;
 pub(crate) use deps_and_precompute::CompletionArtifactWaitOutcomeV2;
 pub(crate) use deps_and_precompute::ExactTypeIndexWaitOutcomeV2;
+pub(crate) use deps_and_precompute::TypeIndexPrecomputePhaseV2;
+pub(crate) use deps_and_precompute::TypeIndexPrecomputeWaiterActionV2;
 #[path = "core/diagnostics_runtime.rs"]
 mod diagnostics_runtime;
 #[path = "core/execution_context.rs"]
@@ -164,6 +166,7 @@ fn did_save_exact_producer_lifecycle_is_terminal_state(state: &str) -> bool {
         state,
         "detached_diagnostics_ready_published"
             | "fully_materialized"
+            | "exact_type_index_deadline"
             | "superseded"
             | "cancelled"
             | "failed"

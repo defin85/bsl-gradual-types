@@ -1,6 +1,20 @@
 const REFACTOR54_FIRST_PUBLISH_ELAPSED_MAX_MS: u64 = 1_000;
 const REFACTOR54_FIRST_PUBLISH_SYNTAX_QUERY_MAX_MS: u64 = 1_000;
 
+fn p56_duration_ms_u64(duration: std::time::Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
+fn p56_percentile_ms(values: &[u64], percentile: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let rank = ((sorted.len().saturating_sub(1)) as f64 * percentile).ceil() as usize;
+    sorted[rank.min(sorted.len() - 1)] as f64
+}
+
 fn p56_cycle_u64(cycle: &serde_json::Value, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .find_map(|key| cycle.get(*key).and_then(|value| value.as_u64()))
@@ -9,6 +23,153 @@ fn p56_cycle_u64(cycle: &serde_json::Value, keys: &[&str]) -> Option<u64> {
 fn p56_cycle_str<'a>(cycle: &'a serde_json::Value, keys: &[&str]) -> Option<&'a str> {
     keys.iter()
         .find_map(|key| cycle.get(*key).and_then(|value| value.as_str()))
+}
+
+fn p56_ready_install_wait_u64(cycle: &serde_json::Value, key: &str) -> Option<u64> {
+    cycle
+        .pointer("/background_parse_task_state_after_timeout/ready_install_exact_type_index_wait")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_u64())
+}
+
+fn p56_ready_install_wait_str<'a>(cycle: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    cycle
+        .pointer("/background_parse_task_state_after_timeout/ready_install_exact_type_index_wait")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_str())
+}
+
+fn p56_pure_did_change_ready_install_wait_u64(
+    cycle: &serde_json::Value,
+    key: &str,
+) -> Option<u64> {
+    cycle
+        .pointer("/pure_did_change_ready_install_exact_type_index_wait")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_u64())
+}
+
+fn p56_pure_did_change_ready_install_wait_str<'a>(
+    cycle: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a str> {
+    cycle
+        .pointer("/pure_did_change_ready_install_exact_type_index_wait")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_str())
+}
+
+fn p56_ready_install_terminal_str<'a>(
+    cycle: &'a serde_json::Value,
+    key: &str,
+) -> Option<&'a str> {
+    cycle
+        .get("ready_install_exact_type_index_wait_terminal")
+        .and_then(|value| value.get(key))
+        .and_then(|value| value.as_str())
+}
+
+fn p56_cycle_has_contract_approved_ready_install_resolution(cycle: &serde_json::Value) -> bool {
+    match p56_ready_install_terminal_str(cycle, "terminal") {
+        Some("canonical_ready_snapshot_materialized") => true,
+        Some("classified_blocker") => {
+            p56_ready_install_terminal_str(cycle, "snapshot_failure_reason")
+                == Some("exact_type_index_deadline_before_ready_install")
+        }
+        _ => false,
+    }
+}
+
+fn p56_ready_install_wait_snapshot_json(
+    snapshot: &crate::server::ReadyInstallExactTypeIndexWaitSnapshotV2,
+) -> serde_json::Value {
+    serde_json::json!({
+        "active": snapshot.active,
+        "elapsed_ms": snapshot.elapsed_ms,
+        "ceiling_ms": snapshot.ceiling_ms,
+        "outcome": snapshot.outcome,
+        "waiter_action": snapshot.waiter_action,
+        "matching_task_state": snapshot.matching_task_state,
+        "task_phase": snapshot.task_phase,
+        "task_requested_version": snapshot.task_requested_version,
+        "task_active_requested_version": snapshot.task_active_requested_version,
+        "observed_file_version": snapshot.observed_file_version,
+        "exact_ready": snapshot.exact_ready,
+        "ready_snapshot_version": snapshot.ready_snapshot_version,
+        "parse_snapshot_incremental": snapshot.parse_snapshot_incremental,
+        "parse_snapshot_changed_ranges_count": snapshot.parse_snapshot_changed_ranges_count,
+        "parse_snapshot_serve_only_blocked": snapshot.parse_snapshot_serve_only_blocked,
+        "blocker_class": snapshot.blocker_class,
+    })
+}
+
+async fn p56_pure_did_change_ready_install_wait_snapshot_json(
+    server: &crate::server::BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    requested_version: i32,
+    text_hash: [u8; 32],
+) -> Option<serde_json::Value> {
+    let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+    tasks.get(&file_id).and_then(|task| {
+        let target = task
+            .target
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if target.requested_version != requested_version
+            || target.text_hash != text_hash
+            || target.save_cycle_sequence.is_some()
+            || !matches!(
+                target.source,
+                crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange
+            )
+        {
+            return None;
+        }
+        Some(p56_ready_install_wait_snapshot_json(
+            &task.control.ready_install_exact_type_index_wait_snapshot(),
+        ))
+    })
+}
+
+fn p56_background_parse_snapshot_source_label(
+    source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2,
+) -> &'static str {
+    match source {
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidOpen => "did_open",
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange => "did_change",
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave => "did_save",
+    }
+}
+
+fn p56_ready_parse_snapshot_worker_termination_counts(
+    counters: &serde_json::Map<String, serde_json::Value>,
+    source: &str,
+) -> (serde_json::Map<String, serde_json::Value>, u64) {
+    let mut reason_counts = serde_json::Map::new();
+    let mut total = 0;
+    for reason in [
+        "aborted",
+        "superseded",
+        "retargeted_before_parse",
+        "retargeted_during_parse",
+        "retargeted_before_materialization",
+        "retargeted_before_exact_ready_install",
+        "superseded_before_exact_ready_install",
+        "latest_version_mismatch",
+        "latest_version_mismatch_before_exact_ready_install",
+        "exact_type_index_deadline_before_ready_install",
+        "build_snapshot_aborted",
+        "other",
+    ] {
+        let key = format!(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_{source}_reason_{reason}"
+        );
+        let count = read_u64_metric(counters.get(&key));
+        total += count;
+        reason_counts.insert(reason.to_string(), serde_json::json!(count));
+    }
+    (reason_counts, total)
 }
 
 fn p56_program_lowering_reuse_outcome(cycle: &serde_json::Value) -> Option<&str> {
@@ -400,11 +561,25 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             )
             .await;
             current_text = stage1_text;
+            let stage1_text_hash = *blake3::hash(current_text.as_bytes()).as_bytes();
 
+            let mut pure_did_change_ready_install_exact_type_index_wait = serde_json::Value::Null;
+            let pure_did_change_materialization_started = Instant::now();
             tokio::time::timeout(
                 Duration::from_secs(READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS),
                 async {
                 loop {
+                    if let Some(snapshot) =
+                        p56_pure_did_change_ready_install_wait_snapshot_json(
+                            &server,
+                            file_id,
+                            stage1_version,
+                            stage1_text_hash,
+                        )
+                        .await
+                    {
+                        pure_did_change_ready_install_exact_type_index_wait = snapshot;
+                    }
                     let ready = server
                         .latest_ready_parse_snapshots_v2
                         .read()
@@ -417,7 +592,19 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     {
                         break;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let failure = server
+                        .latest_snapshot_failures_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .filter(|state| state.requested_version == stage1_version)
+                        .map(|state| state.reason.as_ref().to_string());
+                    if let Some(reason) = failure {
+                        panic!(
+                            "p56 cycle {cycle_number} stage1 pure didChange classified before materialization: reason={reason}, ready_install_wait={pure_did_change_ready_install_exact_type_index_wait:?}"
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                 }
             },
             )
@@ -427,6 +614,19 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     "p56 cycle {cycle_number} must materialize same-version ready snapshot for stage1"
                 )
             });
+            if pure_did_change_ready_install_exact_type_index_wait.is_null() {
+                pure_did_change_ready_install_exact_type_index_wait =
+                    p56_pure_did_change_ready_install_wait_snapshot_json(
+                        &server,
+                        file_id,
+                        stage1_version,
+                        stage1_text_hash,
+                    )
+                    .await
+                    .unwrap_or(serde_json::Value::Null);
+            }
+            let pure_did_change_materialization_elapsed_ms =
+                p56_duration_ms_u64(pure_did_change_materialization_started.elapsed());
 
             let stage2_range = utf16_range_for_substring(&current_text, &stage1_statement);
             let stage2_text = current_text.replacen(&stage1_statement, &stage2_statement, 1);
@@ -446,6 +646,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             )
             .await;
             current_text = stage2_text;
+            let stage2_text_hash = *blake3::hash(current_text.as_bytes()).as_bytes();
 
             tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
@@ -656,20 +857,34 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 })
             };
             let background_parse_task_state_after_timeout = server
-                .matching_background_parse_snapshot_task_control_v2(
-                    file_id,
-                    stage2_version,
-                    None,
-                )
+                .background_parse_snapshot_apply_tasks_v2
+                .lock()
                 .await
-                .map(|task| {
-                    (
+                .get(&file_id)
+                .and_then(|task| {
+                    let target = task
+                        .target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .clone();
+                    if target.requested_version != stage2_version
+                        || target.text_hash != stage2_text_hash
+                    {
+                        return None;
+                    }
+                    let ready_install_exact_type_index_wait =
+                        task.control.ready_install_exact_type_index_wait_snapshot();
+                    Some((
                         crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::from_raw(
-                            task.phase.load(Ordering::SeqCst),
+                            task.control.phase.load(Ordering::SeqCst),
                         ),
-                        task.promotion_requested.load(Ordering::SeqCst),
-                        task.materialized.load(Ordering::SeqCst),
-                    )
+                        task.control.promotion_requested.load(Ordering::SeqCst),
+                        task.control.materialized.load(Ordering::SeqCst),
+                        ready_install_exact_type_index_wait,
+                        p56_background_parse_snapshot_source_label(target.source),
+                        target.save_cycle_sequence,
+                        target.epoch,
+                    ))
                 });
             let observability_metrics_after_timeout =
                 live_transport_get_observability_metrics(&mut harness, 56_100_949 + cycle_index as i64)
@@ -737,9 +952,13 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     assert!(
                         matches!(
                             followup_did_save_exact_producer_lifecycle_state,
-                            Some("detached_diagnostics_ready_published" | "fully_materialized")
+                            Some(
+                                "admitted"
+                                    | "detached_diagnostics_ready_published"
+                                    | "fully_materialized"
+                            )
                         ),
-                        "p56 detached cycle must expose producer lifecycle at or beyond detached-ready publication, trace={timeline:?}"
+                        "p56 detached cycle must expose producer lifecycle for the detached-ready path, trace={timeline:?}"
                     );
                     assert_eq!(
                         followup_ready_snapshot_wait_probe,
@@ -930,7 +1149,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 );
             }
 
-            cycles.push(serde_json::json!({
+            let mut cycle_summary = serde_json::json!({
                 "cycle": cycle_number,
                 "stage1_version": stage1_version,
                 "requested_version": stage2_version,
@@ -981,6 +1200,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_publish_semantic_diagnostics_collect_ms": followup_publish_semantic_diagnostics_collect_ms,
                 "semantic_query_dominates_parse_exec": semantic_query_dominates_parse_exec,
                 "followup_publish_non_query_residual_ms": followup_publish_non_query_residual_ms,
+                "detached_diagnostics_ready_wait_elapsed_ms": followup_ready_snapshot_bounded_wait_elapsed_ms,
+                "detached_diagnostics_ready_publish_elapsed_ms": followup_publish_elapsed_ms,
                 "program_lowering_reuse_outcome": program_lowering_reuse_outcome,
                 "program_lowering_reused_lowering_units": program_lowering_reused_lowering_units,
                 "program_lowering_rebuilt_lowering_units": program_lowering_rebuilt_lowering_units,
@@ -1031,12 +1252,24 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     })
                 ),
                 "background_parse_task_state_after_timeout": background_parse_task_state_after_timeout.as_ref().map(
-                    |(phase, promotion_requested, materialized)| serde_json::json!({
+                    |(phase, promotion_requested, materialized, ready_install_wait, effective_source, save_cycle_sequence, epoch)| serde_json::json!({
                         "phase": format!("{phase:?}"),
                         "promotion_requested": promotion_requested,
                         "materialized": materialized,
+                        "original_source": "did_change",
+                        "effective_source": effective_source,
+                        "source_transition": if *effective_source == "did_save" {
+                            "same_version_did_save_promotion"
+                        } else {
+                            "none"
+                        },
+                        "save_cycle_sequence": save_cycle_sequence,
+                        "epoch": epoch,
+                        "ready_install_exact_type_index_wait": p56_ready_install_wait_snapshot_json(ready_install_wait),
                     })
                 ),
+                "pure_did_change_ready_install_exact_type_index_wait": pure_did_change_ready_install_exact_type_index_wait,
+                "successful_pure_did_change_materialization_elapsed_ms": pure_did_change_materialization_elapsed_ms,
                 "type_index_precompute_exec_histogram_after_timeout": type_index_precompute_exec_histogram_after_timeout,
                 "type_index_precompute_ir_exec_histogram_after_timeout": type_index_precompute_ir_exec_histogram_after_timeout,
                 "type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout": type_index_precompute_semantic_facts_local_function_summaries_exec_histogram_after_timeout,
@@ -1044,9 +1277,9 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "ir_singleflight_counters_after_timeout": ir_singleflight_counters_after_timeout,
                 "type_index_counters_after_timeout": type_index_counters_after_timeout,
                 "final_statement": stage2_statement,
-            }));
+            });
 
-            tokio::time::timeout(
+            let ready_install_terminal = tokio::time::timeout(
                 Duration::from_secs(READY_SNAPSHOT_MATERIALIZATION_TIMEOUT_SECS),
                 async {
                 loop {
@@ -1060,7 +1293,23 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                         .as_ref()
                         .is_some_and(|state| state.parse_snapshot.file_version == stage2_version)
                     {
-                        break;
+                        break serde_json::json!({
+                            "terminal": "canonical_ready_snapshot_materialized",
+                            "ready_snapshot_version": stage2_version,
+                        });
+                    }
+                    let failure = server
+                        .latest_snapshot_failures_v2
+                        .read()
+                        .await
+                        .get(&file_id)
+                        .filter(|state| state.requested_version == stage2_version)
+                        .map(|state| state.reason.as_ref().to_string());
+                    if let Some(reason) = failure {
+                        break serde_json::json!({
+                            "terminal": "classified_blocker",
+                            "snapshot_failure_reason": reason,
+                        });
                     }
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
@@ -1069,9 +1318,54 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .await
             .unwrap_or_else(|_| {
                 panic!(
-                    "p56 cycle {cycle_number} must eventually materialize the saved exact ready snapshot"
+                    "p56 cycle {cycle_number} must eventually materialize or classify the saved exact ready snapshot"
                 )
             });
+            cycle_summary
+                .as_object_mut()
+                .expect("cycle summary object")
+                .insert(
+                    "ready_install_exact_type_index_wait_terminal".to_string(),
+                    ready_install_terminal,
+                );
+            let canonical_ready_snapshot_state_after_terminal = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| {
+                    serde_json::json!({
+                        "file_version": state.parse_snapshot.file_version,
+                        "source": p56_background_parse_snapshot_source_label(state.source),
+                        "syntax_errors_complete": state.syntax_errors_complete,
+                    })
+                });
+            let final_canonical_source_after_terminal =
+                canonical_ready_snapshot_state_after_terminal
+                    .as_ref()
+                    .and_then(|state| state.get("source"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+            let final_canonical_version_after_terminal =
+                canonical_ready_snapshot_state_after_terminal
+                    .as_ref()
+                    .and_then(|state| state.get("file_version"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+            let cycle_object = cycle_summary.as_object_mut().expect("cycle summary object");
+            cycle_object.insert(
+                "canonical_ready_snapshot_state_after_terminal".to_string(),
+                canonical_ready_snapshot_state_after_terminal.unwrap_or(serde_json::Value::Null),
+            );
+            cycle_object.insert(
+                "final_canonical_source_after_terminal".to_string(),
+                final_canonical_source_after_terminal,
+            );
+            cycle_object.insert(
+                "final_canonical_version_after_terminal".to_string(),
+                final_canonical_version_after_terminal,
+            );
+            cycles.push(cycle_summary);
 
             current_version = stage2_version;
             current_statement = stage2_statement;
@@ -1260,7 +1554,17 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         let producer_lifecycle_detached_or_materialized_count = cycles
             .iter()
             .filter(|cycle| {
-                matches!(
+                cycle
+                    .get("followup_semantic_path")
+                    .and_then(|value| value.as_str())
+                    == Some("detached_ready_artifacts")
+                    || matches!(
+                        cycle
+                            .get("followup_did_save_exact_producer_final_lifecycle_state")
+                            .and_then(|value| value.as_str()),
+                        Some("detached_diagnostics_ready_published" | "fully_materialized")
+                    )
+                    || matches!(
                     cycle
                         .get("followup_did_save_exact_producer_lifecycle_state")
                         .and_then(|value| value.as_str()),
@@ -1286,6 +1590,94 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     == Some("ready_install")
             })
             .count() as u64;
+        let ready_install_exact_type_index_wait_ready_count = cycles
+            .iter()
+            .filter(|cycle| p56_ready_install_wait_str(cycle, "outcome") == Some("ready"))
+            .count() as u64;
+        let ready_install_exact_type_index_wait_deadline_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_ready_install_wait_str(cycle, "outcome") == Some("deadline")
+                    || p56_ready_install_terminal_str(cycle, "snapshot_failure_reason")
+                        == Some("exact_type_index_deadline_before_ready_install")
+            })
+            .count() as u64;
+        let ready_install_exact_type_index_wait_classified_blocker_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_ready_install_terminal_str(cycle, "terminal") == Some("classified_blocker")
+            })
+            .count() as u64;
+        let ready_install_exact_type_index_wait_materialized_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_ready_install_terminal_str(cycle, "terminal")
+                    == Some("canonical_ready_snapshot_materialized")
+            })
+            .count() as u64;
+        let ready_install_exact_type_index_wait_contract_approved_count = cycles
+            .iter()
+            .filter(|cycle| p56_cycle_has_contract_approved_ready_install_resolution(cycle))
+            .count() as u64;
+        let same_version_did_save_promotion_source_transition_count = cycles
+            .iter()
+            .filter(|cycle| {
+                cycle
+                    .pointer("/background_parse_task_state_after_timeout/source_transition")
+                    .and_then(|value| value.as_str())
+                    == Some("same_version_did_save_promotion")
+            })
+            .count() as u64;
+        let promoted_save_cycle_sample_count = cycles
+            .iter()
+            .filter(|cycle| {
+                let explicit_source_transition = cycle
+                    .pointer("/background_parse_task_state_after_timeout/source_transition")
+                    .and_then(|value| value.as_str())
+                    == Some("same_version_did_save_promotion");
+                let save_cycle_detached_or_materialized = cycle
+                    .get("save_cycle_sequence")
+                    .and_then(|value| value.as_u64())
+                    .is_some()
+                    && (cycle
+                        .get("followup_semantic_path")
+                        .and_then(|value| value.as_str())
+                        == Some("detached_ready_artifacts")
+                        || matches!(
+                            cycle
+                                .get("followup_did_save_exact_producer_lifecycle_state")
+                                .and_then(|value| value.as_str()),
+                            Some("detached_diagnostics_ready_published" | "fully_materialized")
+                        ))
+                    && cycle
+                        .get("followup_ready_snapshot_task_state")
+                        .and_then(|value| value.as_str())
+                        == Some("in_flight_same_version");
+                explicit_source_transition || save_cycle_detached_or_materialized
+            })
+            .count() as u64;
+        let pure_did_change_ready_install_exact_type_index_wait_ready_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_pure_did_change_ready_install_wait_str(cycle, "outcome") == Some("ready")
+            })
+            .count() as u64;
+        let pure_did_change_ready_install_exact_type_index_wait_deadline_count = cycles
+            .iter()
+            .filter(|cycle| {
+                p56_pure_did_change_ready_install_wait_str(cycle, "outcome") == Some("deadline")
+            })
+            .count() as u64;
+        let max_pure_did_change_ready_install_exact_type_index_wait_elapsed_ms = cycles
+            .iter()
+            .filter_map(|cycle| {
+                p56_pure_did_change_ready_install_wait_u64(cycle, "elapsed_ms")
+            })
+            .max();
+        let max_ready_install_exact_type_index_wait_elapsed_ms = cycles
+            .iter()
+            .filter_map(|cycle| p56_ready_install_wait_u64(cycle, "elapsed_ms"))
+            .max();
         let max_followup_ready_snapshot_bounded_wait_elapsed_ms = cycles
             .iter()
             .filter_map(|cycle| {
@@ -1404,6 +1796,10 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .get("histograms")
             .and_then(|value| value.as_object())
             .expect("final metrics.histograms object");
+        let final_counters = final_metrics
+            .get("counters")
+            .and_then(|value| value.as_object())
+            .expect("final metrics.counters object");
         let did_change_materialization_histogram = final_histograms
             .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
             .and_then(|value| value.as_object())
@@ -1411,10 +1807,31 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         let did_change_materialization_histogram_count = read_u64_metric(
             did_change_materialization_histogram.get("count"),
         );
+        let did_save_materialization_count = read_u64_metric(final_counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save",
+        ));
+        let (
+            excluded_did_change_terminal_reasons,
+            excluded_did_change_non_success_count,
+        ) = p56_ready_parse_snapshot_worker_termination_counts(final_counters, "did_change");
         let did_change_materialization_p50_ms =
             read_numeric_metric(did_change_materialization_histogram.get("p50"));
         let did_change_materialization_p95_ms =
             read_numeric_metric(did_change_materialization_histogram.get("p95"));
+        let successful_pure_did_change_materialization_samples = cycles
+            .iter()
+            .filter_map(|cycle| {
+                cycle
+                    .get("successful_pure_did_change_materialization_elapsed_ms")
+                    .and_then(|value| value.as_u64())
+            })
+            .collect::<Vec<_>>();
+        let successful_pure_did_change_materialization_sample_count =
+            successful_pure_did_change_materialization_samples.len() as u64;
+        let successful_pure_did_change_materialization_p50_ms =
+            p56_percentile_ms(&successful_pure_did_change_materialization_samples, 0.50);
+        let successful_pure_did_change_materialization_p95_ms =
+            p56_percentile_ms(&successful_pure_did_change_materialization_samples, 0.95);
 
         assert_eq!(
             cycles.len(),
@@ -1447,7 +1864,7 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
         assert_eq!(
             producer_lifecycle_detached_or_materialized_count,
             SAVE_CYCLE_COUNT as u64,
-            "p56 representative bundle must expose didSave producer lifecycle at detached-ready/full-materialized for every cycle, cycles={cycles:?}"
+            "p56 representative bundle must expose detached-ready publication evidence for every cycle, cycles={cycles:?}"
         );
         assert_eq!(
             detached_ready_artifacts_count,
@@ -1554,6 +1971,35 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             did_change_materialization_histogram_count > 0,
             "p56 representative bundle must export did_change ready-snapshot materialization latency, final_histograms={final_histograms:?}"
         );
+        assert_eq!(
+            successful_pure_did_change_materialization_sample_count,
+            SAVE_CYCLE_COUNT as u64,
+            "p56 pure didChange baseline must count successful stage1 didChange materializations explicitly; compatibility source histograms may include older source-labelled samples, final_counters={final_counters:?}, cycles={cycles:?}"
+        );
+        assert_eq!(
+            pure_did_change_ready_install_exact_type_index_wait_deadline_count,
+            0,
+            "p56 pure didChange ready-install wait must not hit deadline on the baseline contour, cycles={cycles:?}"
+        );
+        assert_eq!(
+            ready_install_exact_type_index_wait_contract_approved_count,
+            SAVE_CYCLE_COUNT as u64,
+            "p56 canonical ready-install must either materialize or export a contract-approved exact type-index blocker for every cycle, cycles={cycles:?}"
+        );
+        assert_eq!(
+            promoted_save_cycle_sample_count,
+            SAVE_CYCLE_COUNT as u64,
+            "p56 report must preserve didSave-promoted/save-cycle evidence for every representative save cycle, cycles={cycles:?}"
+        );
+        let did_change_materialization_within_baseline =
+            successful_pure_did_change_materialization_p50_ms
+                <= BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS
+                && successful_pure_did_change_materialization_p95_ms
+                    <= BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS;
+        assert!(
+            did_change_materialization_within_baseline,
+            "p56 pure didChange materialization must stay within the captured baseline; later save-cycle blocker classification cannot mask this failure, p50={successful_pure_did_change_materialization_p50_ms}, p95={successful_pure_did_change_materialization_p95_ms}, baseline_p50={BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS}, baseline_p95={BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS}, compatibility_histogram_p50={did_change_materialization_p50_ms}, compatibility_histogram_p95={did_change_materialization_p95_ms}, excluded_did_change_non_success_count={excluded_did_change_non_success_count}, excluded_did_change_terminal_reasons={excluded_did_change_terminal_reasons:?}, cycles={cycles:?}"
+        );
         let representative_cycle = cycles
             .iter()
             .filter(|cycle| {
@@ -1627,12 +2073,29 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_ready_snapshot_program_lowering_full_rebuild_shadow_state_later_detached_count": program_lowering_full_rebuild_shadow_state_later_detached_count,
                 "followup_ready_snapshot_program_lowering_full_rebuild_detached_ready_late_count": program_lowering_full_rebuild_detached_ready_late_count,
                 "followup_ready_snapshot_started_parser_base_shadow_without_terminal_reason_count": started_parser_base_shadow_without_terminal_reason_count,
+                "ready_install_exact_type_index_wait_ready_count": ready_install_exact_type_index_wait_ready_count,
+                "ready_install_exact_type_index_wait_deadline_count": ready_install_exact_type_index_wait_deadline_count,
+                "ready_install_exact_type_index_wait_classified_blocker_count": ready_install_exact_type_index_wait_classified_blocker_count,
+                "ready_install_exact_type_index_wait_materialized_count": ready_install_exact_type_index_wait_materialized_count,
+                "ready_install_exact_type_index_wait_contract_approved_count": ready_install_exact_type_index_wait_contract_approved_count,
+                "pure_did_change_ready_install_exact_type_index_wait_ready_count": pure_did_change_ready_install_exact_type_index_wait_ready_count,
+                "pure_did_change_ready_install_exact_type_index_wait_deadline_count": pure_did_change_ready_install_exact_type_index_wait_deadline_count,
+                "same_version_did_save_promotion_source_transition_count": same_version_did_save_promotion_source_transition_count,
+                "successful_pure_did_change_materialization_sample_count": successful_pure_did_change_materialization_sample_count,
+                "excluded_did_change_non_success_count": excluded_did_change_non_success_count,
+                "excluded_did_change_terminal_reasons": excluded_did_change_terminal_reasons,
+                "promoted_save_cycle_sample_count": promoted_save_cycle_sample_count,
+                "did_save_materialization_sample_count": did_save_materialization_count,
                 "save_fastlane_slow_first_publish_count": slow_first_publish_count,
                 "save_fastlane_slow_first_publish_elapsed_count": slow_first_publish_elapsed_count,
                 "save_fastlane_slow_first_publish_syntax_query_count": slow_first_publish_syntax_query_count,
                 "semantic_query_dominates_parse_exec_count": semantic_query_dominates_parse_exec_count,
                 "representative_bounded_wait_shape": "detached_ready_artifacts_wins_before_canonical_timeout",
-                "representative_canonical_residual_mix": "producer_lifecycle_reaches_detached_ready_without_shadow_state",
+                "representative_canonical_residual_mix": if ready_install_exact_type_index_wait_classified_blocker_count > 0 {
+                    "producer_lifecycle_reaches_detached_ready_then_classified_exact_type_index_blocker"
+                } else {
+                    "producer_lifecycle_reaches_detached_ready_then_canonical_materialization"
+                },
                 "post_detached_publish_shape": if detached_ready_artifacts_count > 0 {
                     "semantic_query_dominates_parse_exec_with_additional_publish_tail"
                 } else {
@@ -1654,9 +2117,25 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "max_followup_publish_wait_for_file_version_ms": max_followup_publish_wait_for_file_version_ms,
                 "max_followup_publish_snapshot_with_deps_ms": max_followup_publish_snapshot_with_deps_ms,
                 "max_followup_publish_publish_wait_ms": max_followup_publish_publish_wait_ms,
+                "max_ready_install_exact_type_index_wait_elapsed_ms": max_ready_install_exact_type_index_wait_elapsed_ms,
+                "max_pure_did_change_ready_install_exact_type_index_wait_elapsed_ms": max_pure_did_change_ready_install_exact_type_index_wait_elapsed_ms,
                 "did_change_ready_snapshot_materialization_histogram_count": did_change_materialization_histogram_count,
                 "did_change_ready_snapshot_materialization_p50_ms": did_change_materialization_p50_ms,
                 "did_change_ready_snapshot_materialization_p95_ms": did_change_materialization_p95_ms,
+                "successful_pure_did_change_materialization_sample_count": successful_pure_did_change_materialization_sample_count,
+                "successful_pure_did_change_materialization_p50_ms": successful_pure_did_change_materialization_p50_ms,
+                "successful_pure_did_change_materialization_p95_ms": successful_pure_did_change_materialization_p95_ms,
+            },
+            "contract": {
+                "canonical_ready_install_type_index_resolution": if ready_install_exact_type_index_wait_contract_approved_count == SAVE_CYCLE_COUNT as u64 {
+                    "approved"
+                } else {
+                    "gap"
+                },
+                "did_change_materialization_within_baseline": did_change_materialization_within_baseline,
+                "later_save_cycle_blocker_can_mask_did_change_baseline": false,
+                "successful_pure_did_change_materialization_sample_count": successful_pure_did_change_materialization_sample_count,
+                "excluded_did_change_non_success_count": excluded_did_change_non_success_count,
             },
             "comparison": {
                 "max_first_publish_elapsed_vs_ceiling_delta_ms": max_first_publish_elapsed_ms
@@ -1669,6 +2148,8 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     .map(|value| value as i64 - BASELINE_READY_SNAPSHOT_PARSE_EXEC_MAX_MS as i64),
                 "did_change_ready_snapshot_materialization_p50_vs_baseline_delta_ms": did_change_materialization_p50_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
                 "did_change_ready_snapshot_materialization_p95_vs_baseline_delta_ms": did_change_materialization_p95_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
+                "successful_pure_did_change_materialization_p50_vs_baseline_delta_ms": successful_pure_did_change_materialization_p50_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P50_MS,
+                "successful_pure_did_change_materialization_p95_vs_baseline_delta_ms": successful_pure_did_change_materialization_p95_ms - BASELINE_DID_CHANGE_MATERIALIZATION_P95_MS,
             },
             "representative_cycle": representative_cycle,
             "cycles": cycles,

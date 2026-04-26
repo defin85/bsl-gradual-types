@@ -152,6 +152,16 @@ impl IntellisenseV2Facade {
         }
     }
 
+    pub async fn current_revision_analysis_snapshot_for_origin_and_operation(
+        &self,
+        _origin: ObservabilityOrigin,
+        operation: SemanticOperation,
+    ) -> AnalysisV2 {
+        maybe_inject_completion_current_revision_snapshot_delay_for_test().await;
+        let queue_priority = RuntimeQueuePriority::for_operation(operation);
+        self.snapshot_with_priority(queue_priority).await
+    }
+
     pub async fn prepare_completion_first_response(
         &self,
         context: &ExecutionContext,

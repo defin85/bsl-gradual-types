@@ -149,7 +149,7 @@ impl TypeIndexPrecomputePhaseV2 {
         self as u8
     }
 
-    pub(super) fn from_atomic(value: u8) -> Self {
+    pub(crate) fn from_atomic(value: u8) -> Self {
         match value {
             1 => Self::WaitingForVersion,
             2 => Self::Snapshotting,
@@ -215,12 +215,11 @@ impl BslLanguageServer {
 
     async fn snapshot_for_completion_wait_v2(&self) -> bsl_analysis_v2::AnalysisV2 {
         self.analysis_v2
-            .completion_current_revision_snapshot_for_origin_and_operation(
+            .current_revision_analysis_snapshot_for_origin_and_operation(
                 bsl_runtime::application::ObservabilityOrigin::Lsp,
                 bsl_runtime::application::SemanticOperation::Completion,
             )
             .await
-            .analysis
     }
 
     async fn current_exact_type_index_ready_for_version_v2(
@@ -464,6 +463,40 @@ impl BslLanguageServer {
                     bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
                         .as_str(),
                 "Event-driven type_index precompute cancelled on file cleanup"
+            );
+            self.coordinator.record_intellisense_v2_type_index_reason(
+                bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                    .as_str(),
+            );
+            task.handle.abort();
+        }
+    }
+
+    pub(crate) async fn cancel_stale_type_index_precompute_v2(
+        &self,
+        file_id: V2FileId,
+        current_version: i32,
+    ) {
+        let task = {
+            let mut tasks = self.type_index_precompute_tasks_v2.lock().await;
+            if tasks
+                .get(&file_id)
+                .is_some_and(|task| task.supersession_key.requested_version != current_version)
+            {
+                tasks.remove(&file_id)
+            } else {
+                None
+            }
+        };
+        if let Some(task) = task {
+            debug!(
+                file_id = file_id.0,
+                requested_version = task.supersession_key.requested_version,
+                current_version,
+                reason_code =
+                    bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
+                        .as_str(),
+                "Event-driven type_index precompute cancelled after newer file version"
             );
             self.coordinator.record_intellisense_v2_type_index_reason(
                 bsl_analysis_v2::TypeIndexPrecomputeReasonCode::TypeIndexPrecomputeCancelled
@@ -994,7 +1027,7 @@ impl BslLanguageServer {
             TypeIndexPrecomputePhaseV2::Snapshotting.as_u8(),
             Ordering::Relaxed,
         );
-        let (analysis, _index_snapshot, _deps_id) = self.analysis_v2.snapshot_with_deps().await;
+        let analysis = self.snapshot_for_completion_wait_v2().await;
         if self
             .type_index_precompute_checkpoint_v2(key, "before_compute")
             .await

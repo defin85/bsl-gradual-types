@@ -433,6 +433,7 @@ pub(crate) enum DidSaveExactProducerLifecycleStateV2 {
     Started,
     DetachedDiagnosticsReadyPublished,
     FullyMaterialized,
+    ExactTypeIndexDeadline,
     Superseded,
     Cancelled,
     Failed,
@@ -446,6 +447,7 @@ impl DidSaveExactProducerLifecycleStateV2 {
             Self::Started => "started",
             Self::DetachedDiagnosticsReadyPublished => "detached_diagnostics_ready_published",
             Self::FullyMaterialized => "fully_materialized",
+            Self::ExactTypeIndexDeadline => "exact_type_index_deadline",
             Self::Superseded => "superseded",
             Self::Cancelled => "cancelled",
             Self::Failed => "failed",
@@ -1358,6 +1360,83 @@ impl BackgroundParseSnapshotApplyTaskPhaseV2 {
     }
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReadyInstallExactTypeIndexWaitProbeV2 {
+    pub waiter_action: Option<&'static str>,
+    pub matching_task_state: Option<&'static str>,
+    pub task_phase: Option<&'static str>,
+    pub task_requested_version: Option<i32>,
+    pub task_active_requested_version: Option<i32>,
+    pub observed_file_version: Option<i32>,
+    pub exact_ready: Option<bool>,
+    pub ready_snapshot_version: Option<i32>,
+    pub parse_snapshot_incremental: Option<bool>,
+    pub parse_snapshot_changed_ranges_count: Option<usize>,
+    pub parse_snapshot_serve_only_blocked: Option<bool>,
+    pub blocker_class: Option<&'static str>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ReadyInstallExactTypeIndexWaitSnapshotV2 {
+    pub active: bool,
+    pub elapsed_ms: Option<u64>,
+    pub ceiling_ms: Option<u64>,
+    pub outcome: Option<&'static str>,
+    pub waiter_action: Option<&'static str>,
+    pub matching_task_state: Option<&'static str>,
+    pub task_phase: Option<&'static str>,
+    pub task_requested_version: Option<i32>,
+    pub task_active_requested_version: Option<i32>,
+    pub observed_file_version: Option<i32>,
+    pub exact_ready: Option<bool>,
+    pub ready_snapshot_version: Option<i32>,
+    pub parse_snapshot_incremental: Option<bool>,
+    pub parse_snapshot_changed_ranges_count: Option<usize>,
+    pub parse_snapshot_serve_only_blocked: Option<bool>,
+    pub blocker_class: Option<&'static str>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Default)]
+struct ReadyInstallExactTypeIndexWaitStateV2 {
+    started_at: Option<Instant>,
+    ceiling: Option<Duration>,
+    finished_elapsed: Option<Duration>,
+    outcome: Option<&'static str>,
+    latest_probe: ReadyInstallExactTypeIndexWaitProbeV2,
+}
+
+impl ReadyInstallExactTypeIndexWaitStateV2 {
+    fn snapshot(&self, now: Instant) -> ReadyInstallExactTypeIndexWaitSnapshotV2 {
+        let elapsed = self.finished_elapsed.or_else(|| {
+            self.started_at
+                .map(|started_at| now.saturating_duration_since(started_at))
+        });
+        ReadyInstallExactTypeIndexWaitSnapshotV2 {
+            active: self.started_at.is_some() && self.outcome.is_none(),
+            elapsed_ms: elapsed.map(|duration| duration.as_millis() as u64),
+            ceiling_ms: self.ceiling.map(|duration| duration.as_millis() as u64),
+            outcome: self.outcome,
+            waiter_action: self.latest_probe.waiter_action,
+            matching_task_state: self.latest_probe.matching_task_state,
+            task_phase: self.latest_probe.task_phase,
+            task_requested_version: self.latest_probe.task_requested_version,
+            task_active_requested_version: self.latest_probe.task_active_requested_version,
+            observed_file_version: self.latest_probe.observed_file_version,
+            exact_ready: self.latest_probe.exact_ready,
+            ready_snapshot_version: self.latest_probe.ready_snapshot_version,
+            parse_snapshot_incremental: self.latest_probe.parse_snapshot_incremental,
+            parse_snapshot_changed_ranges_count: self
+                .latest_probe
+                .parse_snapshot_changed_ranges_count,
+            parse_snapshot_serve_only_blocked: self.latest_probe.parse_snapshot_serve_only_blocked,
+            blocker_class: self.latest_probe.blocker_class,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     pub cancel_requested: AtomicBool,
@@ -1368,6 +1447,7 @@ pub(crate) struct BackgroundParseSnapshotApplyTaskControlV2 {
     detached_ready_artifact_publication_epoch: AtomicU64,
     pub phase: AtomicU8,
     phase_attribution: StdMutex<ReadyParseSnapshotPhaseAttributionStateV2>,
+    ready_install_exact_type_index_wait: StdMutex<ReadyInstallExactTypeIndexWaitStateV2>,
     pub control_notify: Notify,
     pub detached_ready_artifact_notify: Notify,
     pub materialized_notify: Notify,
@@ -1394,6 +1474,9 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
             detached_ready_artifact_publication_epoch: AtomicU64::new(0),
             phase: AtomicU8::new(0),
             phase_attribution: StdMutex::new(ReadyParseSnapshotPhaseAttributionStateV2::default()),
+            ready_install_exact_type_index_wait: StdMutex::new(
+                ReadyInstallExactTypeIndexWaitStateV2::default(),
+            ),
             control_notify: Notify::new(),
             detached_ready_artifact_notify: Notify::new(),
             materialized_notify: Notify::new(),
@@ -1500,6 +1583,71 @@ impl BackgroundParseSnapshotApplyTaskControlV2 {
         &self,
     ) -> ReadyParseSnapshotPhaseAttributionSnapshotV2 {
         self.phase_attribution
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .snapshot(Instant::now())
+    }
+
+    pub(crate) fn reset_ready_install_exact_type_index_wait(&self) {
+        *self
+            .ready_install_exact_type_index_wait
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            ReadyInstallExactTypeIndexWaitStateV2::default();
+    }
+
+    pub(crate) fn start_ready_install_exact_type_index_wait(&self, ceiling: Option<Duration>) {
+        let mut state = self
+            .ready_install_exact_type_index_wait
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *state = ReadyInstallExactTypeIndexWaitStateV2 {
+            started_at: Some(Instant::now()),
+            ceiling,
+            finished_elapsed: None,
+            outcome: None,
+            latest_probe: ReadyInstallExactTypeIndexWaitProbeV2::default(),
+        };
+    }
+
+    pub(crate) fn update_ready_install_exact_type_index_wait(
+        &self,
+        probe: ReadyInstallExactTypeIndexWaitProbeV2,
+    ) {
+        let mut state = self
+            .ready_install_exact_type_index_wait
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if state.started_at.is_some() {
+            state.latest_probe = probe;
+        }
+    }
+
+    pub(crate) fn finish_ready_install_exact_type_index_wait(
+        &self,
+        outcome: &'static str,
+        probe: ReadyInstallExactTypeIndexWaitProbeV2,
+    ) -> Duration {
+        let mut state = self
+            .ready_install_exact_type_index_wait
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let now = Instant::now();
+        let elapsed = state
+            .started_at
+            .map(|started_at| now.saturating_duration_since(started_at))
+            .unwrap_or_default();
+        state.finished_elapsed = Some(elapsed);
+        state.outcome = Some(outcome);
+        state.latest_probe = probe;
+        elapsed
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn ready_install_exact_type_index_wait_snapshot(
+        &self,
+    ) -> ReadyInstallExactTypeIndexWaitSnapshotV2 {
+        self.ready_install_exact_type_index_wait
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .snapshot(Instant::now())

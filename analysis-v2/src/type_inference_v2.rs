@@ -36,17 +36,23 @@ use crate::implicit_bindings::{
 };
 use crate::SemanticDeps;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct TypeIndex {
-    entries: Vec<SemanticTypeEntry>,
-    definition_locations_by_span: HashMap<Span, TypeDefinitionLocation>,
-    assignment_value_type_by_span: HashMap<Span, TypeResolution>,
-    call_receiver_type_by_span: HashMap<Span, TypeResolution>,
-    call_arg_types_by_span: HashMap<Span, Vec<TypeResolution>>,
-    member_access_object_type_by_span: HashMap<Span, TypeResolution>,
-    call_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
-    member_method_targets_by_span: HashMap<Span, SemanticMethodTarget>,
-    constructor_targets_by_span: HashMap<Span, SemanticConstructorTarget>,
+    storage: TypeIndexStorage,
+}
+
+#[derive(Debug, Clone)]
+enum TypeIndexStorage {
+    Owned(Box<SemanticFacts>),
+    SharedProgram(Arc<SemanticProgram>),
+}
+
+impl Default for TypeIndex {
+    fn default() -> Self {
+        Self {
+            storage: TypeIndexStorage::Owned(Box::default()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -150,21 +156,35 @@ impl Drop for ForcedDiagnosticsTypeHintsFallbackGuard {
 impl TypeIndex {
     fn from_semantic_facts(facts: &SemanticFacts) -> Self {
         Self {
-            entries: facts.type_entries.clone(),
-            definition_locations_by_span: facts.definition_locations_by_span.clone(),
-            assignment_value_type_by_span: facts.assignment_value_type_by_span.clone(),
-            call_receiver_type_by_span: facts.call_receiver_type_by_span.clone(),
-            call_arg_types_by_span: facts.call_arg_types_by_span.clone(),
-            member_access_object_type_by_span: facts.member_access_object_type_by_span.clone(),
-            call_method_targets_by_span: facts.call_method_targets_by_span.clone(),
-            member_method_targets_by_span: facts.member_method_targets_by_span.clone(),
-            constructor_targets_by_span: facts.constructor_targets_by_span.clone(),
+            storage: TypeIndexStorage::Owned(Box::new(facts.clone())),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_semantic_facts_owned(facts: SemanticFacts) -> Self {
+        Self {
+            storage: TypeIndexStorage::Owned(Box::new(facts)),
+        }
+    }
+
+    fn from_semantic_program(program: Arc<SemanticProgram>) -> Self {
+        Self {
+            storage: TypeIndexStorage::SharedProgram(program),
+        }
+    }
+
+    fn facts(&self) -> &SemanticFacts {
+        match &self.storage {
+            TypeIndexStorage::Owned(facts) => facts,
+            TypeIndexStorage::SharedProgram(program) => &program.semantic_facts,
         }
     }
 
     pub(crate) fn type_at_byte_offset(&self, byte_offset: u32) -> Option<TypeResolution> {
+        let facts = self.facts();
         let find = |offset: u32| {
-            self.entries
+            facts
+                .type_entries
                 .iter()
                 .filter(|entry| entry.span.contains(offset))
                 .min_by_key(|entry| entry.span.len())
@@ -175,7 +195,8 @@ impl TypeIndex {
     }
 
     pub(crate) fn type_for_exact_span(&self, span: Span) -> Option<TypeResolution> {
-        self.entries
+        self.facts()
+            .type_entries
             .iter()
             .find(|entry| entry.span == span)
             .map(|entry| entry.resolution.clone())
@@ -197,14 +218,17 @@ impl TypeIndex {
         &self,
         span: Span,
     ) -> Option<TypeDefinitionLocation> {
-        self.definition_locations_by_span.get(&span).cloned()
+        self.facts()
+            .definition_locations_by_span
+            .get(&span)
+            .cloned()
     }
 
     pub(crate) fn definition_location_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<TypeDefinitionLocation> {
-        self.closest_fact_by_offset(&self.definition_locations_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().definition_locations_by_span, byte_offset)
     }
 
     pub(crate) fn definition_location_for_span(
@@ -223,90 +247,95 @@ impl TypeIndex {
     }
 
     pub(crate) fn assignment_value_type_for_span(&self, span: Span) -> Option<TypeResolution> {
-        self.assignment_value_type_by_span.get(&span).cloned()
+        self.facts()
+            .assignment_value_type_by_span
+            .get(&span)
+            .cloned()
     }
 
     pub(crate) fn assignment_value_type_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<TypeResolution> {
-        self.closest_fact_by_offset(&self.assignment_value_type_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().assignment_value_type_by_span, byte_offset)
     }
 
     pub(crate) fn call_receiver_type_for_span(&self, span: Span) -> Option<TypeResolution> {
-        self.call_receiver_type_by_span.get(&span).cloned()
+        self.facts().call_receiver_type_by_span.get(&span).cloned()
     }
 
     pub(crate) fn call_receiver_type_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<TypeResolution> {
-        self.closest_fact_by_offset(&self.call_receiver_type_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().call_receiver_type_by_span, byte_offset)
     }
 
     pub(crate) fn call_arg_types_for_span(&self, span: Span) -> Option<Vec<TypeResolution>> {
-        self.call_arg_types_by_span.get(&span).cloned()
+        self.facts().call_arg_types_by_span.get(&span).cloned()
     }
 
     pub(crate) fn call_arg_types_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<Vec<TypeResolution>> {
-        self.closest_fact_by_offset(&self.call_arg_types_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().call_arg_types_by_span, byte_offset)
     }
 
     pub(crate) fn member_access_object_type_for_span(&self, span: Span) -> Option<TypeResolution> {
-        self.member_access_object_type_by_span.get(&span).cloned()
+        self.facts()
+            .member_access_object_type_by_span
+            .get(&span)
+            .cloned()
     }
 
     pub(crate) fn member_access_object_type_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<TypeResolution> {
-        self.closest_fact_by_offset(&self.member_access_object_type_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().member_access_object_type_by_span, byte_offset)
     }
 
     pub(crate) fn call_method_target_for_span(&self, span: Span) -> Option<SemanticMethodTarget> {
-        self.call_method_targets_by_span.get(&span).cloned()
+        self.facts().call_method_targets_by_span.get(&span).cloned()
     }
 
     pub(crate) fn call_method_target_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<SemanticMethodTarget> {
-        self.closest_fact_by_offset(&self.call_method_targets_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().call_method_targets_by_span, byte_offset)
     }
 
     pub(crate) fn member_method_target_for_span(&self, span: Span) -> Option<SemanticMethodTarget> {
-        self.member_method_targets_by_span.get(&span).cloned()
+        self.facts()
+            .member_method_targets_by_span
+            .get(&span)
+            .cloned()
     }
 
     pub(crate) fn member_method_target_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<SemanticMethodTarget> {
-        self.closest_fact_by_offset(&self.member_method_targets_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().member_method_targets_by_span, byte_offset)
     }
 
     pub(crate) fn constructor_target_for_span(
         &self,
         span: Span,
     ) -> Option<SemanticConstructorTarget> {
-        self.constructor_targets_by_span.get(&span).cloned()
+        self.facts().constructor_targets_by_span.get(&span).cloned()
     }
 
     pub(crate) fn constructor_target_at_byte_offset(
         &self,
         byte_offset: u32,
     ) -> Option<SemanticConstructorTarget> {
-        self.closest_fact_by_offset(&self.constructor_targets_by_span, byte_offset)
+        Self::closest_fact_by_offset(&self.facts().constructor_targets_by_span, byte_offset)
     }
 
-    fn closest_fact_by_offset<T: Clone>(
-        &self,
-        facts: &HashMap<Span, T>,
-        byte_offset: u32,
-    ) -> Option<T> {
+    fn closest_fact_by_offset<T: Clone>(facts: &HashMap<Span, T>, byte_offset: u32) -> Option<T> {
         let find = |offset: u32| {
             facts
                 .iter()
@@ -632,7 +661,7 @@ impl<'a> TypeInferencer<'a> {
     fn build_index_profiled(&self, program: &Program, file_path: &str) -> TypeIndexBuildProfiled {
         let profiled = self.build_facts_internal(program, file_path, None, None);
         TypeIndexBuildProfiled {
-            index: TypeIndex::from_semantic_facts(&profiled.facts),
+            index: TypeIndex::from_semantic_facts_owned(profiled.facts),
             profile: profiled.profile,
         }
     }
@@ -654,7 +683,7 @@ impl<'a> TypeInferencer<'a> {
             }),
         );
         TypeIndexBuildProfiled {
-            index: TypeIndex::from_semantic_facts(&profiled.facts),
+            index: TypeIndex::from_semantic_facts_owned(profiled.facts),
             profile: profiled.profile,
         }
     }
@@ -669,6 +698,20 @@ impl<'a> TypeInferencer<'a> {
         TypeIndexBuildProfiled {
             index: TypeIndex::from_semantic_facts(&program.semantic_facts),
             profile: projection_build_profile(program),
+        }
+    }
+
+    fn build_index_from_semantic_program_arc_profiled(
+        &self,
+        program: Arc<SemanticProgram>,
+        file_path: &str,
+        recovery: Option<RecoveryContext<'_>>,
+    ) -> TypeIndexBuildProfiled {
+        let _ = (file_path, recovery);
+        let profile = projection_build_profile(program.as_ref());
+        TypeIndexBuildProfiled {
+            index: TypeIndex::from_semantic_program(program),
+            profile,
         }
     }
 
@@ -3793,6 +3836,15 @@ pub(crate) fn build_type_index_from_semantic_program_with_path_profiled(
     deps: Arc<SemanticDeps>,
 ) -> TypeIndexBuildProfiled {
     TypeInferencer::new(deps).build_index_from_semantic_program_profiled(program, file_path, None)
+}
+
+pub(crate) fn build_type_index_from_semantic_program_arc_with_path_profiled(
+    program: Arc<SemanticProgram>,
+    file_path: &str,
+    deps: Arc<SemanticDeps>,
+) -> TypeIndexBuildProfiled {
+    TypeInferencer::new(deps)
+        .build_index_from_semantic_program_arc_profiled(program, file_path, None)
 }
 
 pub(crate) fn materialize_semantic_facts_with_path_profiled(

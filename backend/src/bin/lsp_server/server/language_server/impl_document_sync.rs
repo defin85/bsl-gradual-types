@@ -78,9 +78,22 @@ enum BuildParseSnapshotOutcomeV2 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExactTypeIndexBeforeReadyInstallOutcomeV2 {
     Ready,
+    Deadline,
     Retargeted,
     Superseded,
     LatestVersionMismatch,
+}
+
+impl ExactTypeIndexBeforeReadyInstallOutcomeV2 {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Deadline => "deadline",
+            Self::Retargeted => "retargeted",
+            Self::Superseded => "superseded",
+            Self::LatestVersionMismatch => "latest_version_mismatch",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -272,6 +285,28 @@ fn did_change_parse_snapshot_replay_order(
 
 fn parse_snapshot_apply_debounce_duration() -> Duration {
     Duration::from_millis(25)
+}
+
+fn ready_install_exact_type_index_wait_max_duration() -> Duration {
+    const DEFAULT_MAX_MS: u64 = 5_000;
+    #[cfg(test)]
+    {
+        if let Some(value) = std::env::var("BSL_TEST_READY_INSTALL_EXACT_TYPE_INDEX_WAIT_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+        {
+            return Duration::from_millis(value);
+        }
+    }
+    Duration::from_millis(DEFAULT_MAX_MS)
+}
+
+fn ready_install_exact_type_index_wait_probe_max_duration() -> Duration {
+    Duration::from_millis(100)
+}
+
+fn duration_from_millis_u128_for_metrics(value_ms: u128) -> Duration {
+    Duration::from_millis(value_ms.min(u64::MAX as u128) as u64)
 }
 
 #[derive(Debug, Clone)]
@@ -511,6 +546,38 @@ fn background_parse_snapshot_apply_source_label(
     }
 }
 
+fn ready_install_exact_type_index_wait_blocker_class(
+    requested_version: i32,
+    observed_file_version: Option<i32>,
+    exact_ready: bool,
+    parse_snapshot_serve_only_blocked: Option<bool>,
+    matching_task_state: Option<&'static str>,
+    task_phase: Option<&'static str>,
+) -> &'static str {
+    if observed_file_version == Some(requested_version) && exact_ready {
+        return "ready";
+    }
+    if observed_file_version != Some(requested_version) {
+        return "observed_version_mismatch";
+    }
+    if parse_snapshot_serve_only_blocked == Some(true) {
+        return "serve_only_blocked";
+    }
+    match matching_task_state {
+        Some("missing") => "no_matching_task",
+        Some("wrong_version") => "task_present_wrong_version",
+        Some("matching") => match task_phase {
+            Some("waiting_for_version") => "type_index_waiting_for_version",
+            Some("snapshotting") => "type_index_snapshotting",
+            Some("waiting_cpu_permit") => "type_index_waiting_cpu_permit",
+            Some("computing") => "type_index_computing",
+            Some("completed") => "type_index_completed",
+            _ => "type_index_not_ready",
+        },
+        _ => "metadata_missing",
+    }
+}
+
 fn record_ready_parse_snapshot_phase_metrics(
     coordinator: &Arc<bsl_runtime::system::SystemCoordinator>,
     origin: &'static str,
@@ -571,6 +638,10 @@ impl ReadyParseSnapshotWorkerLifecycleGuard {
         self.materialized = true;
     }
 
+    fn set_source(&mut self, source: &'static str) {
+        self.source = source;
+    }
+
     fn set_terminal_reason(&mut self, reason: &'static str) {
         self.terminal_reason = Some(reason);
     }
@@ -609,21 +680,184 @@ struct BackgroundParseSnapshotApplyArgs {
     did_change_attribution: Option<DidChangeParseSnapshotAttributionV2>,
 }
 
+struct ReadyInstallExactTypeIndexWaitArgs<'a> {
+    file_id: bsl_analysis_v2::FileId,
+    requested_version: i32,
+    target_epoch_state: &'a Arc<std::sync::atomic::AtomicU64>,
+    target_epoch: u64,
+    task_control: &'a Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>,
+    max_wait: Option<Duration>,
+    allow_type_index_precompute: bool,
+}
+
+struct ReadyParseSnapshotRecordArgs<'a> {
+    file_id: bsl_analysis_v2::FileId,
+    path: &'a Arc<str>,
+    text: Arc<str>,
+    parse_snapshot: &'a bsl_analysis_v2::ParseSnapshot,
+    source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
+    syntax_errors_complete: bool,
+    program_lowering_summary:
+        bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
+}
+
 impl BslLanguageServer {
-    async fn wait_for_exact_type_index_before_ready_install_v2(
+    async fn ready_install_exact_type_index_wait_probe_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
         requested_version: i32,
-        target_epoch_state: &Arc<std::sync::atomic::AtomicU64>,
-        target_epoch: u64,
-        task_control: &Arc<super::super::BackgroundParseSnapshotApplyTaskControlV2>,
+        waiter_action: super::super::core::TypeIndexPrecomputeWaiterActionV2,
+    ) -> super::super::ReadyInstallExactTypeIndexWaitProbeV2 {
+        let analysis = tokio::time::timeout(
+            ready_install_exact_type_index_wait_probe_max_duration(),
+            self.analysis_v2
+                .current_revision_analysis_snapshot_for_origin_and_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                ),
+        )
+        .await
+        .ok();
+        let observed_file_version = if let Some(analysis) = analysis.as_ref() {
+            analysis.file_version(file_id).ok().flatten()
+        } else {
+            self.latest_received_file_versions_v2
+                .read()
+                .await
+                .get(&file_id)
+                .copied()
+        };
+        let exact_ready = analysis.as_ref().is_some_and(|analysis| {
+            observed_file_version == Some(requested_version)
+                && analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+        });
+        let parse_snapshot_meta = analysis.as_ref().and_then(|analysis| {
+            analysis
+                .current_type_index_parse_snapshot_meta(file_id)
+                .ok()
+                .flatten()
+        });
+
+        let ready_snapshot_version = self
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.parse_snapshot.file_version);
+
+        let (
+            matching_task_state,
+            task_phase,
+            task_requested_version,
+            task_active_requested_version,
+        ) = {
+            let tasks = self.type_index_precompute_tasks_v2.lock().await;
+            match tasks.get(&file_id) {
+                Some(task) => {
+                    let matching_task_state =
+                        if task.supersession_key.requested_version == requested_version {
+                            "matching"
+                        } else {
+                            "wrong_version"
+                        };
+                    let task_phase = super::super::core::TypeIndexPrecomputePhaseV2::from_atomic(
+                        task.phase.load(Ordering::Relaxed),
+                    )
+                    .as_str();
+                    (
+                        Some(matching_task_state),
+                        Some(task_phase),
+                        Some(task.supersession_key.requested_version),
+                        Some(task.active_requested_version.load(Ordering::Relaxed)),
+                    )
+                }
+                None => (Some("missing"), None, None, None),
+            }
+        };
+
+        let (
+            parse_snapshot_incremental,
+            parse_snapshot_changed_ranges_count,
+            parse_snapshot_serve_only_blocked,
+        ) = parse_snapshot_meta
+            .map(|(incremental, changed_ranges_count, serve_only_blocked)| {
+                (
+                    Some(incremental),
+                    Some(changed_ranges_count),
+                    Some(serve_only_blocked),
+                )
+            })
+            .unwrap_or((None, None, None));
+
+        super::super::ReadyInstallExactTypeIndexWaitProbeV2 {
+            waiter_action: Some(waiter_action.as_str()),
+            matching_task_state,
+            task_phase,
+            task_requested_version,
+            task_active_requested_version,
+            observed_file_version,
+            exact_ready: Some(exact_ready),
+            ready_snapshot_version,
+            parse_snapshot_incremental,
+            parse_snapshot_changed_ranges_count,
+            parse_snapshot_serve_only_blocked,
+            blocker_class: Some(ready_install_exact_type_index_wait_blocker_class(
+                requested_version,
+                observed_file_version,
+                exact_ready,
+                parse_snapshot_serve_only_blocked,
+                matching_task_state,
+                task_phase,
+            )),
+        }
+    }
+
+    async fn wait_for_exact_type_index_before_ready_install_v2(
+        &self,
+        args: ReadyInstallExactTypeIndexWaitArgs<'_>,
     ) -> ExactTypeIndexBeforeReadyInstallOutcomeV2 {
-        let mut promoted = false;
+        let ReadyInstallExactTypeIndexWaitArgs {
+            file_id,
+            requested_version,
+            target_epoch_state,
+            target_epoch,
+            task_control,
+            max_wait,
+            allow_type_index_precompute,
+        } = args;
+        let started = Instant::now();
+        let mut waiter_action = super::super::core::TypeIndexPrecomputeWaiterActionV2::None;
+        task_control.start_ready_install_exact_type_index_wait(max_wait);
         loop {
             if target_epoch_state.load(Ordering::SeqCst) != target_epoch {
+                let probe = self
+                    .ready_install_exact_type_index_wait_probe_v2(
+                        file_id,
+                        requested_version,
+                        waiter_action,
+                    )
+                    .await;
+                task_control.finish_ready_install_exact_type_index_wait(
+                    ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted.as_str(),
+                    probe,
+                );
                 return ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted;
             }
             if task_control.cancel_requested.load(Ordering::SeqCst) {
+                let probe = self
+                    .ready_install_exact_type_index_wait_probe_v2(
+                        file_id,
+                        requested_version,
+                        waiter_action,
+                    )
+                    .await;
+                task_control.finish_ready_install_exact_type_index_wait(
+                    ExactTypeIndexBeforeReadyInstallOutcomeV2::Superseded.as_str(),
+                    probe,
+                );
                 return ExactTypeIndexBeforeReadyInstallOutcomeV2::Superseded;
             }
             if self
@@ -634,36 +868,77 @@ impl BslLanguageServer {
                 .copied()
                 != Some(requested_version)
             {
+                let probe = self
+                    .ready_install_exact_type_index_wait_probe_v2(
+                        file_id,
+                        requested_version,
+                        waiter_action,
+                    )
+                    .await;
+                task_control.finish_ready_install_exact_type_index_wait(
+                    ExactTypeIndexBeforeReadyInstallOutcomeV2::LatestVersionMismatch.as_str(),
+                    probe,
+                );
                 return ExactTypeIndexBeforeReadyInstallOutcomeV2::LatestVersionMismatch;
             }
 
-            let analysis = self.analysis_v2.snapshot().await;
-            if analysis.file_version(file_id).ok().flatten() == Some(requested_version)
-                && analysis
-                    .current_type_index_serve_only_ready(file_id)
-                    .ok()
-                    .unwrap_or(false)
+            if max_wait.is_some_and(|max_wait| started.elapsed() >= max_wait) {
+                let probe = self
+                    .ready_install_exact_type_index_wait_probe_v2(
+                        file_id,
+                        requested_version,
+                        waiter_action,
+                    )
+                    .await;
+                task_control.finish_ready_install_exact_type_index_wait(
+                    ExactTypeIndexBeforeReadyInstallOutcomeV2::Deadline.as_str(),
+                    probe,
+                );
+                return ExactTypeIndexBeforeReadyInstallOutcomeV2::Deadline;
+            }
+
+            let probe = self
+                .ready_install_exact_type_index_wait_probe_v2(
+                    file_id,
+                    requested_version,
+                    waiter_action,
+                )
+                .await;
+            task_control.update_ready_install_exact_type_index_wait(probe.clone());
+            if probe.observed_file_version == Some(requested_version)
+                && probe.exact_ready == Some(true)
             {
                 self.cleanup_completed_type_index_precompute_task_v2(
                     file_id,
                     Some(requested_version),
                 )
                 .await;
+                task_control.finish_ready_install_exact_type_index_wait(
+                    ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready.as_str(),
+                    probe,
+                );
                 return ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready;
             }
 
-            if !self
-                .has_matching_type_index_precompute_task_v2(file_id, Some(requested_version))
-                .await
-            {
-                self.schedule_type_index_precompute_v2(file_id, requested_version)
-                    .await;
-            }
-            if !promoted {
-                let _ = self
-                    .promote_type_index_precompute_for_waiter_v2(file_id, Some(requested_version))
-                    .await;
-                promoted = true;
+            if allow_type_index_precompute {
+                if !self
+                    .has_matching_type_index_precompute_task_v2(file_id, Some(requested_version))
+                    .await
+                {
+                    self.schedule_type_index_precompute_v2(file_id, requested_version)
+                        .await;
+                }
+                if matches!(
+                    waiter_action,
+                    super::super::core::TypeIndexPrecomputeWaiterActionV2::None
+                ) {
+                    waiter_action = self
+                        .promote_type_index_precompute_for_waiter_v2(
+                            file_id,
+                            Some(requested_version),
+                        )
+                        .await;
+                }
             }
 
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -734,15 +1009,17 @@ impl BslLanguageServer {
             .await;
     }
 
-    async fn record_ready_parse_snapshot_v2(
-        &self,
-        file_id: bsl_analysis_v2::FileId,
-        text: Arc<str>,
-        parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
-        source: super::super::BackgroundParseSnapshotApplyTaskSourceV2,
-        syntax_errors_complete: bool,
-        program_lowering_summary: bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary,
-    ) {
+    async fn record_ready_parse_snapshot_v2(&self, args: ReadyParseSnapshotRecordArgs<'_>) {
+        let ReadyParseSnapshotRecordArgs {
+            file_id,
+            path,
+            text,
+            parse_snapshot,
+            source,
+            syntax_errors_complete,
+            program_lowering_summary,
+        } = args;
+        let cache_text = Arc::clone(&text);
         self.latest_snapshot_failures_v2
             .write()
             .await
@@ -758,6 +1035,18 @@ impl BslLanguageServer {
                 program_lowering_summary: Some(program_lowering_summary),
             },
         );
+        if let Some(parser) = self.coordinator.parser_coordinator() {
+            parser.prime_ast_cache_for_source(
+                cache_text.as_ref(),
+                Arc::clone(&parse_snapshot.parse_result),
+            );
+            parser.prime_tree_cache_for_file(
+                PathBuf::from(path.as_ref()),
+                cache_text.as_ref().to_string(),
+                Arc::clone(&parse_snapshot.backend_tree),
+                parse_snapshot.backend_tree_hash,
+            );
+        }
         self.refresh_snapshot_status_v2(file_id).await;
     }
 
@@ -769,6 +1058,7 @@ impl BslLanguageServer {
         text_hash: [u8; 32],
         save_cycle_sequence: Option<u64>,
         task_control: Option<&super::super::BackgroundParseSnapshotApplyTaskControlV2>,
+        path: &Arc<str>,
         text: Arc<str>,
         parse_snapshot: &bsl_analysis_v2::ParseSnapshot,
         syntax_errors_complete: bool,
@@ -776,6 +1066,7 @@ impl BslLanguageServer {
         let Some(save_cycle_sequence) = save_cycle_sequence else {
             return;
         };
+        let cache_text = Arc::clone(&text);
         let producer_key = super::super::DidSaveExactProducerKeyV2 {
             file_id,
             requested_version,
@@ -796,6 +1087,18 @@ impl BslLanguageServer {
                     syntax_errors_complete,
                 },
             );
+        if let Some(parser) = self.coordinator.parser_coordinator() {
+            parser.prime_ast_cache_for_source(
+                cache_text.as_ref(),
+                Arc::clone(&parse_snapshot.parse_result),
+            );
+            parser.prime_tree_cache_for_file(
+                PathBuf::from(path.as_ref()),
+                cache_text.as_ref().to_string(),
+                Arc::clone(&parse_snapshot.backend_tree),
+                parse_snapshot.backend_tree_hash,
+            );
+        }
         self.record_did_save_exact_producer_lifecycle_state_v2(
             producer_key,
             super::super::DidSaveExactProducerLifecycleStateV2::DetachedDiagnosticsReadyPublished,
@@ -1090,11 +1393,12 @@ impl BslLanguageServer {
         cpu_class: bsl_runtime::application::CpuWorkClass,
         inject_test_delay: bool,
     ) {
+        let expected_version = analysis.file_version(file_id).ok().flatten();
         let context = self
             .build_execution_context_v2(
                 bsl_runtime::application::SemanticOperation::Completion,
                 file_id,
-                None,
+                expected_version,
                 false,
             )
             .await;
@@ -1108,13 +1412,81 @@ impl BslLanguageServer {
                 if inject_test_delay {
                     maybe_inject_current_revision_head_precompute_delay_for_test();
                 }
-                let _ =
+                let ir_program =
                     bsl_runtime::application::IntellisenseV2Facade::run_ir_query_singleflight_attach_or_direct(
                         &context,
                         &analysis,
                         Some(coordinator.as_ref()),
                         file_id,
+                    )?;
+                let Some(ir_program) = ir_program else {
+                    return Ok(());
+                };
+                let Some(expected_version) = expected_version else {
+                    return Ok(());
+                };
+                if analysis
+                    .current_type_index_serve_only_ready(file_id)
+                    .ok()
+                    .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+                let precompute_started = Instant::now();
+                let precompute = analysis.precompute_type_index_for_file_from_program(
+                    file_id,
+                    Some(expected_version),
+                    0,
+                    ir_program,
+                ).map_err(|_| bsl_runtime::application::SingleflightQueryError::Cancelled)?;
+                coordinator.record_intellisense_v2_type_index_reason(
+                    precompute.reason_code.as_str(),
+                );
+                if precompute.stats.evicted_per_file_window_total > 0 {
+                    coordinator.record_intellisense_v2_type_index_reason(
+                        bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedPerFileWindow
+                            .as_str(),
                     );
+                }
+                if precompute.stats.evicted_global_guard_total > 0 {
+                    coordinator.record_intellisense_v2_type_index_reason(
+                        bsl_analysis_v2::TypeIndexArtifactReasonCode::TypeIndexArtifactEvictedGlobalGuard
+                            .as_str(),
+                    );
+                }
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute",
+                    precompute_started.elapsed(),
+                );
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute_build",
+                    duration_from_millis_u128_for_metrics(precompute.stats.build_ms),
+                );
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute_ir",
+                    duration_from_millis_u128_for_metrics(precompute.stats.ir_ms),
+                );
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute_ast_to_ir",
+                    duration_from_millis_u128_for_metrics(precompute.stats.ast_to_ir_convert_ms),
+                );
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute_semantic_facts",
+                    duration_from_millis_u128_for_metrics(precompute.stats.semantic_facts_materialize_ms),
+                );
+                coordinator.record_intellisense_v2_runtime_exec_latency_with_origin(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp.as_str(),
+                    "type_index_precompute_semantic_facts_local_function_summaries",
+                    duration_from_millis_u128_for_metrics(
+                        precompute.stats.semantic_facts_local_function_summaries_ms,
+                    ),
+                );
+                Ok::<(), bsl_runtime::application::SingleflightQueryError>(())
             },
         )
         .await;
@@ -2065,13 +2437,14 @@ impl BslLanguageServer {
             task_control
                 .retarget_requested
                 .store(false, Ordering::SeqCst);
-            let source_label = background_parse_snapshot_apply_source_label(target.source);
+            let mut source_label = background_parse_snapshot_apply_source_label(target.source);
             let mut lifecycle_guard = ReadyParseSnapshotWorkerLifecycleGuard::new(
                 self.coordinator.clone(),
                 origin_label,
                 source_label,
             );
             task_control.reset_phase_attribution();
+            task_control.reset_ready_install_exact_type_index_wait();
             task_control.phase.store(
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
                 Ordering::SeqCst,
@@ -2115,6 +2488,8 @@ impl BslLanguageServer {
                 continue;
             }
             target = refreshed_target;
+            source_label = background_parse_snapshot_apply_source_label(target.source);
+            lifecycle_guard.set_source(source_label);
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
                 self.record_did_save_exact_producer_lifecycle_for_target_v2(
                     file_id,
@@ -2180,6 +2555,8 @@ impl BslLanguageServer {
                 continue;
             }
             target = refreshed_target;
+            source_label = background_parse_snapshot_apply_source_label(target.source);
+            lifecycle_guard.set_source(source_label);
             if target_epoch_state.load(Ordering::SeqCst) != target.epoch {
                 self.record_did_save_exact_producer_lifecycle_for_target_v2(
                     file_id,
@@ -2407,6 +2784,24 @@ impl BslLanguageServer {
                 task_control.control_notify.notify_waiters();
                 break;
             }
+            let refreshed_target = target_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if refreshed_target.epoch != target.epoch {
+                self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                    file_id,
+                    &target,
+                    super::super::DidSaveExactProducerLifecycleStateV2::Superseded,
+                )
+                .await;
+                lifecycle_guard.set_terminal_reason("retargeted_before_materialization");
+                task_control.control_notify.notify_waiters();
+                continue;
+            }
+            target = refreshed_target;
+            source_label = background_parse_snapshot_apply_source_label(target.source);
+            lifecycle_guard.set_source(source_label);
             task_control.phase.store(
                 super::super::BackgroundParseSnapshotApplyTaskPhaseV2::Materializing as u8,
                 Ordering::SeqCst,
@@ -2415,32 +2810,76 @@ impl BslLanguageServer {
                 super::super::ReadyParseSnapshotAttributionPhaseV2::ReadyInstall,
             );
             self.refresh_snapshot_status_v2(file_id).await;
-            let detached_save_cycle_sequence = target_state
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .save_cycle_sequence;
+            let detached_save_cycle_sequence = target.save_cycle_sequence;
             self.record_detached_diagnostics_ready_artifact_v2(
                 file_id,
                 target.requested_version,
                 target.text_hash,
                 detached_save_cycle_sequence,
                 Some(task_control.as_ref()),
+                &target.path,
                 target.text.clone(),
                 &parse_snapshot,
                 !deferred_work.syntax_error_assembly,
             )
             .await;
+
+            // Install the already-built parse snapshot before the exact type-index wait.
+            // Canonical ready publication still waits below, but type-index precompute can now
+            // reuse the same snapshot-backed current revision instead of falling back to the
+            // much slower raw Salsa parse/IR path on large modules.
+            self.analysis_v2.apply_changes_interactive(
+                bsl_runtime::application::ObservabilityOrigin::Lsp,
+                vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
+                    file_id,
+                    text: target.text.clone(),
+                    version: target.requested_version,
+                    path: target.path.clone(),
+                    parse_snapshot: parse_snapshot.clone(),
+                }],
+            );
+            self.spawn_completion_head_precompute_from_snapshot_v2(
+                file_id,
+                target.requested_version,
+            );
+            let allow_type_index_precompute = !matches!(
+                target.source,
+                super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+            );
+
             match self
                 .wait_for_exact_type_index_before_ready_install_v2(
-                    file_id,
-                    target.requested_version,
-                    &target_epoch_state,
-                    target.epoch,
-                    &task_control,
+                    ReadyInstallExactTypeIndexWaitArgs {
+                        file_id,
+                        requested_version: target.requested_version,
+                        target_epoch_state: &target_epoch_state,
+                        target_epoch: target.epoch,
+                        task_control: &task_control,
+                        max_wait: Some(ready_install_exact_type_index_wait_max_duration()),
+                        allow_type_index_precompute,
+                    },
                 )
                 .await
             {
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::Ready => {}
+                ExactTypeIndexBeforeReadyInstallOutcomeV2::Deadline => {
+                    self.record_did_save_exact_producer_lifecycle_for_target_v2(
+                        file_id,
+                        &target,
+                        super::super::DidSaveExactProducerLifecycleStateV2::ExactTypeIndexDeadline,
+                    )
+                    .await;
+                    self.record_snapshot_build_failure_v2(
+                        file_id,
+                        target.requested_version,
+                        "exact_type_index_deadline_before_ready_install",
+                    )
+                    .await;
+                    lifecycle_guard
+                        .set_terminal_reason("exact_type_index_deadline_before_ready_install");
+                    task_control.control_notify.notify_waiters();
+                    break;
+                }
                 ExactTypeIndexBeforeReadyInstallOutcomeV2::Retargeted => {
                     self.record_did_save_exact_producer_lifecycle_for_target_v2(
                         file_id,
@@ -2476,14 +2915,15 @@ impl BslLanguageServer {
                     break;
                 }
             }
-            self.record_ready_parse_snapshot_v2(
+            self.record_ready_parse_snapshot_v2(ReadyParseSnapshotRecordArgs {
                 file_id,
-                target.text.clone(),
-                &parse_snapshot,
-                target.source,
-                !deferred_work.syntax_error_assembly,
+                path: &target.path,
+                text: target.text.clone(),
+                parse_snapshot: &parse_snapshot,
+                source: target.source,
+                syntax_errors_complete: !deferred_work.syntax_error_assembly,
                 program_lowering_summary,
-            )
+            })
             .await;
             if let Some(producer_key) = super::super::DidSaveExactProducerKeyV2::from_parts(
                 file_id,
@@ -2650,22 +3090,6 @@ impl BslLanguageServer {
                 task_control.control_notify.notify_waiters();
                 break;
             }
-
-            // Snapshot-backed apply is enrichment for the already published current revision.
-            // Keep it off the interactive writer queue so completion wait_for_file_version
-            // is not blocked by slow snapshot installs on large modules.
-            self.analysis_v2
-                .apply_changes(vec![bsl_analysis_v2::Change::SetFileWithSnapshot {
-                    file_id,
-                    text: target.text.clone(),
-                    version: target.requested_version,
-                    path: target.path.clone(),
-                    parse_snapshot,
-                }]);
-            self.spawn_completion_head_precompute_from_snapshot_v2(
-                file_id,
-                target.requested_version,
-            );
             task_control.control_notify.notify_waiters();
             if target_epoch_state.load(Ordering::SeqCst) == target.epoch {
                 break;
@@ -2847,15 +3271,26 @@ impl BslLanguageServer {
                 return;
             }
 
-            let analysis = server.analysis_v2.snapshot().await;
+            let analysis = server
+                .analysis_v2
+                .completion_current_revision_snapshot_for_origin_and_operation(
+                    bsl_runtime::application::ObservabilityOrigin::Lsp,
+                    bsl_runtime::application::SemanticOperation::Completion,
+                )
+                .await
+                .analysis;
             if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
                 return;
             }
-            if analysis
+            let completion_head_ready = analysis
                 .current_completion_head_ready(file_id)
                 .ok()
-                .unwrap_or(false)
-            {
+                .unwrap_or(false);
+            let exact_type_index_ready = analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false);
+            if completion_head_ready && exact_type_index_ready {
                 return;
             }
 
@@ -2975,11 +3410,15 @@ impl BslLanguageServer {
             if analysis.file_version(file_id).ok().flatten() != Some(requested_version) {
                 continue;
             }
-            if analysis
+            let completion_head_ready = analysis
                 .current_completion_head_ready(file_id)
                 .ok()
-                .unwrap_or(false)
-            {
+                .unwrap_or(false);
+            let exact_type_index_ready = analysis
+                .current_type_index_serve_only_ready(file_id)
+                .ok()
+                .unwrap_or(false);
+            if completion_head_ready && exact_type_index_ready {
                 if requested_version_state.load(Ordering::Relaxed) == requested_version
                     && self
                         .try_finish_current_revision_head_precompute_v2(
@@ -3299,14 +3738,15 @@ impl BslLanguageServer {
             let program_lowering_summary = report.program_lowering_summary;
             let parse_snapshot = parse_snapshot_from_report(file_id, requested_version, report);
             server
-                .record_ready_parse_snapshot_v2(
+                .record_ready_parse_snapshot_v2(ReadyParseSnapshotRecordArgs {
                     file_id,
-                    text.clone(),
-                    &parse_snapshot,
-                    super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
-                    true,
+                    path: &path,
+                    text: text.clone(),
+                    parse_snapshot: &parse_snapshot,
+                    source: super::super::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+                    syntax_errors_complete: true,
                     program_lowering_summary,
-                )
+                })
                 .await;
             let analysis = server.analysis_v2.snapshot().await;
             let _ = analysis.try_publish_completion_head_from_parse_snapshot_reuse(
@@ -3438,6 +3878,8 @@ impl BslLanguageServer {
             .write()
             .await
             .insert(file_id, version);
+        self.cancel_stale_type_index_precompute_v2(file_id, version)
+            .await;
         self.cleanup_stale_completed_type_index_precompute_task_v2(file_id, version)
             .await;
         let updated_text: Arc<str> = Arc::from(updated_text);
@@ -4133,6 +4575,7 @@ impl BslLanguageServer {
         };
         let diagnostics_generation = self.bump_diagnostics_generation_v2(file_id).await;
         let save_cycle_sequence = self.bump_diagnostics_save_cycle_sequence_v2(file_id).await;
+        self.cancel_type_index_precompute_v2(file_id).await;
         self.cleanup_stale_completed_type_index_precompute_task_v2(file_id, version)
             .await;
         if let Some(text) = save_text {

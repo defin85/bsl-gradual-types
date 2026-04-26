@@ -287,21 +287,11 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
     let uri = Url::parse("file:///snapshot-status-building.bsl").expect("uri");
     let file_id = server.get_or_create_file_id_v2(&uri).await;
     let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
-    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2 {
-        cancel_requested: std::sync::atomic::AtomicBool::new(false),
-        retarget_requested: std::sync::atomic::AtomicBool::new(false),
-        promotion_requested: std::sync::atomic::AtomicBool::new(false),
-        interactive_cpu_requested: std::sync::atomic::AtomicBool::new(false),
-        materialized: std::sync::atomic::AtomicBool::new(false),
-        detached_ready_artifact_publication_epoch: std::sync::atomic::AtomicU64::new(0),
-        phase: std::sync::atomic::AtomicU8::new(
-            crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
-        ),
-        phase_attribution: std::sync::Mutex::new(Default::default()),
-        control_notify: tokio::sync::Notify::new(),
-        detached_ready_artifact_notify: tokio::sync::Notify::new(),
-        materialized_notify: tokio::sync::Notify::new(),
-    });
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    control.phase.store(
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing as u8,
+        Ordering::SeqCst,
+    );
 
     server
         .latest_received_file_versions_v2
@@ -453,6 +443,12 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
             text: text.clone(),
         },
     );
+    let waiting_control =
+        Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    waiting_control.phase.store(
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
+        Ordering::SeqCst,
+    );
     server
         .background_parse_snapshot_apply_tasks_v2
         .lock()
@@ -479,22 +475,7 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
                         epoch: 1,
                     },
                 )),
-                control: Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2 {
-                    cancel_requested: std::sync::atomic::AtomicBool::new(false),
-                    retarget_requested: std::sync::atomic::AtomicBool::new(false),
-                    promotion_requested: std::sync::atomic::AtomicBool::new(false),
-                    interactive_cpu_requested: std::sync::atomic::AtomicBool::new(false),
-                    materialized: std::sync::atomic::AtomicBool::new(false),
-                    detached_ready_artifact_publication_epoch:
-                        std::sync::atomic::AtomicU64::new(0),
-                    phase: std::sync::atomic::AtomicU8::new(
-                        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
-                    ),
-                    phase_attribution: std::sync::Mutex::new(Default::default()),
-                    control_notify: tokio::sync::Notify::new(),
-                    detached_ready_artifact_notify: tokio::sync::Notify::new(),
-                    materialized_notify: tokio::sync::Notify::new(),
-                }),
+                control: waiting_control,
                 handle: tokio::spawn(async {}),
             },
         );

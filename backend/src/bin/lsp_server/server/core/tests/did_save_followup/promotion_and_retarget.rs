@@ -162,9 +162,9 @@ async fn p27_did_save_followup_promotes_exact_parse_exec_past_optional_cache_enr
                     .expect("DidChangeTextDocumentParams"),
                 )
                 .finish(),
-        )
-        .await
-        .expect("didChange notification");
+    )
+    .await
+    .expect("didChange notification");
     assert!(did_change_response.is_none(), "didChange is a notification");
 
     tokio::time::timeout(Duration::from_secs(10), async {
@@ -359,6 +359,783 @@ async fn p27_did_save_followup_promotes_exact_parse_exec_past_optional_cache_enr
             "intellisense_v2_diagnostics_save_followup_ready_snapshot_probe_total_slot_bounded_wait_outcome_ready"
         )) > 0,
         "save-critical exact publish must export bounded-wait ready probe outcome, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change"
+        )) > 0,
+        "didChange worker start must preserve original source evidence, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change"
+        )),
+        0,
+        "same-version didSave promotion must not finalize materialization under original didChange source, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save"
+        )) > 0,
+        "same-version didSave promotion must finalize materialization under effective didSave source, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_change_phase_ready_install"
+        )),
+        0,
+        "ready-install phase metrics must not keep stale didChange attribution after didSave promotion, counters={counters:?}"
+    );
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_save_phase_ready_install"
+        )) > 0,
+        "ready-install phase metrics must use effective didSave attribution after promotion, counters={counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[test]
+fn p55_ready_install_exact_type_index_wait_snapshot_records_terminal_outcomes() {
+    for (outcome, exact_ready, blocker_class) in [
+        ("ready", Some(true), "ready"),
+        ("retargeted", Some(false), "observed_version_mismatch"),
+        ("superseded", Some(false), "type_index_computing"),
+        (
+            "latest_version_mismatch",
+            Some(false),
+            "observed_version_mismatch",
+        ),
+        ("deadline", Some(false), "type_index_computing"),
+    ] {
+        let control = crate::server::BackgroundParseSnapshotApplyTaskControlV2::new();
+        let probe = crate::server::ReadyInstallExactTypeIndexWaitProbeV2 {
+            waiter_action: Some("promotion"),
+            matching_task_state: Some("matching"),
+            task_phase: Some("computing"),
+            task_requested_version: Some(2),
+            task_active_requested_version: Some(2),
+            observed_file_version: Some(2),
+            exact_ready,
+            ready_snapshot_version: Some(1),
+            parse_snapshot_incremental: Some(true),
+            parse_snapshot_changed_ranges_count: Some(1),
+            parse_snapshot_serve_only_blocked: Some(false),
+            blocker_class: Some(blocker_class),
+        };
+
+        control.start_ready_install_exact_type_index_wait(Some(Duration::from_millis(25)));
+        control.update_ready_install_exact_type_index_wait(probe.clone());
+        control.finish_ready_install_exact_type_index_wait(outcome, probe);
+
+        let snapshot = control.ready_install_exact_type_index_wait_snapshot();
+        assert!(!snapshot.active);
+        assert_eq!(snapshot.ceiling_ms, Some(25));
+        assert_eq!(snapshot.outcome, Some(outcome));
+        assert_eq!(snapshot.waiter_action, Some("promotion"));
+        assert_eq!(snapshot.matching_task_state, Some("matching"));
+        assert_eq!(snapshot.task_phase, Some("computing"));
+        assert_eq!(snapshot.ready_snapshot_version, Some(1));
+        assert_eq!(snapshot.blocker_class, Some(blocker_class));
+    }
+}
+
+#[tokio::test]
+async fn p56_pure_did_change_materializes_after_exact_type_index_ready_install() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    fn counter_delta(
+        final_counters: &serde_json::Map<String, serde_json::Value>,
+        baseline_counters: &serde_json::Map<String, serde_json::Value>,
+        key: &str,
+    ) -> u64 {
+        read_u64_metric(final_counters.get(key))
+            .saturating_sub(read_u64_metric(baseline_counters.get(key)))
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v1\");\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v2\");\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0", true);
+    let _ready_install_wait_guard =
+        EnvVarGuard::set("BSL_TEST_READY_INSTALL_EXACT_TYPE_INDEX_WAIT_MS", "5000");
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        V1_FIXTURE,
+        "file:///p56_pure_did_change_ready_install_success.bsl",
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(1) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize version 1 before pure didChange test");
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object")
+        .clone();
+
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("pure didChange must materialize the exact ready snapshot");
+    let analysis = server.analysis_v2.snapshot().await;
+    assert_eq!(
+        analysis.file_version(file_id).ok().flatten(),
+        Some(2),
+        "pure didChange materialization must install the current analysis version"
+    );
+    assert!(
+        analysis
+            .current_type_index_serve_only_ready(file_id)
+            .ok()
+            .unwrap_or(false),
+        "pure didChange materialization must leave the exact type-index artifact ready"
+    );
+    drop(analysis);
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    assert!(
+        counter_delta(
+            final_counters,
+            &baseline_counters,
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change",
+        ) > 0,
+        "pure didChange success must be counted as didChange materialization, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        counter_delta(
+            final_counters,
+            &baseline_counters,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_exact_type_index_deadline_before_ready_install",
+        ),
+        0,
+        "pure didChange ready path must not be classified as a deadline, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p56_pure_did_change_exact_type_index_deadline_is_non_success() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    fn counter_delta(
+        final_counters: &serde_json::Map<String, serde_json::Value>,
+        baseline_counters: &serde_json::Map<String, serde_json::Value>,
+        key: &str,
+    ) -> u64 {
+        read_u64_metric(final_counters.get(key))
+            .saturating_sub(read_u64_metric(baseline_counters.get(key)))
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v1\");\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v2\");\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0", true);
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        V1_FIXTURE,
+        "file:///p56_pure_did_change_ready_install_deadline.bsl",
+    )
+    .await;
+    let _ready_install_wait_guard =
+        EnvVarGuard::set("BSL_TEST_READY_INSTALL_EXACT_TYPE_INDEX_WAIT_MS", "10");
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "2000");
+    let _head_precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_CURRENT_REVISION_HEAD_PRECOMPUTE_DELAY_MS", "2000");
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object")
+        .clone();
+
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let failure = server.latest_snapshot_failures_v2.read().await.get(&file_id).cloned();
+            if failure.as_ref().is_some_and(|state| {
+                state.requested_version == 2
+                    && state.reason.as_ref() == "exact_type_index_deadline_before_ready_install"
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("pure didChange ready-install exact type-index wait must classify the delayed precompute blocker");
+
+    let ready_version = server
+        .latest_ready_parse_snapshots_v2
+        .read()
+        .await
+        .get(&file_id)
+        .map(|state| state.parse_snapshot.file_version);
+    assert_ne!(
+        ready_version,
+        Some(2),
+        "pure didChange deadline classification must not install a canonical ready snapshot"
+    );
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    assert_eq!(
+        counter_delta(
+            final_counters,
+            &baseline_counters,
+            "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change",
+        ),
+        0,
+        "pure didChange deadline must stay out of successful didChange materialization samples, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert!(
+        counter_delta(
+            final_counters,
+            &baseline_counters,
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_change_reason_exact_type_index_deadline_before_ready_install",
+        ) > 0,
+        "pure didChange deadline must export a didChange non-success terminal reason, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p55_same_version_did_save_promotion_uses_effective_source_for_ready_install_metrics() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    fn counter_delta(
+        final_counters: &serde_json::Map<String, serde_json::Value>,
+        baseline_counters: &serde_json::Map<String, serde_json::Value>,
+        key: &str,
+    ) -> u64 {
+        read_u64_metric(final_counters.get(key))
+            .saturating_sub(read_u64_metric(baseline_counters.get(key)))
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v1\");\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v2\");\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0", true);
+    let _pre_materialization_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_PRE_MATERIALIZATION_DELAY_MS", "350");
+
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        V1_FIXTURE,
+        "file:///p55_effective_source_attribution_after_did_save_promotion.bsl",
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(1) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("opened fixture must materialize version 1 before promotion attribution test");
+
+    let baseline_metrics = server.coordinator.observability_metrics();
+    let baseline_counters = baseline_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("baseline metrics.counters object")
+        .clone();
+
+    let v2_hash = *blake3::hash(V2_FIXTURE.as_bytes()).as_bytes();
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current_phase = server
+                .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+                .await
+                .and_then(|control| control.phase_attribution_snapshot().current_phase);
+            if current_phase
+                == Some(crate::server::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange worker must pause before materialization so didSave can promote it");
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let ready_version = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .map(|state| state.parse_snapshot.file_version);
+            if ready_version == Some(2) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("promoted didSave target must materialize exact ready snapshot");
+
+    let final_metrics = server.coordinator.observability_metrics();
+    let final_counters = final_metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("final metrics.counters object");
+    let did_change_started_key =
+        "intellisense_v2_ready_parse_snapshot_worker_started_total_origin_lsp_source_did_change";
+    let did_change_materialization_key =
+        "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_change";
+    let did_save_materialization_key =
+        "intellisense_v2_ready_parse_snapshot_materialization_total_origin_lsp_source_did_save";
+    let did_change_ready_install_phase_key =
+        "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_change_phase_ready_install";
+    let did_save_ready_install_phase_key =
+        "intellisense_v2_ready_parse_snapshot_phase_total_origin_lsp_source_did_save_phase_ready_install";
+
+    assert!(
+        counter_delta(final_counters, &baseline_counters, did_change_started_key) > 0,
+        "worker start must preserve original didChange source evidence, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        counter_delta(final_counters, &baseline_counters, did_change_materialization_key),
+        0,
+        "materialization must not keep stale didChange attribution after didSave promotion, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert!(
+        counter_delta(final_counters, &baseline_counters, did_save_materialization_key) > 0,
+        "materialization must use effective didSave attribution after promotion, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert_eq!(
+        counter_delta(final_counters, &baseline_counters, did_change_ready_install_phase_key),
+        0,
+        "ready-install phase must not keep stale didChange attribution after didSave promotion, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+    assert!(
+        counter_delta(final_counters, &baseline_counters, did_save_ready_install_phase_key) > 0,
+        "ready-install phase must use effective didSave attribution after promotion, final_counters={final_counters:?}, baseline_counters={baseline_counters:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p55_ready_install_exact_type_index_deadline_exports_classified_blocker() {
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+        reload_runtime_config: bool,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            Self::set_with_reload(key, value, false)
+        }
+
+        fn set_with_reload(key: &'static str, value: &str, reload_runtime_config: bool) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            if reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+            Self {
+                key,
+                previous,
+                reload_runtime_config,
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+            if self.reload_runtime_config {
+                bsl_runtime::system::global_runtime_config().reload_env_bootstrap_from_env();
+            }
+        }
+    }
+
+    const V1_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v1\");\nКонецПроцедуры\n";
+    const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(\"v2\");\nКонецПроцедуры\n";
+
+    let _env_lock = lock_test_env().await;
+    let _debounce_guard =
+        EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "0", true);
+    let (mut service, drain_task, server, uri, file_id) = open_lsp_fixture_with_snapshot(
+        V1_FIXTURE,
+        "file:///p55_ready_install_exact_type_index_deadline.bsl",
+    )
+    .await;
+    let _ready_install_wait_guard =
+        EnvVarGuard::set("BSL_TEST_READY_INSTALL_EXACT_TYPE_INDEX_WAIT_MS", "10");
+    let _precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_TYPE_INDEX_PRECOMPUTE_DELAY_MS", "2000");
+    let _head_precompute_delay_guard =
+        EnvVarGuard::set("BSL_TEST_CURRENT_REVISION_HEAD_PRECOMPUTE_DELAY_MS", "2000");
+    let _pre_materialization_guard =
+        EnvVarGuard::set("BSL_TEST_DID_CHANGE_PRE_MATERIALIZATION_DELAY_MS", "350");
+
+    let v2_hash = *blake3::hash(V2_FIXTURE.as_bytes()).as_bytes();
+    let did_change_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didChange")
+                .params(
+                    serde_json::to_value(DidChangeTextDocumentParams {
+                        text_document: VersionedTextDocumentIdentifier {
+                            uri: uri.clone(),
+                            version: 2,
+                        },
+                        content_changes: vec![TextDocumentContentChangeEvent {
+                            range: None,
+                            range_length: None,
+                            text: V2_FIXTURE.to_string(),
+                        }],
+                    })
+                    .expect("DidChangeTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didChange notification");
+    assert!(did_change_response.is_none(), "didChange is a notification");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let current_phase = server
+                .matching_background_parse_snapshot_task_control_v2(file_id, 2, Some(v2_hash))
+                .await
+                .and_then(|control| control.phase_attribution_snapshot().current_phase);
+            if current_phase
+                == Some(
+                    crate::server::ReadyParseSnapshotAttributionPhaseV2::PostParsePreMaterialization,
+                )
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didChange worker must pause before materialization so didSave can attach a save-cycle envelope");
+
+    let did_save_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didSave")
+                .params(
+                    serde_json::to_value(DidSaveTextDocumentParams {
+                        text_document: TextDocumentIdentifier { uri: uri.clone() },
+                        text: None,
+                    })
+                    .expect("DidSaveTextDocumentParams"),
+                )
+                .finish(),
+        )
+        .await
+        .expect("didSave notification");
+    assert!(did_save_response.is_none(), "didSave is a notification");
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let failure = server.latest_snapshot_failures_v2.read().await.get(&file_id).cloned();
+            if failure.as_ref().is_some_and(|state| {
+                state.requested_version == 2
+                    && state.reason.as_ref() == "exact_type_index_deadline_before_ready_install"
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("ready-install exact type-index wait must classify the delayed precompute blocker");
+
+    let ready_version = server
+        .latest_ready_parse_snapshots_v2
+        .read()
+        .await
+        .get(&file_id)
+        .map(|state| state.parse_snapshot.file_version);
+    assert_ne!(
+        ready_version,
+        Some(2),
+        "deadline classification must not weaken canonical ready snapshot exact gates"
+    );
+
+    let counters = server
+        .coordinator
+        .observability_metrics()
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object")
+        .clone();
+    assert!(
+        read_u64_metric(counters.get(
+            "intellisense_v2_ready_parse_snapshot_worker_terminated_without_materialization_total_origin_lsp_source_did_save_reason_exact_type_index_deadline_before_ready_install"
+        )) > 0,
+        "deadline classification must be exported as a low-cardinality worker termination reason, counters={counters:?}"
     );
 
     drain_task.abort();

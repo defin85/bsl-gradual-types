@@ -87,6 +87,12 @@ export interface ObservabilityIncidentBundleSource {
     message?: string;
 }
 
+export interface ObservabilityIncidentMetricsIntegritySummary {
+    observability_contract_violation_total?: number;
+    invalid_saturation_metric?: number;
+    runtime_saturation_sample_total?: number;
+}
+
 export interface ObservabilityIncidentBundleReport {
     bundle_format: string;
     captured_at: string;
@@ -102,6 +108,7 @@ export interface ObservabilityIncidentBundleReport {
     };
     diagnostics_save_requests: ObservabilityIncidentDiagnosticsSaveSummary[];
     diagnostics_save_metrics: ObservabilityIncidentDiagnosticsSaveMetricsSection;
+    observability_metrics_integrity: ObservabilityIncidentMetricsIntegritySummary;
     did_change_parse_snapshot_window: {
         entry_count: number;
     };
@@ -151,6 +158,8 @@ export function buildObservabilityIncidentBundle(
     );
     const diagnosticsSaveMetricsSection =
         buildObservabilityIncidentDiagnosticsSaveMetricsSection(input.observabilityMetrics);
+    const observabilityMetricsIntegritySection =
+        buildObservabilityMetricsIntegritySection(input.observabilityMetrics);
     const didChangeParseSnapshotSection =
         buildObservabilityIncidentDidChangeParseSnapshotSection(
             input.observabilityMetrics,
@@ -198,6 +207,7 @@ export function buildObservabilityIncidentBundle(
         },
         diagnostics_save_requests: diagnosticsSaveSection.requests,
         diagnostics_save_metrics: diagnosticsSaveMetricsSection,
+        observability_metrics_integrity: observabilityMetricsIntegritySection,
         did_change_parse_snapshot_window: {
             entry_count: didChangeParseSnapshotSection.entryCount,
         },
@@ -477,6 +487,31 @@ function buildObservabilityMetricsSource(
     };
 }
 
+function buildObservabilityMetricsIntegritySection(
+    observabilityMetrics: ObservabilityMetricsFetchResult
+): ObservabilityIncidentMetricsIntegritySummary {
+    if (observabilityMetrics.kind !== 'ok') {
+        return {};
+    }
+
+    const metrics = asRecord(observabilityMetrics.response.metrics);
+    const counters = asRecord(metrics?.counters);
+    return {
+        observability_contract_violation_total: getCounter(
+            counters,
+            'intellisense_v2_observability_contract_violation_total'
+        ),
+        invalid_saturation_metric: getCounter(
+            counters,
+            'intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric'
+        ),
+        runtime_saturation_sample_total: getCounter(
+            counters,
+            'intellisense_v2_runtime_saturation_sample_total'
+        ),
+    };
+}
+
 function deriveFindings(
     input: ObservabilityIncidentBundleInput,
     requestSection: ObservabilityIncidentRequestSection
@@ -740,6 +775,19 @@ function deriveFindings(
         findings.push(`semantic diagnostics p95=${Math.round(semanticDiagnosticsP95)}ms in the captured metrics snapshot.`);
     }
 
+    const metricsIntegrity = buildObservabilityMetricsIntegritySection(input.observabilityMetrics);
+    const violationTotal = metricsIntegrity.observability_contract_violation_total;
+    if (typeof violationTotal === 'number' && violationTotal > 0) {
+        const invalidSaturationMetric = metricsIntegrity.invalid_saturation_metric;
+        const invalidSaturationDetail =
+            typeof invalidSaturationMetric === 'number'
+                ? ` (invalid_saturation_metric=${invalidSaturationMetric})`
+                : '';
+        findings.push(
+            `observability contract violations total=${violationTotal}${invalidSaturationDetail} in the captured metrics snapshot.`
+        );
+    }
+
     return findings;
 }
 
@@ -800,6 +848,9 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         '',
         '## Diagnostics Save Metrics',
         ...renderDiagnosticsSaveMetricsSummaryLines(report.diagnostics_save_metrics),
+        '',
+        '## Observability Metrics Integrity',
+        ...renderObservabilityMetricsIntegrityLines(report.observability_metrics_integrity),
         '',
         '## DidChange Parse Snapshot Summary',
         ...renderDidChangeParseSnapshotSummaryLines({
@@ -866,6 +917,23 @@ function renderSourceStatusLine(
 
 function renderBulletSection(values: string[]): string[] {
     return values.map((value) => `- ${value}`);
+}
+
+function renderObservabilityMetricsIntegrityLines(
+    metricsIntegrity: ObservabilityIncidentMetricsIntegritySummary
+): string[] {
+    const hasAnyCounter =
+        typeof metricsIntegrity.observability_contract_violation_total === 'number'
+        || typeof metricsIntegrity.invalid_saturation_metric === 'number'
+        || typeof metricsIntegrity.runtime_saturation_sample_total === 'number';
+    if (!hasAnyCounter) {
+        return ['- unavailable'];
+    }
+
+    return [
+        `- observability_contract_violation | total=${formatOptionalCounter(metricsIntegrity.observability_contract_violation_total)} | invalid_saturation_metric=${formatOptionalCounter(metricsIntegrity.invalid_saturation_metric)}`,
+        `- runtime_saturation_sample_total=${formatOptionalCounter(metricsIntegrity.runtime_saturation_sample_total)}`,
+    ];
 }
 
 function renderBuildIdentityLines(
@@ -944,6 +1012,15 @@ function getHistogramPercentile(
     const histogram = asRecord(histograms?.[histogramName]);
     const value = histogram?.[percentile];
     return typeof value === 'number' ? value : null;
+}
+
+function getCounter(counters: Record<string, any> | null, counterName: string): number | undefined {
+    const value = counters?.[counterName];
+    return typeof value === 'number' ? value : undefined;
+}
+
+function formatOptionalCounter(value: number | undefined): string {
+    return typeof value === 'number' ? String(value) : 'absent';
 }
 
 function asRecord(value: unknown): Record<string, any> | null {

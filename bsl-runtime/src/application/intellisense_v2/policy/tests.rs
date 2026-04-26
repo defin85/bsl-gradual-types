@@ -743,6 +743,24 @@ async fn observed_spawn_records_runtime_class_metrics() {
         gauges.contains_key("intellisense_v2_runtime_saturation_waiters_interactive"),
         "legacy saturation gauge should be exported"
     );
+    assert_eq!(
+        counters
+            .get(
+                "intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric"
+            )
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        0,
+        "generic runtime saturation export must not emit invalid saturation metric violations"
+    );
+    assert!(
+        !gauges.contains_key("intellisense_v2_runtime_saturation_waiters_did_save_followup"),
+        "didSave follow-up waiters must not be exported as a generic saturation gauge"
+    );
+    assert!(
+        !gauges.contains_key("intellisense_v2_runtime_saturation_permits_did_save_followup"),
+        "didSave follow-up permits must not be exported as a generic saturation gauge"
+    );
     assert!(
             gauges.contains_key(
                 "intellisense_v2_drilldown_saturation_gauge_origin_runtime_saturation_metric_queue_depth_total"
@@ -764,12 +782,30 @@ fn cpu_budget_reserves_extra_interactive_permit_when_capacity_allows() {
         "background pool should keep one dedicated permit"
     );
     assert_eq!(
-        snapshot.did_save_followup_permits, 1,
+        budget.did_save_followup_reserved.available_permits(),
+        1,
         "didSave follow-up lane should have its own reserved save-critical permit"
     );
     assert_eq!(
         snapshot.shared_permits, 1,
         "remaining capacity should stay shared"
+    );
+}
+
+#[test]
+fn saturation_snapshot_queue_depth_total_tracks_generic_waiters_only() {
+    let snapshot = CpuBudgetSaturationSnapshot {
+        interactive_waiters: 2,
+        background_waiters: 3,
+        interactive_permits: 0,
+        background_permits: 0,
+        shared_permits: 0,
+    };
+
+    assert_eq!(
+        snapshot.queue_depth_total(),
+        5,
+        "generic queue_depth_total must remain interactive + background waiters only"
     );
 }
 

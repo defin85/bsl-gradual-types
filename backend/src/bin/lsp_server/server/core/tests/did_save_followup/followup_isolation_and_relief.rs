@@ -340,6 +340,14 @@ async fn p7_diagnostics_save_followup_stays_isolated_from_generic_background_res
         .get("gauges")
         .and_then(|value| value.as_object())
         .expect("metrics.gauges object");
+    assert_eq!(
+        counters
+            .get("intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric")
+            .and_then(|value| value.as_u64())
+            .unwrap_or(0),
+        0,
+        "dedicated didSave follow-up lane metrics must not emit generic invalid saturation violations, metrics={metrics:?}"
+    );
     assert!(
         counters
             .get("intellisense_v2_runtime_lane_queue_wait_total_origin_lsp_lane_did_save_followup")

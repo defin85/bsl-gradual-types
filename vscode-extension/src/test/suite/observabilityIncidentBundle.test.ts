@@ -255,6 +255,9 @@ suite('Observability Incident Bundle Test Suite', () => {
                         intellisense_v2_diagnostics_save_followup_semantic_path_total_path_ready_artifacts: 1,
                         intellisense_v2_diagnostics_save_followup_semantic_path_total_path_shadow_state: 1,
                         intellisense_v2_diagnostics_save_followup_semantic_path_total_path_generic_pipeline: 2,
+                        intellisense_v2_observability_contract_violation_total: 2,
+                        intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric: 2,
+                        intellisense_v2_runtime_saturation_sample_total: 720,
                     },
                     histograms: {
                         intellisense_v2_semantic_diagnostics_query_ms: {
@@ -1087,6 +1090,23 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(
             bundle.incidentReport.findings.some((finding) => finding.includes('semantic diagnostics p95=3374ms'))
         );
+        assert.strictEqual(
+            bundle.incidentReport.observability_metrics_integrity.observability_contract_violation_total,
+            2
+        );
+        assert.strictEqual(
+            bundle.incidentReport.observability_metrics_integrity.invalid_saturation_metric,
+            2
+        );
+        assert.strictEqual(
+            bundle.incidentReport.observability_metrics_integrity.runtime_saturation_sample_total,
+            720
+        );
+        assert.ok(
+            bundle.incidentReport.findings.some((finding) =>
+                finding.includes('observability contract violations total=2')
+            )
+        );
         assert.ok(bundle.summaryMarkdown.includes('## Request Scope'));
         assert.ok(bundle.summaryMarkdown.includes('scope=single_uri | uri=file:///tmp/test.bsl | request_count=2'));
         assert.ok(bundle.summaryMarkdown.includes('## Request Summary'));
@@ -1114,6 +1134,13 @@ suite('Observability Incident Bundle Test Suite', () => {
                 'followup_semantic_path | ready_artifacts=1 | shadow_state=1 | generic_pipeline=2'
             )
         );
+        assert.ok(bundle.summaryMarkdown.includes('## Observability Metrics Integrity'));
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'observability_contract_violation | total=2 | invalid_saturation_metric=2'
+            )
+        );
+        assert.ok(bundle.summaryMarkdown.includes('runtime_saturation_sample_total=720'));
         assert.ok(
             bundle.summaryMarkdown.includes(
                 'ready_snapshot_worker_started | did_change=4 | did_save=3'

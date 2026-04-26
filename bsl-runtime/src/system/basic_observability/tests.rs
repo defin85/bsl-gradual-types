@@ -674,6 +674,82 @@ fn saturation_gauge_projection_writes_legacy_and_drilldown() {
 }
 
 #[test]
+fn accepted_saturation_gauges_have_complete_legacy_projection() {
+    for saturation_metric in ALLOWED_SATURATION_METRICS {
+        let event = CanonicalEvent {
+            family: CanonicalFamily::SaturationGauge,
+            origin: "lsp",
+            mode: None,
+            operation: None,
+            stage: None,
+            outcome: None,
+            reason: None,
+            query_kind: None,
+            work_class: None,
+            saturation_metric: Some(saturation_metric),
+            value_kind: CanonicalValueKind::Gauge,
+            value: 1.0,
+            requires_legacy_projection: true,
+        };
+        assert!(
+            BasicObservability::canonical_legacy_projection_target(&event).is_some(),
+            "accepted generic saturation metric {saturation_metric} must have legacy projection"
+        );
+    }
+}
+
+#[test]
+fn did_save_followup_labels_stay_rejected_on_generic_saturation_path() {
+    let observability = BasicObservability::default();
+
+    observability.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        "lsp",
+        "waiters_did_save_followup",
+        2.0,
+        "intellisense_v2_runtime_saturation_waiters_did_save_followup",
+    );
+    observability.record_intellisense_v2_runtime_saturation_gauge_with_origin(
+        "lsp",
+        "permits_did_save_followup",
+        1.0,
+        "intellisense_v2_runtime_saturation_permits_did_save_followup",
+    );
+
+    let exported = observability.get_metrics().export_metrics();
+    let counters = counters(&exported);
+    let gauges = gauges(&exported);
+
+    assert_eq!(
+        counter_value(
+            counters,
+            "intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric"
+        ),
+        2,
+        "lane-specific saturation labels must remain invalid on generic SaturationGauge"
+    );
+    assert!(
+        !gauges
+            .keys()
+            .any(|key| key.contains("saturation_metric_waiters_did_save_followup")),
+        "invalid generic waiters_did_save_followup drilldown gauge must not be exported"
+    );
+    assert!(
+        !gauges
+            .keys()
+            .any(|key| key.contains("saturation_metric_permits_did_save_followup")),
+        "invalid generic permits_did_save_followup drilldown gauge must not be exported"
+    );
+    assert!(
+        !gauges.contains_key("intellisense_v2_runtime_saturation_waiters_did_save_followup"),
+        "invalid generic waiters_did_save_followup legacy gauge must not be exported"
+    );
+    assert!(
+        !gauges.contains_key("intellisense_v2_runtime_saturation_permits_did_save_followup"),
+        "invalid generic permits_did_save_followup legacy gauge must not be exported"
+    );
+}
+
+#[test]
 fn runtime_queue_and_exec_projection_do_not_raise_hint_mismatch() {
     let observability = BasicObservability::default();
     observability.record_intellisense_v2_runtime_queue_wait_latency_with_origin(

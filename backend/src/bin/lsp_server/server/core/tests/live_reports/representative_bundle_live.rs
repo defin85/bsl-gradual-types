@@ -1800,6 +1800,36 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             .get("counters")
             .and_then(|value| value.as_object())
             .expect("final metrics.counters object");
+        let final_gauges = final_metrics
+            .get("gauges")
+            .and_then(|value| value.as_object())
+            .expect("final metrics.gauges object");
+        let observability_contract_violation_total_present = final_counters
+            .contains_key("intellisense_v2_observability_contract_violation_total");
+        let observability_contract_violation_total = read_u64_metric(
+            final_counters.get("intellisense_v2_observability_contract_violation_total"),
+        );
+        let invalid_saturation_metric_present = final_counters.contains_key(
+            "intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric",
+        );
+        let invalid_saturation_metric_count = read_u64_metric(final_counters.get(
+            "intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric",
+        ));
+        let runtime_saturation_sample_total = read_u64_metric(
+            final_counters.get("intellisense_v2_runtime_saturation_sample_total"),
+        );
+        let did_save_followup_lane_quota_key =
+            "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_quota";
+        let did_save_followup_lane_active_slots_key =
+            "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_active_slots";
+        let did_save_followup_lane_queue_depth_key =
+            "intellisense_v2_runtime_lane_saturation_gauge_origin_lsp_lane_did_save_followup_metric_queue_depth";
+        let did_save_followup_lane_quota =
+            read_numeric_metric(final_gauges.get(did_save_followup_lane_quota_key));
+        let did_save_followup_lane_active_slots =
+            read_numeric_metric(final_gauges.get(did_save_followup_lane_active_slots_key));
+        let did_save_followup_lane_queue_depth =
+            read_numeric_metric(final_gauges.get(did_save_followup_lane_queue_depth_key));
         let did_change_materialization_histogram = final_histograms
             .get("intellisense_v2_ready_parse_snapshot_materialization_ms_origin_lsp_source_did_change")
             .and_then(|value| value.as_object())
@@ -1982,6 +2012,26 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             "p56 pure didChange ready-install wait must not hit deadline on the baseline contour, cycles={cycles:?}"
         );
         assert_eq!(
+            observability_contract_violation_total, 0,
+            "p56 representative metrics must not export observability contract violations after refactor-57, final_counters={final_counters:?}"
+        );
+        assert_eq!(
+            invalid_saturation_metric_count, 0,
+            "p56 representative metrics must not export invalid generic saturation labels after refactor-57, final_counters={final_counters:?}"
+        );
+        assert!(
+            final_gauges.contains_key(did_save_followup_lane_quota_key),
+            "p56 representative metrics must preserve didSave-follow-up lane quota gauge, final_gauges={final_gauges:?}"
+        );
+        assert!(
+            final_gauges.contains_key(did_save_followup_lane_active_slots_key),
+            "p56 representative metrics must preserve didSave-follow-up lane active_slots gauge, final_gauges={final_gauges:?}"
+        );
+        assert!(
+            final_gauges.contains_key(did_save_followup_lane_queue_depth_key),
+            "p56 representative metrics must preserve didSave-follow-up lane queue_depth gauge, final_gauges={final_gauges:?}"
+        );
+        assert_eq!(
             ready_install_exact_type_index_wait_contract_approved_count,
             SAVE_CYCLE_COUNT as u64,
             "p56 canonical ready-install must either materialize or export a contract-approved exact type-index blocker for every cycle, cycles={cycles:?}"
@@ -2058,6 +2108,18 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "followup_semantic_path_shadow_state": BASELINE_SHADOW_STATE_COUNT,
             },
             "summary": {
+                "observability_integrity": {
+                    "observability_contract_violation_total_present": observability_contract_violation_total_present,
+                    "observability_contract_violation_total": observability_contract_violation_total,
+                    "invalid_saturation_metric_present": invalid_saturation_metric_present,
+                    "invalid_saturation_metric": invalid_saturation_metric_count,
+                    "runtime_saturation_sample_total": runtime_saturation_sample_total,
+                    "did_save_followup_lane": {
+                        "quota": did_save_followup_lane_quota,
+                        "active_slots": did_save_followup_lane_active_slots,
+                        "queue_depth": did_save_followup_lane_queue_depth,
+                    },
+                },
                 "followup_semantic_path_detached_ready_artifacts": detached_ready_artifacts_count,
                 "followup_semantic_path_ready_artifacts": ready_artifacts_count,
                 "followup_semantic_path_shadow_state": shadow_state_count,

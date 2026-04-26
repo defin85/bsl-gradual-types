@@ -509,10 +509,8 @@ pub fn cpu_work_class_for_operation(operation: SemanticOperation) -> CpuWorkClas
 struct CpuBudgetSaturationSnapshot {
     interactive_waiters: usize,
     background_waiters: usize,
-    did_save_followup_waiters: usize,
     interactive_permits: usize,
     background_permits: usize,
-    did_save_followup_permits: usize,
     shared_permits: usize,
 }
 
@@ -1031,10 +1029,8 @@ impl CpuBoundBudget {
         CpuBudgetSaturationSnapshot {
             interactive_waiters: self.interactive_waiters.load(Ordering::Acquire),
             background_waiters: self.background_waiters.load(Ordering::Acquire),
-            did_save_followup_waiters: self.did_save_followup_waiters.load(Ordering::Acquire),
             interactive_permits: self.interactive_reserved.available_permits(),
             background_permits: self.background_reserved.available_permits(),
-            did_save_followup_permits: self.did_save_followup_reserved.available_permits(),
             shared_permits: self.shared.available_permits(),
         }
     }
@@ -1358,10 +1354,8 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
         CpuBudgetSaturationSnapshot {
             interactive_waiters: 0,
             background_waiters: 0,
-            did_save_followup_waiters: 0,
             interactive_permits: 0,
             background_permits: 0,
-            did_save_followup_permits: 0,
             shared_permits: cpu_bound_semaphore().available_permits(),
         }
     };
@@ -1380,12 +1374,6 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
     );
     coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
         origin,
-        "waiters_did_save_followup",
-        snapshot.did_save_followup_waiters as f64,
-        "intellisense_v2_runtime_saturation_waiters_did_save_followup",
-    );
-    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
-        origin,
         "permits_interactive",
         snapshot.interactive_permits as f64,
         "intellisense_v2_runtime_saturation_permits_interactive",
@@ -1395,12 +1383,6 @@ fn emit_runtime_saturation_gauges(origin: &str, observability: Option<&SystemCoo
         "permits_background",
         snapshot.background_permits as f64,
         "intellisense_v2_runtime_saturation_permits_background",
-    );
-    coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
-        origin,
-        "permits_did_save_followup",
-        snapshot.did_save_followup_permits as f64,
-        "intellisense_v2_runtime_saturation_permits_did_save_followup",
     );
     coordinator.record_intellisense_v2_runtime_saturation_gauge_with_origin(
         origin,

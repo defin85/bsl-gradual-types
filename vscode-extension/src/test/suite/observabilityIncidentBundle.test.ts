@@ -1473,6 +1473,55 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
     });
 
+    test('fast program-lowering reuse should not be reported as a tail classification gap', () => {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        const trace = timeline.response.traces[0];
+        trace.followup_readiness_blocker_bucket = 'snapshot_with_deps';
+        trace.followup_ready_snapshot_timeout_phase = undefined;
+        trace.followup_ready_snapshot_timeout_leaf = undefined;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint = undefined;
+        trace.followup_ready_snapshot_parse_exec_ms = 98;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_ms = 94;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms = 94;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint = 'program_lowering';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome = 'top_level_reuse';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units = 2042;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units = 46;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source = 'save_family';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source = 'save_family';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count = 1;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit = false;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit = false;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-04-27T14:06:57.571Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            !bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('classified as snapshot_with_deps')
+            )
+        );
+        assert.ok(
+            !bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('program_lowering tail without complete reuse evidence')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source=save_family'
+            )
+        );
+    });
+
     test('program-lowering seed eviction evidence should survive report, raw JSON, and summary', () => {
         const timeline = sampleDiagnosticsSaveTimeline();
         if (timeline.kind !== 'ok') {

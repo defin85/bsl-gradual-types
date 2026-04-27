@@ -96,6 +96,8 @@ export interface ObservabilityIncidentDiagnosticsSaveSection {
     gaps: string[];
 }
 
+const PROGRAM_LOWERING_TAIL_MIN_MS = 1_000;
+
 export function buildObservabilityIncidentDiagnosticsSaveSection(
     diagnosticsSaveTimeline: DiagnosticsSaveTimelineFetchResult
 ): ObservabilityIncidentDiagnosticsSaveSection {
@@ -203,7 +205,7 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             && hasProgramLoweringTailEvidence(trace)
         ) {
             gaps.push(
-                `Diagnostics save trace ${trace.trace_id} is classified as snapshot_with_deps even though the ready-snapshot timeout leaf/checkpoint is program_lowering; exact program-lowering tail must be classified separately.`
+                `Diagnostics save trace ${trace.trace_id} is classified as snapshot_with_deps even though the ready-snapshot timeout leaf/checkpoint or seconds-scale dominant checkpoint is program_lowering; exact program-lowering tail must be classified separately.`
             );
         }
         if (hasProgramLoweringTailEvidence(trace) && !hasProgramLoweringReuseEvidence(trace)) {
@@ -378,11 +380,16 @@ function hasProgramLoweringTailEvidence(
         || trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint === 'program_lowering'
         || (
             trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint === 'program_lowering'
-            && isPositiveTimingValue(
-                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+            && isAtLeast(
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms,
+                PROGRAM_LOWERING_TAIL_MIN_MS
             )
         )
     );
+}
+
+function isAtLeast(value: number | undefined, minimum: number): value is number {
+    return typeof value === 'number' && value >= minimum;
 }
 
 function hasProgramLoweringReuseEvidence(

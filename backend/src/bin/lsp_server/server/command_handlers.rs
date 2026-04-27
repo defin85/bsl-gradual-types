@@ -848,10 +848,7 @@ impl BslLanguageServer {
                 .read()
                 .await
                 .get(&file_id)
-                .filter(|state| {
-                    state.parse_snapshot.file_version == shadow_state.version
-                        && state.text.as_ref() == shadow_state.text.as_ref()
-                })
+                .filter(|state| state.text.as_ref() == shadow_state.text.as_ref())
                 .map(|state| {
                     (
                         Arc::clone(&state.parse_snapshot.parse_result),
@@ -904,10 +901,7 @@ impl BslLanguageServer {
                     .read()
                     .await
                     .get(&file_id)
-                    .filter(|state| {
-                        state.parse_snapshot.file_version == shadow_state.version
-                            && state.text.as_ref() == shadow_state.text.as_ref()
-                    })
+                    .filter(|state| state.text.as_ref() == shadow_state.text.as_ref())
                     .map(|state| {
                         (
                             Arc::clone(&state.parse_snapshot.parse_result),

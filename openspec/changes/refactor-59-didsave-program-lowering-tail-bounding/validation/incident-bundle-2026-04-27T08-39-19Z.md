@@ -210,15 +210,17 @@ Fresh completion/current-context isolation checks:
   `current_context_timeline_retention_evicts_oldest_first`, preserving the
   current-context timeline API surface used by incident bundles.
 
-Non-acceptance probe:
+Follow-up current-context ready-snapshot probe:
 
 - `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_index -- --nocapture`
-  failed on the stricter historical assertion that `getCurrentContext` launches
-  zero auxiliary parse attempts (`left=1`, `right=0`). This was not used as
-  acceptance evidence for `refactor-59`: the change did not modify
-  current-context routing, and the accepted preservation gate above checks the
-  relevant requirement for this slice: completion isolation under
-  current-context load plus timeline availability.
+  now passes after allowing `bsl.getCurrentContext` to reuse a text-equivalent
+  latest ready parse snapshot even when the shadow document has advanced to a
+  newer same-text version without an exact type index. This restores the
+  historical zero auxiliary parse assertion for current-context syntax-only
+  resolution.
+- `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_ -- --nocapture --test-threads=1`
+  passed `9` current-context guards. The serial mode is intentional for this
+  slice because several tests share test-only global parse-attempt counters.
 
 Focused checks:
 
@@ -226,6 +228,8 @@ Focused checks:
 - `npm run lint --prefix vscode-extension`
 - `cargo test -p bsl-backend --bin bsl-lsp-server same_version_same_text_ready_snapshot_can_seed_didsave_rebuild`
 - `cargo test -p bsl-backend --bin bsl-lsp-server diagnostics_save_timeline_classifies_program_lowering_tail_before_snapshot_with_deps`
+- `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_uses_parse_snapshot_without_warming_exact_type_index -- --nocapture`
+- `cargo test -p bsl-backend --bin bsl-lsp-server p33_get_current_context_ -- --nocapture --test-threads=1`
 - `cargo test -p bsl-backend --bin bsl-lsp-server p33_same_key_current_context_burst_keeps_completion_bounded_under_mixed_load -- --nocapture`
 - `cargo test -p bsl-backend --bin bsl-lsp-server current_context_timeline_`
 - `BSL_TEST_GREP="Observability Incident Bundle" npm test --prefix vscode-extension`

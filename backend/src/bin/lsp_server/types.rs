@@ -935,6 +935,18 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source:
         Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source:
+        Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count:
+        Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason:
+        Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason:
+        Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit:
         Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

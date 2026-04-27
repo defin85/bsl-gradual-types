@@ -1,7 +1,8 @@
 fn p53_full_rebuild_program_lowering_summary_for_test(
 ) -> bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringSummary {
     use bsl_runtime::system::parser_coordinator::{
-        ParseSnapshotProgramLoweringReuseOutcome, ParseSnapshotProgramLoweringSummary,
+        ParseSnapshotProgramLoweringReuseOutcome,
+        ParseSnapshotProgramLoweringReusePlanFailureReason, ParseSnapshotProgramLoweringSummary,
     };
 
     ParseSnapshotProgramLoweringSummary {
@@ -20,6 +21,10 @@ fn p53_full_rebuild_program_lowering_summary_for_test(
         routine_body_reused_suffix_lowering_units: 0,
         routine_body_rebuilt_lowering_units: 0,
         reuse_plan_build_source: None,
+        reuse_seed_source: None,
+        reuse_seed_candidate_count: Some(0),
+        reuse_seed_eviction_reason: None,
+        reuse_plan_failure_reason: Some(ParseSnapshotProgramLoweringReusePlanFailureReason::MissingSeed),
         reuse_plan_take_if_unique_hit: Some(false),
         reuse_plan_borrowed_cache_hit: Some(false),
         reuse_plan_build_ms: Some(0),

@@ -363,6 +363,12 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
         reuse_plan_build_source: Some(
             bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReusePlanBuildSource::Owned,
         ),
+        reuse_seed_source: Some(
+            bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseSeedSource::AstCacheOwned,
+        ),
+        reuse_seed_candidate_count: Some(1),
+        reuse_seed_eviction_reason: None,
+        reuse_plan_failure_reason: None,
         reuse_plan_take_if_unique_hit: Some(true),
         reuse_plan_borrowed_cache_hit: Some(false),
         reuse_plan_build_ms: Some(9),
@@ -466,6 +472,23 @@ async fn p24b_diagnostics_save_timeline_exports_program_lowering_reuse_summary()
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source
             .as_deref(),
         Some("owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source
+            .as_deref(),
+        Some("ast_cache_owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count,
+        Some(1)
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason,
+        None
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason,
+        None
     );
     assert_eq!(
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit,
@@ -587,6 +610,12 @@ async fn p24b_diagnostics_save_timeline_snapshot_exports_program_lowering_reuse_
         reuse_plan_build_source: Some(
             bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReusePlanBuildSource::Owned,
         ),
+        reuse_seed_source: Some(
+            bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseSeedSource::AstCacheOwned,
+        ),
+        reuse_seed_candidate_count: Some(1),
+        reuse_seed_eviction_reason: None,
+        reuse_plan_failure_reason: None,
         reuse_plan_take_if_unique_hit: Some(true),
         reuse_plan_borrowed_cache_hit: Some(false),
         reuse_plan_build_ms: Some(4),
@@ -661,6 +690,15 @@ async fn p24b_diagnostics_save_timeline_snapshot_exports_program_lowering_reuse_
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source
             .as_deref(),
         Some("owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source
+            .as_deref(),
+        Some("ast_cache_owned")
+    );
+    assert_eq!(
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count,
+        Some(1)
     );
     assert_eq!(
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit,

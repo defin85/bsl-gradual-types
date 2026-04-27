@@ -62,6 +62,8 @@ const PARSE_SNAPSHOT_FALLBACK_INPUT_EDIT_CONVERSION_FAILED: &str = "input_edit_c
 const PARSE_SNAPSHOT_FALLBACK_INCREMENTAL_PARSE_FAILED: &str = "incremental_parse_failed";
 const PARSE_SNAPSHOT_FALLBACK_STALE_PARSER_BASE: &str = "stale_parser_base";
 const PARSE_SNAPSHOT_FALLBACK_OTHER: &str = "other";
+const LOWERING_REUSE_SAVE_FAMILY_SEED_CAPACITY: usize = 8;
+const LOWERING_REUSE_SAVE_FAMILY_EVICTION_CAPACITY: usize = 32;
 
 #[cfg(test)]
 static PARSE_SNAPSHOT_FULL_PARSE_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
@@ -274,6 +276,10 @@ pub struct ParseSnapshotProgramLoweringSummary {
     pub routine_body_reused_suffix_lowering_units: u64,
     pub routine_body_rebuilt_lowering_units: u64,
     pub reuse_plan_build_source: Option<ParseSnapshotProgramLoweringReusePlanBuildSource>,
+    pub reuse_seed_source: Option<ParseSnapshotProgramLoweringReuseSeedSource>,
+    pub reuse_seed_candidate_count: Option<u64>,
+    pub reuse_seed_eviction_reason: Option<ParseSnapshotProgramLoweringReuseSeedEvictionReason>,
+    pub reuse_plan_failure_reason: Option<ParseSnapshotProgramLoweringReusePlanFailureReason>,
     pub reuse_plan_take_if_unique_hit: Option<bool>,
     pub reuse_plan_borrowed_cache_hit: Option<bool>,
     pub reuse_plan_build_ms: Option<u64>,
@@ -302,6 +308,7 @@ pub struct ParseSnapshotProgramLoweringSummary {
 pub enum ParseSnapshotProgramLoweringReusePlanBuildSource {
     Owned,
     Borrowed,
+    SaveFamily,
 }
 
 impl ParseSnapshotProgramLoweringReusePlanBuildSource {
@@ -309,6 +316,70 @@ impl ParseSnapshotProgramLoweringReusePlanBuildSource {
         match self {
             Self::Owned => "owned",
             Self::Borrowed => "borrowed",
+            Self::SaveFamily => "save_family",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotProgramLoweringReuseSeedSource {
+    AstCacheOwned,
+    AstCacheBorrowed,
+    SaveFamily,
+}
+
+impl ParseSnapshotProgramLoweringReuseSeedSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AstCacheOwned => "ast_cache_owned",
+            Self::AstCacheBorrowed => "ast_cache_borrowed",
+            Self::SaveFamily => "save_family",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotProgramLoweringReuseSeedEvictionReason {
+    BoundedRetention,
+    CacheDisabled,
+    TerminalCleanup,
+    Superseded,
+    Cancelled,
+    Failed,
+    ContinuityLost,
+}
+
+impl ParseSnapshotProgramLoweringReuseSeedEvictionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::BoundedRetention => "bounded_retention",
+            Self::CacheDisabled => "cache_disabled",
+            Self::TerminalCleanup => "terminal_cleanup",
+            Self::Superseded => "superseded",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+            Self::ContinuityLost => "continuity_lost",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParseSnapshotProgramLoweringReusePlanFailureReason {
+    ReuseDisabled,
+    CacheDisabled,
+    MissingSeed,
+    SeedEvicted,
+    NotReusable,
+}
+
+impl ParseSnapshotProgramLoweringReusePlanFailureReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ReuseDisabled => "reuse_disabled",
+            Self::CacheDisabled => "cache_disabled",
+            Self::MissingSeed => "missing_seed",
+            Self::SeedEvicted => "seed_evicted",
+            Self::NotReusable => "not_reusable",
         }
     }
 }
@@ -316,6 +387,10 @@ impl ParseSnapshotProgramLoweringReusePlanBuildSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct ParseSnapshotProgramLoweringAttribution {
     reuse_plan_build_source: Option<ParseSnapshotProgramLoweringReusePlanBuildSource>,
+    reuse_seed_source: Option<ParseSnapshotProgramLoweringReuseSeedSource>,
+    reuse_seed_candidate_count: Option<u64>,
+    reuse_seed_eviction_reason: Option<ParseSnapshotProgramLoweringReuseSeedEvictionReason>,
+    reuse_plan_failure_reason: Option<ParseSnapshotProgramLoweringReusePlanFailureReason>,
     reuse_plan_take_if_unique_hit: Option<bool>,
     reuse_plan_borrowed_cache_hit: Option<bool>,
     reuse_plan_build_ms: Option<u64>,
@@ -526,6 +601,7 @@ pub struct ParserCoordinator {
     disk_cache: Arc<DiskCache>,
     cache_scope: Arc<RwLock<AstCacheScope>>,
     cache_enabled: Arc<AtomicBool>,
+    lowering_reuse_save_family_seeds: Mutex<LoweringReuseSaveFamilySeedStore>,
     symbol_index: Arc<RwLock<Option<Arc<IntellisenseIndexStore>>>>,
 }
 
@@ -533,6 +609,109 @@ pub struct ParserCoordinator {
 struct AstCacheScope {
     project_id: Option<String>,
     config_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct LoweringReuseSaveFamilySeed {
+    content_hash: [u8; 32],
+    parse_result: Arc<ParseResult>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct LoweringReuseSaveFamilySeedEviction {
+    content_hash: [u8; 32],
+    reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+}
+
+#[derive(Debug, Clone, Default)]
+struct LoweringReuseSaveFamilySeedLookup {
+    candidate_count: u64,
+    parse_result: Option<Arc<ParseResult>>,
+    eviction_reason: Option<ParseSnapshotProgramLoweringReuseSeedEvictionReason>,
+}
+
+#[derive(Debug, Default)]
+struct LoweringReuseSaveFamilySeedStore {
+    seeds: VecDeque<LoweringReuseSaveFamilySeed>,
+    evictions: VecDeque<LoweringReuseSaveFamilySeedEviction>,
+}
+
+impl LoweringReuseSaveFamilySeedStore {
+    fn put(&mut self, content_hash: [u8; 32], parse_result: Arc<ParseResult>) {
+        self.seeds.retain(|seed| seed.content_hash != content_hash);
+        if self.seeds.len() >= LOWERING_REUSE_SAVE_FAMILY_SEED_CAPACITY {
+            if let Some(evicted) = self.seeds.pop_front() {
+                self.record_eviction(
+                    evicted.content_hash,
+                    ParseSnapshotProgramLoweringReuseSeedEvictionReason::BoundedRetention,
+                );
+            }
+        }
+        self.seeds.push_back(LoweringReuseSaveFamilySeed {
+            content_hash,
+            parse_result,
+        });
+    }
+
+    fn lookup(&self, content_hash: [u8; 32]) -> LoweringReuseSaveFamilySeedLookup {
+        let candidate = self
+            .seeds
+            .iter()
+            .rev()
+            .find(|seed| seed.content_hash == content_hash);
+        LoweringReuseSaveFamilySeedLookup {
+            candidate_count: u64::from(candidate.is_some()),
+            parse_result: candidate.map(|seed| Arc::clone(&seed.parse_result)),
+            eviction_reason: candidate
+                .is_none()
+                .then(|| self.eviction_reason(content_hash))
+                .flatten(),
+        }
+    }
+
+    fn clear_with_reason(&mut self, reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason) {
+        let drained: Vec<[u8; 32]> = self.seeds.drain(..).map(|seed| seed.content_hash).collect();
+        for content_hash in drained {
+            self.record_eviction(content_hash, reason);
+        }
+    }
+
+    fn remove_with_reason(
+        &mut self,
+        content_hash: [u8; 32],
+        reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+    ) {
+        self.seeds.retain(|seed| seed.content_hash != content_hash);
+        self.record_eviction(content_hash, reason);
+    }
+
+    fn record_eviction(
+        &mut self,
+        content_hash: [u8; 32],
+        reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+    ) {
+        self.evictions
+            .retain(|eviction| eviction.content_hash != content_hash);
+        if self.evictions.len() >= LOWERING_REUSE_SAVE_FAMILY_EVICTION_CAPACITY {
+            self.evictions.pop_front();
+        }
+        self.evictions
+            .push_back(LoweringReuseSaveFamilySeedEviction {
+                content_hash,
+                reason,
+            });
+    }
+
+    fn eviction_reason(
+        &self,
+        content_hash: [u8; 32],
+    ) -> Option<ParseSnapshotProgramLoweringReuseSeedEvictionReason> {
+        self.evictions
+            .iter()
+            .rev()
+            .find(|eviction| eviction.content_hash == content_hash)
+            .map(|eviction| eviction.reason)
+    }
 }
 
 /// TreeSitter парсер с tree-sitter-bsl
@@ -554,6 +733,9 @@ impl ParserCoordinator {
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
+            lowering_reuse_save_family_seeds: Mutex::new(
+                LoweringReuseSaveFamilySeedStore::default(),
+            ),
             symbol_index: Arc::new(RwLock::new(None)),
         }
     }
@@ -574,6 +756,9 @@ impl ParserCoordinator {
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
+            lowering_reuse_save_family_seeds: Mutex::new(
+                LoweringReuseSaveFamilySeedStore::default(),
+            ),
             symbol_index: Arc::new(RwLock::new(None)),
         }
     }
@@ -603,6 +788,9 @@ impl ParserCoordinator {
             disk_cache: Arc::new(DiskCache::disabled(1)),
             cache_scope: Arc::new(RwLock::new(AstCacheScope::default())),
             cache_enabled: Arc::new(AtomicBool::new(!is_cache_disabled_env())),
+            lowering_reuse_save_family_seeds: Mutex::new(
+                LoweringReuseSaveFamilySeedStore::default(),
+            ),
             symbol_index: Arc::new(RwLock::new(None)),
         }
     }
@@ -622,6 +810,9 @@ impl ParserCoordinator {
         self.cache_enabled.store(enabled, Ordering::Relaxed);
         if !enabled {
             self.ast_cache.clear();
+            self.clear_lowering_reuse_save_family_seeds(
+                ParseSnapshotProgramLoweringReuseSeedEvictionReason::CacheDisabled,
+            );
         }
     }
 
@@ -633,13 +824,27 @@ impl ParserCoordinator {
         self.ast_cache.clear();
     }
 
+    pub fn release_lowering_reuse_save_family_seed(
+        &self,
+        content_hash: [u8; 32],
+        reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+    ) {
+        let mut seeds = self
+            .lowering_reuse_save_family_seeds
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        seeds.remove_with_reason(content_hash, reason);
+    }
+
     pub fn prime_ast_cache_for_source(
         &self,
         source: &str,
         parse_result: Arc<bsl_syntax::ast::ParseResult>,
     ) {
+        let content_hash = ast_cache_key(source);
         self.ast_cache
-            .put_if_absent(ast_cache_key(source), parse_result);
+            .put_if_absent(content_hash, Arc::clone(&parse_result));
+        self.retain_lowering_reuse_save_family_seed(content_hash, parse_result.as_ref());
     }
 
     pub fn ast_cache_stats(&self) -> crate::system::ast_cache::AstCacheStats {
@@ -1090,6 +1295,7 @@ impl ParserCoordinator {
         };
         parse_exec_subphases.deferred_syntax_error_assembly = deferred_syntax_error_assembly;
         let program_lowering_summary = Self::summarize_program_lowering(&parse_result, options);
+        self.retain_lowering_reuse_save_family_seed(new_hash, &parse_result);
         if let Some(install_op) = tree_cache_install_op {
             match self.run_tree_cache_install_with_cancellation(
                 install_op,
@@ -2209,6 +2415,7 @@ impl ParserCoordinator {
                     if let Ok(Some(cached)) = self.try_load_ast_from_disk(path, content) {
                         let cached_arc = Arc::new(cached.clone());
                         self.ast_cache.put(content_hash, cached_arc);
+                        self.retain_lowering_reuse_save_family_seed(content_hash, &cached);
                         self.update_symbol_index(Path::new(path), &cached);
                         return Ok(cached);
                     }
@@ -2324,6 +2531,15 @@ impl ParserCoordinator {
         attribution: &mut ParseSnapshotProgramLoweringAttribution,
     ) -> Option<LoweringReusePlan> {
         if !exact_program_lowering_reuse_enabled() {
+            attribution.reuse_seed_candidate_count = Some(0);
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::ReuseDisabled);
+            return None;
+        }
+        if !self.cache_enabled() {
+            attribution.reuse_seed_candidate_count = Some(0);
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::CacheDisabled);
             return None;
         }
         let cache_key = ast_cache_key(old_source);
@@ -2331,6 +2547,9 @@ impl ParserCoordinator {
         attribution.reuse_plan_borrowed_cache_hit = Some(false);
         if let Some(previous_parse_result) = self.ast_cache.take_if_unique(cache_key) {
             attribution.reuse_plan_take_if_unique_hit = Some(true);
+            attribution.reuse_seed_candidate_count = Some(1);
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::AstCacheOwned);
             let started = std::time::Instant::now();
             match Self::derive_exact_lowering_reuse_plan_owned(
                 previous_parse_result,
@@ -2347,26 +2566,71 @@ impl ParserCoordinator {
                     return Some(plan);
                 }
                 Err(previous_parse_result) => {
+                    attribution.reuse_plan_failure_reason =
+                        Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
                     self.ast_cache
                         .put(cache_key, Arc::new(previous_parse_result));
                 }
             }
         }
-        let previous_parse_result = self.ast_cache.get(cache_key)?;
-        attribution.reuse_plan_borrowed_cache_hit = Some(true);
-        let started = std::time::Instant::now();
-        let plan = Self::derive_exact_lowering_reuse_plan(
-            previous_parse_result.as_ref(),
-            new_tree,
-            changed_ranges,
-            attribution,
-        )?;
-        let elapsed_ms = duration_to_u64_ms(started.elapsed());
-        attribution.reuse_plan_build_source =
-            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
-        attribution.reuse_plan_build_ms = Some(elapsed_ms);
-        attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
-        Some(plan)
+        if let Some(previous_parse_result) = self.ast_cache.get(cache_key) {
+            attribution.reuse_plan_borrowed_cache_hit = Some(true);
+            attribution.reuse_seed_candidate_count = Some(1);
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::AstCacheBorrowed);
+            let started = std::time::Instant::now();
+            let plan = Self::derive_exact_lowering_reuse_plan(
+                previous_parse_result.as_ref(),
+                new_tree,
+                changed_ranges,
+                attribution,
+            );
+            if let Some(plan) = plan {
+                let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                attribution.reuse_plan_build_source =
+                    Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
+                attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_failure_reason = None;
+                return Some(plan);
+            }
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
+            return None;
+        }
+
+        let seed_lookup = self.lookup_lowering_reuse_save_family_seed(cache_key);
+        attribution.reuse_seed_candidate_count = Some(seed_lookup.candidate_count);
+        attribution.reuse_seed_eviction_reason = seed_lookup.eviction_reason;
+        if let Some(previous_parse_result) = seed_lookup.parse_result {
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::SaveFamily);
+            let started = std::time::Instant::now();
+            let plan = Self::derive_exact_lowering_reuse_plan(
+                previous_parse_result.as_ref(),
+                new_tree,
+                changed_ranges,
+                attribution,
+            );
+            if let Some(plan) = plan {
+                let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                attribution.reuse_plan_build_source =
+                    Some(ParseSnapshotProgramLoweringReusePlanBuildSource::SaveFamily);
+                attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_failure_reason = None;
+                return Some(plan);
+            }
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
+            return None;
+        }
+
+        attribution.reuse_plan_failure_reason = Some(if seed_lookup.eviction_reason.is_some() {
+            ParseSnapshotProgramLoweringReusePlanFailureReason::SeedEvicted
+        } else {
+            ParseSnapshotProgramLoweringReusePlanFailureReason::MissingSeed
+        });
+        None
     }
 
     fn build_exact_same_content_lowering_reuse_plan(
@@ -2376,6 +2640,15 @@ impl ParserCoordinator {
         attribution: &mut ParseSnapshotProgramLoweringAttribution,
     ) -> Option<LoweringReusePlan> {
         if !exact_program_lowering_reuse_enabled() {
+            attribution.reuse_seed_candidate_count = Some(0);
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::ReuseDisabled);
+            return None;
+        }
+        if !self.cache_enabled() {
+            attribution.reuse_seed_candidate_count = Some(0);
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::CacheDisabled);
             return None;
         }
         let cache_key = ast_cache_key(source);
@@ -2383,6 +2656,9 @@ impl ParserCoordinator {
         attribution.reuse_plan_borrowed_cache_hit = Some(false);
         if let Some(previous_parse_result) = self.ast_cache.take_if_unique(cache_key) {
             attribution.reuse_plan_take_if_unique_hit = Some(true);
+            attribution.reuse_seed_candidate_count = Some(1);
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::AstCacheOwned);
             let started = std::time::Instant::now();
             match Self::derive_exact_same_content_lowering_reuse_plan_owned(previous_parse_result) {
                 Ok(plan) => {
@@ -2394,24 +2670,67 @@ impl ParserCoordinator {
                     return Some(plan);
                 }
                 Err(previous_parse_result) => {
+                    attribution.reuse_plan_failure_reason =
+                        Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
                     self.ast_cache
                         .put(cache_key, Arc::new(previous_parse_result));
                 }
             }
         }
-        let previous_parse_result = self.ast_cache.get(cache_key)?;
-        attribution.reuse_plan_borrowed_cache_hit = Some(true);
-        let started = std::time::Instant::now();
-        let plan = Self::derive_exact_same_content_lowering_reuse_plan(
-            previous_parse_result.as_ref(),
-            new_tree,
-        )?;
-        let elapsed_ms = duration_to_u64_ms(started.elapsed());
-        attribution.reuse_plan_build_source =
-            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
-        attribution.reuse_plan_build_ms = Some(elapsed_ms);
-        attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
-        Some(plan)
+        if let Some(previous_parse_result) = self.ast_cache.get(cache_key) {
+            attribution.reuse_plan_borrowed_cache_hit = Some(true);
+            attribution.reuse_seed_candidate_count = Some(1);
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::AstCacheBorrowed);
+            let started = std::time::Instant::now();
+            let plan = Self::derive_exact_same_content_lowering_reuse_plan(
+                previous_parse_result.as_ref(),
+                new_tree,
+            );
+            if let Some(plan) = plan {
+                let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                attribution.reuse_plan_build_source =
+                    Some(ParseSnapshotProgramLoweringReusePlanBuildSource::Borrowed);
+                attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_borrowed_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_failure_reason = None;
+                return Some(plan);
+            }
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
+            return None;
+        }
+
+        let seed_lookup = self.lookup_lowering_reuse_save_family_seed(cache_key);
+        attribution.reuse_seed_candidate_count = Some(seed_lookup.candidate_count);
+        attribution.reuse_seed_eviction_reason = seed_lookup.eviction_reason;
+        if let Some(previous_parse_result) = seed_lookup.parse_result {
+            attribution.reuse_seed_source =
+                Some(ParseSnapshotProgramLoweringReuseSeedSource::SaveFamily);
+            let started = std::time::Instant::now();
+            let plan = Self::derive_exact_same_content_lowering_reuse_plan(
+                previous_parse_result.as_ref(),
+                new_tree,
+            );
+            if let Some(plan) = plan {
+                let elapsed_ms = duration_to_u64_ms(started.elapsed());
+                attribution.reuse_plan_build_source =
+                    Some(ParseSnapshotProgramLoweringReusePlanBuildSource::SaveFamily);
+                attribution.reuse_plan_build_ms = Some(elapsed_ms);
+                attribution.reuse_plan_failure_reason = None;
+                return Some(plan);
+            }
+            attribution.reuse_plan_failure_reason =
+                Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable);
+            return None;
+        }
+
+        attribution.reuse_plan_failure_reason = Some(if seed_lookup.eviction_reason.is_some() {
+            ParseSnapshotProgramLoweringReusePlanFailureReason::SeedEvicted
+        } else {
+            ParseSnapshotProgramLoweringReusePlanFailureReason::MissingSeed
+        });
+        None
     }
 
     fn derive_exact_same_content_lowering_reuse_plan(
@@ -3007,6 +3326,10 @@ impl ParserCoordinator {
                     routine_body_reused_suffix_lowering_units: 0,
                     routine_body_rebuilt_lowering_units: 0,
                     reuse_plan_build_source: None,
+                    reuse_seed_source: None,
+                    reuse_seed_candidate_count: None,
+                    reuse_seed_eviction_reason: None,
+                    reuse_plan_failure_reason: None,
                     reuse_plan_take_if_unique_hit: None,
                     reuse_plan_borrowed_cache_hit: None,
                     reuse_plan_build_ms: None,
@@ -3050,6 +3373,10 @@ impl ParserCoordinator {
                 routine_body_reused_suffix_lowering_units: 0,
                 routine_body_rebuilt_lowering_units: 0,
                 reuse_plan_build_source: None,
+                reuse_seed_source: None,
+                reuse_seed_candidate_count: None,
+                reuse_seed_eviction_reason: None,
+                reuse_plan_failure_reason: None,
                 reuse_plan_take_if_unique_hit: None,
                 reuse_plan_borrowed_cache_hit: None,
                 reuse_plan_build_ms: None,
@@ -3085,6 +3412,10 @@ impl ParserCoordinator {
             return summary;
         };
         summary.reuse_plan_build_source = attribution.reuse_plan_build_source;
+        summary.reuse_seed_source = attribution.reuse_seed_source;
+        summary.reuse_seed_candidate_count = attribution.reuse_seed_candidate_count;
+        summary.reuse_seed_eviction_reason = attribution.reuse_seed_eviction_reason;
+        summary.reuse_plan_failure_reason = attribution.reuse_plan_failure_reason;
         summary.reuse_plan_take_if_unique_hit = attribution.reuse_plan_take_if_unique_hit;
         summary.reuse_plan_borrowed_cache_hit = attribution.reuse_plan_borrowed_cache_hit;
         summary.reuse_plan_build_ms = attribution.reuse_plan_build_ms;
@@ -3274,6 +3605,10 @@ impl ParserCoordinator {
             routine_body_reused_suffix_lowering_units,
             routine_body_rebuilt_lowering_units,
             reuse_plan_build_source: None,
+            reuse_seed_source: None,
+            reuse_seed_candidate_count: None,
+            reuse_seed_eviction_reason: None,
+            reuse_plan_failure_reason: None,
             reuse_plan_take_if_unique_hit: None,
             reuse_plan_borrowed_cache_hit: None,
             reuse_plan_build_ms: None,
@@ -3426,6 +3761,10 @@ impl ParserCoordinator {
             routine_body_reused_suffix_lowering_units,
             routine_body_rebuilt_lowering_units,
             reuse_plan_build_source: None,
+            reuse_seed_source: None,
+            reuse_seed_candidate_count: None,
+            reuse_seed_eviction_reason: None,
+            reuse_plan_failure_reason: None,
             reuse_plan_take_if_unique_hit: None,
             reuse_plan_borrowed_cache_hit: None,
             reuse_plan_build_ms: None,
@@ -4082,7 +4421,41 @@ impl ParserCoordinator {
     fn store_ast_memory(&self, content_hash: [u8; 32], result: &ParseResult) {
         if self.cache_enabled() {
             self.ast_cache.put(content_hash, Arc::new(result.clone()));
+            self.retain_lowering_reuse_save_family_seed(content_hash, result);
         }
+    }
+
+    fn retain_lowering_reuse_save_family_seed(&self, content_hash: [u8; 32], result: &ParseResult) {
+        if !self.cache_enabled() || !exact_program_lowering_reuse_enabled() {
+            return;
+        }
+        let mut seeds = self
+            .lowering_reuse_save_family_seeds
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        seeds.put(content_hash, Arc::new(result.clone()));
+    }
+
+    fn lookup_lowering_reuse_save_family_seed(
+        &self,
+        content_hash: [u8; 32],
+    ) -> LoweringReuseSaveFamilySeedLookup {
+        let seeds = self
+            .lowering_reuse_save_family_seeds
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        seeds.lookup(content_hash)
+    }
+
+    fn clear_lowering_reuse_save_family_seeds(
+        &self,
+        reason: ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+    ) {
+        let mut seeds = self
+            .lowering_reuse_save_family_seeds
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        seeds.clear_with_reason(reason);
     }
 
     fn update_symbol_index(&self, file_path: &Path, result: &ParseResult) {

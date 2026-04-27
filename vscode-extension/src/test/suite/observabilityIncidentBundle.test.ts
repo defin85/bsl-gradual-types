@@ -459,6 +459,8 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count: 2,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count: 1,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source: 'take_if_unique',
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source: 'ast_cache_owned',
+                        followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count: 1,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit: true,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit: false,
                         followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms: 2,
@@ -1017,6 +1019,16 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.strictEqual(
             bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source,
+            'ast_cache_owned'
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count,
+            1
+        );
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0]
                 .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit,
             false
         );
@@ -1309,6 +1321,16 @@ suite('Observability Incident Bundle Test Suite', () => {
         );
         assert.ok(
             bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source=ast_cache_owned'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count=1'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
                 'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms=2'
             )
         );
@@ -1420,6 +1442,9 @@ suite('Observability Incident Bundle Test Suite', () => {
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units = undefined;
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units = undefined;
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source = null;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source = undefined;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count = undefined;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason = undefined;
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit = undefined;
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit = undefined;
 
@@ -1444,6 +1469,75 @@ suite('Observability Incident Bundle Test Suite', () => {
                 gap.includes('diagnostics-save-trace-1')
                 && gap.includes('program_lowering tail without complete reuse evidence')
                 && gap.includes('reuse_outcome')
+            )
+        );
+    });
+
+    test('program-lowering seed eviction evidence should survive report, raw JSON, and summary', () => {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        const trace = timeline.response.traces[0];
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome = 'full_rebuild';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units = 0;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units = 2088;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source = null;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source = null;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count = 0;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason = 'superseded';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason = 'seed_evicted';
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit = false;
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit = false;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        const request = bundle.incidentReport.diagnostics_save_requests[0];
+        assert.strictEqual(
+            request
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason,
+            'superseded'
+        );
+        assert.strictEqual(
+            request
+                .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason,
+            'seed_evicted'
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason=superseded'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason=seed_evicted'
+            )
+        );
+
+        const rawTimeline = bundle.files.find(
+            (file) => file.relativePath === 'raw/diagnostics_save_timeline.json'
+        );
+        assert.ok(rawTimeline);
+        assert.ok(
+            rawTimeline.contents.includes(
+                '"followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason": "superseded"'
+            )
+        );
+        assert.ok(
+            rawTimeline.contents.includes(
+                '"followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason": "seed_evicted"'
+            )
+        );
+        assert.ok(
+            !bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('program_lowering tail without complete reuse evidence')
             )
         );
     });

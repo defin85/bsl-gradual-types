@@ -447,6 +447,10 @@ pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) program_lowering_routine_body_reused_suffix_lowering_units: Option<u64>,
     pub(crate) program_lowering_routine_body_rebuilt_lowering_units: Option<u64>,
     pub(crate) program_lowering_reuse_plan_build_source: Option<&'static str>,
+    pub(crate) program_lowering_reuse_seed_source: Option<&'static str>,
+    pub(crate) program_lowering_reuse_seed_candidate_count: Option<u64>,
+    pub(crate) program_lowering_reuse_seed_eviction_reason: Option<&'static str>,
+    pub(crate) program_lowering_reuse_plan_failure_reason: Option<&'static str>,
     pub(crate) program_lowering_reuse_plan_take_if_unique_hit: Option<bool>,
     pub(crate) program_lowering_reuse_plan_borrowed_cache_hit: Option<bool>,
     pub(crate) program_lowering_reuse_plan_build_ms: Option<u64>,
@@ -605,6 +609,16 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .map(|summary| summary.routine_body_rebuilt_lowering_units),
             program_lowering_reuse_plan_build_source: program_lowering_summary
                 .and_then(|summary| summary.reuse_plan_build_source.map(|value| value.as_str())),
+            program_lowering_reuse_seed_source: program_lowering_summary
+                .and_then(|summary| summary.reuse_seed_source.map(|value| value.as_str())),
+            program_lowering_reuse_seed_candidate_count: program_lowering_summary
+                .and_then(|summary| summary.reuse_seed_candidate_count),
+            program_lowering_reuse_seed_eviction_reason: program_lowering_summary.and_then(
+                |summary| summary.reuse_seed_eviction_reason.map(|value| value.as_str()),
+            ),
+            program_lowering_reuse_plan_failure_reason: program_lowering_summary.and_then(
+                |summary| summary.reuse_plan_failure_reason.map(|value| value.as_str()),
+            ),
             program_lowering_reuse_plan_take_if_unique_hit: program_lowering_summary
                 .and_then(|summary| summary.reuse_plan_take_if_unique_hit),
             program_lowering_reuse_plan_borrowed_cache_hit: program_lowering_summary
@@ -1055,6 +1069,16 @@ impl DiagnosticsReadySnapshotPhaseAttributionV2 {
                 .map(|summary| summary.routine_body_rebuilt_lowering_units),
             program_lowering_reuse_plan_build_source: program_lowering_summary
                 .and_then(|summary| summary.reuse_plan_build_source.map(|value| value.as_str())),
+            program_lowering_reuse_seed_source: program_lowering_summary
+                .and_then(|summary| summary.reuse_seed_source.map(|value| value.as_str())),
+            program_lowering_reuse_seed_candidate_count: program_lowering_summary
+                .and_then(|summary| summary.reuse_seed_candidate_count),
+            program_lowering_reuse_seed_eviction_reason: program_lowering_summary.and_then(
+                |summary| summary.reuse_seed_eviction_reason.map(|value| value.as_str()),
+            ),
+            program_lowering_reuse_plan_failure_reason: program_lowering_summary.and_then(
+                |summary| summary.reuse_plan_failure_reason.map(|value| value.as_str()),
+            ),
             program_lowering_reuse_plan_take_if_unique_hit: program_lowering_summary
                 .and_then(|summary| summary.reuse_plan_take_if_unique_hit),
             program_lowering_reuse_plan_borrowed_cache_hit: program_lowering_summary

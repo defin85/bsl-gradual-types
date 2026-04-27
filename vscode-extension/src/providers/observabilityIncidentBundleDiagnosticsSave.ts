@@ -46,6 +46,10 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source?: string | null;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source?: string | null;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason?: string | null;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason?: string | null;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit?: boolean;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit?: boolean;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms?: number;
@@ -204,7 +208,7 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         }
         if (hasProgramLoweringTailEvidence(trace) && !hasProgramLoweringReuseEvidence(trace)) {
             gaps.push(
-                `Diagnostics save trace ${trace.trace_id} has a program_lowering tail without complete reuse evidence; expected reuse_outcome, reused/rebuilt lowering units, reuse_plan_build_source, take_if_unique_hit, and borrowed_cache_hit.`
+                `Diagnostics save trace ${trace.trace_id} has a program_lowering tail without complete reuse evidence; expected reuse_outcome, reused/rebuilt lowering units, seed candidate count, reuse_plan_build_source or failure_reason, take_if_unique_hit, and borrowed_cache_hit.`
             );
         }
     }
@@ -281,6 +285,14 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source:
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason,
+            followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason:
+                trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit:
                 trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit,
             followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit:
@@ -376,11 +388,16 @@ function hasProgramLoweringTailEvidence(
 function hasProgramLoweringReuseEvidence(
     trace: ObservabilityIncidentDiagnosticsSaveSummary
 ): boolean {
+    const reusePlanBuildSource =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source;
+    const reusePlanFailureReason =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason;
     return (
         hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome)
         && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units)
         && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units)
-        && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source)
+        && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count)
+        && (hasValue(reusePlanBuildSource) || hasValue(reusePlanFailureReason))
         && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit)
         && hasValue(trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit)
     );
@@ -914,6 +931,26 @@ function formatFollowupProgramLoweringReuse(
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source;
     if (reusePlanBuildSource) {
         parts.push(`${prefix}_reuse_plan_build_source=${reusePlanBuildSource}`);
+    }
+    const reuseSeedSource =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source;
+    if (reuseSeedSource) {
+        parts.push(`${prefix}_reuse_seed_source=${reuseSeedSource}`);
+    }
+    const reuseSeedCandidateCount =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count;
+    if (hasValue(reuseSeedCandidateCount)) {
+        parts.push(`${prefix}_reuse_seed_candidate_count=${reuseSeedCandidateCount}`);
+    }
+    const reuseSeedEvictionReason =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason;
+    if (reuseSeedEvictionReason) {
+        parts.push(`${prefix}_reuse_seed_eviction_reason=${reuseSeedEvictionReason}`);
+    }
+    const reusePlanFailureReason =
+        trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason;
+    if (reusePlanFailureReason) {
+        parts.push(`${prefix}_reuse_plan_failure_reason=${reusePlanFailureReason}`);
     }
     const reusePlanTakeIfUniqueHit =
         trace.followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit;

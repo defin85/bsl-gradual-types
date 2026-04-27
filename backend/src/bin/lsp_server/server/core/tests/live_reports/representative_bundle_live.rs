@@ -1117,6 +1117,18 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
             let program_lowering_reuse_plan_build_source = timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source")
                 .and_then(|value| value.as_str());
+            let program_lowering_reuse_seed_source = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_source")
+                .and_then(|value| value.as_str());
+            let program_lowering_reuse_seed_candidate_count = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_candidate_count")
+                .and_then(|value| value.as_u64());
+            let program_lowering_reuse_seed_eviction_reason = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_seed_eviction_reason")
+                .and_then(|value| value.as_str());
+            let program_lowering_reuse_plan_failure_reason = timeline
+                .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_failure_reason")
+                .and_then(|value| value.as_str());
             let program_lowering_reuse_plan_take_if_unique_hit = timeline
                 .get("followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit")
                 .and_then(|value| value.as_bool());
@@ -1146,6 +1158,15 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                     semantic_query_dominates_parse_exec,
                     Some(true),
                     "p56 cycle {cycle_number} must prove that semantic_diagnostics_query now dominates ready-snapshot parse_exec, trace={timeline:?}, followup_ready_snapshot_program_lowering_ms={followup_ready_snapshot_program_lowering_ms:?}, program_lowering_reuse_outcome={program_lowering_reuse_outcome:?}, program_lowering_reused_lowering_units={program_lowering_reused_lowering_units:?}, program_lowering_rebuilt_lowering_units={program_lowering_rebuilt_lowering_units:?}, program_lowering_reused_window_count={program_lowering_reused_window_count:?}, program_lowering_rebuilt_window_count={program_lowering_rebuilt_window_count:?}, program_lowering_reuse_plan_build_source={program_lowering_reuse_plan_build_source:?}, program_lowering_reuse_plan_take_if_unique_hit={program_lowering_reuse_plan_take_if_unique_hit:?}, program_lowering_reuse_plan_borrowed_cache_hit={program_lowering_reuse_plan_borrowed_cache_hit:?}, program_lowering_reuse_plan_build_ms={program_lowering_reuse_plan_build_ms:?}, program_lowering_reused_progress_ms={program_lowering_reused_progress_ms:?}, program_lowering_rebuild_dispatch_ms={program_lowering_rebuild_dispatch_ms:?}"
+                );
+                assert!(
+                    program_lowering_reuse_seed_candidate_count.is_some(),
+                    "p56 cycle {cycle_number} must expose lowering reuse seed candidate count when program lowering evidence is present, trace={timeline:?}"
+                );
+                assert!(
+                    program_lowering_reuse_plan_build_source.is_some()
+                        || program_lowering_reuse_plan_failure_reason.is_some(),
+                    "p56 cycle {cycle_number} must expose either lowering reuse build source or explicit failure reason, trace={timeline:?}"
                 );
             }
 
@@ -1208,6 +1229,10 @@ fn p56_real_conf_big_diagnostics_representative_save_followup_bundle_live() {
                 "program_lowering_reused_window_count": program_lowering_reused_window_count,
                 "program_lowering_rebuilt_window_count": program_lowering_rebuilt_window_count,
                 "program_lowering_reuse_plan_build_source": program_lowering_reuse_plan_build_source,
+                "program_lowering_reuse_seed_source": program_lowering_reuse_seed_source,
+                "program_lowering_reuse_seed_candidate_count": program_lowering_reuse_seed_candidate_count,
+                "program_lowering_reuse_seed_eviction_reason": program_lowering_reuse_seed_eviction_reason,
+                "program_lowering_reuse_plan_failure_reason": program_lowering_reuse_plan_failure_reason,
                 "program_lowering_reuse_plan_take_if_unique_hit": program_lowering_reuse_plan_take_if_unique_hit,
                 "program_lowering_reuse_plan_borrowed_cache_hit": program_lowering_reuse_plan_borrowed_cache_hit,
                 "program_lowering_reuse_plan_build_ms": program_lowering_reuse_plan_build_ms,

@@ -858,6 +858,238 @@ mod parse_snapshot_tests {
     }
 
     #[test]
+    fn exact_lowering_reuse_plan_uses_save_family_seed_after_ast_cache_clear() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-save-family-seed.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+        parser.clear_ast_cache();
+
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        let plan = parser
+            .build_exact_lowering_reuse_plan(
+                &old_source,
+                &new_tree,
+                &changed_ranges,
+                &mut lowering_attribution,
+            )
+            .expect("bounded save-family seed must survive AST cache clearing");
+
+        assert_eq!(plan.outcome, LoweringReusePlanOutcome::RoutineBodyReuse);
+        assert_eq!(
+            lowering_attribution.reuse_plan_build_source,
+            Some(ParseSnapshotProgramLoweringReusePlanBuildSource::SaveFamily)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_seed_source,
+            Some(ParseSnapshotProgramLoweringReuseSeedSource::SaveFamily)
+        );
+        assert_eq!(lowering_attribution.reuse_seed_candidate_count, Some(1));
+        assert_eq!(
+            lowering_attribution.reuse_plan_take_if_unique_hit,
+            Some(false)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_borrowed_cache_hit,
+            Some(false)
+        );
+        assert_eq!(lowering_attribution.reuse_plan_failure_reason, None);
+    }
+
+    #[test]
+    fn exact_lowering_reuse_plan_reports_missing_seed_when_no_cache_or_seed_exists() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-missing-seed.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+        let cancellation_flag = AtomicBool::new(false);
+        let base_tree = parser
+            .tree_sitter
+            .parse_tree_only_with_cancellation(&base, None, &cancellation_flag)
+            .expect("base tree");
+        parser.tree_cache.set(
+            file_path.clone(),
+            base_tree,
+            base.clone(),
+            hash_content(&base),
+        );
+
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        assert!(
+            parser
+                .build_exact_lowering_reuse_plan(
+                    &old_source,
+                    &new_tree,
+                    &changed_ranges,
+                    &mut lowering_attribution,
+                )
+                .is_none(),
+            "planning must fail closed without an AST cache entry or save-family seed"
+        );
+        assert_eq!(lowering_attribution.reuse_seed_candidate_count, Some(0));
+        assert_eq!(
+            lowering_attribution.reuse_plan_failure_reason,
+            Some(ParseSnapshotProgramLoweringReusePlanFailureReason::MissingSeed)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_take_if_unique_hit,
+            Some(false)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_borrowed_cache_hit,
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn exact_lowering_reuse_seed_cleanup_records_cache_disabled_eviction_reason() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let base = build_large_ascii_callable_fixture(8);
+        let cache_key = ast_cache_key(&base);
+
+        parser.parse(&base).expect("seed parse");
+        assert_eq!(
+            parser
+                .lookup_lowering_reuse_save_family_seed(cache_key)
+                .candidate_count,
+            1
+        );
+
+        parser.set_cache_enabled(false);
+        let lookup = parser.lookup_lowering_reuse_save_family_seed(cache_key);
+        assert_eq!(lookup.candidate_count, 0);
+        assert_eq!(
+            lookup.eviction_reason,
+            Some(ParseSnapshotProgramLoweringReuseSeedEvictionReason::CacheDisabled)
+        );
+    }
+
+    #[test]
+    fn exact_lowering_reuse_seed_release_records_terminal_cleanup_eviction_reason() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let base = build_large_ascii_callable_fixture(8);
+        let cache_key = ast_cache_key(&base);
+
+        parser.parse(&base).expect("seed parse");
+        assert_eq!(
+            parser
+                .lookup_lowering_reuse_save_family_seed(cache_key)
+                .candidate_count,
+            1
+        );
+
+        parser.release_lowering_reuse_save_family_seed(
+            cache_key,
+            ParseSnapshotProgramLoweringReuseSeedEvictionReason::TerminalCleanup,
+        );
+        let lookup = parser.lookup_lowering_reuse_save_family_seed(cache_key);
+        assert_eq!(lookup.candidate_count, 0);
+        assert_eq!(
+            lookup.eviction_reason,
+            Some(ParseSnapshotProgramLoweringReuseSeedEvictionReason::TerminalCleanup)
+        );
+    }
+
+    #[test]
+    fn exact_lowering_reuse_seed_capacity_eviction_is_reported_as_failure_reason() {
+        let _env_lock = lock_parse_snapshot_test_env();
+        let parser = ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("snapshot-routine-body-reuse-evicted-seed.bsl");
+        let base = build_large_ascii_callable_fixture(24);
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), base.clone(), Vec::new())
+            .expect("seed snapshot");
+        for index in 0..LOWERING_REUSE_SAVE_FAMILY_SEED_CAPACITY {
+            let other = build_large_ascii_callable_fixture(8 + index)
+                .replace("Процедура Test()", &format!("Процедура Other{}()", index));
+            parser.parse(&other).expect("other seed parse");
+        }
+        parser.clear_ast_cache();
+
+        let (old_tree, old_source, _) = parser
+            .tree_cache
+            .get(&file_path)
+            .expect("seeded tree cache entry");
+        let (updated, edit) =
+            replace_first_occurrence_edit(&base, "Value12 = 12", "Value12 = 1200");
+        let cancellation_flag = AtomicBool::new(false);
+        let (new_tree, changed_ranges) = parser
+            .tree_sitter
+            .parse_incremental_tree_only_with_cancellation(
+                &updated,
+                Some(old_tree.as_ref()),
+                vec![edit],
+                &old_source,
+                &cancellation_flag,
+            )
+            .expect("incremental tree");
+        let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
+
+        assert!(
+            parser
+                .build_exact_lowering_reuse_plan(
+                    &old_source,
+                    &new_tree,
+                    &changed_ranges,
+                    &mut lowering_attribution,
+                )
+                .is_none(),
+            "bounded retention may fail closed but must not look like an unexplained full rebuild"
+        );
+        assert_eq!(lowering_attribution.reuse_seed_candidate_count, Some(0));
+        assert_eq!(
+            lowering_attribution.reuse_seed_eviction_reason,
+            Some(ParseSnapshotProgramLoweringReuseSeedEvictionReason::BoundedRetention)
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_failure_reason,
+            Some(ParseSnapshotProgramLoweringReusePlanFailureReason::SeedEvicted)
+        );
+    }
+
+    #[test]
     fn exact_lowering_reuse_plan_reuses_callable_body_siblings_around_changed_if_region() {
         let _env_lock = lock_parse_snapshot_test_env();
         let parser = ParserCoordinator::with_fallback();
@@ -967,16 +1199,19 @@ mod parse_snapshot_tests {
             .expect("incremental tree");
         let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
 
+        let plan = parser.build_exact_lowering_reuse_plan(
+            &old_source,
+            &new_tree,
+            &changed_ranges,
+            &mut lowering_attribution,
+        );
         assert!(
-            parser
-                .build_exact_lowering_reuse_plan(
-                    &old_source,
-                    &new_tree,
-                    &changed_ranges,
-                    &mut lowering_attribution,
-                )
-                .is_none(),
+            plan.is_none(),
             "var-declaration edit must fail closed instead of reusing lowered body windows"
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_failure_reason,
+            Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable)
         );
     }
 
@@ -1018,16 +1253,19 @@ mod parse_snapshot_tests {
             .expect("incremental tree");
         let mut lowering_attribution = ParseSnapshotProgramLoweringAttribution::default();
 
+        let plan = parser.build_exact_lowering_reuse_plan(
+            &old_source,
+            &new_tree,
+            &changed_ranges,
+            &mut lowering_attribution,
+        );
         assert!(
-            parser
-                .build_exact_lowering_reuse_plan(
-                    &old_source,
-                    &new_tree,
-                    &changed_ranges,
-                    &mut lowering_attribution,
-                )
-                .is_none(),
+            plan.is_none(),
             "try/except body edit must stay fail-closed until exception-region boundaries are proven sound"
+        );
+        assert_eq!(
+            lowering_attribution.reuse_plan_failure_reason,
+            Some(ParseSnapshotProgramLoweringReusePlanFailureReason::NotReusable)
         );
     }
 

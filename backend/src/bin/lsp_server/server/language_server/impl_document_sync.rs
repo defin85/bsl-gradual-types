@@ -468,6 +468,26 @@ fn parse_snapshot_text_hash(text: &str) -> [u8; 32] {
     *blake3::hash(text.as_bytes()).as_bytes()
 }
 
+fn lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(
+    state: super::super::DidSaveExactProducerLifecycleStateV2,
+) -> Option<
+    bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseSeedEvictionReason,
+> {
+    use super::super::DidSaveExactProducerLifecycleStateV2 as State;
+    use bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseSeedEvictionReason as Reason;
+
+    match state {
+        State::Admitted | State::Started => None,
+        State::DetachedDiagnosticsReadyPublished
+        | State::FullyMaterialized
+        | State::ExactTypeIndexDeadline => Some(Reason::TerminalCleanup),
+        State::Superseded => Some(Reason::Superseded),
+        State::Cancelled => Some(Reason::Cancelled),
+        State::Failed => Some(Reason::Failed),
+        State::ContinuityLost => Some(Reason::ContinuityLost),
+    }
+}
+
 fn late_ranged_did_change_parser_base_preservation_allowed(
     did_change_attribution: Option<&DidChangeParseSnapshotAttributionV2>,
     control: &super::super::BackgroundParseSnapshotApplyTaskControlV2,
@@ -971,13 +991,31 @@ impl BslLanguageServer {
         key: super::super::DidSaveExactProducerKeyV2,
         state: super::super::DidSaveExactProducerLifecycleStateV2,
     ) {
-        self.did_save_exact_producer_lifecycle_v2
-            .write()
-            .await
-            .insert(
-                key,
-                super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
-            );
+        {
+            self.did_save_exact_producer_lifecycle_v2
+                .write()
+                .await
+                .insert(
+                    key,
+                    super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
+                );
+        }
+        self.release_lowering_reuse_save_family_seed_for_did_save_lifecycle_v2(key, state);
+    }
+
+    fn release_lowering_reuse_save_family_seed_for_did_save_lifecycle_v2(
+        &self,
+        key: super::super::DidSaveExactProducerKeyV2,
+        state: super::super::DidSaveExactProducerLifecycleStateV2,
+    ) {
+        let Some(reason) =
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(state)
+        else {
+            return;
+        };
+        if let Some(parser) = self.coordinator.parser_coordinator() {
+            parser.release_lowering_reuse_save_family_seed(key.text_hash, reason);
+        }
     }
 
     async fn record_did_save_exact_producer_lifecycle_events_v2(
@@ -990,12 +1028,19 @@ impl BslLanguageServer {
         if events.is_empty() {
             return;
         }
-        let mut lifecycles = self.did_save_exact_producer_lifecycle_v2.write().await;
-        for (key, state) in events {
-            lifecycles.insert(
-                key,
-                super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
-            );
+        let mut seed_releases = Vec::with_capacity(events.len());
+        {
+            let mut lifecycles = self.did_save_exact_producer_lifecycle_v2.write().await;
+            for (key, state) in events {
+                lifecycles.insert(
+                    key,
+                    super::super::DidSaveExactProducerLifecycleEntryV2::new(state),
+                );
+                seed_releases.push((key, state));
+            }
+        }
+        for (key, state) in seed_releases {
+            self.release_lowering_reuse_save_family_seed_for_did_save_lifecycle_v2(key, state);
         }
     }
 
@@ -4959,5 +5004,56 @@ mod refactor59_same_version_seed_tests {
 
         assert!(Arc::ptr_eq(&seed.parse_result, &parse_result));
         assert_eq!(seed.source_text.as_ref(), text.as_ref());
+    }
+
+    #[test]
+    fn terminal_didsave_lifecycle_states_map_to_lowering_reuse_seed_evictions() {
+        use crate::server::DidSaveExactProducerLifecycleStateV2 as State;
+        use bsl_runtime::system::parser_coordinator::ParseSnapshotProgramLoweringReuseSeedEvictionReason as Reason;
+
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(State::Admitted),
+            None
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(State::Started),
+            None
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(
+                State::DetachedDiagnosticsReadyPublished
+            ),
+            Some(Reason::TerminalCleanup)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(
+                State::FullyMaterialized
+            ),
+            Some(Reason::TerminalCleanup)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(
+                State::ExactTypeIndexDeadline
+            ),
+            Some(Reason::TerminalCleanup)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(State::Superseded),
+            Some(Reason::Superseded)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(State::Cancelled),
+            Some(Reason::Cancelled)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(State::Failed),
+            Some(Reason::Failed)
+        );
+        assert_eq!(
+            lowering_reuse_seed_eviction_reason_for_did_save_lifecycle_state_v2(
+                State::ContinuityLost
+            ),
+            Some(Reason::ContinuityLost)
+        );
     }
 }

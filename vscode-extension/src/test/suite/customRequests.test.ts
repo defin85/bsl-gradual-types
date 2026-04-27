@@ -9,6 +9,7 @@ import {
     getObservabilityMetricsFetchResult,
     getObservabilityMetricsWithRequest,
     getCompletionTimeline,
+    getCurrentContextTimeline,
     getDiagnosticsSaveTimeline,
     resetObservabilityCapabilityCaches,
     validateMethod,
@@ -321,9 +322,40 @@ suite('LSP Custom Requests Test Suite', () => {
                     });
                 }
 
+                if (command === 'bsl.getCurrentContextTimeline') {
+                    return Promise.resolve({
+                        version: 1,
+                        traces: [
+                            {
+                                trace_id: 'current-context-trace-1',
+                                uri: 'file:///test.bsl',
+                                line: 4,
+                                character: 12,
+                                started_at_ms: 1_700_000_000_000,
+                                requested_version: 3,
+                                editor_session_id: 'editor-session-1',
+                                request_generation: 7,
+                                route: 'broker_follower',
+                                broker_role: 'follower',
+                                readiness_wait_result: 'no_matching_task',
+                                ready_snapshot_wait_ms: 1,
+                                ready_snapshot_wait_budget_ms: 100,
+                                broker_wait_result: 'resolved',
+                                broker_wait_ms: 2,
+                                broker_wait_budget_ms: 2000,
+                                parse_source: 'parser_coordinator',
+                                parse_ms: 11,
+                                wall_ms: 14,
+                                supersession_outcome: 'none',
+                                final_status: 'resolved',
+                            },
+                        ],
+                    });
+                }
+
                 if (command === 'bsl.getDiagnosticsSaveTimeline') {
                     return Promise.resolve({
-                        version: 21,
+                        version: 22,
                         traces: [
                             {
                                 trace_id: 'diagnostics-save-trace-1',
@@ -400,6 +432,7 @@ suite('LSP Custom Requests Test Suite', () => {
                                 followup_apply_lag_ms: 21,
                                 followup_wait_for_file_version_ms: 12,
                                 followup_snapshot_with_deps_ms: 8,
+                                followup_readiness_blocker_bucket: 'wait_for_file_version',
                                 terminal_outcome: 'published',
                             }
                         ]
@@ -736,6 +769,49 @@ suite('LSP Custom Requests Test Suite', () => {
         assert.strictEqual(sendRequestStub.callCount, callCountBefore);
     });
 
+    test('getCurrentContextTimeline should work via executeCommand', async function() {
+        this.timeout(5000);
+
+        const result = await getCurrentContextTimeline({ limit: 10 });
+        assert.strictEqual(result.kind, 'ok');
+        if (result.kind !== 'ok') {
+            return;
+        }
+
+        assert.strictEqual(result.response.version, 1);
+        assert.strictEqual(result.response.traces.length, 1);
+        assert.strictEqual(result.response.traces[0].trace_id, 'current-context-trace-1');
+        assert.strictEqual(result.response.traces[0].route, 'broker_follower');
+        assert.strictEqual(result.response.traces[0].broker_role, 'follower');
+        assert.strictEqual(result.response.traces[0].readiness_wait_result, 'no_matching_task');
+        assert.strictEqual(result.response.traces[0].broker_wait_result, 'resolved');
+        assert.strictEqual(result.response.traces[0].parse_source, 'parser_coordinator');
+        assert.strictEqual(result.response.traces[0].final_status, 'resolved');
+    });
+
+    test('getCurrentContextTimeline should fail-closed on Method not found', async function() {
+        this.timeout(5000);
+
+        sendRequestStub.resetBehavior();
+        sendRequestStub.callsFake((method: string, params: any) => {
+            if (
+                method === 'workspace/executeCommand'
+                && params?.command === 'bsl.getCurrentContextTimeline'
+            ) {
+                return Promise.reject({ code: -32601, message: 'Method not found' });
+            }
+            return Promise.resolve(null);
+        });
+
+        const first = await getCurrentContextTimeline({ limit: 1 });
+        assert.strictEqual(first.kind, 'unsupported');
+
+        const callCountBefore = sendRequestStub.callCount;
+        const second = await getCurrentContextTimeline({ limit: 1 });
+        assert.strictEqual(second.kind, 'unsupported');
+        assert.strictEqual(sendRequestStub.callCount, callCountBefore);
+    });
+
     test('getDiagnosticsSaveTimeline should work via executeCommand', async function() {
         this.timeout(5000);
 
@@ -745,7 +821,7 @@ suite('LSP Custom Requests Test Suite', () => {
             return;
         }
 
-        assert.strictEqual(result.response.version, 21);
+        assert.strictEqual(result.response.version, 22);
         assert.strictEqual(result.response.traces.length, 1);
         assert.strictEqual(result.response.traces[0].trace_id, 'diagnostics-save-trace-1');
         assert.strictEqual(result.response.traces[0].save_cycle_sequence, 2);
@@ -794,6 +870,10 @@ suite('LSP Custom Requests Test Suite', () => {
         );
         assert.strictEqual(result.response.traces[0].followup_runtime_queue_wait_ms, 6);
         assert.strictEqual(result.response.traces[0].followup_apply_lag_ms, 21);
+        assert.strictEqual(
+            result.response.traces[0].followup_readiness_blocker_bucket,
+            'wait_for_file_version'
+        );
     });
 
     test('getDiagnosticsSaveTimeline should fail-closed on Method not found', async function() {

@@ -25,7 +25,8 @@ use crate::commands::{
 use crate::handlers::{find_containing_function_in_parse_result, CurrentContextResponse};
 use crate::types::{
     AutoReindexCommandParams, AutoReindexStateResponse, BuildIndexParams, BuildIndexResponse,
-    CompletionTimelineRequest, CompletionTimelineResponse, DiagnosticsSaveTimelineRequest,
+    CompletionTimelineRequest, CompletionTimelineResponse, CurrentContextTimelineRequest,
+    CurrentContextTimelineResponse, DiagnosticsSaveTimelineRequest,
     DiagnosticsSaveTimelineResponse, GetCurrentContextParams, GetIndexStateParams,
     GetIndexStateResponse, GetSnapshotStatusRequest, IncrementalUpdateParams,
     IncrementalUpdateResponse, ObservabilityMetricsRequest, ObservabilityMetricsResponse,
@@ -211,9 +212,26 @@ enum CurrentContextParseBrokerAcquireOutcome {
 }
 
 enum CurrentContextParseBrokerWaitOutcome {
-    Resolved(CurrentContextParseSharedResult),
-    Superseded,
-    BudgetExhausted,
+    Resolved(CurrentContextParseSharedResult, Duration),
+    Superseded(Duration),
+    BudgetExhausted(Duration),
+}
+
+#[derive(Debug, Clone)]
+struct CurrentContextTimelineDraft {
+    uri: String,
+    line: u32,
+    character: u32,
+    started_at_ms: u64,
+    requested_version: Option<i32>,
+    editor_session_id: Option<String>,
+    request_generation: Option<u64>,
+    readiness_wait_result: Option<String>,
+    ready_snapshot_wait_ms: Option<u64>,
+    ready_snapshot_wait_budget_ms: Option<u64>,
+    broker_wait_result: Option<String>,
+    broker_wait_ms: Option<u64>,
+    broker_wait_budget_ms: Option<u64>,
 }
 
 impl CurrentContextSupersessionKey {
@@ -280,6 +298,74 @@ impl CurrentContextTerminalOutcome {
     }
 }
 
+impl CurrentContextTimelineDraft {
+    fn new(params: &GetCurrentContextParams, started_at_ms: u64) -> Self {
+        Self {
+            uri: params.uri.clone(),
+            line: params.line,
+            character: params.character,
+            started_at_ms,
+            requested_version: None,
+            editor_session_id: params.editor_session_id.clone(),
+            request_generation: params.request_generation,
+            readiness_wait_result: None,
+            ready_snapshot_wait_ms: None,
+            ready_snapshot_wait_budget_ms: None,
+            broker_wait_result: None,
+            broker_wait_ms: None,
+            broker_wait_budget_ms: None,
+        }
+    }
+
+    fn to_trace(
+        &self,
+        trace_id: String,
+        route: Option<CurrentContextRoute>,
+        terminal_outcome: CurrentContextTerminalOutcome,
+        parse_observability: Option<CurrentContextParseObservability>,
+        wall_elapsed: Duration,
+    ) -> crate::types::CurrentContextTimelineTrace {
+        let route_label = route.map(|route| route.as_str().to_string());
+        let broker_role = match route {
+            Some(CurrentContextRoute::BrokerLeader) => Some("leader".to_string()),
+            Some(CurrentContextRoute::BrokerFollower) => Some("follower".to_string()),
+            _ => None,
+        };
+        let supersession_outcome = match terminal_outcome {
+            CurrentContextTerminalOutcome::Superseded => "superseded",
+            CurrentContextTerminalOutcome::BudgetExhausted => "budget_exhausted",
+            _ => "none",
+        };
+        crate::types::CurrentContextTimelineTrace {
+            trace_id,
+            uri: self.uri.clone(),
+            line: self.line,
+            character: self.character,
+            started_at_ms: self.started_at_ms,
+            requested_version: self.requested_version,
+            editor_session_id: self.editor_session_id.clone(),
+            request_generation: self.request_generation,
+            route: route_label,
+            broker_role,
+            readiness_wait_result: self.readiness_wait_result.clone(),
+            ready_snapshot_wait_ms: self.ready_snapshot_wait_ms,
+            ready_snapshot_wait_budget_ms: self.ready_snapshot_wait_budget_ms,
+            broker_wait_result: self.broker_wait_result.clone(),
+            broker_wait_ms: self.broker_wait_ms,
+            broker_wait_budget_ms: self.broker_wait_budget_ms,
+            parse_source: parse_observability.map(|value| value.parse_source.to_string()),
+            parse_ms: parse_observability.map(|value| duration_to_ms(value.parse_elapsed)),
+            wall_ms: duration_to_ms(wall_elapsed),
+            supersession_outcome: supersession_outcome.to_string(),
+            final_status: terminal_outcome.as_str().to_string(),
+        }
+    }
+}
+
+fn duration_to_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u64::MAX as u128) as u64
+}
+
 fn acquire_current_context_parse_broker_entry(
     broker: &CurrentContextParseBroker,
     key: CurrentContextParseBrokerKey,
@@ -317,25 +403,26 @@ async fn wait_for_current_context_parse_broker_result(
     supersession_key: Option<&CurrentContextSupersessionKey>,
     wait_budget: Duration,
 ) -> CurrentContextParseBrokerWaitOutcome {
+    let wait_started = Instant::now();
     let deadline = tokio::time::Instant::now() + wait_budget;
     loop {
         if let Some(result) = entry.take_shared_result() {
-            return CurrentContextParseBrokerWaitOutcome::Resolved(result);
+            return CurrentContextParseBrokerWaitOutcome::Resolved(result, wait_started.elapsed());
         }
         if let Some(supersession_key) = supersession_key {
             if !is_latest_current_context_generation(latest_generations, supersession_key) {
-                return CurrentContextParseBrokerWaitOutcome::Superseded;
+                return CurrentContextParseBrokerWaitOutcome::Superseded(wait_started.elapsed());
             }
         }
 
         let now = tokio::time::Instant::now();
         if now >= deadline {
-            return CurrentContextParseBrokerWaitOutcome::BudgetExhausted;
+            return CurrentContextParseBrokerWaitOutcome::BudgetExhausted(wait_started.elapsed());
         }
 
         let notified = entry.notify.notified();
         if let Some(result) = entry.take_shared_result() {
-            return CurrentContextParseBrokerWaitOutcome::Resolved(result);
+            return CurrentContextParseBrokerWaitOutcome::Resolved(result, wait_started.elapsed());
         }
 
         tokio::select! {
@@ -568,6 +655,30 @@ impl BslLanguageServer {
         state.to_response()
     }
 
+    fn record_current_context_request_observability_and_timeline(
+        &self,
+        timeline: &CurrentContextTimelineDraft,
+        route: Option<CurrentContextRoute>,
+        terminal_outcome: CurrentContextTerminalOutcome,
+        parse_observability: Option<CurrentContextParseObservability>,
+        wall_elapsed: Duration,
+    ) {
+        record_current_context_request_observability(
+            self.coordinator.as_ref(),
+            route,
+            terminal_outcome,
+            parse_observability,
+            wall_elapsed,
+        );
+        self.record_current_context_timeline_trace(timeline.to_trace(
+            self.next_current_context_timeline_trace_id(),
+            route,
+            terminal_outcome,
+            parse_observability,
+            wall_elapsed,
+        ));
+    }
+
     pub(crate) async fn begin_full_index_operation(
         &self,
         kind: FullIndexOperationKind,
@@ -688,6 +799,9 @@ impl BslLanguageServer {
             params.uri, params.line, params.character
         );
 
+        let current_context_started = Instant::now();
+        let mut current_context_timeline =
+            CurrentContextTimelineDraft::new(&params, super::unix_timestamp_ms());
         let uri = Url::parse(&params.uri).map_err(|e| {
             tower_lsp::jsonrpc::Error::invalid_params(format!("Invalid URI: {}", e))
         })?;
@@ -712,18 +826,20 @@ impl BslLanguageServer {
                     .ok()
                     .and_then(|path| read_bsl_file(&path).ok().map(Arc::from))
             });
+        current_context_timeline.requested_version =
+            shadow_state.as_ref().map(|state| state.version);
         let Some(file_text) = file_text else {
             warn!(
                 uri = %uri,
                 file_id = file_id.0,
                 "getCurrentContext: document text is unavailable"
             );
-            record_current_context_request_observability(
-                self.coordinator.as_ref(),
+            self.record_current_context_request_observability_and_timeline(
+                &current_context_timeline,
                 None,
                 CurrentContextTerminalOutcome::ParseUnavailable,
                 None,
-                Duration::ZERO,
+                current_context_started.elapsed(),
             );
             return Ok(CurrentContextResponse::empty());
         };
@@ -747,7 +863,6 @@ impl BslLanguageServer {
         };
         let line = params.line;
         let character = params.character;
-        let current_context_started = Instant::now();
         let broker_key = CurrentContextParseBrokerKey::new(
             file_id,
             shadow_state.as_ref().map(|state| state.version),
@@ -760,12 +875,12 @@ impl BslLanguageServer {
                 supersession_key,
                 &broker_key,
             ) {
-                record_current_context_request_observability(
-                    self.coordinator.as_ref(),
+                self.record_current_context_request_observability_and_timeline(
+                    &current_context_timeline,
                     None,
                     CurrentContextTerminalOutcome::Superseded,
                     None,
-                    Duration::ZERO,
+                    current_context_started.elapsed(),
                 );
                 return Ok(CurrentContextResponse::empty());
             }
@@ -774,10 +889,14 @@ impl BslLanguageServer {
 
         let mut exact_task_wait_superseded = false;
         let ready_parse_snapshot = if ready_parse_snapshot.is_some() {
+            current_context_timeline.readiness_wait_result = Some("immediate".to_string());
+            current_context_timeline.ready_snapshot_wait_ms = Some(0);
             ready_parse_snapshot
         } else if let Some(shadow_state) = shadow_state.as_ref() {
             let wait_started = Instant::now();
             let wait_budget = current_context_ready_snapshot_wait_budget();
+            current_context_timeline.ready_snapshot_wait_budget_ms =
+                Some(duration_to_ms(wait_budget));
             let expected_text_hash = Some(broker_key.text_hash);
             loop {
                 let ready = self
@@ -796,6 +915,9 @@ impl BslLanguageServer {
                         )
                     });
                 if ready.is_some() {
+                    current_context_timeline.readiness_wait_result = Some("ready".to_string());
+                    current_context_timeline.ready_snapshot_wait_ms =
+                        Some(duration_to_ms(wait_started.elapsed()));
                     break ready;
                 }
                 if supersession_key.as_ref().is_some_and(|supersession_key| {
@@ -805,10 +927,17 @@ impl BslLanguageServer {
                     )
                 }) {
                     exact_task_wait_superseded = true;
+                    current_context_timeline.readiness_wait_result = Some("superseded".to_string());
+                    current_context_timeline.ready_snapshot_wait_ms =
+                        Some(duration_to_ms(wait_started.elapsed()));
                     break None;
                 }
                 let remaining = wait_budget.saturating_sub(wait_started.elapsed());
                 if remaining == Duration::ZERO {
+                    current_context_timeline.readiness_wait_result =
+                        Some("budget_exhausted".to_string());
+                    current_context_timeline.ready_snapshot_wait_ms =
+                        Some(duration_to_ms(wait_started.elapsed()));
                     break None;
                 }
                 let Some(task_control) = self
@@ -819,6 +948,10 @@ impl BslLanguageServer {
                     )
                     .await
                 else {
+                    current_context_timeline.readiness_wait_result =
+                        Some("no_matching_task".to_string());
+                    current_context_timeline.ready_snapshot_wait_ms =
+                        Some(duration_to_ms(wait_started.elapsed()));
                     break None;
                 };
                 let materialized = task_control.materialized_notify.notified();
@@ -832,12 +965,13 @@ impl BslLanguageServer {
                 }
             }
         } else {
+            current_context_timeline.readiness_wait_result = Some("no_shadow_state".to_string());
             None
         };
 
         if exact_task_wait_superseded {
-            record_current_context_request_observability(
-                self.coordinator.as_ref(),
+            self.record_current_context_request_observability_and_timeline(
+                &current_context_timeline,
                 None,
                 CurrentContextTerminalOutcome::Superseded,
                 None,
@@ -864,8 +998,8 @@ impl BslLanguageServer {
             } else {
                 CurrentContextTerminalOutcome::Superseded
             };
-            record_current_context_request_observability(
-                self.coordinator.as_ref(),
+            self.record_current_context_request_observability_and_timeline(
+                &current_context_timeline,
                 Some(CurrentContextRoute::ReadySnapshot),
                 terminal_outcome,
                 Some(parse_observability),
@@ -889,6 +1023,8 @@ impl BslLanguageServer {
             broker_key.clone(),
         ) {
             CurrentContextParseBrokerAcquireOutcome::Leader(entry) => {
+                current_context_timeline.broker_wait_result = Some("leader".to_string());
+                current_context_timeline.broker_wait_ms = Some(0);
                 if supersession_key.as_ref().is_some_and(|supersession_key| {
                     !current_context_generation_allows_equivalent_parse_reuse(
                         self.current_context_latest_generations.as_ref(),
@@ -1008,8 +1144,8 @@ impl BslLanguageServer {
                                 error = %err,
                                 "getCurrentContext: auxiliary parse task failed"
                             );
-                            record_current_context_request_observability(
-                                self.coordinator.as_ref(),
+                            self.record_current_context_request_observability_and_timeline(
+                                &current_context_timeline,
                                 Some(CurrentContextRoute::BrokerLeader),
                                 CurrentContextTerminalOutcome::ParseUnavailable,
                                 None,
@@ -1028,20 +1164,28 @@ impl BslLanguageServer {
                 }
             }
             CurrentContextParseBrokerAcquireOutcome::Follower(entry) => {
+                let broker_wait_budget = current_context_parse_broker_wait_budget();
+                current_context_timeline.broker_wait_budget_ms =
+                    Some(duration_to_ms(broker_wait_budget));
                 match wait_for_current_context_parse_broker_result(
                     &entry,
                     self.current_context_latest_generations.as_ref(),
                     supersession_key.as_ref(),
-                    current_context_parse_broker_wait_budget(),
+                    broker_wait_budget,
                 )
                 .await
                 {
-                    CurrentContextParseBrokerWaitOutcome::Resolved(shared_result) => {
+                    CurrentContextParseBrokerWaitOutcome::Resolved(shared_result, elapsed) => {
+                        current_context_timeline.broker_wait_result = Some("resolved".to_string());
+                        current_context_timeline.broker_wait_ms = Some(duration_to_ms(elapsed));
                         (CurrentContextRoute::BrokerFollower, shared_result)
                     }
-                    CurrentContextParseBrokerWaitOutcome::Superseded => {
-                        record_current_context_request_observability(
-                            self.coordinator.as_ref(),
+                    CurrentContextParseBrokerWaitOutcome::Superseded(elapsed) => {
+                        current_context_timeline.broker_wait_result =
+                            Some("superseded".to_string());
+                        current_context_timeline.broker_wait_ms = Some(duration_to_ms(elapsed));
+                        self.record_current_context_request_observability_and_timeline(
+                            &current_context_timeline,
                             Some(CurrentContextRoute::BrokerFollower),
                             CurrentContextTerminalOutcome::Superseded,
                             None,
@@ -1049,9 +1193,12 @@ impl BslLanguageServer {
                         );
                         return Ok(CurrentContextResponse::empty());
                     }
-                    CurrentContextParseBrokerWaitOutcome::BudgetExhausted => {
-                        record_current_context_request_observability(
-                            self.coordinator.as_ref(),
+                    CurrentContextParseBrokerWaitOutcome::BudgetExhausted(elapsed) => {
+                        current_context_timeline.broker_wait_result =
+                            Some("budget_exhausted".to_string());
+                        current_context_timeline.broker_wait_ms = Some(duration_to_ms(elapsed));
+                        self.record_current_context_request_observability_and_timeline(
+                            &current_context_timeline,
                             Some(CurrentContextRoute::BrokerFollower),
                             CurrentContextTerminalOutcome::BudgetExhausted,
                             None,
@@ -1082,8 +1229,8 @@ impl BslLanguageServer {
                     } else {
                         CurrentContextTerminalOutcome::Resolved
                     };
-                record_current_context_request_observability(
-                    self.coordinator.as_ref(),
+                self.record_current_context_request_observability_and_timeline(
+                    &current_context_timeline,
                     Some(route),
                     terminal_outcome,
                     Some(parse_observability),
@@ -1114,8 +1261,8 @@ impl BslLanguageServer {
                     } else {
                         CurrentContextTerminalOutcome::ParseUnavailable
                     };
-                record_current_context_request_observability(
-                    self.coordinator.as_ref(),
+                self.record_current_context_request_observability_and_timeline(
+                    &current_context_timeline,
                     Some(route),
                     terminal_outcome,
                     Some(parse_observability),
@@ -1134,8 +1281,8 @@ impl BslLanguageServer {
                 Ok(CurrentContextResponse::empty())
             }
             CurrentContextParseSharedResult::Superseded => {
-                record_current_context_request_observability(
-                    self.coordinator.as_ref(),
+                self.record_current_context_request_observability_and_timeline(
+                    &current_context_timeline,
                     Some(route),
                     CurrentContextTerminalOutcome::Superseded,
                     None,
@@ -1497,6 +1644,38 @@ impl BslLanguageServer {
 
         Ok(CompletionTimelineResponse {
             version: super::COMPLETION_TIMELINE_VERSION,
+            traces: traces.into_iter().rev().collect(),
+        })
+    }
+
+    pub(crate) async fn handle_get_current_context_timeline(
+        &self,
+        params: CurrentContextTimelineRequest,
+    ) -> JsonRpcResult<CurrentContextTimelineResponse> {
+        let default_limit = super::CURRENT_CONTEXT_TIMELINE_MAX_ENTRIES;
+        let limit = params
+            .limit
+            .unwrap_or(default_limit)
+            .clamp(1, super::CURRENT_CONTEXT_TIMELINE_MAX_ENTRIES);
+        let uri_filter = params.uri.as_deref();
+
+        let traces_guard = self
+            .current_context_timeline_traces
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let traces = traces_guard
+            .iter()
+            .rev()
+            .filter(|trace| match uri_filter {
+                Some(uri) => trace.uri == uri,
+                None => true,
+            })
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        Ok(CurrentContextTimelineResponse {
+            version: super::CURRENT_CONTEXT_TIMELINE_VERSION,
             traces: traces.into_iter().rev().collect(),
         })
     }
@@ -2158,7 +2337,38 @@ mod tests {
             followup_apply_lag_ms: None,
             followup_wait_for_file_version_ms: None,
             followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
             terminal_outcome: Some("published".to_string()),
+        }
+    }
+
+    fn sample_current_context_trace(
+        trace_id: &str,
+        uri: &str,
+    ) -> crate::types::CurrentContextTimelineTrace {
+        crate::types::CurrentContextTimelineTrace {
+            trace_id: trace_id.to_string(),
+            uri: uri.to_string(),
+            line: 7,
+            character: 3,
+            started_at_ms: 1_700_000_000_000,
+            requested_version: Some(11),
+            editor_session_id: Some("editor-session-1".to_string()),
+            request_generation: Some(4),
+            route: Some("broker_follower".to_string()),
+            broker_role: Some("follower".to_string()),
+            readiness_wait_result: Some("no_matching_task".to_string()),
+            ready_snapshot_wait_ms: Some(1),
+            ready_snapshot_wait_budget_ms: Some(100),
+            broker_wait_result: Some("resolved".to_string()),
+            broker_wait_ms: Some(9),
+            broker_wait_budget_ms: Some(2_000),
+            parse_source: Some("syntax_fallback".to_string()),
+            parse_ms: Some(21),
+            wall_ms: 31,
+            supersession_outcome: "none".to_string(),
+            final_status: "resolved".to_string(),
         }
     }
 
@@ -2226,6 +2436,64 @@ mod tests {
         assert!(trace.server_edge_details.is_none());
         assert_eq!(trace.stages.len(), 1);
         assert_eq!(trace.stages[0].status, "cancelled");
+    }
+
+    #[tokio::test]
+    async fn current_context_timeline_retention_evicts_oldest_first() {
+        let server = create_test_server();
+        for idx in 0..205_u64 {
+            server.record_current_context_timeline_trace(sample_current_context_trace(
+                &format!("current-context-trace-{idx}"),
+                "file:///timeline-current-context.bsl",
+            ));
+        }
+
+        let response = server
+            .handle_get_current_context_timeline(
+                crate::types::CurrentContextTimelineRequest::default(),
+            )
+            .await
+            .expect("current context timeline response");
+
+        assert_eq!(
+            response.version,
+            crate::server::CURRENT_CONTEXT_TIMELINE_VERSION
+        );
+        assert_eq!(response.traces.len(), 200);
+        assert_eq!(
+            response.traces.first().map(|trace| trace.trace_id.as_str()),
+            Some("current-context-trace-5")
+        );
+        assert_eq!(
+            response.traces.last().map(|trace| trace.trace_id.as_str()),
+            Some("current-context-trace-204")
+        );
+    }
+
+    #[tokio::test]
+    async fn current_context_timeline_can_filter_by_uri() {
+        let server = create_test_server();
+        server.record_current_context_timeline_trace(sample_current_context_trace(
+            "current-context-trace-a",
+            "file:///timeline-a.bsl",
+        ));
+        server.record_current_context_timeline_trace(sample_current_context_trace(
+            "current-context-trace-b",
+            "file:///timeline-b.bsl",
+        ));
+
+        let response = server
+            .handle_get_current_context_timeline(crate::types::CurrentContextTimelineRequest {
+                limit: Some(10),
+                uri: Some("file:///timeline-b.bsl".to_string()),
+            })
+            .await
+            .expect("current context timeline response");
+
+        assert_eq!(response.traces.len(), 1);
+        assert_eq!(response.traces[0].trace_id, "current-context-trace-b");
+        assert_eq!(response.traces[0].broker_role.as_deref(), Some("follower"));
+        assert_eq!(response.traces[0].final_status, "resolved");
     }
 
     #[tokio::test]

@@ -930,6 +930,27 @@ pub(super) async fn live_transport_get_completion_timeline(
         .expect("result field")
 }
 
+pub(super) async fn live_transport_get_current_context_timeline(
+    harness: &mut LiveLspTransportHarness,
+    request_id: i64,
+    limit: usize,
+) -> serde_json::Value {
+    let execute_response = harness
+        .send_request(
+            request_id,
+            "workspace/executeCommand",
+            serde_json::json!({
+                "command": "bsl.getCurrentContextTimeline",
+                "arguments": [{ "limit": limit }],
+            }),
+        )
+        .await;
+    execute_response
+        .get("result")
+        .cloned()
+        .expect("result field")
+}
+
 pub(super) async fn take_test_request_server_edge_trace(
     request_id: i64,
 ) -> crate::server::request_context::TestRequestServerEdgeTrace {

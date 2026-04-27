@@ -924,6 +924,51 @@ export type CompletionTimelineFetchResult =
     | { kind: 'unsupported' }
     | { kind: 'error'; message: string };
 
+export interface CurrentContextTimelineRequest {
+    limit?: number;
+    uri?: string;
+}
+
+export interface CurrentContextTimelineTrace {
+    trace_id: string;
+    uri: string;
+    line: number;
+    character: number;
+    started_at_ms: number;
+    requested_version?: number;
+    editor_session_id?: string;
+    request_generation?: number;
+    route?: 'ready_snapshot' | 'broker_leader' | 'broker_follower';
+    broker_role?: 'leader' | 'follower';
+    readiness_wait_result?:
+        | 'immediate'
+        | 'ready'
+        | 'superseded'
+        | 'budget_exhausted'
+        | 'no_matching_task'
+        | 'no_shadow_state';
+    ready_snapshot_wait_ms?: number;
+    ready_snapshot_wait_budget_ms?: number;
+    broker_wait_result?: 'leader' | 'resolved' | 'superseded' | 'budget_exhausted';
+    broker_wait_ms?: number;
+    broker_wait_budget_ms?: number;
+    parse_source?: 'ready_snapshot' | 'parser_coordinator' | 'syntax_fallback' | 'parse_unavailable';
+    parse_ms?: number;
+    wall_ms: number;
+    supersession_outcome: 'none' | 'superseded' | 'budget_exhausted';
+    final_status: 'resolved' | 'parse_unavailable' | 'superseded' | 'budget_exhausted';
+}
+
+export interface CurrentContextTimelineResponse {
+    version: number;
+    traces: CurrentContextTimelineTrace[];
+}
+
+export type CurrentContextTimelineFetchResult =
+    | { kind: 'ok'; response: CurrentContextTimelineResponse }
+    | { kind: 'unsupported' }
+    | { kind: 'error'; message: string };
+
 export interface DiagnosticsSaveTimelineRequest {
     limit?: number;
 }
@@ -1083,6 +1128,15 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_apply_lag_ms?: number;
     followup_wait_for_file_version_ms?: number;
     followup_snapshot_with_deps_ms?: number;
+    followup_readiness_blocker_bucket?:
+        | 'wait_for_file_version'
+        | 'snapshot_with_deps'
+        | 'runtime_queue_wait'
+        | 'apply_lag'
+        | 'post_ready_publish_gate'
+        | 'ready_snapshot_task'
+        | 'unclassified_readiness_residual';
+    followup_unclassified_readiness_residual_ms?: number;
     terminal_outcome?: string;
 }
 
@@ -1245,6 +1299,7 @@ export function resetObservabilityCapabilityCaches(): void {
     observabilityMetricsUnsupported = false;
     observabilityMetricsUnsupportedNotified = false;
     completionTimelineUnsupported = false;
+    currentContextTimelineUnsupported = false;
     diagnosticsSaveTimelineUnsupported = false;
 }
 
@@ -1319,6 +1374,7 @@ export async function getObservabilityMetricsWithRequest(
 }
 
 let completionTimelineUnsupported = false;
+let currentContextTimelineUnsupported = false;
 let diagnosticsSaveTimelineUnsupported = false;
 
 /**
@@ -1361,6 +1417,40 @@ export async function getCompletionTimeline(
         }
         const message = error instanceof Error ? error.message : String(error);
         logger.error('Failed to get completion timeline', error);
+        return { kind: 'error', message };
+    }
+}
+
+export async function getCurrentContextTimeline(
+    request: CurrentContextTimelineRequest = {}
+): Promise<CurrentContextTimelineFetchResult> {
+    if (currentContextTimelineUnsupported) {
+        return { kind: 'unsupported' };
+    }
+
+    const client = (await import('./client/index')).getLanguageClient();
+    if (!client) {
+        return { kind: 'error', message: 'LSP client not available' };
+    }
+
+    const args = Object.keys(request).length > 0 ? [request] : [];
+    try {
+        const result = await client.sendRequest('workspace/executeCommand', {
+            command: 'bsl.getCurrentContextTimeline',
+            arguments: args
+        });
+        if (!result || typeof result !== 'object') {
+            return { kind: 'error', message: 'Invalid current context timeline response' };
+        }
+        return { kind: 'ok', response: result as CurrentContextTimelineResponse };
+    } catch (error) {
+        if (isMethodNotFoundError(error)) {
+            currentContextTimelineUnsupported = true;
+            logger.warn('[Current Context Timeline] LSP server does not support bsl.getCurrentContextTimeline');
+            return { kind: 'unsupported' };
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error('Failed to get current context timeline', error);
         return { kind: 'error', message };
     }
 }

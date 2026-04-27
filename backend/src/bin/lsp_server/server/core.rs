@@ -76,6 +76,11 @@ fn next_completion_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64
     format!("completion-trace-{id}")
 }
 
+fn next_current_context_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64) -> String {
+    let id = counter.fetch_add(1, Ordering::Relaxed);
+    format!("current-context-trace-{id}")
+}
+
 fn next_diagnostics_save_timeline_trace_id_from(counter: &std::sync::atomic::AtomicU64) -> String {
     let id = counter.fetch_add(1, Ordering::Relaxed);
     format!("diagnostics-save-trace-{id}")
@@ -221,6 +226,8 @@ fn finalize_diagnostics_save_timeline_trace_for_terminal_outcome(
     trace.followup_blocker_reason = None;
     trace.followup_wait_for_file_version_ms = None;
     trace.followup_snapshot_with_deps_ms = None;
+    trace.followup_readiness_blocker_bucket = None;
+    trace.followup_unclassified_readiness_residual_ms = None;
     trace.terminal_outcome = Some(terminal_outcome);
 }
 
@@ -231,6 +238,64 @@ fn clear_diagnostics_save_timeline_followup_wait_inner(
     trace.followup_blocker_reason = None;
     trace.followup_wait_for_file_version_ms = None;
     trace.followup_snapshot_with_deps_ms = None;
+    trace.followup_readiness_blocker_bucket = None;
+    trace.followup_unclassified_readiness_residual_ms = None;
+}
+
+fn positive_timing_ms(value: Option<u64>) -> bool {
+    value.is_some_and(|value| value > 0)
+}
+
+fn refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(
+    trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
+) {
+    let followup_publish = trace.followup_publish.as_ref();
+    let publish_wait_for_file_version_ms =
+        followup_publish.and_then(|publish| publish.wait_for_file_version_ms);
+    let publish_snapshot_with_deps_ms =
+        followup_publish.and_then(|publish| publish.snapshot_with_deps_ms);
+    let publish_runtime_queue_wait_ms =
+        followup_publish.and_then(|publish| publish.runtime_queue_wait_ms);
+    let publish_apply_lag_ms = followup_publish.and_then(|publish| publish.apply_lag_ms);
+
+    let bucket = if positive_timing_ms(trace.followup_wait_for_file_version_ms)
+        || positive_timing_ms(publish_wait_for_file_version_ms)
+    {
+        Some("wait_for_file_version")
+    } else if positive_timing_ms(trace.followup_snapshot_with_deps_ms)
+        || positive_timing_ms(publish_snapshot_with_deps_ms)
+    {
+        Some("snapshot_with_deps")
+    } else if positive_timing_ms(trace.followup_runtime_queue_wait_ms)
+        || positive_timing_ms(publish_runtime_queue_wait_ms)
+    {
+        Some("runtime_queue_wait")
+    } else if positive_timing_ms(trace.followup_apply_lag_ms)
+        || positive_timing_ms(publish_apply_lag_ms)
+    {
+        Some("apply_lag")
+    } else if trace.followup_blocker_reason.as_deref() == Some("post_ready_publish_gate") {
+        Some("post_ready_publish_gate")
+    } else if trace.followup_ready_snapshot_task_state.is_some()
+        || trace.followup_ready_snapshot_timeout_leaf.is_some()
+        || trace
+            .followup_did_save_exact_producer_lifecycle_state_at_timeout
+            .is_some()
+    {
+        Some("ready_snapshot_task")
+    } else if positive_timing_ms(trace.followup_ready_snapshot_ready_install_ms) {
+        Some("unclassified_readiness_residual")
+    } else {
+        None
+    };
+
+    trace.followup_readiness_blocker_bucket = bucket.map(str::to_string);
+    trace.followup_unclassified_readiness_residual_ms =
+        if bucket == Some("unclassified_readiness_residual") {
+            trace.followup_ready_snapshot_ready_install_ms
+        } else {
+            None
+        };
 }
 
 fn duration_to_nonzero_ms(duration: Option<Duration>) -> Option<u64> {
@@ -459,6 +524,7 @@ fn overwrite_diagnostics_save_timeline_ready_snapshot_phase_attribution_view_inn
         &mut trace.followup_ready_snapshot_dominant_phase_ms,
         attribution.dominant_phase_ms,
     );
+    refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
 }
 
 fn merge_diagnostics_save_timeline_ready_snapshot_phase_attribution_inner(
@@ -647,6 +713,19 @@ fn record_completion_timeline_trace_inner(
     );
     traces.push_back(trace);
     while traces.len() > super::COMPLETION_TIMELINE_MAX_ENTRIES {
+        let _ = traces.pop_front();
+    }
+}
+
+fn record_current_context_timeline_trace_inner(
+    traces: &StdMutex<VecDeque<crate::types::CurrentContextTimelineTrace>>,
+    trace: crate::types::CurrentContextTimelineTrace,
+) {
+    let mut traces = traces
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    traces.push_back(trace);
+    while traces.len() > super::CURRENT_CONTEXT_TIMELINE_MAX_ENTRIES {
         let _ = traces.pop_front();
     }
 }
@@ -887,6 +966,8 @@ impl BslLanguageServer {
             Arc::new(super::completion_cancellation::CompletionCancellationRegistry::default());
         let completion_timeline_traces = Arc::new(StdMutex::new(VecDeque::new()));
         let next_completion_timeline_trace_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
+        let current_context_timeline_traces = Arc::new(StdMutex::new(VecDeque::new()));
+        let next_current_context_timeline_trace_id = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let diagnostics_save_timeline_store =
             Arc::new(StdMutex::new(super::DiagnosticsSaveTimelineStore::default()));
         let next_diagnostics_save_timeline_trace_id =
@@ -952,6 +1033,8 @@ impl BslLanguageServer {
             current_context_parse_broker: Arc::new(StdMutex::new(HashMap::new())),
             completion_timeline_traces: completion_timeline_traces.clone(),
             next_completion_timeline_trace_id: next_completion_timeline_trace_id.clone(),
+            current_context_timeline_traces: current_context_timeline_traces.clone(),
+            next_current_context_timeline_trace_id: next_current_context_timeline_trace_id.clone(),
             diagnostics_save_timeline_store: diagnostics_save_timeline_store.clone(),
             did_change_parse_snapshot_evidence_store: did_change_parse_snapshot_evidence_store
                 .clone(),
@@ -1060,6 +1143,22 @@ impl BslLanguageServer {
         trace: crate::types::CompletionTimelineTrace,
     ) {
         record_completion_timeline_trace_inner(self.completion_timeline_traces.as_ref(), trace);
+    }
+
+    pub(crate) fn next_current_context_timeline_trace_id(&self) -> String {
+        next_current_context_timeline_trace_id_from(
+            self.next_current_context_timeline_trace_id.as_ref(),
+        )
+    }
+
+    pub(crate) fn record_current_context_timeline_trace(
+        &self,
+        trace: crate::types::CurrentContextTimelineTrace,
+    ) {
+        record_current_context_timeline_trace_inner(
+            self.current_context_timeline_traces.as_ref(),
+            trace,
+        );
     }
 
     pub(crate) fn begin_diagnostics_save_timeline_cycle(
@@ -1235,6 +1334,8 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
@@ -1416,6 +1517,8 @@ impl BslLanguageServer {
                     followup_apply_lag_ms: None,
                     followup_wait_for_file_version_ms: None,
                     followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                     terminal_outcome: None,
                 }
             });
@@ -1483,6 +1586,7 @@ impl BslLanguageServer {
                 clear_diagnostics_save_timeline_followup_wait_inner(trace);
             }
 
+            refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
             trace.terminal_outcome = diagnostics_save_timeline_cycle_terminal_outcome(trace);
             trace.terminal_outcome.is_some()
         };
@@ -1732,6 +1836,8 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
@@ -1780,6 +1886,7 @@ impl BslLanguageServer {
                 ));
             }
         }
+        refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
     }
 
     pub(crate) fn record_diagnostics_save_timeline_followup_producer_lifecycle_state(
@@ -1799,6 +1906,7 @@ impl BslLanguageServer {
                 trace.followup_did_save_exact_producer_final_lifecycle_state =
                     Some(producer_lifecycle_state.to_string());
             }
+            refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
         }
     }
 
@@ -1819,6 +1927,7 @@ impl BslLanguageServer {
             {
                 trace.followup_did_save_exact_producer_lifecycle_state_at_timeout =
                     Some(producer_lifecycle_state.to_string());
+                refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
             }
         }
     }
@@ -1838,6 +1947,7 @@ impl BslLanguageServer {
                 Some(producer_lifecycle_state.to_string());
             trace.followup_did_save_exact_producer_final_lifecycle_state =
                 Some(producer_lifecycle_state.to_string());
+            refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
         }
     }
 
@@ -2086,6 +2196,8 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
@@ -2270,6 +2382,8 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
@@ -2460,6 +2574,8 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
@@ -2492,6 +2608,7 @@ impl BslLanguageServer {
             wait_for_file_version_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
         trace.followup_snapshot_with_deps_ms =
             snapshot_with_deps_ms.map(|value| value.as_millis().min(u64::MAX as u128) as u64);
+        refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
     }
 
     pub(crate) fn record_diagnostics_save_timeline_followup_blocker_reason(
@@ -2668,10 +2785,13 @@ impl BslLanguageServer {
                 followup_apply_lag_ms: None,
                 followup_wait_for_file_version_ms: None,
                 followup_snapshot_with_deps_ms: None,
+                followup_readiness_blocker_bucket: None,
+                followup_unclassified_readiness_residual_ms: None,
                 terminal_outcome: None,
             }
         });
         trace.followup_blocker_reason = Some(reason.to_string());
+        refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(trace);
     }
 
     pub(crate) fn diagnostics_save_timeline_fastlane_progress(

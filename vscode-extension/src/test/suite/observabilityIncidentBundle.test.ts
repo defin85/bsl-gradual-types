@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import {
     CompletionTimelineFetchResult,
+    CurrentContextTimelineFetchResult,
     DiagnosticsSaveTimelineFetchResult,
     ObservabilityMetricsFetchResult,
     ObservabilityMetricsResponse,
@@ -363,11 +364,45 @@ suite('Observability Incident Bundle Test Suite', () => {
         };
     }
 
+    function sampleCurrentContextTimeline(): CurrentContextTimelineFetchResult {
+        return {
+            kind: 'ok',
+            response: {
+                version: 1,
+                traces: [
+                    {
+                        trace_id: 'current-context-trace-1',
+                        uri: 'file:///tmp/test.bsl',
+                        line: 12,
+                        character: 8,
+                        started_at_ms: 1_700_000_000_100,
+                        requested_version: 9,
+                        editor_session_id: 'editor-session-1',
+                        request_generation: 14,
+                        route: 'broker_follower',
+                        broker_role: 'follower',
+                        readiness_wait_result: 'no_matching_task',
+                        ready_snapshot_wait_ms: 1,
+                        ready_snapshot_wait_budget_ms: 100,
+                        broker_wait_result: 'resolved',
+                        broker_wait_ms: 12,
+                        broker_wait_budget_ms: 2000,
+                        parse_source: 'parser_coordinator',
+                        parse_ms: 86,
+                        wall_ms: 101,
+                        supersession_outcome: 'none',
+                        final_status: 'resolved',
+                    },
+                ],
+            },
+        };
+    }
+
     function sampleDiagnosticsSaveTimeline(): DiagnosticsSaveTimelineFetchResult {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-1',
@@ -441,6 +476,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_apply_lag_ms: 23,
                         followup_wait_for_file_version_ms: 9,
                         followup_snapshot_with_deps_ms: 7,
+                        followup_readiness_blocker_bucket: 'wait_for_file_version',
                         terminal_outcome: 'published',
                     },
                 ],
@@ -452,7 +488,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-2',
@@ -503,6 +539,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_wait_reason: 'apply_lag',
                         followup_blocker_reason: 'apply_lag',
                         followup_apply_lag_ms: 1770,
+                        followup_readiness_blocker_bucket: 'apply_lag',
                     },
                 ],
             },
@@ -513,7 +550,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-3',
@@ -541,6 +578,7 @@ suite('Observability Incident Bundle Test Suite', () => {
                         followup_ready_snapshot_relief_valve_budget_ms: 500,
                         followup_shadow_state_available: false,
                         followup_wait_reason: 'runtime_queue_wait',
+                        followup_readiness_blocker_bucket: 'ready_snapshot_task',
                     },
                 ],
             },
@@ -551,7 +589,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-4',
@@ -609,7 +647,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         return {
             kind: 'ok',
             response: {
-                version: 21,
+                version: 22,
                 traces: [
                     {
                         trace_id: 'diagnostics-save-trace-5',
@@ -818,6 +856,7 @@ suite('Observability Incident Bundle Test Suite', () => {
         const bundle = buildObservabilityIncidentBundle({
             capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
             completionTimeline: sampleTimeline(),
+            currentContextTimeline: sampleCurrentContextTimeline(),
             completionTraceLimit: 50,
             clientProbes: [
                 sampleProbe({
@@ -855,15 +894,23 @@ suite('Observability Incident Bundle Test Suite', () => {
                 'summary.md',
                 'incident.json',
                 'raw/completion_timeline.json',
+                'raw/current_context_timeline.json',
                 'raw/diagnostics_save_timeline.json',
                 'raw/client_probes.json',
                 'raw/observability_metrics.json',
             ]
         );
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.status, 'available');
+        assert.strictEqual(bundle.incidentReport.sources.current_context_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(bundle.incidentReport.sources.completion_timeline.contract_version, 25);
-        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 21);
+        assert.strictEqual(bundle.incidentReport.sources.current_context_timeline.contract_version, 1);
+        assert.strictEqual(bundle.incidentReport.sources.diagnostics_save_timeline.contract_version, 22);
+        assert.strictEqual(bundle.incidentReport.current_context_window.request_count, 1);
+        assert.strictEqual(
+            bundle.incidentReport.current_context_requests[0].route,
+            'broker_follower'
+        );
         assert.strictEqual(bundle.incidentReport.sources.client_probes.probe_count, 2);
         assert.strictEqual(bundle.incidentReport.sources.observability_metrics.uptime_seconds, 184);
         assert.deepStrictEqual(bundle.incidentReport.capture_scope, {
@@ -875,6 +922,15 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.strictEqual(bundle.incidentReport.requests.length, 2);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_window.request_count, 1);
         assert.strictEqual(bundle.incidentReport.diagnostics_save_requests.length, 1);
+        assert.strictEqual(
+            bundle.incidentReport.diagnostics_save_requests[0].followup_readiness_blocker_bucket,
+            'wait_for_file_version'
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_readiness_blocker_bucket=wait_for_file_version'
+            )
+        );
         assert.deepStrictEqual(bundle.incidentReport.diagnostics_save_metrics.followup_wait_state, [
             { name: 'apply_lag', count: 2 },
             { name: 'runtime_queue_wait', count: 1 },
@@ -1253,6 +1309,49 @@ suite('Observability Incident Bundle Test Suite', () => {
         assert.ok(bundle.summaryMarkdown.includes('correlation=correlated:probe-1'));
         assert.ok(bundle.summaryMarkdown.includes('raw/diagnostics_save_timeline.json'));
         assert.ok(bundle.summaryMarkdown.includes('raw/completion_timeline.json'));
+    });
+
+    test('unclassified readiness residual should keep acceptance gap after budget widening', () => {
+        const timeline = sampleDiagnosticsSaveTimeline();
+        if (timeline.kind !== 'ok') {
+            throw new Error('expected ok diagnostics save timeline fixture');
+        }
+        const trace = timeline.response.traces[0];
+        trace.followup_wait_for_file_version_ms = undefined;
+        trace.followup_snapshot_with_deps_ms = undefined;
+        trace.followup_runtime_queue_wait_ms = undefined;
+        trace.followup_apply_lag_ms = undefined;
+        trace.followup_ready_snapshot_ready_install_ms = 2193;
+        trace.followup_ready_snapshot_relief_valve_budget_ms = 5000;
+        trace.followup_readiness_blocker_bucket = 'unclassified_readiness_residual';
+        trace.followup_unclassified_readiness_residual_ms = 2193;
+
+        const bundle = buildObservabilityIncidentBundle({
+            capturedAtMs: Date.parse('2026-03-19T10:23:21.000Z'),
+            completionTimeline: sampleTimeline(),
+            diagnosticsSaveTimeline: timeline,
+            completionTraceLimit: 50,
+            clientProbes: [sampleProbe()],
+            observabilityMetrics: sampleMetrics(),
+        });
+
+        assert.ok(
+            bundle.incidentReport.gaps.some((gap) =>
+                gap.includes('diagnostics-save-trace-1')
+                && gap.includes('unclassified readiness residual 2193ms')
+                && gap.includes('budget widening alone is not accepted')
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_readiness_blocker_bucket=unclassified_readiness_residual'
+            )
+        );
+        assert.ok(
+            bundle.summaryMarkdown.includes(
+                'followup_unclassified_readiness_residual_ms=2193'
+            )
+        );
     });
 
     test('bundle should render provided build identity into incident report and raw attachments', () => {

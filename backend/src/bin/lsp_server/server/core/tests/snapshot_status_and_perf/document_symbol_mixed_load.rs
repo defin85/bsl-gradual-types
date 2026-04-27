@@ -503,8 +503,12 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
 
         let completion_timeline =
             live_transport_get_completion_timeline(&mut harness, 39_300_900, 160).await;
+        let current_context_timeline =
+            live_transport_get_current_context_timeline(&mut harness, 39_300_901, 160).await;
+        let diagnostics_save_timeline =
+            live_transport_get_diagnostics_save_timeline(&mut harness, 39_300_902, 160).await;
         let observability_metrics =
-            live_transport_get_observability_metrics(&mut harness, 39_300_901).await;
+            live_transport_get_observability_metrics(&mut harness, 39_300_903).await;
         let timeline_traces = completion_timeline
             .get("traces")
             .and_then(|value| value.as_array())
@@ -518,6 +522,44 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             !filtered_traces.is_empty(),
             "expected non-empty completion timeline traces for real conf_big module"
         );
+        let current_context_timeline_traces = current_context_timeline
+            .get("traces")
+            .and_then(|value| value.as_array())
+            .expect("current-context timeline traces array");
+        let filtered_current_context_traces: Vec<serde_json::Value> = current_context_timeline_traces
+            .iter()
+            .filter(|trace| trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str()))
+            .cloned()
+            .collect();
+        assert!(
+            !filtered_current_context_traces.is_empty(),
+            "expected first-class current-context timeline traces for real conf_big module"
+        );
+        let diagnostics_save_timeline_traces = diagnostics_save_timeline
+            .get("traces")
+            .and_then(|value| value.as_array())
+            .expect("diagnostics-save timeline traces array");
+        let filtered_diagnostics_save_traces: Vec<serde_json::Value> =
+            diagnostics_save_timeline_traces
+                .iter()
+                .filter(|trace| {
+                    trace.get("uri").and_then(|value| value.as_str()) == Some(uri.as_str())
+                })
+                .cloned()
+                .collect();
+        assert!(
+            !filtered_diagnostics_save_traces.is_empty(),
+            "expected diagnostics-save timeline traces for real conf_big module"
+        );
+        let diagnostics_save_readiness_bucket_traces = filtered_diagnostics_save_traces
+            .iter()
+            .filter(|trace| {
+                trace
+                    .get("followup_readiness_blocker_bucket")
+                    .and_then(|value| value.as_str())
+                    .is_some()
+            })
+            .count();
 
         let histograms = observability_metrics
             .get("histograms")
@@ -2042,6 +2084,9 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "measured_document_symbol_fresh_outline_leak_samples": measured_document_symbol_fresh_outline_leak_samples,
                 "measured_current_context_response_seen_samples": measured_current_context_response_seen_samples,
                 "measured_current_context_parse_attempts_total": measured_current_context_parse_attempts_total,
+                "current_context_timeline_trace_count_for_uri": filtered_current_context_traces.len(),
+                "diagnostics_save_timeline_trace_count_for_uri": filtered_diagnostics_save_traces.len(),
+                "diagnostics_save_readiness_bucket_trace_count_for_uri": diagnostics_save_readiness_bucket_traces,
                 "measured_parse_snapshot_full_total_delta": measured_parse_snapshot_full_total_delta,
                 "measured_parse_snapshot_incremental_total_delta": measured_parse_snapshot_incremental_total_delta,
                 "measured_parse_snapshot_reused_total_delta": measured_parse_snapshot_reused_total_delta,
@@ -2173,6 +2218,16 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
                 "trace_count": filtered_traces.len(),
                 "selected_traces": filtered_traces,
                 "raw": completion_timeline,
+            },
+            "current_context_timeline": {
+                "trace_count": filtered_current_context_traces.len(),
+                "selected_traces": filtered_current_context_traces.clone(),
+                "raw": current_context_timeline,
+            },
+            "diagnostics_save_timeline": {
+                "trace_count": filtered_diagnostics_save_traces.len(),
+                "selected_traces": filtered_diagnostics_save_traces.clone(),
+                "raw": diagnostics_save_timeline,
             },
             "validation": {
                 "parse_cold_start": parse_cold_start_validation,
@@ -2501,6 +2556,10 @@ fn p39_real_conf_big_document_symbol_mixed_load_gate_live() {
             measured_current_context_parse_attempts_total > 0,
             "mixed-load gate must exercise current-context as a real auxiliary parse-only load instead of a no-op request stream, measured_current_context_parse_attempts_total={}, measured_samples={measured_samples:?}",
             measured_current_context_parse_attempts_total
+        );
+        assert!(
+            diagnostics_save_readiness_bucket_traces > 0,
+            "mixed-load gate must expose diagnostics-save readiness blocker buckets in first-class timeline evidence, filtered_diagnostics_save_traces={filtered_diagnostics_save_traces:?}"
         );
         assert!(
             measured_parse_snapshot_full_total_delta <= TOTAL_MIXED_LOAD_REQUESTS as u64,

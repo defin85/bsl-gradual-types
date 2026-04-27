@@ -73,6 +73,8 @@ export interface ObservabilityIncidentDiagnosticsSaveSummary {
     followup_apply_lag_ms?: number;
     followup_wait_for_file_version_ms?: number;
     followup_snapshot_with_deps_ms?: number;
+    followup_readiness_blocker_bucket?: string;
+    followup_unclassified_readiness_residual_ms?: number;
     terminal_outcome?: string;
 }
 
@@ -174,6 +176,16 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
         gaps.push(
             `Diagnostics save timeline v${diagnosticsSaveTimeline.response.version} does not expose exact ready-snapshot assembly checkpoint attribution by design.`
         );
+    }
+    for (const trace of diagnosticsSaveTimeline.response.traces) {
+        if (
+            trace.followup_readiness_blocker_bucket === 'unclassified_readiness_residual'
+            && isPositiveTimingValue(trace.followup_unclassified_readiness_residual_ms)
+        ) {
+            gaps.push(
+                `Diagnostics save trace ${trace.trace_id} has unclassified readiness residual ${trace.followup_unclassified_readiness_residual_ms}ms; budget widening alone is not accepted without explicit blocker attribution.`
+            );
+        }
     }
 
     return {
@@ -292,6 +304,9 @@ export function buildObservabilityIncidentDiagnosticsSaveSection(
             followup_apply_lag_ms: trace.followup_apply_lag_ms,
             followup_wait_for_file_version_ms: trace.followup_wait_for_file_version_ms,
             followup_snapshot_with_deps_ms: trace.followup_snapshot_with_deps_ms,
+            followup_readiness_blocker_bucket: trace.followup_readiness_blocker_bucket,
+            followup_unclassified_readiness_residual_ms:
+                trace.followup_unclassified_readiness_residual_ms,
             terminal_outcome: trace.terminal_outcome,
         })),
         gaps,
@@ -376,7 +391,9 @@ function formatFollowupWait(
     runtimeQueueWaitMs: number | undefined,
     applyLagMs: number | undefined,
     waitForFileVersionMs: number | undefined,
-    snapshotWithDepsMs: number | undefined
+    snapshotWithDepsMs: number | undefined,
+    readinessBlockerBucket: string | undefined,
+    unclassifiedReadinessResidualMs: number | undefined
 ): string | undefined {
     if (
         !reason
@@ -387,6 +404,8 @@ function formatFollowupWait(
         && !isPositiveTimingValue(applyLagMs)
         && !isPositiveTimingValue(waitForFileVersionMs)
         && !isPositiveTimingValue(snapshotWithDepsMs)
+        && !readinessBlockerBucket
+        && !isPositiveTimingValue(unclassifiedReadinessResidualMs)
     ) {
         return undefined;
     }
@@ -415,6 +434,14 @@ function formatFollowupWait(
     }
     if (isPositiveTimingValue(snapshotWithDepsMs)) {
         parts.push(`followup_snapshot_with_deps_ms=${snapshotWithDepsMs}`);
+    }
+    if (readinessBlockerBucket) {
+        parts.push(`followup_readiness_blocker_bucket=${readinessBlockerBucket}`);
+    }
+    if (isPositiveTimingValue(unclassifiedReadinessResidualMs)) {
+        parts.push(
+            `followup_unclassified_readiness_residual_ms=${unclassifiedReadinessResidualMs}`
+        );
     }
     return parts.join(' | ');
 }
@@ -886,7 +913,9 @@ export function renderDiagnosticsSaveSummaryLines(
             request.followup_runtime_queue_wait_ms,
             request.followup_apply_lag_ms,
             request.followup_wait_for_file_version_ms,
-            request.followup_snapshot_with_deps_ms
+            request.followup_snapshot_with_deps_ms,
+            request.followup_readiness_blocker_bucket,
+            request.followup_unclassified_readiness_residual_ms
         ),
     ].filter((line): line is string => Boolean(line)));
 }

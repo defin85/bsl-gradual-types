@@ -1,4 +1,116 @@
 #[tokio::test]
+async fn diagnostics_save_timeline_classifies_followup_readiness_wait_bucket() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///diagnostics-save-readiness-bucket.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1224),
+        diagnostics_generation: 41,
+        save_cycle_sequence: 13,
+        requested_version: 22,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_followup_wait_state(
+        &uri,
+        key,
+        "semantic_work",
+        None,
+        None,
+        Some(Duration::from_millis(12)),
+        Some(Duration::from_millis(80)),
+        Some("recomputed"),
+        Some("generic_pipeline"),
+        Some("salsa"),
+        Some("salsa"),
+        None,
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_readiness_blocker_bucket.as_deref(),
+        Some("wait_for_file_version")
+    );
+    assert_eq!(trace.followup_unclassified_readiness_residual_ms, None);
+}
+
+#[tokio::test]
+async fn diagnostics_save_timeline_classifies_followup_publish_readiness_bucket() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///diagnostics-save-publish-readiness-bucket.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1226),
+        diagnostics_generation: 43,
+        save_cycle_sequence: 15,
+        requested_version: 24,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_profile_result(
+        &uri,
+        key,
+        crate::server::DiagnosticsSaveTimelineProfileResult {
+            profile: bsl_runtime::application::DiagnosticsProfile::IdleHeavy,
+            disposition: bsl_runtime::application::DiagnosticsDisposition::Published,
+            publish: Some(crate::types::DiagnosticsSaveTimelinePublishTrace {
+                profile: "idle_heavy".to_string(),
+                publish_kind: "full".to_string(),
+                outcome: "published".to_string(),
+                elapsed_ms: 144,
+                runtime_queue_wait_ms: None,
+                apply_lag_ms: Some(62),
+                wait_for_file_version_ms: Some(62),
+                snapshot_with_deps_ms: Some(7),
+                ..Default::default()
+            }),
+        },
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_readiness_blocker_bucket.as_deref(),
+        Some("wait_for_file_version")
+    );
+    assert_eq!(trace.followup_unclassified_readiness_residual_ms, None);
+}
+
+#[tokio::test]
+async fn diagnostics_save_timeline_marks_unclassified_ready_install_residual() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri = Url::parse("file:///diagnostics-save-unclassified-residual.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1225),
+        diagnostics_generation: 42,
+        save_cycle_sequence: 14,
+        requested_version: 23,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        None,
+        None,
+        None,
+        Some(true),
+        Some(diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2 {
+            parse_exec_ms: Some(84),
+            ready_install_ms: Some(2_193),
+            ..Default::default()
+        }),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_readiness_blocker_bucket.as_deref(),
+        Some("unclassified_readiness_residual")
+    );
+    assert_eq!(
+        trace.followup_unclassified_readiness_residual_ms,
+        Some(2_193)
+    );
+}
+
+#[tokio::test]
 async fn p24_diagnostics_save_timeline_reports_relief_valve_timeout_for_exact_worker() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///p24-ready-snapshot-relief-timeout.bsl").expect("uri");

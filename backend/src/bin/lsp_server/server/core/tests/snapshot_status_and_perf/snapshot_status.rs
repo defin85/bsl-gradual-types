@@ -529,7 +529,7 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
     server.latest_document_shadow_state_v2.write().await.insert(
         file_id,
         DocumentShadowStateV2 {
-            version: 21,
+            version: 22,
             text: text.clone(),
         },
     );
@@ -543,7 +543,7 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
                 target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
                 target: Arc::new(std::sync::Mutex::new(
                     crate::server::BackgroundParseSnapshotApplyTargetV2 {
-                        requested_version: 21,
+                        requested_version: 22,
                         text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
                         save_cycle_sequence: None,
                         source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,

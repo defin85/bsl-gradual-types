@@ -1,5 +1,6 @@
 import {
     CompletionTimelineFetchResult,
+    CurrentContextTimelineFetchResult,
     DiagnosticsSaveTimelineFetchResult,
     ObservabilityMetricsFetchResult,
 } from '../lsp/customRequests';
@@ -31,6 +32,7 @@ import {
 
 const BUNDLE_FORMAT = 'bsl-observability-incident/v1';
 const COMPLETION_TIMELINE_RAW_PATH = 'raw/completion_timeline.json';
+const CURRENT_CONTEXT_TIMELINE_RAW_PATH = 'raw/current_context_timeline.json';
 const DIAGNOSTICS_SAVE_TIMELINE_RAW_PATH = 'raw/diagnostics_save_timeline.json';
 const CLIENT_PROBES_RAW_PATH = 'raw/client_probes.json';
 const OBSERVABILITY_METRICS_RAW_PATH = 'raw/observability_metrics.json';
@@ -64,6 +66,7 @@ export interface ObservabilityIncidentBundleBuildIdentity {
 export interface ObservabilityIncidentBundleInput {
     capturedAtMs: number;
     completionTimeline: CompletionTimelineFetchResult;
+    currentContextTimeline?: CurrentContextTimelineFetchResult;
     diagnosticsSaveTimeline?: DiagnosticsSaveTimelineFetchResult;
     completionTraceLimit: number;
     clientProbes: CompletionProbe[];
@@ -93,6 +96,23 @@ export interface ObservabilityIncidentMetricsIntegritySummary {
     runtime_saturation_sample_total?: number;
 }
 
+export interface ObservabilityIncidentCurrentContextSummary {
+    trace_id: string;
+    uri: string;
+    position: string;
+    route?: string;
+    broker_role?: string;
+    readiness_wait_result?: string;
+    ready_snapshot_wait_ms?: number;
+    broker_wait_result?: string;
+    broker_wait_ms?: number;
+    parse_source?: string;
+    parse_ms?: number;
+    wall_ms: number;
+    supersession_outcome: string;
+    final_status: string;
+}
+
 export interface ObservabilityIncidentBundleReport {
     bundle_format: string;
     captured_at: string;
@@ -103,6 +123,10 @@ export interface ObservabilityIncidentBundleReport {
         request_count: number;
     };
     requests: ObservabilityIncidentRequestSummary[];
+    current_context_window: {
+        request_count: number;
+    };
+    current_context_requests: ObservabilityIncidentCurrentContextSummary[];
     diagnostics_save_window: {
         request_count: number;
     };
@@ -115,6 +139,7 @@ export interface ObservabilityIncidentBundleReport {
     did_change_parse_snapshot_entries: ObservabilityIncidentDidChangeParseSnapshotSummary[];
     sources: {
         completion_timeline: ObservabilityIncidentBundleSource;
+        current_context_timeline: ObservabilityIncidentBundleSource;
         diagnostics_save_timeline: ObservabilityIncidentBundleSource;
         client_probes: ObservabilityIncidentBundleSource;
         observability_metrics: ObservabilityIncidentBundleSource;
@@ -125,6 +150,7 @@ export interface ObservabilityIncidentBundleReport {
         path: string;
         section:
             | 'completion_timeline'
+            | 'current_context_timeline'
             | 'diagnostics_save_timeline'
             | 'client_probes'
             | 'observability_metrics'
@@ -144,6 +170,9 @@ export function buildObservabilityIncidentBundle(
     input: ObservabilityIncidentBundleInput
 ): ObservabilityIncidentBundle {
     const capturedAtIso = new Date(input.capturedAtMs).toISOString();
+    const currentContextTimelineProvided = input.currentContextTimeline !== undefined;
+    const currentContextTimeline: CurrentContextTimelineFetchResult =
+        input.currentContextTimeline ?? { kind: 'unsupported' };
     const diagnosticsSaveTimeline: DiagnosticsSaveTimelineFetchResult =
         input.diagnosticsSaveTimeline ?? { kind: 'unsupported' };
     const rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'] = [];
@@ -152,6 +181,9 @@ export function buildObservabilityIncidentBundle(
     const requestSection = buildObservabilityIncidentRequestSection(
         input.completionTimeline,
         input.clientProbes
+    );
+    const currentContextRequests = buildCurrentContextRequestSummaries(
+        currentContextTimeline
     );
     const diagnosticsSaveSection = buildObservabilityIncidentDiagnosticsSaveSection(
         diagnosticsSaveTimeline
@@ -178,6 +210,13 @@ export function buildObservabilityIncidentBundle(
         gaps,
         files
     );
+    const currentContextTimelineSource = buildCurrentContextTimelineSource(
+        currentContextTimeline,
+        rawAttachments,
+        gaps,
+        files,
+        currentContextTimelineProvided
+    );
     const diagnosticsSaveTimelineSource = buildDiagnosticsSaveTimelineSource(
         diagnosticsSaveTimeline,
         rawAttachments,
@@ -202,6 +241,10 @@ export function buildObservabilityIncidentBundle(
             request_count: requestSection.requestCount,
         },
         requests: requestSection.requests,
+        current_context_window: {
+            request_count: currentContextRequests.length,
+        },
+        current_context_requests: currentContextRequests,
         diagnostics_save_window: {
             request_count: diagnosticsSaveSection.requestCount,
         },
@@ -214,6 +257,7 @@ export function buildObservabilityIncidentBundle(
         did_change_parse_snapshot_entries: didChangeParseSnapshotSection.entries,
         sources: {
             completion_timeline: completionTimelineSource,
+            current_context_timeline: currentContextTimelineSource,
             diagnostics_save_timeline: diagnosticsSaveTimelineSource,
             client_probes: clientProbesSource,
             observability_metrics: observabilityMetricsSource,
@@ -379,6 +423,77 @@ function buildCompletionTimelineSource(
         status: 'unavailable',
         message: completionTimeline.message,
     };
+}
+
+function buildCurrentContextTimelineSource(
+    currentContextTimeline: CurrentContextTimelineFetchResult,
+    rawAttachments: ObservabilityIncidentBundleReport['raw_attachments'],
+    gaps: string[],
+    files: ObservabilityIncidentBundleFile[],
+    recordGap: boolean
+): ObservabilityIncidentBundleSource {
+    if (currentContextTimeline.kind === 'ok') {
+        rawAttachments.push({
+            path: CURRENT_CONTEXT_TIMELINE_RAW_PATH,
+            section: 'current_context_timeline',
+            classification: 'authoritative_server_trace',
+        });
+        files.push({
+            relativePath: CURRENT_CONTEXT_TIMELINE_RAW_PATH,
+            contents: `${JSON.stringify(currentContextTimeline.response, null, 2)}\n`,
+        });
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'available',
+            raw_attachment: CURRENT_CONTEXT_TIMELINE_RAW_PATH,
+            trace_count: currentContextTimeline.response.traces.length,
+            contract_version: currentContextTimeline.response.version,
+        };
+    }
+
+    if (currentContextTimeline.kind === 'unsupported') {
+        if (recordGap) {
+            gaps.push('Current context timeline is unsupported by the connected server.');
+        }
+        return {
+            classification: 'authoritative_server_trace',
+            status: 'unsupported',
+            message: 'Connected server does not support bsl.getCurrentContextTimeline.',
+        };
+    }
+
+    if (recordGap) {
+        gaps.push(`Current context timeline is unavailable: ${currentContextTimeline.message}`);
+    }
+    return {
+        classification: 'authoritative_server_trace',
+        status: 'unavailable',
+        message: currentContextTimeline.message,
+    };
+}
+
+function buildCurrentContextRequestSummaries(
+    currentContextTimeline: CurrentContextTimelineFetchResult
+): ObservabilityIncidentCurrentContextSummary[] {
+    if (currentContextTimeline.kind !== 'ok') {
+        return [];
+    }
+    return currentContextTimeline.response.traces.map((trace) => ({
+        trace_id: trace.trace_id,
+        uri: trace.uri,
+        position: `${trace.line}:${trace.character}`,
+        route: trace.route,
+        broker_role: trace.broker_role,
+        readiness_wait_result: trace.readiness_wait_result,
+        ready_snapshot_wait_ms: trace.ready_snapshot_wait_ms,
+        broker_wait_result: trace.broker_wait_result,
+        broker_wait_ms: trace.broker_wait_ms,
+        parse_source: trace.parse_source,
+        parse_ms: trace.parse_ms,
+        wall_ms: trace.wall_ms,
+        supersession_outcome: trace.supersession_outcome,
+        final_status: trace.final_status,
+    }));
 }
 
 function buildClientProbeSource(
@@ -839,6 +954,9 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
             gaps: [],
         }),
         '',
+        '## Current Context Summary',
+        ...renderCurrentContextSummaryLines(report.current_context_requests),
+        '',
         '## Diagnostics Save Summary',
         ...renderDiagnosticsSaveSummaryLines({
             requestCount: report.diagnostics_save_window.request_count,
@@ -861,6 +979,7 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         '',
         '## Source Status',
         renderSourceStatusLine('Completion timeline', report.sources.completion_timeline),
+        renderSourceStatusLine('Current context timeline', report.sources.current_context_timeline),
         renderSourceStatusLine('Diagnostics save timeline', report.sources.diagnostics_save_timeline),
         renderSourceStatusLine('Client probes', report.sources.client_probes),
         renderSourceStatusLine('Observability metrics', report.sources.observability_metrics),
@@ -878,6 +997,7 @@ function renderSummaryMarkdown(report: ObservabilityIncidentBundleReport): strin
         '',
         '## Notes',
         '- Completion timeline remains the authoritative completion trace in this bundle.',
+        '- Current context timeline is an authoritative per-bsl.getCurrentContext server trace when supported.',
         '- Diagnostics save timeline is an authoritative per-didSave server trace when supported.',
         '- Client probes are local-only extension data and never substitute server stages, routes, or outcomes.',
         '- Observability metrics are cumulative process snapshots, not per-request traces.',
@@ -913,6 +1033,39 @@ function renderSourceStatusLine(
         details.push(`message=${source.message}`);
     }
     return `- ${label}: ${details.join(' | ')}`;
+}
+
+function renderCurrentContextSummaryLines(
+    requests: ObservabilityIncidentCurrentContextSummary[]
+): string[] {
+    if (requests.length === 0) {
+        return ['- No current-context traces captured.'];
+    }
+    return requests.map((request) => {
+        const details = [
+            `trace=${request.trace_id}`,
+            `uri=${request.uri}`,
+            `position=${request.position}`,
+            `route=${request.route ?? 'unknown'}`,
+            `broker_role=${request.broker_role ?? 'none'}`,
+            `readiness=${request.readiness_wait_result ?? 'unknown'}`,
+            `ready_wait=${fmtOptionalMs(request.ready_snapshot_wait_ms)}`,
+            `broker_wait=${fmtOptionalMs(request.broker_wait_ms)}`,
+            `parse_source=${request.parse_source ?? 'none'}`,
+            `parse=${fmtOptionalMs(request.parse_ms)}`,
+            `wall=${request.wall_ms}ms`,
+            `supersession=${request.supersession_outcome}`,
+            `final=${request.final_status}`,
+        ];
+        if (request.broker_wait_result) {
+            details.push(`broker_wait_result=${request.broker_wait_result}`);
+        }
+        return `- ${details.join(' | ')}`;
+    });
+}
+
+function fmtOptionalMs(value: number | undefined): string {
+    return typeof value === 'number' ? `${value}ms` : 'n/a';
 }
 
 function renderBulletSection(values: string[]): string[] {

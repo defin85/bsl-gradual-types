@@ -55,6 +55,13 @@ suite('Observability Commands Test Suite', () => {
                 traces: [],
             },
         });
+        sinon.stub(customRequestsModule, 'getCurrentContextTimeline').resolves({
+            kind: 'ok',
+            response: {
+                version: 1,
+                traces: [],
+            },
+        });
         sinon.stub(customRequestsModule, 'getDiagnosticsSaveTimeline').resolves({
             kind: 'ok',
             response: {
@@ -96,6 +103,7 @@ suite('Observability Commands Test Suite', () => {
             [
                 'client_probes.json',
                 'completion_timeline.json',
+                'current_context_timeline.json',
                 'diagnostics_save_timeline.json',
                 'observability_metrics.json',
             ]
@@ -104,6 +112,7 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(incident.request_window.request_count, 0);
         assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'available');
+        assert.strictEqual(incident.sources.current_context_timeline.status, 'available');
         assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'available');
         assert.strictEqual(incident.sources.observability_metrics.status, 'available');
     });
@@ -117,6 +126,13 @@ suite('Observability Commands Test Suite', () => {
             kind: 'ok',
             response: {
                 version: 8,
+                traces: [],
+            },
+        });
+        sinon.stub(customRequestsModule, 'getCurrentContextTimeline').resolves({
+            kind: 'ok',
+            response: {
+                version: 1,
                 traces: [],
             },
         });
@@ -184,6 +200,9 @@ suite('Observability Commands Test Suite', () => {
         const getCompletionTimelineStub = sinon
             .stub(customRequestsModule, 'getCompletionTimeline')
             .rejects(new Error('unexpected refetch'));
+        const getCurrentContextTimelineStub = sinon
+            .stub(customRequestsModule, 'getCurrentContextTimeline')
+            .rejects(new Error('unexpected refetch'));
         const getDiagnosticsSaveTimelineStub = sinon
             .stub(customRequestsModule, 'getDiagnosticsSaveTimeline')
             .rejects(new Error('unexpected refetch'));
@@ -208,6 +227,9 @@ suite('Observability Commands Test Suite', () => {
             completionTimeline: {
                 kind: 'unsupported',
             },
+            currentContextTimeline: {
+                kind: 'unsupported',
+            },
             diagnosticsSaveTimeline: {
                 kind: 'unsupported',
             },
@@ -218,6 +240,7 @@ suite('Observability Commands Test Suite', () => {
         });
 
         assert.strictEqual(getCompletionTimelineStub.callCount, 0);
+        assert.strictEqual(getCurrentContextTimelineStub.callCount, 0);
         assert.strictEqual(getDiagnosticsSaveTimelineStub.callCount, 0);
         assert.strictEqual(getMetricsStub.callCount, 0);
 
@@ -229,6 +252,7 @@ suite('Observability Commands Test Suite', () => {
         assert.strictEqual(incident.request_window.request_count, 0);
         assert.deepStrictEqual(incident.requests, []);
         assert.strictEqual(incident.sources.completion_timeline.status, 'unsupported');
+        assert.strictEqual(incident.sources.current_context_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });
@@ -240,6 +264,9 @@ suite('Observability Commands Test Suite', () => {
 
         const getCompletionTimelineStub = sinon
             .stub(customRequestsModule, 'getCompletionTimeline')
+            .rejects(new Error('unexpected refetch'));
+        const getCurrentContextTimelineStub = sinon
+            .stub(customRequestsModule, 'getCurrentContextTimeline')
             .rejects(new Error('unexpected refetch'));
         const getDiagnosticsSaveTimelineStub = sinon
             .stub(customRequestsModule, 'getDiagnosticsSaveTimeline')
@@ -259,6 +286,9 @@ suite('Observability Commands Test Suite', () => {
                     version: 20,
                     traces: [],
                 },
+            },
+            currentContextTimeline: {
+                kind: 'unsupported',
             },
             diagnosticsSaveTimeline: {
                 kind: 'unsupported',
@@ -281,6 +311,7 @@ suite('Observability Commands Test Suite', () => {
         await command!();
 
         assert.strictEqual(getCompletionTimelineStub.callCount, 0);
+        assert.strictEqual(getCurrentContextTimelineStub.callCount, 0);
         assert.strictEqual(getDiagnosticsSaveTimelineStub.callCount, 0);
         assert.strictEqual(getMetricsStub.callCount, 0);
 
@@ -289,6 +320,7 @@ suite('Observability Commands Test Suite', () => {
         const bundleRoot = path.join(tempRootDir, bundleFolders[0]);
         const incident = JSON.parse(await fs.readFile(path.join(bundleRoot, 'incident.json'), 'utf8'));
         assert.strictEqual(incident.sources.completion_timeline.status, 'available');
+        assert.strictEqual(incident.sources.current_context_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.diagnostics_save_timeline.status, 'unsupported');
         assert.strictEqual(incident.sources.observability_metrics.status, 'unsupported');
     });

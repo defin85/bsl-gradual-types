@@ -572,6 +572,59 @@ pub struct CompletionTimelineResponse {
     pub traces: Vec<CompletionTimelineTrace>,
 }
 
+/// Custom request: bsl/getCurrentContextTimeline - per-request current-context traces
+#[derive(Debug, Deserialize, Default)]
+pub struct CurrentContextTimelineRequest {
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CurrentContextTimelineTrace {
+    pub trace_id: String,
+    pub uri: String,
+    pub line: u32,
+    pub character: u32,
+    pub started_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_version: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub editor_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_generation: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub route: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readiness_wait_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_snapshot_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_snapshot_wait_budget_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_wait_result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_wait_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub broker_wait_budget_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parse_ms: Option<u64>,
+    pub wall_ms: u64,
+    pub supersession_outcome: String,
+    pub final_status: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CurrentContextTimelineResponse {
+    pub version: u32,
+    pub traces: Vec<CurrentContextTimelineTrace>,
+}
+
 /// Custom request: bsl/getDiagnosticsSaveTimeline - per-save diagnostics refresh traces
 #[derive(Debug, Deserialize, Default)]
 pub struct DiagnosticsSaveTimelineRequest {
@@ -1003,6 +1056,10 @@ pub struct DiagnosticsSaveTimelineTrace {
     pub followup_wait_for_file_version_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub followup_snapshot_with_deps_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_readiness_blocker_bucket: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub followup_unclassified_readiness_residual_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_outcome: Option<String>,
 }

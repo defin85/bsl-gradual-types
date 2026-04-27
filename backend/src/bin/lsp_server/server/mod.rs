@@ -140,7 +140,9 @@ pub(crate) type CompletionParityStoreV2 =
 
 pub(crate) const COMPLETION_TIMELINE_VERSION: u32 = 25;
 pub(crate) const COMPLETION_TIMELINE_MAX_ENTRIES: usize = 200;
-pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 21;
+pub(crate) const CURRENT_CONTEXT_TIMELINE_VERSION: u32 = 1;
+pub(crate) const CURRENT_CONTEXT_TIMELINE_MAX_ENTRIES: usize = 200;
+pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_VERSION: u32 = 22;
 pub(crate) const DIAGNOSTICS_SAVE_TIMELINE_MAX_ENTRIES: usize = 200;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_VERSION: u32 = 3;
 pub(crate) const DID_CHANGE_PARSE_SNAPSHOT_EVIDENCE_MAX_ENTRIES: usize = 200;
@@ -377,6 +379,9 @@ pub struct BslLanguageServer {
     pub(crate) completion_timeline_traces:
         Arc<StdMutex<VecDeque<crate::types::CompletionTimelineTrace>>>,
     pub(crate) next_completion_timeline_trace_id: Arc<AtomicU64>,
+    pub(crate) current_context_timeline_traces:
+        Arc<StdMutex<VecDeque<crate::types::CurrentContextTimelineTrace>>>,
+    pub(crate) next_current_context_timeline_trace_id: Arc<AtomicU64>,
     pub(crate) diagnostics_save_timeline_store: Arc<StdMutex<DiagnosticsSaveTimelineStore>>,
     pub(crate) did_change_parse_snapshot_evidence_store:
         Arc<StdMutex<DidChangeParseSnapshotEvidenceStore>>,

@@ -4,6 +4,7 @@ import { CommandHandler } from '../types';
 import { getActiveServerLaunchInfo, getLanguageClient } from '../lsp';
 import {
     getCompletionTimeline,
+    getCurrentContextTimeline,
     getDiagnosticsSaveTimeline,
     getObservabilityMetrics,
     getObservabilityMetricsFetchResult,
@@ -52,6 +53,8 @@ function mergeExportCaptures(
         capturedAtMs: explicitCapture.capturedAtMs ?? sharedCapture?.capturedAtMs,
         completionTimeline:
             explicitCapture.completionTimeline ?? sharedCapture?.completionTimeline,
+        currentContextTimeline:
+            explicitCapture.currentContextTimeline ?? sharedCapture?.currentContextTimeline,
         diagnosticsSaveTimeline:
             explicitCapture.diagnosticsSaveTimeline ?? sharedCapture?.diagnosticsSaveTimeline,
         clientProbes: explicitCapture.clientProbes ?? sharedCapture?.clientProbes,
@@ -76,14 +79,23 @@ async function exportObservabilityIncidentBundleToFolder(
     const completionTimelinePromise = resolvedCapture.completionTimeline
         ? Promise.resolve(resolvedCapture.completionTimeline)
         : getCompletionTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
+    const currentContextTimelinePromise = resolvedCapture.currentContextTimeline
+        ? Promise.resolve(resolvedCapture.currentContextTimeline)
+        : getCurrentContextTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
     const diagnosticsSaveTimelinePromise = resolvedCapture.diagnosticsSaveTimeline
         ? Promise.resolve(resolvedCapture.diagnosticsSaveTimeline)
         : getDiagnosticsSaveTimeline({ limit: COMPLETION_TIMELINE_EXPORT_LIMIT });
     const observabilityMetricsPromise = resolvedCapture.observabilityMetrics
         ? Promise.resolve(resolvedCapture.observabilityMetrics)
         : getObservabilityMetricsFetchResult({ shape: 'full' });
-    const [completionTimeline, diagnosticsSaveTimeline, observabilityMetrics] = await Promise.all([
+    const [
+        completionTimeline,
+        currentContextTimeline,
+        diagnosticsSaveTimeline,
+        observabilityMetrics,
+    ] = await Promise.all([
         completionTimelinePromise,
+        currentContextTimelinePromise,
         diagnosticsSaveTimelinePromise,
         observabilityMetricsPromise,
     ]);
@@ -92,6 +104,7 @@ async function exportObservabilityIncidentBundleToFolder(
     const bundle = buildObservabilityIncidentBundle({
         capturedAtMs,
         completionTimeline,
+        currentContextTimeline,
         diagnosticsSaveTimeline,
         completionTraceLimit: COMPLETION_TIMELINE_EXPORT_LIMIT,
         clientProbes,

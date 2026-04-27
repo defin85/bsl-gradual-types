@@ -390,7 +390,7 @@ enum ReadySnapshotContinuationResultV2 {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct DiagnosticsReadySnapshotPhaseAttributionV2 {
     pub(crate) timeout_phase: Option<&'static str>,
     pub(crate) timeout_phase_elapsed_ms: Option<u64>,

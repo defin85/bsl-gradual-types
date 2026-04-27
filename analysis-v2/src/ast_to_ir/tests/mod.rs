@@ -540,6 +540,32 @@ fn test_raise_error_statement_keeps_message_node() {
 }
 
 #[test]
+fn test_raise_error_statement_without_message_keeps_none_message_node() {
+    let ast = Program {
+        statements: vec![Statement::RaiseError {
+            message: None,
+            span: AstSpan::stub(),
+        }],
+    };
+
+    let ir = AstToIrConverter::convert(
+        ast,
+        "ВызватьИсключение;".to_string(),
+        "test.bsl".to_string(),
+        create_test_repository(),
+        create_test_signature_index(),
+    )
+    .unwrap();
+
+    assert_eq!(ir.nodes.len(), 1);
+    if let SemanticNodeKind::RaiseErrorStatement { message_node } = &ir.nodes[0].kind {
+        assert_eq!(*message_node, None);
+    } else {
+        panic!("Expected RaiseErrorStatement at nodes[0]");
+    }
+}
+
+#[test]
 fn test_add_handler_statement_keeps_event_and_handler_nodes() {
     let ast = Program {
         statements: vec![Statement::AddHandler {

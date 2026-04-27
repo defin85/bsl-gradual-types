@@ -124,6 +124,29 @@ fn parse_valid_for_header_has_no_syntax_errors() {
 }
 
 #[test]
+fn parse_bare_raise_has_no_syntax_errors_and_no_message() {
+    let source = "Попытка\n    Сообщить(1);\nИсключение\n    ВызватьИсключение;\nКонецПопытки;";
+    let result = parse(source, &ParseOptions::default()).unwrap();
+    assert!(
+        result.syntax_errors.is_empty(),
+        "expected bare rethrow to be valid BSL, got: {:?}",
+        result.syntax_errors
+    );
+
+    let Statement::Try { except_body, .. } = &result.program.statements[0] else {
+        panic!(
+            "expected try statement, got: {:?}",
+            result.program.statements
+        );
+    };
+    let Statement::RaiseError { message, .. } = &except_body[0] else {
+        panic!("expected raise statement, got: {:?}", except_body);
+    };
+
+    assert!(message.is_none());
+}
+
+#[test]
 fn parse_if_without_then_reports_single_helpful_error_on_header_line() {
     let source = "Если x = 1\n    Сообщить(x);\nКонецЕсли;";
     let result = parse(source, &ParseOptions::default()).unwrap();

@@ -305,6 +305,20 @@ fn test_raise_error_statement() {
 }
 
 #[test]
+fn test_raise_error_statement_without_message() {
+    let code = "ВызватьИсключение;";
+    let program = parse_bsl(code).expect("Парсинг должен пройти успешно");
+
+    assert_eq!(program.statements.len(), 1);
+    match &program.statements[0] {
+        Statement::RaiseError { message, .. } => {
+            assert!(message.is_none());
+        }
+        _ => panic!("Expected RaiseError statement"),
+    }
+}
+
+#[test]
 fn test_call_statement() {
     let code = "Сообщить(\"Привет\");";
     let program = parse_bsl(code).expect("Парсинг должен пройти успешно");

@@ -307,7 +307,10 @@ module.exports = grammar({
     rise_error_statement: ($) =>
       // Prefer parsing `RAISE (...)` as arguments, not as a parenthesized expression.
       // This avoids ambiguity after introducing `parenthesized_expression`.
-      seq($.RAISE_KEYWORD, choice(prec(1, $.arguments), $.expression), optional(';')),
+      seq(
+        $.RAISE_KEYWORD,
+        choice(seq(choice(prec(1, $.arguments), $.expression), optional(';')), ';'),
+      ),
 
     var_statement: ($) =>
       seq(

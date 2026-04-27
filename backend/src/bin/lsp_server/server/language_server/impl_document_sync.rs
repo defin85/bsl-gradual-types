@@ -342,10 +342,14 @@ fn derive_same_version_rebuild_previous_ready_seed_v2(
     requested_version: i32,
     requested_text: &Arc<str>,
 ) -> Option<ParseSnapshotAstReuseSeedV2> {
+    let ready_version = ready_state.parse_snapshot.file_version;
+    let is_previous_version_seed =
+        ready_version < requested_version && ready_state.text.as_ref() != requested_text.as_ref();
+    let is_same_version_same_text_seed =
+        ready_version == requested_version && ready_state.text.as_ref() == requested_text.as_ref();
     if !ready_state.syntax_errors_complete
         || ready_state.parse_snapshot.parse_result.has_errors()
-        || ready_state.parse_snapshot.file_version >= requested_version
-        || ready_state.text.as_ref() == requested_text.as_ref()
+        || !(is_previous_version_seed || is_same_version_same_text_seed)
         || ready_state
             .parse_snapshot
             .parse_result
@@ -4902,4 +4906,58 @@ impl BslLanguageServer {
     // ========================================================================
     // LSP FEATURES
     // ========================================================================
+}
+
+#[cfg(test)]
+mod refactor59_same_version_seed_tests {
+    use super::*;
+
+    fn parse_snapshot_for_seed_test(
+        file_id: bsl_analysis_v2::FileId,
+        version: i32,
+        text: &str,
+    ) -> bsl_analysis_v2::ParseSnapshot {
+        let parse_result =
+            Arc::new(bsl_syntax::parse(text, &bsl_syntax::ParseOptions::default()).expect("parse"));
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_bsl::LANGUAGE.into())
+            .expect("tree-sitter-bsl language");
+        let backend_tree = Arc::new(parser.parse(text, None).expect("tree-sitter parse"));
+
+        bsl_analysis_v2::ParseSnapshot {
+            file_id,
+            file_version: version,
+            parse_result,
+            line_index: Arc::new(bsl_line_index::LineIndex::new(text)),
+            backend_tree,
+            changed_ranges: Arc::new(Vec::new()),
+            produced_at_millis: 0,
+            backend_tree_hash: 0,
+            incremental: true,
+            fallback_reason: None,
+        }
+    }
+
+    #[test]
+    fn same_version_same_text_ready_snapshot_can_seed_didsave_rebuild() {
+        let text: Arc<str> = Arc::from("Процедура Test()\n    Сообщить(\"ok\");\nКонецПроцедуры\n");
+        let parse_snapshot =
+            parse_snapshot_for_seed_test(bsl_analysis_v2::FileId(59), 15, text.as_ref());
+        let parse_result = parse_snapshot.parse_result.clone();
+        let ready_state = ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot,
+            source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+            syntax_errors_complete: true,
+            phase_attribution: crate::server::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
+        };
+
+        let seed = derive_same_version_rebuild_previous_ready_seed_v2(&ready_state, 15, &text)
+            .expect("same-version same-text ready snapshot should seed didSave rebuild");
+
+        assert!(Arc::ptr_eq(&seed.parse_result, &parse_result));
+        assert_eq!(seed.source_text.as_ref(), text.as_ref());
+    }
 }

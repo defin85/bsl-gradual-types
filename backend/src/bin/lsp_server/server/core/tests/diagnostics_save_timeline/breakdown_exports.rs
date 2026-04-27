@@ -74,6 +74,68 @@ async fn diagnostics_save_timeline_classifies_followup_publish_readiness_bucket(
 }
 
 #[tokio::test]
+async fn diagnostics_save_timeline_classifies_program_lowering_tail_before_snapshot_with_deps() {
+    let server = create_diagnostics_save_timeline_test_server();
+    let uri =
+        Url::parse("file:///diagnostics-save-program-lowering-tail-bucket.bsl").expect("uri");
+    let key = crate::server::DiagnosticsSaveTimelineCycleKey {
+        file_id: bsl_analysis_v2::FileId(1227),
+        diagnostics_generation: 44,
+        save_cycle_sequence: 16,
+        requested_version: 25,
+    };
+
+    server.begin_diagnostics_save_timeline_cycle(&uri, key);
+    server.record_diagnostics_save_timeline_followup_wait_state(
+        &uri,
+        key,
+        "semantic_work",
+        None,
+        None,
+        None,
+        Some(Duration::from_millis(47)),
+        Some("recomputed"),
+        Some("detached_ready_artifacts"),
+        Some("snapshot"),
+        Some("snapshot_build"),
+        None,
+    );
+    server.record_diagnostics_save_timeline_followup_probe_state(
+        &uri,
+        key,
+        None,
+        Some("timeout"),
+        None,
+        Some(false),
+        Some(diagnostics_runtime::DiagnosticsReadySnapshotPhaseAttributionV2 {
+            timeout_phase: Some("parse_exec"),
+            timeout_leaf: Some("program_lowering"),
+            parse_exec_ms: Some(3_598),
+            parse_exec_core_build_exact_ready_snapshot_assembly_ms: Some(3_596),
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms: Some(
+                3_596,
+            ),
+            parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms: Some(3_596),
+            ready_install_ms: Some(1),
+            ..Default::default()
+        }),
+    );
+
+    let trace = diagnostics_save_timeline_trace_for_test(&server, &uri, key).await;
+    assert_eq!(
+        trace.followup_readiness_blocker_bucket.as_deref(),
+        Some("program_lowering_tail")
+    );
+    assert_eq!(trace.followup_snapshot_with_deps_ms, Some(47));
+    assert_eq!(
+        trace.followup_semantic_path.as_deref(),
+        Some("detached_ready_artifacts")
+    );
+    assert_eq!(trace.followup_ready_snapshot_ready_install_ms, Some(1));
+    assert_eq!(trace.followup_unclassified_readiness_residual_ms, None);
+}
+
+#[tokio::test]
 async fn diagnostics_save_timeline_marks_unclassified_ready_install_residual() {
     let server = create_diagnostics_save_timeline_test_server();
     let uri = Url::parse("file:///diagnostics-save-unclassified-residual.bsl").expect("uri");

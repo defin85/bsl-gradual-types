@@ -1078,6 +1078,14 @@ export interface DiagnosticsSaveTimelineTrace {
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint_elapsed_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_conversion_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_outcome?: string;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_lowering_units?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_lowering_units?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reused_window_count?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_rebuilt_window_count?: number;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_build_source?: string | null;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_take_if_unique_hit?: boolean;
+    followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_reuse_plan_borrowed_cache_hit?: boolean;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_publishable_artifact_packaging_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_syntax_error_collection_ms?: number;
     followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint?:
@@ -1134,6 +1142,7 @@ export interface DiagnosticsSaveTimelineTrace {
         | 'runtime_queue_wait'
         | 'apply_lag'
         | 'post_ready_publish_gate'
+        | 'program_lowering_tail'
         | 'ready_snapshot_task'
         | 'unclassified_readiness_residual';
     followup_unclassified_readiness_residual_ms?: number;

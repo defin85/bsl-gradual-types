@@ -246,6 +246,29 @@ fn positive_timing_ms(value: Option<u64>) -> bool {
     value.is_some_and(|value| value > 0)
 }
 
+fn diagnostics_save_timeline_has_program_lowering_tail(
+    trace: &crate::types::DiagnosticsSaveTimelineTrace,
+) -> bool {
+    const PROGRAM_LOWERING_TAIL_MIN_MS: u64 = 1_000;
+
+    if trace.followup_ready_snapshot_timeout_leaf.as_deref() == Some("program_lowering")
+        || trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_timeout_checkpoint
+            .as_deref()
+            == Some("program_lowering")
+    {
+        return true;
+    }
+
+    trace
+        .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_dominant_checkpoint
+        .as_deref()
+        == Some("program_lowering")
+        && trace
+            .followup_ready_snapshot_parse_exec_core_build_exact_ready_snapshot_assembly_program_lowering_ms
+            .is_some_and(|elapsed_ms| elapsed_ms >= PROGRAM_LOWERING_TAIL_MIN_MS)
+}
+
 fn refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(
     trace: &mut crate::types::DiagnosticsSaveTimelineTrace,
 ) {
@@ -262,6 +285,8 @@ fn refresh_diagnostics_save_timeline_readiness_blocker_bucket_inner(
         || positive_timing_ms(publish_wait_for_file_version_ms)
     {
         Some("wait_for_file_version")
+    } else if diagnostics_save_timeline_has_program_lowering_tail(trace) {
+        Some("program_lowering_tail")
     } else if positive_timing_ms(trace.followup_snapshot_with_deps_ms)
         || positive_timing_ms(publish_snapshot_with_deps_ms)
     {

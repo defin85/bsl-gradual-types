@@ -7,6 +7,10 @@ Keep this checklist as the diagnostic/audit trail for the waiting-phase `shadow_
 Do not mark the implementation or behavioral validation tasks complete in this change unless the
 same producer-side fix and representative fail gate are also completed through `refactor-51`.
 
+The implementation and behavioral validation are now complete through archived change
+`openspec/changes/archive/2026-04-28-refactor-51-didsave-exact-producer-lane-bounding/`; see
+`validation/refactor-51-acceptance-2026-04-28.md`.
+
 ## 1. Contract
 
 - [x] 1.1 Add a `bsl-intellisense-v2` requirement that same-version `didSave` heavy follow-up
@@ -27,19 +31,19 @@ same producer-side fix and representative fail gate are also completed through `
 
 ## 3. Implementation
 
-- [ ] 3.1 Introduce a runtime change that prevents waiting-only same-version `didSave` heavy
+- [x] 3.1 Introduce a runtime change that prevents waiting-only same-version `didSave` heavy
       follow-up from defaulting to expensive terminal `shadow_state` semantic publication while the
       exact producer is still provably current. Owned by `refactor-51`.
-- [ ] 3.2 Keep detached diagnostics-ready consumption, canonical live exact semantics, and
+- [x] 3.2 Keep detached diagnostics-ready consumption, canonical live exact semantics, and
       operator-facing timeout/wait-state attribution truthful on top of the new path. Owned by
       `refactor-51`.
-- [ ] 3.3 Add regressions for waiting-phase same-version follow-up, truthful fallback semantics,
+- [x] 3.3 Add regressions for waiting-phase same-version follow-up, truthful fallback semantics,
       and representative diagnostics-save timeline evidence. Owned by `refactor-51`.
 
 ## 4. Validation
 
-- [ ] 4.1 Run targeted backend/runtime/diagnostics-save regressions for the new waiting-phase
+- [x] 4.1 Run targeted backend/runtime/diagnostics-save regressions for the new waiting-phase
       follow-up path and preserved fail-closed semantics. Owned by `refactor-51`.
-- [ ] 4.2 Run representative live/perf validation for the waiting-phase `didSave` same-version
+- [x] 4.2 Run representative live/perf validation for the waiting-phase `didSave` same-version
       gate on `examples/conf_big`. Owned by `refactor-51`.
 - [x] 4.3 Run `openspec validate refactor-50-didsave-waiting-phase-shadow-state-bounding --strict --no-interactive`.

@@ -169,7 +169,42 @@ fn test_combined_cache_roundtrip() {
     let key = coordinator.build_combined_cache_key(&platform_meta, &config_meta);
     let cache = coordinator.disk_cache();
     let cached = cache.try_get::<CombinedCachePayload>(&key).unwrap();
-    assert!(cached.is_some(), "Combined cache entry отсутствует");
+    let cached = cached.expect("Combined cache entry отсутствует");
+    assert!(
+        !cached.config_metadata.is_empty(),
+        "Combined cache должен хранить metadata для первого incremental update"
+    );
+
+    let canonical_config_path = config_path.canonicalize().unwrap();
+    {
+        let cache_lock = coordinator.config_index_cache();
+        let guard = cache_lock.read().unwrap();
+        let index_cache = guard
+            .as_ref()
+            .expect("config index cache должен быть засеян после cold startup");
+        assert_eq!(index_cache.config_root, canonical_config_path);
+        assert!(
+            !index_cache.metadata_by_key.is_empty(),
+            "config index cache должен содержать metadata"
+        );
+    }
+
+    let second = SystemCoordinator::new();
+    second
+        .start_with_paths_blocking(Some(syntax_path), Some(config_path), Some("8.3.25"), None)
+        .unwrap();
+    {
+        let cache_lock = second.config_index_cache();
+        let guard = cache_lock.read().unwrap();
+        let index_cache = guard
+            .as_ref()
+            .expect("config index cache должен быть засеян после combined cache startup");
+        assert_eq!(index_cache.config_root, canonical_config_path);
+        assert!(
+            !index_cache.metadata_by_key.is_empty(),
+            "combined cache startup должен восстановить metadata cache"
+        );
+    }
 }
 
 #[test]

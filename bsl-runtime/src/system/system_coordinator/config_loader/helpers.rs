@@ -113,6 +113,112 @@ pub(super) fn extend_indexed_signatures(
         .extend(source.module_signatures.clone());
 }
 
+pub(super) fn build_config_index_cache(
+    config_root: &Path,
+    metadata: &[UniversalMetadataObject],
+    module_signatures: &[ModuleSignatureSnapshot],
+) -> ConfigIndexCache {
+    let discovery = crate::data::loaders::config_metadata_parser::ConfigurationDiscovery::new(
+        config_root.to_path_buf(),
+        false,
+    );
+    let mut cache = ConfigIndexCache {
+        config_root: config_root.to_path_buf(),
+        ..Default::default()
+    };
+
+    for obj in metadata {
+        let key = ObjectKey::new(&obj.object_type_raw, &obj.name);
+        cache.metadata_by_key.insert(key.clone(), obj.clone());
+
+        let xml_path = obj
+            .metadata_xml_path
+            .as_ref()
+            .filter(|path| path.exists())
+            .cloned()
+            .or_else(|| {
+                resolve_object_xml_path(&discovery, config_root, &obj.object_type_raw, &obj.name)
+            });
+        if let Some(xml_path) = xml_path {
+            cache.object_xml_map.insert(xml_path, key.clone());
+        }
+
+        refresh_form_mappings(&mut cache, config_root, &discovery, &key, obj);
+    }
+
+    cache.child_objects = build_child_objects_map(&cache.metadata_by_key);
+
+    for snapshot in module_signatures {
+        cache
+            .module_signatures
+            .insert(snapshot.module_path.clone(), snapshot.clone());
+    }
+
+    cache
+}
+
+fn build_child_objects_map(
+    metadata_by_key: &std::collections::HashMap<ObjectKey, UniversalMetadataObject>,
+) -> std::collections::HashMap<String, Vec<String>> {
+    let mut out: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    for obj in metadata_by_key.values() {
+        out.entry(obj.object_type_raw.clone())
+            .or_default()
+            .push(obj.name.clone());
+    }
+    for names in out.values_mut() {
+        names.sort();
+        names.dedup();
+    }
+    out
+}
+
+fn resolve_object_xml_path(
+    discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+    config_root: &Path,
+    object_type_raw: &str,
+    object_name: &str,
+) -> Option<PathBuf> {
+    let folder_name = discovery.xml_tag_to_folder_name(object_type_raw);
+    let direct = config_root
+        .join(&folder_name)
+        .join(format!("{}.xml", object_name));
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    let subdir = config_root
+        .join(&folder_name)
+        .join(object_name)
+        .join(format!("{}.xml", object_name));
+    if subdir.exists() {
+        return Some(subdir);
+    }
+
+    None
+}
+
+fn refresh_form_mappings(
+    cache: &mut ConfigIndexCache,
+    config_root: &Path,
+    discovery: &crate::data::loaders::config_metadata_parser::ConfigurationDiscovery,
+    key: &ObjectKey,
+    metadata: &UniversalMetadataObject,
+) {
+    cache.form_xml_map.retain(|_, v| v != key);
+    let folder_name = discovery.xml_tag_to_folder_name(&metadata.object_type_raw);
+    for form in &metadata.forms {
+        let form_xml = config_root
+            .join(&folder_name)
+            .join(&metadata.name)
+            .join("Forms")
+            .join(&form.name)
+            .join("Ext")
+            .join("Form.xml");
+        cache.form_xml_map.insert(form_xml, key.clone());
+    }
+}
+
 pub(super) fn config_fingerprint(config_path: &Path, strict: bool) -> Result<String> {
     use walkdir::WalkDir;
 

@@ -12,13 +12,14 @@ use tracing::{info, warn};
 use crate::data::loaders::progress::{IndexingPhase, ProgressUpdate};
 use crate::data::loaders::{
     collect_module_paths, index_configuration_bsl_modules_with_progress_parallel_cached,
-    IndexedConfigSignatures, ModuleIndexProgress, ParsedModuleData, UniversalMetadataObject,
+    IndexedConfigSignatures, ModuleIndexProgress, ModuleSignatureSnapshot, ParsedModuleData,
+    UniversalMetadataObject,
 };
 use bsl_shared::domain::types::{MetadataKind, RawTypeData};
 use serde::{Deserialize, Serialize};
 
 use super::coordinator::SystemCoordinator;
-use super::types::LoadMetadataResult;
+use super::types::{ConfigIndexCache, LoadMetadataResult, ObjectKey};
 use crate::system::{
     DiskCacheKey, IndexItem, IndexItemKind, IndexKind, IndexSnapshotId, SymbolKind, SymbolScope,
     TypeKind, Visibility,
@@ -41,6 +42,7 @@ struct ConfigLayerBCachePayload {
 pub(crate) struct CombinedConfigCachePayload {
     pub raw_types: Vec<RawTypeData>,
     pub indexed: IndexedConfigSignatures,
+    pub metadata: Vec<UniversalMetadataObject>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +55,23 @@ pub(crate) struct ConfigCombinedCacheMeta {
 }
 
 impl SystemCoordinator {
+    pub(crate) fn seed_config_index_cache_from_metadata(
+        &self,
+        config_path: &Path,
+        metadata: &[UniversalMetadataObject],
+        module_signatures: &[ModuleSignatureSnapshot],
+    ) {
+        let canonical_path =
+            std::fs::canonicalize(config_path).unwrap_or_else(|_| config_path.to_path_buf());
+        let cache = build_config_index_cache(&canonical_path, metadata, module_signatures);
+        let cache_lock = self.config_index_cache();
+        let mut guard = cache_lock.write().unwrap_or_else(|poisoned| {
+            warn!("Config index cache RwLock poisoned (write), recovering");
+            poisoned.into_inner()
+        });
+        *guard = Some(cache);
+    }
+
     pub fn cache_scope_for_config_path(
         &self,
         config_path: &Path,

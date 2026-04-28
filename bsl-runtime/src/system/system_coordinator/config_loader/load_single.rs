@@ -253,6 +253,7 @@ impl SystemCoordinator {
         let mut ext_count = 0;
         let mut total_types = 0;
         let mut all_metadata: Vec<UniversalMetadataObject> = Vec::new();
+        let mut all_module_signatures: Vec<ModuleSignatureSnapshot> = Vec::new();
 
         let bundle = self.domain_bundle().ok_or_else(|| {
             anyhow::anyhow!("Domain bundle не инициализирован. Вызовите start() сначала.")
@@ -267,6 +268,7 @@ impl SystemCoordinator {
             Some(CombinedConfigCachePayload {
                 raw_types: Vec::new(),
                 indexed: IndexedConfigSignatures::default(),
+                metadata: Vec::new(),
             })
         } else {
             None
@@ -345,6 +347,7 @@ impl SystemCoordinator {
             let config_info_for_build = config_info.clone();
             let config_set_id = config_set_id.clone();
             let metadata = metadata.clone();
+            let metadata_for_indexing_for_combined = metadata_for_indexing.clone();
             let metadata_for_indexing = metadata_for_indexing.clone();
             let prefix = prefix.map(str::to_string);
             let entry = cache.get_or_build_with_swr(
@@ -440,6 +443,7 @@ impl SystemCoordinator {
             }
 
             let payload = entry.value;
+            let module_signatures = payload.indexed.module_signatures.clone();
             let config_methods_count = payload.indexed.config_methods.len();
             let global_functions_count = payload.indexed.global_functions.len();
             let def_locations_count = payload.indexed.definition_locations.len();
@@ -448,7 +452,11 @@ impl SystemCoordinator {
             if let Some(ref mut combined) = combined_payload {
                 combined.raw_types.extend(payload.raw_types.clone());
                 extend_indexed_signatures(&mut combined.indexed, &payload.indexed);
+                combined
+                    .metadata
+                    .extend(metadata_for_indexing_for_combined.clone());
             }
+            all_module_signatures.extend(module_signatures.clone());
 
             for (owner_type, sig) in payload.indexed.config_methods {
                 repository.add_config_method_signature(&owner_type, sig);
@@ -493,10 +501,7 @@ impl SystemCoordinator {
                 .load_types(payload.raw_types)
                 .map_err(|e| anyhow::anyhow!("Ошибка загрузки типов: {}", e))?;
 
-            self.update_intellisense_index_from_modules(
-                config_path,
-                &payload.indexed.module_signatures,
-            );
+            self.update_intellisense_index_from_modules(config_path, &module_signatures);
 
             match config_info.config_type {
                 ConfigurationType::Base => base_count += 1,
@@ -508,6 +513,11 @@ impl SystemCoordinator {
             config_path,
             repository.get_all_types(),
             &all_metadata,
+        );
+        self.seed_config_index_cache_from_metadata(
+            config_path,
+            &all_metadata,
+            &all_module_signatures,
         );
         self.persist_intellisense_index_snapshot(&project_id, &config_set_id);
 

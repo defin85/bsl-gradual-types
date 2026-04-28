@@ -19,7 +19,9 @@ use crate::data::adapters::{
     convert_syntax_helper_to_semantic_bundle, PlatformDocsSemanticBundle,
     PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION,
 };
-use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
+use crate::data::loaders::config_metadata_parser::{
+    ConfigurationDiscovery, UniversalMetadataObject,
+};
 use crate::data::loaders::{
     hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, OptimizationSettings,
     SyntaxHelperDatabase, SyntaxHelperLoader,
@@ -65,6 +67,7 @@ struct SyntaxHelperCachePayload {
 struct CombinedCachePayload {
     config_raw_types: Vec<RawTypeData>,
     config_indexed: IndexedConfigSignatures,
+    config_metadata: Vec<UniversalMetadataObject>,
 }
 
 impl SystemCoordinator {
@@ -341,6 +344,11 @@ impl SystemCoordinator {
                                     &platform_version,
                                     &payload.config_raw_types,
                                 );
+                                self.seed_config_index_cache_from_metadata(
+                                    config_path,
+                                    &payload.config_metadata,
+                                    &payload.config_indexed.module_signatures,
+                                );
                                 combined_cache_hit = true;
                                 self.set_startup_progress(StartupProgressDto {
                                     phase: "Загрузка конфигурации".to_string(),
@@ -410,6 +418,7 @@ impl SystemCoordinator {
                                 let combined_payload = CombinedCachePayload {
                                     config_raw_types: payload.raw_types,
                                     config_indexed: payload.indexed,
+                                    config_metadata: payload.metadata,
                                 };
                                 let cache = self.disk_cache();
                                 let _ = cache.get_or_build_with(

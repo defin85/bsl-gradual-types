@@ -13,7 +13,7 @@ use tracing::debug;
 
 use super::super::progress::{IndexingPhase, ProgressUpdate};
 use super::loader::SyntaxHelperLoader;
-use super::types::{CategoryInfo, SyntaxNode};
+use super::types::{CategoryInfo, PropertySourceKind, SyntaxNode};
 use super::utils;
 use super::utils::FileType;
 
@@ -201,7 +201,7 @@ impl SyntaxHelperLoader {
                 Ok(SyntaxNode::Method(method_info))
             }
             FileType::Property => {
-                let property_info = self.document_parser.parse_property(&document)?;
+                let property_info = self.document_parser.parse_property(path, &document)?;
                 Ok(SyntaxNode::Property(property_info))
             }
             FileType::Category => {
@@ -308,7 +308,14 @@ impl SyntaxHelperLoader {
             SyntaxNode::Property(prop) => {
                 let key = format!("property_{}", prop.name);
                 self.properties.insert(key.clone(), prop.clone());
-                self.nodes.insert(key, SyntaxNode::Property(prop));
+                if prop.source_kind == PropertySourceKind::GlobalContextProperty {
+                    let source_key = prop.source_key.clone().unwrap_or_else(|| key.clone());
+                    self.global_context_properties
+                        .insert(source_key.clone(), prop.clone());
+                    self.nodes.insert(source_key, SyntaxNode::Property(prop));
+                } else {
+                    self.nodes.insert(key, SyntaxNode::Property(prop));
+                }
             }
             SyntaxNode::GlobalFunction(func) => {
                 let key = format!("global_function_{}", func.name);
@@ -327,4 +334,45 @@ impl SyntaxHelperLoader {
 fn is_language_help_path(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
     path_str.contains("rebuilt.shlang_ru")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn save_node_indexes_global_context_property_by_source_key() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let html_path = root.join(
+            "examples/syntax_helper/rebuilt.shcntx_ru/objects/Global context/properties/Metadata974.html",
+        );
+        let loader = SyntaxHelperLoader::new();
+        let node = loader
+            .parse_html_file(&html_path)
+            .expect("failed to parse Metadata974.html");
+
+        loader.save_node(node);
+        let db = loader.export_database();
+
+        let property = db
+            .global_context_properties
+            .get("objects/Global context/properties/Metadata974")
+            .expect("global-context property should be indexed by source key");
+
+        assert_eq!(property.normalized_global_context_key(), "метаданные");
+        assert_eq!(
+            property.normalized_global_context_english_key().as_deref(),
+            Some("metadata")
+        );
+        assert!(
+            db.properties
+                .contains_key("property_Глобальный контекст.Метаданные"),
+            "legacy property key is preserved for compatibility"
+        );
+        assert!(
+            !db.nodes
+                .contains_key("property_Глобальный контекст.Метаданные"),
+            "global-context classification must not depend on legacy property_<name> node key"
+        );
+    }
 }

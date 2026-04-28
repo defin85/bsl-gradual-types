@@ -47,6 +47,8 @@ pub struct SyntaxHelperLoader {
     pub(crate) methods: Arc<DashMap<String, MethodInfo>>,
     /// Свойства (lock-free)
     pub(crate) properties: Arc<DashMap<String, PropertyInfo>>,
+    /// Свойства глобального контекста с provenance-key классификацией
+    pub(crate) global_context_properties: Arc<DashMap<String, PropertyInfo>>,
     /// Категории (lock-free)
     pub(crate) categories: Arc<DashMap<String, CategoryInfo>>,
     /// Глобальные функции (lock-free)
@@ -97,6 +99,7 @@ impl SyntaxHelperLoader {
             nodes: Arc::new(DashMap::new()),
             methods: Arc::new(DashMap::new()),
             properties: Arc::new(DashMap::new()),
+            global_context_properties: Arc::new(DashMap::new()),
             categories: Arc::new(DashMap::new()),
             global_functions: Arc::new(DashMap::new()),
             type_index: Arc::new(DashMap::new()),
@@ -447,6 +450,11 @@ impl SyntaxHelperLoader {
         // Копируем свойства
         for entry in self.properties.iter() {
             db.properties
+                .insert(entry.key().clone(), entry.value().clone());
+        }
+
+        for entry in self.global_context_properties.iter() {
+            db.global_context_properties
                 .insert(entry.key().clone(), entry.value().clone());
         }
 

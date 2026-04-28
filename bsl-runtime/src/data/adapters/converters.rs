@@ -1,13 +1,25 @@
 //! Functions to convert parsed data into the common `RawTypeData` format.
 
 use crate::data::loaders::{SyntaxHelperDatabase, SyntaxNode, TypeInfo};
+use bsl_shared::domain::global_context::{GlobalContextIndex, GlobalContextPropertyData};
 use bsl_shared::domain::signature_index::{ContextRequirements, MethodSignature, SignatureSource};
 use bsl_shared::domain::types::{
     ParameterInfo as SignatureParam, RawDataSource, RawMethodData, RawParamData, RawPropertyData,
     RawTypeData, TypeResolution,
 };
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tracing::warn;
+
+pub const PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION: &str = "platform-docs-semantic-bundle-v2";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformDocsSemanticBundle {
+    pub schema_version: String,
+    pub raw_types: Vec<RawTypeData>,
+    pub global_function_signatures: Vec<MethodSignature>,
+    pub global_context_index: GlobalContextIndex,
+}
 
 /// Converts a full SyntaxHelperDatabase into a vector of RawTypeData.
 pub fn convert_syntax_helper_to_raw(db: &SyntaxHelperDatabase) -> Vec<RawTypeData> {
@@ -30,6 +42,17 @@ pub fn convert_syntax_helper_to_raw(db: &SyntaxHelperDatabase) -> Vec<RawTypeDat
             }
         })
         .collect()
+}
+
+pub fn convert_syntax_helper_to_semantic_bundle(
+    db: &SyntaxHelperDatabase,
+) -> PlatformDocsSemanticBundle {
+    PlatformDocsSemanticBundle {
+        schema_version: PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION.to_string(),
+        raw_types: convert_syntax_helper_to_raw(db),
+        global_function_signatures: convert_syntax_helper_global_functions(db),
+        global_context_index: convert_syntax_helper_global_context_index(db),
+    }
 }
 
 fn contexts_to_requirements(contexts: &[String]) -> Option<ContextRequirements> {
@@ -272,6 +295,7 @@ fn convert_type_info_to_raw(
                     name: russian.clone(),
                     prop_type: property_info.property_type.clone().unwrap_or_default(),
                     is_readonly: property_info.is_readonly,
+                    collection_item_type: property_info.collection_item_type.clone(),
                 }
             } else {
                 warn!(
@@ -303,6 +327,34 @@ fn convert_type_info_to_raw(
 
 pub fn convert_resolutions_to_raw(_resolutions: &[TypeResolution]) -> Vec<RawTypeData> {
     vec![]
+}
+
+pub fn convert_syntax_helper_global_context_index(db: &SyntaxHelperDatabase) -> GlobalContextIndex {
+    let properties = db
+        .global_context_properties
+        .values()
+        .map(|property| {
+            let normalized_key = property.normalized_global_context_key();
+            GlobalContextPropertyData {
+                name: property.name.clone(),
+                english_name: property.english_name.clone(),
+                prop_type: property.property_type.clone(),
+                is_readonly: property.is_readonly,
+                description: property.description.clone(),
+                contexts: property.contexts.clone(),
+                source_key: property
+                    .source_key
+                    .clone()
+                    .unwrap_or_else(|| normalized_key.clone()),
+                source_path: property.source_path.clone(),
+                normalized_key,
+                english_normalized_key: property.normalized_global_context_english_key(),
+                collection_item_type: property.collection_item_type.clone(),
+            }
+        })
+        .collect();
+
+    GlobalContextIndex::loaded(properties)
 }
 
 pub fn convert_syntax_helper_global_functions(db: &SyntaxHelperDatabase) -> Vec<MethodSignature> {

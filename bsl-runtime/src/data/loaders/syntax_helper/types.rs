@@ -1,5 +1,6 @@
 //! Структуры данных для парсера синтакс-помощника 1С
 
+use bsl_shared::domain::global_context::normalize_global_context_property_key;
 use bsl_shared::domain::types::FacetKind;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -136,9 +137,47 @@ pub struct MethodOverloadInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PropertyInfo {
     pub name: String,
+    #[serde(default)]
+    pub english_name: Option<String>,
     pub property_type: Option<String>,
     pub is_readonly: bool,
     pub description: Option<String>,
+    #[serde(default)]
+    pub contexts: Vec<String>,
+    #[serde(default)]
+    pub source_key: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_kind: PropertySourceKind,
+    #[serde(default)]
+    pub collection_item_type: Option<String>,
+}
+
+/// Provenance class for a Syntax Helper property page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PropertySourceKind {
+    TypeProperty,
+    GlobalContextProperty,
+}
+
+impl Default for PropertySourceKind {
+    fn default() -> Self {
+        Self::TypeProperty
+    }
+}
+
+impl PropertyInfo {
+    pub fn normalized_global_context_key(&self) -> String {
+        normalize_global_context_property_key(&self.name)
+    }
+
+    pub fn normalized_global_context_english_key(&self) -> Option<String> {
+        self.english_name
+            .as_deref()
+            .map(normalize_global_context_property_key)
+            .filter(|key| !key.is_empty())
+    }
 }
 
 /// Информация о конструкторе
@@ -180,6 +219,8 @@ pub struct SyntaxHelperDatabase {
     pub nodes: HashMap<String, SyntaxNode>,
     pub methods: HashMap<String, MethodInfo>,
     pub properties: HashMap<String, PropertyInfo>,
+    #[serde(default)]
+    pub global_context_properties: HashMap<String, PropertyInfo>,
     pub categories: HashMap<String, CategoryInfo>,
     #[serde(default)]
     pub global_functions: HashMap<String, GlobalFunctionInfo>,

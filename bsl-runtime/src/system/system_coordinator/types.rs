@@ -10,12 +10,14 @@ use serde::Serialize;
 
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::GlobalContextIndex;
 
 /// Domain layer bundle (repository + resolver) owned by SystemCoordinator.
 #[derive(Clone)]
 pub struct DomainBundle {
     pub repository: Arc<dyn TypeRepository>,
     pub resolver: Arc<TypeResolver>,
+    pub global_context_index: Arc<GlobalContextIndex>,
 }
 
 /// Результат загрузки метаданных конфигурации

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tower_lsp::lsp_types::*;
 use tracing::error;
 
-use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids;
+use bsl_backend::application::get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids_and_global_context;
 use bsl_backend::application::type_system::{
     build_call_snippet, resolve_method_completion, resolve_type_details,
 };
@@ -249,7 +249,7 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot
 
     let runtime_started = Instant::now();
     let completion = if member_access_request {
-        bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
+        bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids_and_global_context(
             file_content.as_ref(),
             position.line,
             position.character,
@@ -262,13 +262,14 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot
             include_flow_sensitive,
             deps_id,
             settings_id,
+            Some(deps.global_context_index.clone()),
             trigger_char_hint,
         )
         .await
     } else {
         match ir_program {
             Some(ir_program) => {
-                get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids(
+                get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids_and_global_context(
                     file_content.as_ref(),
                     position.line,
                     position.character,
@@ -282,12 +283,13 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot
                     include_flow_sensitive,
                     deps_id,
                     settings_id,
+                    Some(deps.global_context_index.clone()),
                     trigger_char_hint,
                 )
                 .await
             }
             None => {
-                bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids(
+                bsl_backend::application::get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids_and_global_context(
                     file_content.as_ref(),
                     position.line,
                     position.character,
@@ -300,6 +302,7 @@ pub async fn handle_completion_v2_with_trigger_hint_and_owner_hints_and_snapshot
                     include_flow_sensitive,
                     deps_id,
                     settings_id,
+                    Some(deps.global_context_index.clone()),
                     trigger_char_hint,
                 )
                 .await

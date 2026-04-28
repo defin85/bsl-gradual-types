@@ -14,6 +14,7 @@ Global context properties such as `Метаданные` must be loaded from the
 - Resolve bare identifiers such as `Метаданные` through the data-driven global-context index after local/module scopes and before undeclared-variable diagnostics.
 - Derive metadata object collection chains from loaded platform type/property data, including property-level collection item types, instead of hardcoded source tables wherever Syntax Helper data is available.
 - Inventory existing hardcoded global metadata manager collections (`GLOBAL_COLLECTIONS_INFO`) and either migrate them to Syntax Helper/config-driven data in this change or leave an explicit follow-up with evidence for any remaining hardcoded entries.
+- Ensure loaded Syntax Helper/global-context entries take precedence over legacy hardcoded global collection tables; hardcodes may remain only as centralized degraded/bootstrap fallback.
 - Keep degraded behavior fail-closed when Syntax Helper or a specific global-context property is absent.
 - Remove or demote the current hardcoded `Метаданные` bridge to a test-only/degraded fallback once the index is wired.
 

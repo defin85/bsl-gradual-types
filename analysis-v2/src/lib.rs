@@ -28,6 +28,7 @@ use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::types::TypeResolution;
 use bsl_shared::domain::types::{DiagnosticSeverity, ParseError, TypeDiagnostic};
 use bsl_shared::domain::validators::TypeValidator;
+use bsl_shared::domain::GlobalContextIndex;
 use bsl_shared::domain::TypeMetadataLookup;
 use bsl_shared::domain::{FlowAnalysisContext, NullSafetyAnalyzer};
 use bsl_shared::formatting::DetailLevel;
@@ -112,6 +113,69 @@ pub struct SemanticDeps {
     /// Явный флаг: платформа (Syntax Helper) загружена и SignatureIndex считается полным
     /// для целей диагностики "Неопределенная процедура или функция".
     pub platform_signatures_loaded: bool,
+    pub global_context_index: Arc<GlobalContextIndex>,
+}
+
+impl SemanticDeps {
+    pub fn from_parts(
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+        platform_signatures_loaded: bool,
+        global_context_index: Arc<GlobalContextIndex>,
+    ) -> Self {
+        Self {
+            repository,
+            signature_index,
+            resolver,
+            platform_signatures_loaded,
+            global_context_index,
+        }
+    }
+
+    pub fn empty() -> Self {
+        let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let signature_index = repository.get_signature_index_clone();
+        let platform_signatures_loaded = repository.platform_docs_loaded();
+        Self::from_parts(
+            repository,
+            signature_index,
+            Some(resolver),
+            platform_signatures_loaded,
+            Arc::new(GlobalContextIndex::unavailable()),
+        )
+    }
+
+    pub fn loaded_docs(
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+        global_context_index: Arc<GlobalContextIndex>,
+    ) -> Self {
+        Self::from_parts(
+            repository,
+            signature_index,
+            resolver,
+            true,
+            global_context_index,
+        )
+    }
+
+    pub fn degraded_docs(
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::from_parts(
+            repository,
+            signature_index,
+            resolver,
+            false,
+            Arc::new(GlobalContextIndex::degraded(reason)),
+        )
+    }
 }
 
 impl std::fmt::Debug for SemanticDeps {
@@ -122,6 +186,11 @@ impl std::fmt::Debug for SemanticDeps {
                 "platform_signatures_loaded",
                 &self.platform_signatures_loaded,
             )
+            .field(
+                "global_context_loaded",
+                &self.global_context_index.is_loaded(),
+            )
+            .field("global_context_len", &self.global_context_index.len())
             .finish_non_exhaustive()
     }
 }

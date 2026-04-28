@@ -7,6 +7,10 @@ use bsl_shared::domain::types::{
     RawPropertyData, RawTabularSectionData, RawTypeData, StructuralMemberId, StructuralMemberSpan,
     FORM_DATA_SEMANTICS_NOTE,
 };
+use bsl_shared::domain::{
+    normalize_global_context_property_key, GlobalContextIndex, GlobalContextPropertyData,
+    GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX, GLOBAL_CONTEXT_SOURCE_NOTE,
+};
 use bsl_shared::TypeRepository;
 use bsl_syntax::ParseOptions;
 use std::path::Path;
@@ -83,6 +87,28 @@ fn structural_member_span_for_literal_occurrence(
     StructuralMemberSpan::new(start, start + literal.len() as u32)
 }
 
+fn global_context_index_with_property(
+    name: &str,
+    english_name: Option<&str>,
+    prop_type: &str,
+) -> Arc<GlobalContextIndex> {
+    Arc::new(GlobalContextIndex::loaded(vec![
+        GlobalContextPropertyData {
+            name: name.to_string(),
+            english_name: english_name.map(str::to_string),
+            prop_type: Some(prop_type.to_string()),
+            is_readonly: true,
+            description: None,
+            contexts: vec!["Global context".to_string()],
+            source_key: format!("objects/Global context/properties/{name}"),
+            source_path: None,
+            normalized_key: normalize_global_context_property_key(name),
+            english_normalized_key: english_name.map(normalize_global_context_property_key),
+            collection_item_type: None,
+        },
+    ]))
+}
+
 fn deps_with_array_method() -> Arc<SemanticDeps> {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
@@ -119,6 +145,7 @@ fn deps_with_array_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -150,6 +177,7 @@ fn deps_with_common_module_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -176,6 +204,7 @@ fn deps_with_universal_collection_types() -> Arc<SemanticDeps> {
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 methods: vec![],
                 ..Default::default()
@@ -208,6 +237,7 @@ fn deps_with_universal_collection_types() -> Arc<SemanticDeps> {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -249,6 +279,7 @@ fn deps_with_document_create_document_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -271,6 +302,7 @@ fn deps_with_form_attribute_to_value_signature() -> Arc<SemanticDeps> {
                     name: "Ссылка".to_string(),
                     prop_type: "ДокументСсылка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -315,6 +347,7 @@ fn deps_with_form_attribute_to_value_signature() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -329,6 +362,7 @@ fn deps_with_metadata_global_context_types() -> Arc<SemanticDeps> {
                     name: "РегистрыНакопления".to_string(),
                     prop_type: "КоллекцияОбъектовМетаданных".to_string(),
                     is_readonly: true,
+                    collection_item_type: Some("ОбъектМетаданных: РегистрНакопления".to_string()),
                 }],
                 ..Default::default()
             },
@@ -344,6 +378,7 @@ fn deps_with_metadata_global_context_types() -> Arc<SemanticDeps> {
                     name: "Измерения".to_string(),
                     prop_type: "КоллекцияОбъектовМетаданных".to_string(),
                     is_readonly: true,
+                    collection_item_type: Some("ОбъектМетаданных: Поле".to_string()),
                 }],
                 ..Default::default()
             },
@@ -354,6 +389,7 @@ fn deps_with_metadata_global_context_types() -> Arc<SemanticDeps> {
                     name: "Имя".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -369,6 +405,30 @@ fn deps_with_metadata_global_context_types() -> Arc<SemanticDeps> {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: global_context_index_with_property(
+            "Метаданные",
+            Some("Metadata"),
+            "ОбъектМетаданныхКонфигурация",
+        ),
+    })
+}
+
+fn deps_with_loaded_global_context_property(
+    name: &str,
+    english_name: Option<&str>,
+    prop_type: &str,
+) -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+        global_context_index: global_context_index_with_property(name, english_name, prop_type),
     })
 }
 
@@ -396,6 +456,155 @@ fn builds_type_index_for_simple_assignment_and_method_call() {
         .type_at_byte_offset(method_call_offset)
         .expect("type at method call");
     assert_eq!(method_call.type_name(), "Число");
+}
+
+#[test]
+fn resolves_bare_global_context_property_from_loaded_index() {
+    let source = r#"Функция Значение() Экспорт
+    Возврат Синтетика;
+КонецФункции
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_context_property("Синтетика", Some("Synthetic"), "Строка");
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let offset = source.find("Синтетика").expect("synthetic identifier") as u32;
+    let resolution = index
+        .type_at_byte_offset(offset)
+        .expect("type at synthetic global context property");
+    assert_eq!(resolution.type_name(), "Строка");
+    assert!(
+        resolution.is_undeclared_variable().is_none(),
+        "loaded global-context property must not be undeclared: {resolution:?}"
+    );
+    assert!(
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE),
+        "resolution should carry global-context provenance note: {resolution:?}"
+    );
+    assert!(
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note.starts_with(GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX)),
+        "resolution should carry global-context source key note: {resolution:?}"
+    );
+}
+
+#[test]
+fn unavailable_global_context_index_does_not_invent_metadata_binding() {
+    let source = r#"Функция Значение() Экспорт
+    Возврат Метаданные;
+КонецФункции
+"#;
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", Arc::new(SemanticDeps::empty()));
+
+    let offset = source.find("Метаданные").expect("metadata identifier") as u32;
+    let resolution = index
+        .type_at_byte_offset(offset)
+        .expect("type at unavailable global context property");
+    assert_eq!(resolution.is_undeclared_variable(), Some("Метаданные"));
+}
+
+#[test]
+fn local_variable_shadows_loaded_global_context_property() {
+    let source = r#"Функция Значение() Экспорт
+    Метаданные = "local";
+    Возврат Метаданные;
+КонецФункции
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_context_property(
+        "Метаданные",
+        Some("Metadata"),
+        "ОбъектМетаданныхКонфигурация",
+    );
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let return_offset = source
+        .match_indices("Метаданные")
+        .nth(1)
+        .map(|(offset, _)| offset as u32)
+        .expect("return metadata identifier");
+    let resolution = index
+        .type_at_byte_offset(return_offset)
+        .expect("type at shadowed Метаданные");
+    assert_eq!(resolution.type_name(), "Строка");
+    assert!(
+        !resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE),
+        "local shadow must not keep global-context provenance: {resolution:?}"
+    );
+}
+
+#[test]
+fn loaded_global_context_property_wins_over_legacy_global_collection_table() {
+    let source = r#"Функция Значение() Экспорт
+    Возврат РегистрыНакопления;
+КонецФункции
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_context_property(
+        "РегистрыНакопления",
+        Some("AccumulationRegisters"),
+        "СинтетическийМенеджерРегистров",
+    );
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let offset = source
+        .find("РегистрыНакопления")
+        .expect("global manager property") as u32;
+    let resolution = index
+        .type_at_byte_offset(offset)
+        .expect("type at loaded global manager property");
+    assert_eq!(resolution.type_name(), "СинтетическийМенеджерРегистров");
+    assert!(
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE),
+        "loaded global-context property must carry source provenance: {resolution:?}"
+    );
+}
+
+#[test]
+fn loaded_global_manager_collection_resolves_from_global_context_index() {
+    let source = r#"Функция Менеджеры() Экспорт
+    Возврат РегистрыНакопления;
+КонецФункции
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_context_property(
+        "РегистрыНакопления",
+        Some("AccumulationRegisters"),
+        "РегистрыНакопленияМенеджер",
+    );
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let offset = source
+        .find("РегистрыНакопления")
+        .expect("global manager collection") as u32;
+    let resolution = index
+        .type_at_byte_offset(offset)
+        .expect("type at loaded global manager collection");
+    assert_eq!(resolution.type_name(), "РегистрыНакопленияМенеджер");
+    assert!(
+        resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE),
+        "loaded manager collection should come from GlobalContextIndex: {resolution:?}"
+    );
 }
 
 #[test]
@@ -427,6 +636,242 @@ fn resolves_metadata_global_context_accumulation_register_dimension_name_chain()
         .type_at_byte_offset(name_offset)
         .expect("type at metadata field name");
     assert_eq!(name_type.type_name(), "Строка");
+}
+
+#[test]
+fn resolves_conf_big_metadata_manager_module_lines_32_and_36() {
+    let source = include_str!(
+        "../../../examples/conf_big/AccumulationRegisters/АвансовыеПлатежиИностранцевПоНДФЛ/Ext/ManagerModule.bsl"
+    );
+    let program = parse(source);
+    let deps = deps_with_metadata_global_context_types();
+    let index = build_type_index_with_path(
+        &program,
+        "AccumulationRegisters/АвансовыеПлатежиИностранцевПоНДФЛ/Ext/ManagerModule.bsl",
+        deps,
+    );
+
+    for marker in ["ГоловнаяОрганизация.Имя", "ФизическоеЛицо.Имя"]
+    {
+        let marker_start = source
+            .find(marker)
+            .unwrap_or_else(|| panic!("missing conf_big marker {marker}"));
+        let name_offset = marker_start
+            + marker
+                .rfind("Имя")
+                .unwrap_or_else(|| panic!("missing final Имя in marker {marker}"));
+        let name_type = index
+            .type_at_byte_offset(name_offset as u32)
+            .unwrap_or_else(|| panic!("type at final Имя for marker {marker}"));
+        assert_eq!(name_type.type_name(), "Строка", "marker {marker}");
+    }
+}
+
+#[test]
+fn metadata_collection_property_uses_repository_before_legacy_table() {
+    let source = r#"Функция Коллекция() Экспорт
+    Возврат Метаданные.РегистрыНакопления;
+КонецФункции
+"#;
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "РегистрыНакопления".to_string(),
+                    prop_type: "СинтетическаяКоллекцияМетаданных".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "СинтетическаяКоллекцияМетаданных".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load configuration metadata repository property");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let deps = Arc::new(SemanticDeps {
+        repository: repository.clone(),
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository))),
+        platform_signatures_loaded: true,
+        global_context_index: global_context_index_with_property(
+            "Метаданные",
+            Some("Metadata"),
+            "ОбъектМетаданныхКонфигурация",
+        ),
+    });
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let collection_offset = source
+        .find("РегистрыНакопления")
+        .expect("metadata collection property") as u32;
+    let collection_type = index
+        .type_at_byte_offset(collection_offset)
+        .expect("type at metadata collection property");
+    assert_eq!(
+        collection_type.type_name(),
+        "СинтетическаяКоллекцияМетаданных"
+    );
+}
+
+#[test]
+fn metadata_collection_item_type_note_comes_from_source_property_instance() {
+    let source = r#"Процедура Тест()
+    Первый = Метаданные.СинтетическиеОбъекты.Первый;
+    Второй = Метаданные.ДругиеОбъекты.Второй;
+КонецПроцедуры
+"#;
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![
+                    RawPropertyData {
+                        name: "СинтетическиеОбъекты".to_string(),
+                        prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                        is_readonly: true,
+                        collection_item_type: Some("ОбъектМетаданных: Синтетика".to_string()),
+                    },
+                    RawPropertyData {
+                        name: "ДругиеОбъекты".to_string(),
+                        prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                        is_readonly: true,
+                        collection_item_type: Some("ОбъектМетаданных: ДругаяСинтетика".to_string()),
+                    },
+                ],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияОбъектовМетаданных".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбъектМетаданных: Синтетика".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбъектМетаданных: ДругаяСинтетика".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load per-property metadata collection item types");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let deps = Arc::new(SemanticDeps {
+        repository: repository.clone(),
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository))),
+        platform_signatures_loaded: true,
+        global_context_index: global_context_index_with_property(
+            "Метаданные",
+            Some("Metadata"),
+            "ОбъектМетаданныхКонфигурация",
+        ),
+    });
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let first_object_offset = source
+        .match_indices("Первый")
+        .nth(1)
+        .map(|(offset, _)| offset as u32)
+        .expect("first metadata object name");
+    let second_object_offset = source
+        .match_indices("Второй")
+        .nth(1)
+        .map(|(offset, _)| offset as u32)
+        .expect("second metadata object name");
+
+    let first_object_type = index
+        .type_at_byte_offset(first_object_offset)
+        .expect("type at first metadata object name");
+    let second_object_type = index
+        .type_at_byte_offset(second_object_offset)
+        .expect("type at second metadata object name");
+
+    assert_eq!(first_object_type.type_name(), "ОбъектМетаданных: Синтетика");
+    assert_eq!(
+        second_object_type.type_name(),
+        "ОбъектМетаданных: ДругаяСинтетика"
+    );
+}
+
+#[test]
+fn metadata_collection_element_name_uses_item_type_before_collection_properties() {
+    let source = r#"Функция ОбъектМетаданных() Экспорт
+    Возврат Метаданные.СинтетическиеОбъекты.СинтетическийРегистр;
+КонецФункции
+"#;
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "СинтетическиеОбъекты".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                    collection_item_type: Some("ОбъектМетаданных: Синтетика".to_string()),
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияОбъектовМетаданных".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "СинтетическийРегистр".to_string(),
+                    prop_type: "Булево".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбъектМетаданных: Синтетика".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load metadata collection element fixture");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let deps = Arc::new(SemanticDeps {
+        repository: repository.clone(),
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository))),
+        platform_signatures_loaded: true,
+        global_context_index: global_context_index_with_property(
+            "Метаданные",
+            Some("Metadata"),
+            "ОбъектМетаданныхКонфигурация",
+        ),
+    });
+    let program = parse(source);
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let object_name_offset = source.find("СинтетическийРегистр").expect("object name") as u32;
+    let object_name_type = index
+        .type_at_byte_offset(object_name_offset)
+        .expect("type at metadata object name");
+
+    assert_eq!(object_name_type.type_name(), "ОбъектМетаданных: Синтетика");
 }
 
 #[test]
@@ -519,6 +964,7 @@ fn semantic_program_index_materializes_configuration_symbol_exact_span_and_defin
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = concat!(
@@ -1496,6 +1942,7 @@ fn seeds_form_module_context_for_elements_property_access() {
                     name: "СчетФактураПросмотр".to_string(),
                     prop_type: "ГруппаФормы".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -1516,6 +1963,7 @@ fn seeds_form_module_context_for_elements_property_access() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1590,6 +2038,7 @@ fn seeds_form_module_context_for_this_object_and_parameters() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1652,6 +2101,7 @@ fn form_module_object_seed_contains_form_data_semantics_metadata_notes() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1727,6 +2177,7 @@ fn resolves_form_module_object_link_property_from_object_facet() {
                     name: "Ссылка".to_string(),
                     prop_type: "ДокументСсылка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -1752,6 +2203,7 @@ fn resolves_form_module_object_link_property_from_object_facet() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1797,6 +2249,7 @@ fn resolves_form_module_object_link_property_without_platform_object_properties(
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1842,6 +2295,7 @@ fn resolves_form_module_object_deletion_mark_property_without_platform_object_pr
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1887,6 +2341,7 @@ fn resolves_catalog_form_module_object_link_property_without_platform_object_pro
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -1924,6 +2379,7 @@ fn form_module_object_member_resolution_does_not_leak_form_shape() {
                     name: "Ссылка".to_string(),
                     prop_type: "ДокументСсылка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -1940,6 +2396,7 @@ fn form_module_object_member_resolution_does_not_leak_form_shape() {
                     name: "СчетФактура".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -1954,6 +2411,7 @@ fn form_module_object_member_resolution_does_not_leak_form_shape() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2008,6 +2466,7 @@ fn form_module_object_resolves_tabular_projection_without_form_shape_leakage() {
                     name: "СчетФактура".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2022,6 +2481,7 @@ fn form_module_object_resolves_tabular_projection_without_form_shape_leakage() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2139,6 +2599,7 @@ fn seeds_catalog_object_module_context_for_hierarchical_catalogs() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2227,6 +2688,7 @@ fn object_module_bare_identifier_without_canonical_binding_stays_undeclared() {
                 name: "ДоговорКонтрагента".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -2239,6 +2701,7 @@ fn object_module_bare_identifier_without_canonical_binding_stays_undeclared() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2273,6 +2736,7 @@ fn recordset_module_bare_identifier_without_canonical_binding_stays_undeclared()
                 name: "ОбменДанными".to_string(),
                 prop_type: "Булево".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -2285,6 +2749,7 @@ fn recordset_module_bare_identifier_without_canonical_binding_stays_undeclared()
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2319,6 +2784,7 @@ fn object_module_explicit_this_object_member_stays_available() {
                 name: "ДоговорКонтрагента".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -2331,6 +2797,7 @@ fn object_module_explicit_this_object_member_stays_available() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2361,6 +2828,7 @@ fn recordset_module_explicit_object_member_stays_available() {
                 name: "ОбменДанными".to_string(),
                 prop_type: "Булево".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -2373,6 +2841,7 @@ fn recordset_module_explicit_object_member_stays_available() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2404,6 +2873,7 @@ fn form_module_bare_identifier_does_not_use_applied_owner_fallback() {
                     name: "ДоговорКонтрагента".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2422,6 +2892,7 @@ fn form_module_bare_identifier_does_not_use_applied_owner_fallback() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let source = r#"Процедура Тест()
@@ -2555,6 +3026,7 @@ fn universal_collection_effects_do_not_mutate_type_repository() {
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2585,6 +3057,7 @@ fn universal_collection_effects_do_not_mutate_type_repository() {
             repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>
         ))),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
     let before = repository_impl.get_all_types();
 

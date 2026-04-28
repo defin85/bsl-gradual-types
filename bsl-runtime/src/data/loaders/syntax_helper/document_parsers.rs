@@ -76,7 +76,10 @@ impl DocumentParser {
     pub fn parse_method(&self, document: &Html) -> Result<MethodInfo> {
         let title = self.html_extractor.extract_title(document);
         let (name, _english_from_title) = self.html_extractor.parse_title(&title);
-        let description = self.html_extractor.extract_description(document);
+        let description = self
+            .html_extractor
+            .extract_property_description(document)
+            .unwrap_or_else(|| self.html_extractor.extract_description(document));
         let (return_type, return_description) = self.html_extractor.extract_return_info(document);
         let overloads = self.html_extractor.extract_method_overloads(document);
         let parameters = overloads
@@ -166,18 +169,31 @@ impl DocumentParser {
     }
 
     /// Парсит свойство из документа
-    pub fn parse_property(&self, document: &Html) -> Result<PropertyInfo> {
+    pub fn parse_property(&self, path: &Path, document: &Html) -> Result<PropertyInfo> {
         let title = self.html_extractor.extract_title(document);
-        let (name, _english_from_title) = self.html_extractor.parse_title(&title);
-        let description = self.html_extractor.extract_description(document);
+        let (name, english_from_title) = self.html_extractor.parse_title(&title);
+        let description = self
+            .html_extractor
+            .extract_property_description(document)
+            .unwrap_or_else(|| self.html_extractor.extract_description(document));
         let property_type = self.html_extractor.extract_property_type(document);
         let is_readonly = self.html_extractor.is_readonly(document);
+        let contexts = Self::extract_availability_contexts(document);
+        let collection_item_type = self
+            .html_extractor
+            .extract_metadata_collection_item_type(document);
 
         Ok(PropertyInfo {
             name,
+            english_name: non_empty_string(english_from_title),
             property_type,
             is_readonly,
             description: Some(description),
+            contexts,
+            source_key: Some(Self::source_key_from_path(path)),
+            source_path: Some(path.to_string_lossy().replace('\\', "/")),
+            source_kind: Self::property_source_kind(path),
+            collection_item_type,
         })
     }
 
@@ -332,6 +348,25 @@ impl DocumentParser {
         None
     }
 
+    fn property_source_kind(path: &Path) -> PropertySourceKind {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        if normalized.contains("/objects/Global context/properties/") {
+            PropertySourceKind::GlobalContextProperty
+        } else {
+            PropertySourceKind::TypeProperty
+        }
+    }
+
+    fn source_key_from_path(path: &Path) -> String {
+        let normalized = path.to_string_lossy().replace('\\', "/");
+        let without_ext = normalized.strip_suffix(".html").unwrap_or(&normalized);
+        if let Some(pos) = without_ext.rfind("/objects/") {
+            without_ext[pos + 1..].to_string()
+        } else {
+            without_ext.to_string()
+        }
+    }
+
     /// Извлекает контексты доступности функции
     fn extract_availability_contexts(document: &Html) -> Vec<String> {
         let Ok(availability_selector) = Selector::parse("p.V8SH_chapter + p") else {
@@ -363,5 +398,84 @@ impl DocumentParser {
 impl Default for DocumentParser {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_global_context_property_preserves_fields_and_source() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let html_path = root.join(
+            "examples/syntax_helper/rebuilt.shcntx_ru/objects/Global context/properties/Metadata974.html",
+        );
+        let content = std::fs::read_to_string(&html_path).expect("failed to read Metadata974.html");
+        let document = Html::parse_document(&content);
+
+        let property = DocumentParser::new()
+            .parse_property(&html_path, &document)
+            .expect("failed to parse Metadata974 property");
+
+        assert_eq!(property.name, "Глобальный контекст.Метаданные");
+        assert_eq!(
+            property.english_name.as_deref(),
+            Some("Global context.Metadata")
+        );
+        assert_eq!(
+            property.property_type.as_deref(),
+            Some("ОбъектМетаданныхКонфигурация")
+        );
+        assert!(property.is_readonly);
+        assert!(property
+            .description
+            .as_deref()
+            .is_some_and(|description| description.contains("структуре метаданных")));
+        assert!(
+            property.contexts.iter().any(|context| context == "Сервер"),
+            "availability contexts should include server"
+        );
+        assert_eq!(
+            property.source_key.as_deref(),
+            Some("objects/Global context/properties/Metadata974")
+        );
+        assert_eq!(
+            property.source_kind,
+            PropertySourceKind::GlobalContextProperty
+        );
+    }
+
+    #[test]
+    fn parse_metadata_collection_property_preserves_item_type() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let html_path = root.join(
+            "examples/syntax_helper/rebuilt.shcntx_ru/objects/catalog63/catalog272/ConfigurationMetadataObject/properties/AccumulationRegisters6284.html",
+        );
+        let content = std::fs::read_to_string(&html_path)
+            .expect("failed to read AccumulationRegisters6284.html");
+        let document = Html::parse_document(&content);
+
+        let property = DocumentParser::new()
+            .parse_property(&html_path, &document)
+            .expect("failed to parse AccumulationRegisters property");
+
+        assert_eq!(
+            property.property_type.as_deref(),
+            Some("КоллекцияОбъектовМетаданных")
+        );
+        assert_eq!(
+            property.collection_item_type.as_deref(),
+            Some("ОбъектМетаданных: РегистрНакопления")
+        );
     }
 }

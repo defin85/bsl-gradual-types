@@ -153,6 +153,7 @@ fn build_deps(repository_impl: Arc<InMemoryTypeRepository>) -> Arc<bsl_analysis_
         resolver: Some(resolver),
         repository,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     })
 }
 

@@ -29,6 +29,7 @@ impl TypeMetadataLookup {
                 name: name.to_string(),
                 prop_type: prop_type.to_string(),
                 is_readonly,
+                collection_item_type: None,
             });
         };
 
@@ -302,6 +303,7 @@ impl TypeMetadataLookup {
                             name: value.clone(),
                             prop_type: enum_ref_type.clone(),
                             is_readonly: true,
+                            collection_item_type: None,
                         })
                         .collect();
                     return Some(props);
@@ -363,6 +365,7 @@ impl TypeMetadataLookup {
                             // readonly: табличную часть нельзя заменить целиком
                             // (Док.ТЧ = Другая), но можно изменять содержимое
                             is_readonly: true,
+                            collection_item_type: None,
                         });
                     }
                 }

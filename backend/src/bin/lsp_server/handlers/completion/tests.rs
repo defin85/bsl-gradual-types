@@ -69,6 +69,7 @@ fn create_test_env() -> TestEnv {
             name: "Длина".to_string(),
             prop_type: "Число".to_string(),
             is_readonly: true,
+            collection_item_type: None,
         }],
         ..Default::default()
     };
@@ -160,6 +161,7 @@ fn create_test_env() -> TestEnv {
         resolver: Some(resolver),
         repository,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     TestEnv { index, deps }

@@ -56,7 +56,7 @@ pub(super) fn syntax_helper_settings_fingerprint(
 ) -> String {
     let settings = &syntax_parser.settings;
     format!(
-        "syntax_helper_parser_v1;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};keywords={};strict_fingerprint={}",
+        "syntax_helper_parser_v2;threads={:?};batch={};show={};limit={:?};skip={:?};parallel={};keywords={};strict_fingerprint={}",
         settings.max_threads,
         settings.batch_size,
         settings.show_progress,

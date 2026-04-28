@@ -12,9 +12,13 @@ use anyhow::anyhow;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{RawDataSource, RawTypeData};
+use bsl_shared::domain::GlobalContextIndex;
 use serde::{Deserialize, Serialize};
 
-use crate::data::adapters::{convert_syntax_helper_global_functions, convert_syntax_helper_to_raw};
+use crate::data::adapters::{
+    convert_syntax_helper_to_semantic_bundle, PlatformDocsSemanticBundle,
+    PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION,
+};
 use crate::data::loaders::config_metadata_parser::ConfigurationDiscovery;
 use crate::data::loaders::{
     hbk_recovery, progress::ProgressUpdate, IndexedConfigSignatures, OptimizationSettings,
@@ -221,7 +225,7 @@ impl SystemCoordinator {
         let repository = Arc::new(InMemoryTypeRepository::new());
 
         // 4. Загружаем данные в репозиторий (через Adapters)
-        let platform_raw_data = if !syntax_result.database.nodes.is_empty() {
+        let platform_docs_bundle = if !syntax_result.database.nodes.is_empty() {
             self.populate_repository_from_syntax_helper(
                 &repository,
                 syntax_result.database,
@@ -229,12 +233,19 @@ impl SystemCoordinator {
             )?
         } else {
             // Загружаем базовые типы как fallback
-            Self::load_fallback_types(&repository)?
+            PlatformDocsSemanticBundle {
+                schema_version: PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION.to_string(),
+                raw_types: Self::load_fallback_types(&repository)?,
+                global_function_signatures: Vec::new(),
+                global_context_index: GlobalContextIndex::unavailable(),
+            }
         };
+        let platform_raw_data = &platform_docs_bundle.raw_types;
+        let global_context_index = Arc::new(platform_docs_bundle.global_context_index.clone());
 
         if !platform_raw_data.is_empty() {
             let mut type_items: Vec<IndexItem> = Vec::new();
-            for raw_type in &platform_raw_data {
+            for raw_type in platform_raw_data {
                 if raw_type.source != RawDataSource::Platform {
                     continue;
                 }
@@ -279,6 +290,7 @@ impl SystemCoordinator {
             *cache = Some(Arc::new(DomainBundle {
                 repository: repository.clone(),
                 resolver: resolver.clone(),
+                global_context_index: global_context_index.clone(),
             }));
         }
 
@@ -644,8 +656,11 @@ impl SystemCoordinator {
         ))
     }
 
-    fn build_platform_raw_cache_key(&self, meta: &PlatformCacheMeta) -> DiskCacheKey {
-        let settings_fingerprint = format!("{};raw_v1", meta.settings_fingerprint);
+    fn build_platform_semantic_bundle_cache_key(&self, meta: &PlatformCacheMeta) -> DiskCacheKey {
+        let settings_fingerprint = format!(
+            "{};{}",
+            meta.settings_fingerprint, PLATFORM_DOCS_SEMANTIC_BUNDLE_SCHEMA_VERSION
+        );
         let key_hash = blake3::hash(
             format!(
                 "{}|{}|{}",
@@ -657,7 +672,7 @@ impl SystemCoordinator {
         .to_string();
 
         DiskCacheKey::new(
-            "platform_raw",
+            "platform_semantic_bundle",
             key_hash,
             meta.source_identity.clone(),
             meta.source_fingerprint.clone(),
@@ -709,31 +724,36 @@ impl SystemCoordinator {
         repository: &Arc<InMemoryTypeRepository>,
         database: crate::data::loaders::syntax_helper::SyntaxHelperDatabase,
         cache_meta: Option<&PlatformCacheMeta>,
-    ) -> Result<Vec<RawTypeData>, StartupError> {
-        let platform_raw_data = if let Some(meta) = cache_meta {
-            let cache_key = self.build_platform_raw_cache_key(meta);
+    ) -> Result<PlatformDocsSemanticBundle, StartupError> {
+        let platform_docs_bundle = if let Some(meta) = cache_meta {
+            let cache_key = self.build_platform_semantic_bundle_cache_key(meta);
             let cache = self.disk_cache();
             let database_for_build = database.clone();
             let entry = cache
                 .get_or_build_with_swr(
                     &cache_key,
-                    move || Ok(convert_syntax_helper_to_raw(&database_for_build)),
-                    |types| !types.is_empty(),
+                    move || {
+                        Ok(convert_syntax_helper_to_semantic_bundle(
+                            &database_for_build,
+                        ))
+                    },
+                    |bundle| !bundle.raw_types.is_empty(),
                 )
                 .map_err(StartupError::PlatformTypesError)?;
             if entry.from_cache {
-                info!("Используем кэш platform raw types");
+                info!("Используем кэш platform semantic bundle");
             }
             entry.value
         } else {
-            convert_syntax_helper_to_raw(&database)
+            convert_syntax_helper_to_semantic_bundle(&database)
         };
+        let platform_raw_data = &platform_docs_bundle.raw_types;
 
         // MILESTONE 2.20.5: Заполняем SignatureIndex из загруженных типов
-        let platform_types_clone = platform_raw_data.clone(); // Клонируем для SignatureIndex
+        let platform_types_clone = platform_raw_data.to_vec(); // Клонируем для SignatureIndex
 
         repository
-            .load_types(platform_raw_data.clone())
+            .load_types(platform_raw_data.to_vec())
             .map_err(StartupError::PlatformTypesError)?;
         repository.set_platform_docs_loaded(true);
 
@@ -747,10 +767,13 @@ impl SystemCoordinator {
             .build();
         repository.set_signature_index(index);
 
-        let global_function_signatures = convert_syntax_helper_global_functions(&database);
-        if !global_function_signatures.is_empty() {
-            let count = global_function_signatures.len();
-            for signature in global_function_signatures {
+        if !platform_docs_bundle.global_function_signatures.is_empty() {
+            let count = platform_docs_bundle.global_function_signatures.len();
+            for signature in platform_docs_bundle
+                .global_function_signatures
+                .iter()
+                .cloned()
+            {
                 let name = signature.name.clone();
                 repository.add_global_function_signature(&name, signature);
             }
@@ -768,7 +791,7 @@ impl SystemCoordinator {
         info!("SignatureIndex заполнен платформенными методами");
         info!("GenericInfo применён к {} типам-коллекциям", generic_count);
 
-        Ok(platform_raw_data)
+        Ok(platform_docs_bundle)
     }
 }
 

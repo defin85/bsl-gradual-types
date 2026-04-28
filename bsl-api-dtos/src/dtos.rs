@@ -133,6 +133,16 @@ pub struct SnapshotInputsDto {
     pub strict_fingerprint: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct GlobalContextDocsStatusDto {
+    pub state: String,
+    pub property_count: usize,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub degraded_reason: Option<String>,
+}
+
 /// Metadata about the currently loaded deps snapshot (Web UI parity diagnostics).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +153,8 @@ pub struct SnapshotMetaDto {
     pub platform_fingerprint: Option<String>,
     pub config_fingerprint: Option<String>,
     pub strict_fingerprint: bool,
+    #[serde(default)]
+    pub global_context: GlobalContextDocsStatusDto,
     pub repository_stats: RepositoryStats,
     pub inputs: SnapshotInputsDto,
 }

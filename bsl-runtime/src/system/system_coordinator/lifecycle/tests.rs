@@ -114,7 +114,7 @@ fn test_platform_raw_cache_produces_signature_index() {
         .unwrap();
 
     let repository = Arc::new(InMemoryTypeRepository::new());
-    coordinator
+    let platform_docs_bundle = coordinator
         .populate_repository_from_syntax_helper(
             &repository,
             load_result.database,
@@ -127,6 +127,13 @@ fn test_platform_raw_cache_produces_signature_index() {
     assert!(
         methods.iter().any(|method| method.name == "Добавить"),
         "Ожидали метод Массив.Добавить в SignatureIndex"
+    );
+    assert!(
+        platform_docs_bundle
+            .global_context_index
+            .get("Метаданные")
+            .is_some(),
+        "Ожидали Метаданные в GlobalContextIndex semantic bundle"
     );
 }
 

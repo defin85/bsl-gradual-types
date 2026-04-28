@@ -137,6 +137,7 @@ mod detail_level_tests {
                 name: format!("Свойство{}", i),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             })
             .collect();
 

@@ -12,6 +12,7 @@ The core direction is correct: `Метаданные` and other global-context p
 - `analysis-v2` receives an immutable index through `SemanticDeps` and performs no Syntax Helper file IO.
 - Local/module symbols shadow global-context properties.
 - Metadata object chains use `TypeRepository` property data before any degraded fallback.
+- Loaded global-context entries take precedence over legacy hardcoded global collection tables.
 - Missing Syntax Helper data fails closed.
 - Existing global metadata manager collection hardcodes must be inventoried and either migrated or explicitly left as fallback/follow-up.
 
@@ -28,6 +29,7 @@ The core direction is correct: `Метаданные` and other global-context p
 | Compatibility | Watch | Adding `SemanticDeps` fields will touch many test literals; builder tasks reduce churn. |
 | Operability | Pass with patch | Added debug/status task for loaded/absent/degraded evidence. |
 | Test strategy | Pass with patch | Added synthetic no-analysis-v2-edit test and distinct item-type regression. |
+| Legacy source precedence | Fixed gap | Loaded global-context entries now win over legacy tables; hardcodes are fallback-only. |
 | Remaining hardcodes | Watch | `GLOBAL_COLLECTIONS_INFO` is now an explicit inventory/migration task instead of hidden scope drift. |
 
 ## Execution Plan
@@ -36,7 +38,7 @@ The core direction is correct: `Метаданные` and other global-context p
 2. Build a coordinated platform-docs semantic bundle containing raw types, global functions, and global-context index.
 3. Add `SemanticDeps` builder/default APIs and wire runtime/CLI/LSP/bsl-agent deps.
 4. Replace `lookup_global_context_property` and metadata-object tables with index-backed lookup and centralized degraded fallback.
-5. Inventory `GLOBAL_COLLECTIONS_INFO`; migrate data-derivable entries or document fallback/follow-up entries.
+5. Inventory `GLOBAL_COLLECTIONS_INFO`; migrate data-derivable entries or document fallback/follow-up entries, while preserving index-first precedence.
 6. Add parser/converter, inference, diagnostics, hover/type-at-position, completion, and CLI regressions.
 7. Run strict OpenSpec and targeted cargo/CLI validation from `tasks.md`.
 
@@ -48,6 +50,7 @@ The core direction is correct: `Метаданные` and other global-context p
 - Required a coordinated platform-docs semantic bundle/cache identity instead of independent raw-type/global-function/global-context conversion paths.
 - Required `SemanticDeps` constructors/builders to limit broad test churn and make degraded docs states explicit.
 - Added explicit inventory/migration requirement for `GLOBAL_COLLECTIONS_INFO`.
+- Required loaded global-context entries to take precedence over legacy hardcoded global collection tables.
 
 ## Assumptions and Open Questions
 

@@ -98,6 +98,7 @@ fn inject_predefined_chart_of_accounts_type(deps_bundle: &DepsBundleV2) {
                 name: "ГотоваяПродукция".to_string(),
                 prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])

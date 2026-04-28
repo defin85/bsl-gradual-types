@@ -424,6 +424,7 @@ impl TypeMetadataLookup {
                         name: member.canonical_name.clone(),
                         prop_type: member.member_type.type_name(),
                         is_readonly: false,
+                        collection_item_type: None,
                     },
                     PROPERTY_ORIGIN_STRUCTURAL,
                 )
@@ -519,6 +520,7 @@ impl TypeMetadataLookup {
             name: property.name.clone(),
             prop_type: reference_type.to_string(),
             is_readonly: true,
+            collection_item_type: None,
         })
     }
 
@@ -549,6 +551,7 @@ impl TypeMetadataLookup {
                             name: tabular.name.clone(),
                             prop_type: format!("ДанныеФормыКоллекция<Строка{}>", tabular.name),
                             is_readonly: false,
+                            collection_item_type: None,
                         }
                     }));
                     properties
@@ -646,11 +649,13 @@ impl TypeMetadataLookup {
                     object_name,
                 ),
                 is_readonly: true,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "ПометкаУдаления".to_string(),
                 prop_type: "Булево".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             },
         ]
     }
@@ -687,6 +692,7 @@ impl TypeMetadataLookup {
                     name: value.clone(),
                     prop_type: enum_ref_type.clone(),
                     is_readonly: true,
+                    collection_item_type: None,
                 })
                 .collect(),
         )

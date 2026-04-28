@@ -31,6 +31,7 @@ fn goto_definition_fails_closed_without_exact_type_index_artifact() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     });
 
     let content = concat!(

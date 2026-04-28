@@ -139,6 +139,10 @@ pub struct RawPropertyData {
     pub prop_type: String,
     /// Whether property is read-only
     pub is_readonly: bool,
+    /// Element type for collection-valued properties when Syntax Helper documents
+    /// it on the property page rather than on the reusable collection type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_item_type: Option<String>,
 }
 
 /// Raw parameter data from parser

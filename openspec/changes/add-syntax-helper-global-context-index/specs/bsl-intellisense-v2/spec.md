@@ -77,9 +77,19 @@ The system SHALL inventory hardcoded global metadata manager collections such as
 
 For each hardcoded collection entry, the system SHALL either migrate it to a data-driven Syntax Helper/configuration index or record explicit fallback evidence and a follow-up plan.
 
+When Syntax Helper or configuration metadata provides the same global manager property, the data-driven entry SHALL take precedence over the legacy hardcoded table entry. Hardcoded entries SHALL act only as explicit degraded/bootstrap fallback.
+
 #### Scenario: Remaining global collection hardcodes are explicit
 
 - **GIVEN** implementation still needs a hardcoded global metadata manager collection entry after this change
 - **WHEN** delivery evidence is produced
 - **THEN** the entry is listed with the reason it remains hardcoded
 - **AND** the entry is marked as degraded/bootstrap fallback or linked to a follow-up OpenSpec change
+
+#### Scenario: Loaded global collection property is not shadowed by legacy table
+
+- **GIVEN** Syntax Helper global-context index contains `РегистрыНакопления`
+- **AND** a legacy hardcoded table also contains `РегистрыНакопления`
+- **WHEN** v2 resolves the bare identifier `РегистрыНакопления`
+- **THEN** the result is derived from the data-driven index with Syntax Helper/config provenance
+- **AND** the legacy table is not treated as a peer authority for that entry

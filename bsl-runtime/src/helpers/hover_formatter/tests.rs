@@ -18,6 +18,7 @@ mod tests {
         RawPropertyData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
         SpecialType, TypeResolution, WeightedType,
     };
+    use bsl_shared::domain::{GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX, GLOBAL_CONTEXT_SOURCE_NOTE};
     use bsl_shared::formatting::DetailLevel;
     use std::sync::Arc;
 
@@ -138,6 +139,33 @@ mod tests {
     }
 
     #[test]
+    fn test_format_variable_shows_global_context_provenance() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        repo.load_types(vec![RawTypeData {
+            name: "ОбъектМетаданныхКонфигурация".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        }])
+        .unwrap();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup);
+        let mut resolution = TypeResolution::explicit("ОбъектМетаданныхКонфигурация");
+        resolution
+            .metadata
+            .notes
+            .push(GLOBAL_CONTEXT_SOURCE_NOTE.to_string());
+        resolution.metadata.notes.push(format!(
+            "{GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX}objects/Global context/properties/Metadata974"
+        ));
+
+        let hover = formatter.format_variable("Метаданные", &resolution);
+
+        assert!(hover.contains("ОбъектМетаданныхКонфигурация"));
+        assert!(hover.contains("Syntax Helper: Global context"));
+        assert!(hover.contains("objects/Global context/properties/Metadata974"));
+    }
+
+    #[test]
     fn test_certainty_formatting_known() {
         let config = HoverFormatConfig::default();
         let result = HoverBuilder::new(&config)
@@ -248,6 +276,7 @@ mod tests {
                 name: format!("Свойство{}", i),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             })
             .collect();
 
@@ -432,16 +461,19 @@ mod tests {
                     name: "Яблоко".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 },
                 RawPropertyData {
                     name: "Абрикос".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 },
                 RawPropertyData {
                     name: "Банан".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 },
             ],
             facets: vec![FacetKind::Object],

@@ -1,5 +1,5 @@
 use super::*;
-use crate::system::{IndexItem, IndexSnapshot, SymbolKind, SymbolScope, TypeKind};
+use crate::system::{IndexItem, IndexSnapshot, IndexSnapshotId, SymbolKind, SymbolScope, TypeKind};
 use bsl_analysis_v2::{
     AnalysisHostV2, Change as ChangeV2, DepsSnapshotId, FileId as V2FileId, SettingsId,
 };
@@ -13,6 +13,9 @@ use bsl_shared::domain::types::{
     Certainty, ConcreteType, ConfigurationType, FacetKind, MetadataKind, RawDataSource,
     RawMethodData, RawPropertyData, RawTypeData, ResolutionMetadata, ResolutionResult,
     ResolutionSource, TypeResolution, FORM_DATA_FORM_TYPE_NOTE_PREFIX, FORM_DATA_SEMANTICS_NOTE,
+};
+use bsl_shared::domain::{
+    normalize_global_context_property_key, GlobalContextIndex, GlobalContextPropertyData,
 };
 use bsl_shared::formatting::DetailLevel;
 use std::sync::Arc;
@@ -55,6 +58,26 @@ fn byte_offset_of(content: &str, marker: &str) -> u32 {
         .find(marker)
         .map(|index| index as u32)
         .unwrap_or_else(|| panic!("Marker not found: {}", marker))
+}
+
+fn completion_global_context_index() -> Arc<GlobalContextIndex> {
+    Arc::new(GlobalContextIndex::loaded(vec![
+        GlobalContextPropertyData {
+            name: "Глобальный контекст.Метаданные".to_string(),
+            english_name: Some("Global context.Metadata".to_string()),
+            prop_type: Some("ОбъектМетаданныхКонфигурация".to_string()),
+            is_readonly: true,
+            description: Some("Предоставляет доступ к структуре метаданных.".to_string()),
+            contexts: vec!["Сервер".to_string()],
+            source_key: "objects/Global context/properties/Metadata974".to_string(),
+            source_path: None,
+            normalized_key: normalize_global_context_property_key("Глобальный контекст.Метаданные"),
+            english_normalized_key: Some(normalize_global_context_property_key(
+                "Global context.Metadata",
+            )),
+            collection_item_type: None,
+        },
+    ]))
 }
 
 #[test]
@@ -230,6 +253,91 @@ fn completion_context_can_add_statements_flags() {
     assert!(!ctx.can_add_statements);
 }
 
+#[tokio::test]
+async fn completion_non_member_includes_loaded_global_context_properties() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = TypeResolver::new(repo.clone());
+    let metadata_lookup = TypeMetadataLookup::new(repo);
+    let snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash("global-context-completion"));
+    let content = "Ме";
+    let analysis = CompletionAnalysisContext {
+        ir_program: None,
+        resolver: &resolver,
+        file_path: "test.bsl",
+        member_access_owner_type_hints: Vec::new(),
+        include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
+        global_context_index: Some(completion_global_context_index()),
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        0,
+        content.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32,
+        None,
+        &snapshot,
+        &metadata_lookup,
+        &analysis,
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let metadata = result
+        .items
+        .iter()
+        .find(|candidate| candidate.item.label == "Метаданные")
+        .expect("loaded global-context property completion");
+    assert_eq!(
+        metadata.item.detail.as_deref(),
+        Some("ОбъектМетаданныхКонфигурация")
+    );
+    assert_eq!(metadata.item.kind as u8, CompletionKind::Property as u8);
+}
+
+#[tokio::test]
+async fn completion_non_member_omits_global_context_properties_without_loaded_index() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    let repo: Arc<dyn TypeRepository> = repository.clone();
+    let resolver = TypeResolver::new(repo.clone());
+    let metadata_lookup = TypeMetadataLookup::new(repo);
+    let snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash("no-global-context-completion"));
+    let content = "Ме";
+    let analysis = CompletionAnalysisContext {
+        ir_program: None,
+        resolver: &resolver,
+        file_path: "test.bsl",
+        member_access_owner_type_hints: Vec::new(),
+        include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
+        global_context_index: Some(Arc::new(GlobalContextIndex::unavailable())),
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        0,
+        content.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32,
+        None,
+        &snapshot,
+        &metadata_lookup,
+        &analysis,
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    assert!(
+        result
+            .items
+            .iter()
+            .all(|candidate| candidate.item.label != "Метаданные"),
+        "unavailable global-context index must not invent Метаданные completion"
+    );
+}
+
 #[test]
 fn add_properties_from_resolution_preserves_form_data_provider_order_priorities() {
     let repository = Arc::new(InMemoryTypeRepository::new());
@@ -244,6 +352,7 @@ fn add_properties_from_resolution_preserves_form_data_provider_order_priorities(
                     name: "СвойствоМетаданных".to_string(),
                     prop_type: "Число".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -254,6 +363,7 @@ fn add_properties_from_resolution_preserves_form_data_provider_order_priorities(
                     name: "РеквизитФормы".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -265,6 +375,7 @@ fn add_properties_from_resolution_preserves_form_data_provider_order_priorities(
                     name: "ФацетСвойство".to_string(),
                     prop_type: "Число".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -351,6 +462,7 @@ fn form_data_member_completion_includes_intrinsic_and_excludes_shape_and_facet_m
                     name: "РеквизитФормы".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -367,6 +479,7 @@ fn form_data_member_completion_includes_intrinsic_and_excludes_shape_and_facet_m
                     name: "ФацетСвойство".to_string(),
                     prop_type: "Число".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -652,6 +765,7 @@ fn build_non_member_completion_fixture(
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     let mut host = AnalysisHostV2::default();
@@ -697,6 +811,7 @@ async fn completion_labels_non_member(
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -1329,6 +1444,7 @@ async fn completion_non_member_warm_snapshot_reuses_immutable_catalogs() {
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     let deps_id = DepsSnapshotId::from_hash("refactor-13-cache-reuse");
@@ -1423,6 +1539,7 @@ async fn completion_non_member_cache_keeps_local_and_contextual_candidates_stabl
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let deps_id = DepsSnapshotId::from_hash("refactor-13-local-contextual");
     let settings_id = SettingsId::from_hash("refactor-13-local-contextual");
@@ -1602,6 +1719,7 @@ async fn completion_non_member_semantic_path_ignores_polluted_index_snapshot() {
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -1685,6 +1803,7 @@ async fn completion_resolves_variable_type_for_member_access() {
                 name: "Количество".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -1710,6 +1829,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -1737,6 +1857,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач")
@@ -1786,6 +1907,7 @@ async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact(
                 name: "Количество".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -1816,6 +1938,7 @@ async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact(
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -1843,6 +1966,7 @@ async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact(
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let resolved = resolve_member_owner_type(Some(&ctx), content, line, column, "ТаблЗнач").await;
@@ -1888,6 +2012,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
                 name: "Количество".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -1944,6 +2069,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -1971,6 +2097,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2040,6 +2167,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
                 name: "Prop".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -2059,6 +2187,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2086,6 +2215,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2133,6 +2263,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
                     name: "РеквизитФормы".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2149,6 +2280,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
                     name: "ФацетСвойство".to_string(),
                     prop_type: "Число".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2171,6 +2303,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2198,6 +2331,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2250,6 +2384,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
                     name: "РеквизитФормы".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2266,6 +2401,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
                     name: "ФацетСвойство".to_string(),
                     prop_type: "Число".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2292,6 +2428,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2329,6 +2466,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2401,6 +2539,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2428,6 +2567,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         include_flow_sensitive: true,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2469,6 +2609,7 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     let cases = [
@@ -2542,6 +2683,7 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
             include_flow_sensitive: false,
             deps_id: None,
             settings_id: None,
+            global_context_index: None,
         };
 
         let without_hint = resolve_member_owner_type_sync(
@@ -2564,6 +2706,7 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
             include_flow_sensitive: false,
             deps_id: None,
             settings_id: None,
+            global_context_index: None,
         };
         let resolved = resolve_member_owner_type_sync(
             Some(&ctx_with_hint),
@@ -2591,6 +2734,7 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     let content = concat!("Процедура Тест()\n", "    Объект.\n", "КонецПроцедуры\n",);
@@ -2622,6 +2766,7 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let fallback = resolve_member_owner_type_sync(Some(&ctx), content, 1, access_column, "Объект");
@@ -2643,6 +2788,7 @@ async fn completion_resolves_nested_member_access_chain() {
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2679,6 +2825,7 @@ async fn completion_resolves_nested_member_access_chain() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2706,6 +2853,7 @@ async fn completion_resolves_nested_member_access_chain() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2741,6 +2889,7 @@ async fn completion_supports_member_access_after_method_call() {
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2761,6 +2910,7 @@ async fn completion_supports_member_access_after_method_call() {
                     name: "Имя".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2787,6 +2937,7 @@ async fn completion_supports_member_access_after_method_call() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2813,6 +2964,7 @@ async fn completion_supports_member_access_after_method_call() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2850,6 +3002,7 @@ async fn completion_supports_member_access_after_index_access() {
                     name: "Имя".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2877,6 +3030,7 @@ async fn completion_supports_member_access_after_index_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2903,6 +3057,7 @@ async fn completion_supports_member_access_after_index_access() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -2940,6 +3095,7 @@ async fn completion_supports_member_access_after_map_index_access() {
                     name: "Имя".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2967,6 +3123,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -2993,6 +3150,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3030,6 +3188,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
                     name: "Имя".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3057,6 +3216,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3083,6 +3243,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3122,6 +3283,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
                 name: "Количество".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -3146,6 +3308,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3172,6 +3335,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3207,6 +3371,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3242,6 +3407,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3268,6 +3434,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3303,6 +3470,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
                     name: "PropA".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3313,6 +3481,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
                     name: "PropB".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3338,6 +3507,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3382,6 +3552,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3422,6 +3593,7 @@ async fn completion_supports_member_access_after_choice_expression() {
                     name: "PropA".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3432,6 +3604,7 @@ async fn completion_supports_member_access_after_choice_expression() {
                     name: "PropB".to_string(),
                     prop_type: "Строка".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -3460,6 +3633,7 @@ async fn completion_supports_member_access_after_choice_expression() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3504,6 +3678,7 @@ async fn completion_supports_member_access_after_choice_expression() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(
@@ -3543,6 +3718,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
                 name: "Наименование".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         }])
@@ -3585,6 +3761,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
     host.apply_change(ChangeV2::SetDepsSnapshot {
@@ -3611,6 +3788,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     let result = get_completion_with_analysis(

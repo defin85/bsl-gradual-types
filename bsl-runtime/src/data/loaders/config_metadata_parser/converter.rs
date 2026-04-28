@@ -176,7 +176,8 @@ impl UniversalMetadataObject {
             .map(|attr| bsl_shared::domain::types::RawPropertyData {
                 name: attr.name.clone(),
                 prop_type: attr.type_name.clone(),
-                is_readonly: false, // TODO: определить из метаданных
+                is_readonly: false,
+                collection_item_type: None, // TODO: определить из метаданных
             })
             .collect()
     }
@@ -245,22 +246,26 @@ impl UniversalMetadataObject {
                         name: "Ссылка".to_string(),
                         prop_type: reference_type,
                         is_readonly: true,
+                        collection_item_type: None,
                     });
                 }
                 "deletionmark" => out.push(RawPropertyData {
                     name: "ПометкаУдаления".to_string(),
                     prop_type: "Булево".to_string(),
                     is_readonly: true,
+                    collection_item_type: None,
                 }),
                 "date" => out.push(RawPropertyData {
                     name: "Дата".to_string(),
                     prop_type: "Дата".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }),
                 "number" => out.push(RawPropertyData {
                     name: "Номер".to_string(),
                     prop_type: self.number_standard_attribute_type(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }),
                 "posted" => {
                     if !self.is_posting_capable_document() {
@@ -270,6 +275,7 @@ impl UniversalMetadataObject {
                         name: "Проведен".to_string(),
                         prop_type: "Булево".to_string(),
                         is_readonly: false,
+                        collection_item_type: None,
                     });
                 }
                 _ => {}
@@ -325,6 +331,7 @@ impl UniversalMetadataObject {
                 name: name.clone(),
                 prop_type: format!("{PREDEFINED_MANAGER_PROP_TYPE_PREFIX}{reference_type}"),
                 is_readonly: true,
+                collection_item_type: None,
             });
         }
         out
@@ -373,6 +380,7 @@ impl UniversalMetadataObject {
             name: "Объект".to_string(),
             prop_type: FORM_DATA_CANONICAL_TYPE_NAME.to_string(),
             is_readonly: false,
+            collection_item_type: None,
         });
 
         fn normalize_form_attr_type(raw: &str) -> String {
@@ -423,6 +431,7 @@ impl UniversalMetadataObject {
                 name: attr.name.clone(),
                 prop_type,
                 is_readonly: false,
+                collection_item_type: None,
             });
         }
 
@@ -437,6 +446,7 @@ impl UniversalMetadataObject {
                 name: ts.name.clone(),
                 prop_type: format!("ДанныеФормыКоллекция<Строка{}>", ts.name),
                 is_readonly: false,
+                collection_item_type: None,
             });
         }
 
@@ -513,6 +523,7 @@ impl UniversalMetadataObject {
                     name: a.name.clone(),
                     prop_type: a.attr_type.clone(),
                     is_readonly: false,
+                    collection_item_type: None,
                 })
                 .collect(),
             facets: Vec::new(),
@@ -574,6 +585,7 @@ impl UniversalMetadataObject {
                             name: name.clone(),
                             prop_type: ui_type.to_string(),
                             is_readonly: false,
+                            collection_item_type: None,
                         });
                     }
                 }

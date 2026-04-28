@@ -29,8 +29,8 @@ use crate::system::{
 use bsl_shared::api::ValidationErrorDto;
 use bsl_shared::api::{
     AstNodeDto, DebugAstResponseDto, DiagnosticsResponseDto, EnhancedHoverResponse,
-    McpBackendModeDto, McpStatusDto, SemanticErrorDto, SnapshotInputsDto, SnapshotMetaDto,
-    StartupProgressDto, SyntaxErrorDto,
+    GlobalContextDocsStatusDto, McpBackendModeDto, McpStatusDto, SemanticErrorDto,
+    SnapshotInputsDto, SnapshotMetaDto, StartupProgressDto, SyntaxErrorDto,
 };
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{DiagnosticSeverity, TypeDiagnostic};
@@ -462,6 +462,12 @@ fn snapshot_meta_dto(
         platform_fingerprint: deps_bundle.meta.platform_fingerprint.clone(),
         config_fingerprint: deps_bundle.meta.config_fingerprint.clone(),
         strict_fingerprint: deps_bundle.meta.strict_fingerprint,
+        global_context: GlobalContextDocsStatusDto {
+            state: deps_bundle.meta.global_context_state.clone(),
+            property_count: deps_bundle.meta.global_context_property_count,
+            fingerprint: deps_bundle.meta.global_context_fingerprint.clone(),
+            degraded_reason: deps_bundle.meta.global_context_degraded_reason.clone(),
+        },
         repository_stats: deps_bundle.semantic_deps.repository.get_stats(),
         inputs: SnapshotInputsDto {
             syntax_helper_path: inputs

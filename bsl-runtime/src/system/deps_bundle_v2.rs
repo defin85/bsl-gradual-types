@@ -8,6 +8,8 @@ use walkdir::WalkDir;
 use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
+use bsl_shared::domain::GlobalContextAvailability;
+use bsl_shared::domain::GlobalContextIndex;
 
 use super::{IndexSnapshot, SystemCoordinator};
 
@@ -26,6 +28,10 @@ pub struct DepsBundleV2Meta {
     pub config_fingerprint: Option<String>,
     pub index_snapshot_id: String,
     pub strict_fingerprint: bool,
+    pub global_context_state: String,
+    pub global_context_property_count: usize,
+    pub global_context_fingerprint: String,
+    pub global_context_degraded_reason: Option<String>,
 }
 
 pub fn build_deps_bundle_v2(
@@ -56,7 +62,7 @@ pub fn build_deps_bundle_v2(
         build_semantic_deps_snapshot(coordinator).context("build_semantic_deps_snapshot")?;
 
     let deps_payload = format!(
-        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};platform_signatures_loaded={};strict_fingerprint={}",
+        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};platform_signatures_loaded={};global_context_fp={};strict_fingerprint={}",
         bsl_analysis_v2::DEPS_SCHEMA_VERSION,
         platform_version,
         platform_fingerprint.as_deref().unwrap_or("none"),
@@ -67,11 +73,17 @@ pub fn build_deps_bundle_v2(
         repo_stats.configuration_types,
         repo_stats.user_defined_types,
         semantic_deps.platform_signatures_loaded,
+        semantic_deps.global_context_index.fingerprint(),
         strict,
     );
 
     let deps_id =
         DepsSnapshotId::from_hash(blake3::hash(deps_payload.as_bytes()).to_hex().to_string());
+    let global_context_state = global_context_state(semantic_deps.global_context_index.as_ref());
+    let global_context_property_count = semantic_deps.global_context_index.len();
+    let global_context_fingerprint = semantic_deps.global_context_index.fingerprint().to_string();
+    let global_context_degraded_reason =
+        global_context_degraded_reason(semantic_deps.global_context_index.as_ref());
 
     Ok(DepsBundleV2 {
         deps_id,
@@ -83,8 +95,28 @@ pub fn build_deps_bundle_v2(
             config_fingerprint,
             index_snapshot_id,
             strict_fingerprint: strict,
+            global_context_state,
+            global_context_property_count,
+            global_context_fingerprint,
+            global_context_degraded_reason,
         },
     })
+}
+
+fn global_context_state(index: &GlobalContextIndex) -> String {
+    match index.availability() {
+        GlobalContextAvailability::Loaded if index.is_empty() => "loaded_empty".to_string(),
+        GlobalContextAvailability::Loaded => "loaded".to_string(),
+        GlobalContextAvailability::Unavailable => "absent".to_string(),
+        GlobalContextAvailability::Degraded { .. } => "degraded".to_string(),
+    }
+}
+
+fn global_context_degraded_reason(index: &GlobalContextIndex) -> Option<String> {
+    match index.availability() {
+        GlobalContextAvailability::Degraded { reason } => Some(reason.clone()),
+        _ => None,
+    }
 }
 
 fn build_semantic_deps_snapshot(
@@ -101,12 +133,13 @@ fn build_semantic_deps_snapshot(
         let platform_signatures_loaded = repository.platform_docs_loaded();
         let stats = repository.get_stats();
         return Ok((
-            Arc::new(SemanticDeps {
+            Arc::new(SemanticDeps::from_parts(
                 repository,
                 signature_index,
-                resolver: Some(resolver),
+                Some(resolver),
                 platform_signatures_loaded,
-            }),
+                Arc::new(GlobalContextIndex::unavailable()),
+            )),
             stats,
         ));
     };
@@ -118,6 +151,7 @@ fn build_semantic_deps_snapshot(
     let signature_index = source_repo.get_signature_index_clone();
     let method_definition_locations = source_repo.get_method_definition_locations_clone();
     let platform_signatures_loaded = platform_docs_loaded;
+    let global_context_index = bundle.global_context_index.clone();
 
     let snapshot_repo_impl = Arc::new(InMemoryTypeRepository::new());
     snapshot_repo_impl.set_platform_docs_loaded(platform_docs_loaded);
@@ -137,12 +171,13 @@ fn build_semantic_deps_snapshot(
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
 
     Ok((
-        Arc::new(SemanticDeps {
+        Arc::new(SemanticDeps::from_parts(
             repository,
             signature_index,
-            resolver: Some(resolver),
+            Some(resolver),
             platform_signatures_loaded,
-        }),
+            global_context_index,
+        )),
         stats,
     ))
 }
@@ -232,4 +267,66 @@ fn fingerprint_paths(root: &Path, files: &[PathBuf], strict: bool) -> String {
     }
 
     hasher.finalize().to_hex().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system::DomainBundle;
+    use bsl_shared::domain::GlobalContextPropertyData;
+
+    fn global_context_index_for(name: &str, prop_type: &str) -> Arc<GlobalContextIndex> {
+        Arc::new(GlobalContextIndex::loaded(vec![
+            GlobalContextPropertyData {
+                name: format!("Глобальный контекст.{name}"),
+                english_name: None,
+                prop_type: Some(prop_type.to_string()),
+                is_readonly: true,
+                description: None,
+                contexts: Vec::new(),
+                source_key: format!("synthetic/{name}"),
+                source_path: None,
+                normalized_key: name.to_lowercase(),
+                english_normalized_key: None,
+                collection_item_type: None,
+            },
+        ]))
+    }
+
+    fn install_domain_bundle(
+        coordinator: &SystemCoordinator,
+        global_context_index: Arc<GlobalContextIndex>,
+    ) {
+        let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
+        let resolver = Arc::new(TypeResolver::new(repository.clone()));
+        let mut cache = coordinator.domain_bundle_cache.write().unwrap();
+        *cache = Some(Arc::new(DomainBundle {
+            repository,
+            resolver,
+            global_context_index,
+        }));
+    }
+
+    #[test]
+    fn deps_snapshot_id_includes_global_context_fingerprint() {
+        let coordinator = SystemCoordinator::new();
+        coordinator.set_platform_version(Some("8.3.25".to_string()));
+
+        install_domain_bundle(
+            &coordinator,
+            global_context_index_for("Метаданные", "ОбъектМетаданныхКонфигурация"),
+        );
+        let left = build_deps_bundle_v2(&coordinator, None, None).expect("left deps bundle");
+        assert_eq!(left.meta.global_context_state, "loaded");
+        assert_eq!(left.meta.global_context_property_count, 1);
+        assert!(left.meta.global_context_degraded_reason.is_none());
+
+        install_domain_bundle(
+            &coordinator,
+            global_context_index_for("Метаданные", "Строка"),
+        );
+        let right = build_deps_bundle_v2(&coordinator, None, None).expect("right deps bundle");
+
+        assert_ne!(left.deps_id.as_str(), right.deps_id.as_str());
+    }
 }

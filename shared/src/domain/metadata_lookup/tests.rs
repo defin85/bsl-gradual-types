@@ -900,6 +900,7 @@ fn test_information_register_object_facet_uses_recordset_platform_members() {
             name: "ОбменДанными".to_string(),
             prop_type: "ОбменДанными".to_string(),
             is_readonly: false,
+            collection_item_type: None,
         }],
         facets: vec![FacetKind::Collection],
         kind: None,
@@ -1382,6 +1383,7 @@ fn test_form_data_provider_chain_uses_intrinsic_then_raw_without_form_shape() {
                 name: "СвойствоМетаданных".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         },
@@ -1392,6 +1394,7 @@ fn test_form_data_provider_chain_uses_intrinsic_then_raw_without_form_shape() {
                 name: "РеквизитФормы".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         },
@@ -1403,6 +1406,7 @@ fn test_form_data_provider_chain_uses_intrinsic_then_raw_without_form_shape() {
                 name: "ФацетСвойство".to_string(),
                 prop_type: "Число".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             }],
             ..Default::default()
         },
@@ -1479,16 +1483,19 @@ fn test_form_data_provider_chain_uses_repository_standard_attributes() {
                 name: "Дата".to_string(),
                 prop_type: "Дата".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "Номер".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "Проведен".to_string(),
                 prop_type: "Булево".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
         ],
         ..Default::default()
@@ -1722,6 +1729,7 @@ fn test_form_data_intrinsic_properties_do_not_override_repository_properties() {
             name: "Ссылка".to_string(),
             prop_type: "ДокументСсылка".to_string(),
             is_readonly: true,
+            collection_item_type: None,
         }],
         ..Default::default()
     }])
@@ -1800,11 +1808,13 @@ fn test_manager_facet_includes_predefined_marker_properties() {
                 name: "ГотоваяПродукция".to_string(),
                 prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "Код".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
         ],
         ..Default::default()
@@ -1854,16 +1864,19 @@ fn test_predefined_merge_keeps_base_property_on_name_conflict() {
                 name: "ГотоваяПродукция".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "ГотоваяПродукция".to_string(),
                 prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "Товары".to_string(),
                 prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             },
         ],
         ..Default::default()
@@ -1927,11 +1940,13 @@ fn test_object_facet_skips_predefined_marker_properties() {
                 name: "ГотоваяПродукция".to_string(),
                 prop_type: "__predefined_manager__:ПланСчетовСсылка.Хозрасчетный".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             },
             RawPropertyData {
                 name: "Код".to_string(),
                 prop_type: "Строка".to_string(),
                 is_readonly: false,
+                collection_item_type: None,
             },
         ],
         ..Default::default()

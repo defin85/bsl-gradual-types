@@ -149,10 +149,17 @@ Bare identifier resolution order remains conservative:
 
 1. local variables, parameters, module variables, and explicit declarations;
 2. context-specific implicit symbols;
-3. existing global metadata collections/common modules;
-4. data-driven global-context properties;
+3. data-driven global-context properties, including Syntax Helper global metadata manager properties when present;
+4. configuration/common-module symbols and centralized legacy/degraded global metadata collection fallback for entries not available from the docs/config index;
 5. owner-member fallback where applicable;
 6. undeclared variable.
+
+Legacy `GLOBAL_COLLECTIONS_INFO`, `GLOBAL_CONTEXT_PROPERTIES_INFO`, and
+`METADATA_OBJECT_COLLECTIONS_INFO` lookups must never override a loaded
+global-context index entry. If the same property exists in Syntax Helper or in a
+configuration-backed index, the index-backed result wins and carries provenance;
+legacy tables may run only when the data-driven entry is absent/unavailable and
+the fallback was explicitly inventoried.
 
 For a global-context property:
 
@@ -212,6 +219,10 @@ This change must not silently leave that table as an unreviewed peer source of p
 
 1. migrate entries that can be derived from Syntax Helper/configuration metadata into the same data-driven platform/config index family; or
 2. keep specific entries only behind a documented degraded/runtime bootstrap fallback, with a follow-up OpenSpec change for any entries that cannot yet be data-driven.
+
+When a loaded Syntax Helper/global-context entry and a legacy table entry share
+the same global property name, the loaded entry is authoritative. The legacy
+entry is not a peer source and must not be consulted first.
 
 The acceptance evidence must state which entries were migrated, which remain fallback-only, and why.
 

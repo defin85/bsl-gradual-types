@@ -9,7 +9,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use bsl_shared::domain::is_configuration_type_pattern;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureIndex, SignatureSource};
 use bsl_shared::domain::types::MetadataKind;
@@ -22,6 +21,10 @@ use bsl_shared::domain::types::{
 };
 use bsl_shared::domain::TypeDefinitionLocation;
 use bsl_shared::domain::TypeMetadataLookup;
+use bsl_shared::domain::{
+    is_configuration_type_pattern, GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX,
+    GLOBAL_CONTEXT_SOURCE_NOTE,
+};
 use bsl_shared::domain::{CodeLocation, ModuleType};
 use bsl_shared::ir::{
     SemanticConstructorTarget, SemanticFacts, SemanticMethodTarget, SemanticProgram,
@@ -31,8 +34,8 @@ use bsl_shared::FORM_DATA_SEMANTICS_NOTE;
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{
-    is_global_collection, lookup_global_collection, lookup_global_context_property,
-    lookup_metadata_object_collection,
+    is_global_collection, lookup_global_collection,
+    lookup_legacy_metadata_object_collection_fallback,
 };
 use crate::implicit_bindings::{
     directive_disables_form_context, ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
@@ -1145,7 +1148,9 @@ impl<'a> TypeInferencer<'a> {
         if is_global_collection(name).is_some() {
             return true;
         }
-        if lookup_global_context_property(name).is_some() {
+        if self.deps.global_context_index.is_loaded()
+            && self.deps.global_context_index.get(name).is_some()
+        {
             return true;
         }
 
@@ -1737,8 +1742,8 @@ impl<'a> TypeInferencer<'a> {
             return value.clone();
         }
 
-        if let Some(global_property) = lookup_global_context_property(name) {
-            return self.resolve_platform_descriptor_type(global_property.type_name);
+        if let Some(global_property) = self.resolve_global_context_property(name) {
+            return global_property;
         }
 
         if is_global_collection(name).is_some() {
@@ -1760,6 +1765,36 @@ impl<'a> TypeInferencer<'a> {
         }
 
         TypeResolution::undeclared_variable(name)
+    }
+
+    fn resolve_global_context_property(&self, name: &str) -> Option<TypeResolution> {
+        if !self.deps.global_context_index.is_loaded() {
+            return None;
+        }
+
+        let property = self.deps.global_context_index.get(name)?;
+        let prop_type = property.prop_type.as_deref()?.trim();
+        if prop_type.is_empty() {
+            return None;
+        }
+
+        let mut resolution = self.resolve_platform_descriptor_type(prop_type);
+        if !resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE)
+        {
+            resolution
+                .metadata
+                .notes
+                .push(GLOBAL_CONTEXT_SOURCE_NOTE.to_string());
+        }
+        resolution.metadata.notes.push(format!(
+            "{GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX}{}",
+            property.source_key
+        ));
+        Some(resolution)
     }
 
     fn infer_new_expression(
@@ -1811,7 +1846,15 @@ impl<'a> TypeInferencer<'a> {
     ) -> TypeResolution {
         let base_type = object_type.type_name();
         if base_type == CONFIGURATION_METADATA_OBJECT_TYPE_NAME {
-            if let Some(info) = lookup_metadata_object_collection(property) {
+            let property_key = property.to_lowercase();
+            if let Some(mut resolved) =
+                self.resolve_property_type_by_name(object_type, property_key.as_str())
+            {
+                self.attach_legacy_metadata_collection_item_type_if_needed(property, &mut resolved);
+                return resolved;
+            }
+
+            if let Some(info) = lookup_legacy_metadata_object_collection_fallback(property) {
                 return self.metadata_object_collection_resolution(info.item_type_name);
             }
         }
@@ -1821,7 +1864,17 @@ impl<'a> TypeInferencer<'a> {
         }
 
         if Self::is_metadata_object_type_name(&base_type) {
-            if let Some(item_type_name) = Self::nested_metadata_collection_item_type(property) {
+            let property_key = property.to_lowercase();
+            if let Some(mut resolved) =
+                self.resolve_property_type_by_name(object_type, property_key.as_str())
+            {
+                self.attach_legacy_metadata_collection_item_type_if_needed(property, &mut resolved);
+                return resolved;
+            }
+
+            if let Some(item_type_name) =
+                Self::legacy_nested_metadata_collection_item_type(property)
+            {
                 return self.metadata_object_collection_resolution(item_type_name);
             }
         }
@@ -1842,13 +1895,32 @@ impl<'a> TypeInferencer<'a> {
         TypeResolution::unknown()
     }
 
+    fn attach_legacy_metadata_collection_item_type_if_needed(
+        &self,
+        property: &str,
+        resolution: &mut TypeResolution,
+    ) {
+        if resolution.type_name() != METADATA_OBJECT_COLLECTION_TYPE_NAME
+            || Self::metadata_collection_item_type(resolution).is_some()
+        {
+            return;
+        }
+
+        if let Some(info) = lookup_legacy_metadata_object_collection_fallback(property) {
+            resolution.metadata.notes.push(format!(
+                "{METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX}{}",
+                info.item_type_name
+            ));
+        }
+    }
+
     fn is_metadata_object_type_name(type_name: &str) -> bool {
         type_name.starts_with("ОбъектМетаданных:")
             || type_name.starts_with("MetadataObject:")
             || type_name == CONFIGURATION_METADATA_OBJECT_TYPE_NAME
     }
 
-    fn nested_metadata_collection_item_type(property: &str) -> Option<&'static str> {
+    fn legacy_nested_metadata_collection_item_type(property: &str) -> Option<&'static str> {
         match property {
             "Измерения" | "Dimensions" | "Реквизиты" | "Attributes" | "Ресурсы" | "Resources" => {
                 Some(METADATA_OBJECT_FIELD_TYPE_NAME)

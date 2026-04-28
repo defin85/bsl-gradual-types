@@ -62,6 +62,7 @@ fn create_test_repository_with_n_properties(property_count: usize) -> Arc<InMemo
             name: format!("Свойство{}", i),
             prop_type: "Строка".to_string(),
             is_readonly: false,
+            collection_item_type: None,
         })
         .collect();
 

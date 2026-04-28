@@ -956,15 +956,18 @@ impl BslLanguageServer {
                 let signature_index = repository.get_signature_index_clone();
                 let resolver = Some(Arc::new(TypeResolver::new(repository.clone())));
 
-                let semantic_deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+                let semantic_deps = Arc::new(bsl_analysis_v2::SemanticDeps::from_parts(
                     repository,
                     signature_index,
                     resolver,
-                    platform_signatures_loaded: false,
-                });
+                    false,
+                    Default::default(),
+                ));
 
                 let index_snapshot = Arc::new(coordinator.intellisense_index().snapshot());
                 let index_snapshot_id = index_snapshot.id.as_str().to_string();
+                let global_context_fingerprint =
+                    semantic_deps.global_context_index.fingerprint().to_string();
 
                 DepsBundleV2 {
                     deps_id: DepsSnapshotId::from_hash(""),
@@ -976,6 +979,10 @@ impl BslLanguageServer {
                         config_fingerprint: None,
                         index_snapshot_id,
                         strict_fingerprint: false,
+                        global_context_state: "absent".to_string(),
+                        global_context_property_count: 0,
+                        global_context_fingerprint,
+                        global_context_degraded_reason: None,
                     },
                 }
             });

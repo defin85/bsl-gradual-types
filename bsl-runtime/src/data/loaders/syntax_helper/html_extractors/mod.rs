@@ -94,6 +94,14 @@ impl HtmlExtractor {
         DescriptionExtractor::extract_property_type(document)
     }
 
+    pub fn extract_property_description(&self, document: &Html) -> Option<String> {
+        DescriptionExtractor::extract_property_description(document)
+    }
+
+    pub fn extract_metadata_collection_item_type(&self, document: &Html) -> Option<String> {
+        DescriptionExtractor::extract_metadata_collection_item_type(document)
+    }
+
     pub fn extract_links(&self, document: &Html) -> Vec<String> {
         DescriptionExtractor::extract_links(document)
     }

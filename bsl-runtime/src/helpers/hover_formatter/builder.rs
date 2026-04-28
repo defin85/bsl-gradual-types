@@ -4,7 +4,10 @@
 
 use bsl_shared::domain::metadata_lookup::TypeMetadataLookup;
 use bsl_shared::domain::types::{Certainty, TypeResolution, FORM_DATA_SEMANTICS_NOTE};
-use bsl_shared::formatting::{normalize_user_facing_type_name, user_facing_resolution_type_name};
+use bsl_shared::domain::{GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX, GLOBAL_CONTEXT_SOURCE_NOTE};
+use bsl_shared::formatting::{
+    normalize_user_facing_type_name, user_facing_resolution_type_name, DetailLevel,
+};
 
 use super::config::{HoverFormatConfig, HoverOutputFormat};
 use super::sections;
@@ -58,6 +61,33 @@ impl<'a> HoverBuilder<'a> {
             type_display::format_type_string(resolution)
         };
         self.add_section("Тип", &type_str)
+    }
+
+    /// Добавляет provenance для типов, полученных из Syntax Helper global context.
+    pub fn add_provenance_info(mut self, resolution: &TypeResolution) -> Self {
+        if !resolution
+            .metadata
+            .notes
+            .iter()
+            .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE)
+        {
+            return self;
+        }
+
+        self = self.add_section("Источник", "Syntax Helper: Global context");
+
+        if matches!(self.config.detail_level, DetailLevel::Detailed) {
+            if let Some(source_key) = resolution
+                .metadata
+                .notes
+                .iter()
+                .find_map(|note| note.strip_prefix(GLOBAL_CONTEXT_SOURCE_KEY_NOTE_PREFIX))
+            {
+                self = self.add_section("Ключ источника", source_key);
+            }
+        }
+
+        self
     }
 
     /// Добавляет информацию об уверенности (certainty)

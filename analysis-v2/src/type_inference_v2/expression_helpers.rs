@@ -98,14 +98,17 @@ impl TypeInferencer<'_> {
         }
 
         if let Some(resolved) = self.try_resolve_configuration_type(&prop.prop_type) {
-            let resolved = Some(resolved);
+            let resolved = Some(self.with_property_collection_item_type_note(&prop, resolved));
             self.property_type_cache
                 .borrow_mut()
                 .insert(cache_key, resolved.clone());
             return resolved;
         }
         if self.deps.repository.find_type(&prop.prop_type).is_some() {
-            let resolved = Some(self.resolver.resolve_expression_sync(&prop.prop_type));
+            let resolved = Some(self.with_property_collection_item_type_note(
+                &prop,
+                self.resolver.resolve_expression_sync(&prop.prop_type),
+            ));
             self.property_type_cache
                 .borrow_mut()
                 .insert(cache_key, resolved.clone());
@@ -113,11 +116,36 @@ impl TypeInferencer<'_> {
         }
         // Типы свойств из metadata (в т.ч. синтетические UI-типы форм вроде "ГруппаФормы")
         // должны возвращаться даже если их документация не загружена в repository.
-        let resolved = Some(TypeResolution::inferred(&prop.prop_type));
+        let resolved = Some(self.with_property_collection_item_type_note(
+            &prop,
+            TypeResolution::inferred(&prop.prop_type),
+        ));
         self.property_type_cache
             .borrow_mut()
             .insert(cache_key, resolved.clone());
         resolved
+    }
+
+    fn with_property_collection_item_type_note(
+        &self,
+        property: &bsl_shared::domain::types::RawPropertyData,
+        mut resolution: TypeResolution,
+    ) -> TypeResolution {
+        let Some(item_type) = property
+            .collection_item_type
+            .as_deref()
+            .map(str::trim)
+            .filter(|item_type| !item_type.is_empty())
+        else {
+            return resolution;
+        };
+
+        if Self::metadata_collection_item_type(&resolution).is_none() {
+            resolution.metadata.notes.push(format!(
+                "{METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX}{item_type}"
+            ));
+        }
+        resolution
     }
 }
 

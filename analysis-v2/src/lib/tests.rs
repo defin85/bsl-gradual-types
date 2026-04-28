@@ -36,6 +36,49 @@ fn normalize_json(value: &mut serde_json::Value) {
     }
 }
 
+#[test]
+fn semantic_deps_constructors_model_global_context_doc_states() {
+    let empty = SemanticDeps::empty();
+    assert!(!empty.global_context_index.is_loaded());
+
+    let loaded_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+    let loaded_index = Arc::new(GlobalContextIndex::loaded(vec![
+        bsl_shared::domain::GlobalContextPropertyData {
+            name: "Глобальный контекст.Метаданные".to_string(),
+            english_name: Some("Global context.Metadata".to_string()),
+            prop_type: Some("ОбъектМетаданныхКонфигурация".to_string()),
+            is_readonly: true,
+            description: None,
+            contexts: Vec::new(),
+            source_key: "synthetic/Metadata".to_string(),
+            source_path: None,
+            normalized_key: "метаданные".to_string(),
+            english_normalized_key: Some("metadata".to_string()),
+            collection_item_type: None,
+        },
+    ]));
+    let loaded = SemanticDeps::loaded_docs(
+        loaded_repo.clone(),
+        loaded_repo.get_signature_index_clone(),
+        Some(Arc::new(TypeResolver::new(loaded_repo.clone()))),
+        loaded_index,
+    );
+    assert!(loaded.platform_signatures_loaded);
+    assert!(loaded.global_context_index.get("Metadata").is_some());
+
+    let degraded_repo = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+    let degraded = SemanticDeps::degraded_docs(
+        degraded_repo.clone(),
+        degraded_repo.get_signature_index_clone(),
+        Some(Arc::new(TypeResolver::new(degraded_repo))),
+        "syntax helper unavailable",
+    );
+    assert!(matches!(
+        degraded.global_context_index.availability(),
+        bsl_shared::domain::GlobalContextAvailability::Degraded { .. }
+    ));
+}
+
 fn parse_snapshot_for_test(
     file_id: FileId,
     file_version: i32,
@@ -309,6 +352,7 @@ fn deps_and_settings_ids_are_read_from_snapshot() {
             signature_index: SignatureIndex::new(),
             resolver: None,
             platform_signatures_loaded: false,
+            global_context_index: Default::default(),
         }),
     });
     host.lock()
@@ -335,6 +379,7 @@ fn deps_and_settings_ids_are_read_from_snapshot() {
                 signature_index: SignatureIndex::new(),
                 resolver: None,
                 platform_signatures_loaded: false,
+                global_context_index: Default::default(),
             }),
         });
         host.apply_change(Change::SetSettingsSnapshot {
@@ -1101,6 +1146,151 @@ fn semantic_diagnostics_skip_when_syntax_errors_present() {
 }
 
 #[test]
+fn semantic_diagnostics_allow_dynamic_metadata_collection_object_names() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1422);
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                properties: vec![bsl_shared::domain::types::RawPropertyData {
+                    name: "СинтетическиеОбъекты".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                    collection_item_type: Some("ОбъектМетаданных: Синтетика".to_string()),
+                }],
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "КоллекцияОбъектовМетаданных".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбъектМетаданных: Синтетика".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load metadata diagnostics fixture");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let global_context_index = Arc::new(bsl_shared::domain::GlobalContextIndex::loaded(vec![
+        bsl_shared::domain::GlobalContextPropertyData {
+            name: "Метаданные".to_string(),
+            english_name: Some("Metadata".to_string()),
+            prop_type: Some("ОбъектМетаданныхКонфигурация".to_string()),
+            is_readonly: true,
+            description: None,
+            contexts: vec!["Global context".to_string()],
+            source_key: "objects/Global context/properties/Metadata".to_string(),
+            source_path: None,
+            normalized_key: bsl_shared::domain::normalize_global_context_property_key("Метаданные"),
+            english_normalized_key: Some(
+                bsl_shared::domain::normalize_global_context_property_key("Metadata"),
+            ),
+            collection_item_type: None,
+        },
+    ]));
+    let deps = Arc::new(SemanticDeps {
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
+        global_context_index,
+    });
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-metadata-dynamic-object-name"),
+        deps,
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Функция Тест() Экспорт\n\
+                 Возврат Метаданные.СинтетическиеОбъекты.СинтетическийРегистр;\n\
+                 КонецФункции",
+        ),
+        version: 1,
+        path: Arc::from("metadata-dynamic-object-name.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("СинтетическийРегистр")),
+        "dynamic metadata object name must not be reported as a missing fixed property: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_do_not_report_loaded_global_context_property_as_undeclared() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1423);
+    let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
+    let global_context_index = Arc::new(bsl_shared::domain::GlobalContextIndex::loaded(vec![
+        bsl_shared::domain::GlobalContextPropertyData {
+            name: "Синтетика".to_string(),
+            english_name: Some("Synthetic".to_string()),
+            prop_type: Some("Строка".to_string()),
+            is_readonly: true,
+            description: None,
+            contexts: vec!["Global context".to_string()],
+            source_key: "objects/Global context/properties/Synthetic".to_string(),
+            source_path: None,
+            normalized_key: bsl_shared::domain::normalize_global_context_property_key("Синтетика"),
+            english_normalized_key: Some(
+                bsl_shared::domain::normalize_global_context_property_key("Synthetic"),
+            ),
+            collection_item_type: None,
+        },
+    ]));
+    let deps = Arc::new(SemanticDeps {
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
+        global_context_index,
+    });
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-loaded-global-context-diagnostics"),
+        deps,
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Процедура Тест()\n\
+                 Значение = Синтетика;\n\
+                 КонецПроцедуры",
+        ),
+        version: 1,
+        path: Arc::from("loaded-global-context-diagnostics.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("Синтетика")),
+        "loaded global-context property must not be reported as undeclared: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn semantic_diagnostics_depend_on_deps_id() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(1);
@@ -1119,6 +1309,7 @@ fn semantic_diagnostics_depend_on_deps_id() {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        global_context_index: Default::default(),
     });
 
     host.apply_change(Change::SetDepsSnapshot {
@@ -1473,6 +1664,7 @@ fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        global_context_index: Default::default(),
     });
 
     host.apply_change(Change::SetDepsSnapshot {
@@ -2063,6 +2255,7 @@ fn default_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        global_context_index: Default::default(),
     })
 }
 
@@ -2087,6 +2280,7 @@ fn universal_collection_semantic_deps() -> Arc<SemanticDeps> {
                     name: "Колонки".to_string(),
                     prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
                     is_readonly: false,
+                    collection_item_type: None,
                 }],
                 ..Default::default()
             },
@@ -2115,6 +2309,7 @@ fn universal_collection_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 
@@ -2135,6 +2330,7 @@ fn array_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        global_context_index: Default::default(),
     })
 }
 

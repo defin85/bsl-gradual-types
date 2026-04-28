@@ -136,6 +136,52 @@ impl DescriptionExtractor {
         Some(TypeParser::assemble_types(&fragments))
     }
 
+    /// Извлекает описание свойства из секции "Описание:" после строки "Тип:".
+    pub fn extract_property_description(document: &Html) -> Option<String> {
+        let html_text = document.html();
+        let section = Self::find_description_section(&html_text)?;
+        let (_type_line, description) = TypeParser::extract_type_line(&section);
+        description.filter(|text| !text.trim().is_empty())
+    }
+
+    /// Извлекает item type для свойств `КоллекцияОбъектовМетаданных`.
+    pub fn extract_metadata_collection_item_type(document: &Html) -> Option<String> {
+        let html_text = document.html();
+        let section = Self::find_description_section(&html_text)?;
+        const RU_MARKER: &str = "Элементами коллекции являются объекты типа";
+        const EN_MARKER: &str = "The collection items are objects of type";
+
+        let marker_pos = section
+            .find(RU_MARKER)
+            .map(|pos| pos + RU_MARKER.len())
+            .or_else(|| section.find(EN_MARKER).map(|pos| pos + EN_MARKER.len()))?;
+        let after_marker = &section[marker_pos..];
+        let fragment = Html::parse_fragment(after_marker);
+        let selector = Selector::parse("a").ok()?;
+
+        fragment
+            .select(&selector)
+            .map(|link| link.text().collect::<String>().trim().to_string())
+            .find(|text| !text.is_empty())
+    }
+
+    fn find_description_section(html_text: &str) -> Option<String> {
+        const RU_DESC: &str = "Описание:";
+        const EN_DESC: &str = "Description:";
+
+        let section_start = html_text
+            .find(RU_DESC)
+            .map(|p| p + RU_DESC.len())
+            .or_else(|| html_text.find(EN_DESC).map(|p| p + EN_DESC.len()))?;
+        let remaining = &html_text[section_start..];
+        let section_end = remaining
+            .find("<p class=\"V8SH_chapter\">")
+            .or_else(|| remaining.find("</body>"))
+            .unwrap_or(remaining.len());
+
+        Some(remaining[..section_end].to_string())
+    }
+
     /// Извлекает ссылки из документа
     pub fn extract_links(document: &Html) -> Vec<String> {
         let mut links = Vec::new();

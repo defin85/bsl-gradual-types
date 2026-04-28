@@ -14,7 +14,10 @@ use bsl_shared::domain::get_collection_kind;
 use bsl_shared::domain::repository::TypeRepository;
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::types::{ContextualTypeDescriptor, FacetKind, MetadataKind};
-use bsl_shared::domain::{CompletionItem, CompletionKind, TypeMetadataLookup, TypeResolution};
+use bsl_shared::domain::{
+    strip_global_context_property_owner, CompletionItem, CompletionKind, GlobalContextIndex,
+    TypeMetadataLookup, TypeResolution,
+};
 use bsl_shared::ir::{ScopeId, ScopeKind, SemanticNodeKind, SemanticProgram};
 
 use super::super::extractors::symbol_extractor::{
@@ -128,6 +131,7 @@ pub(crate) struct CompletionAnalysisContext<'a> {
     pub include_flow_sensitive: bool,
     pub deps_id: Option<bsl_analysis_v2::DepsSnapshotId>,
     pub settings_id: Option<bsl_analysis_v2::SettingsId>,
+    pub global_context_index: Option<Arc<GlobalContextIndex>>,
 }
 
 impl CompletionAnalysisContext<'_> {
@@ -710,6 +714,7 @@ pub async fn get_completion_with_semantic_program(
         include_flow_sensitive: false,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     get_completion_with_analysis(
@@ -870,6 +875,44 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and
     settings_id: Option<&bsl_analysis_v2::SettingsId>,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
+    get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids_and_global_context(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        ir_program,
+        member_access_owner_type_hints,
+        include_flow_sensitive,
+        deps_id,
+        settings_id,
+        None,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and_owner_hints_with_snapshot_ids_and_global_context(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    ir_program: Arc<SemanticProgram>,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+    deps_id: Option<&bsl_analysis_v2::DepsSnapshotId>,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    global_context_index: Option<Arc<GlobalContextIndex>>,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: Some(ir_program),
         resolver,
@@ -878,6 +921,7 @@ pub async fn get_completion_with_semantic_program_snapshot_with_trigger_hint_and
         include_flow_sensitive,
         deps_id: deps_id.cloned(),
         settings_id: settings_id.cloned(),
+        global_context_index,
     };
 
     get_completion_with_analysis(
@@ -941,6 +985,42 @@ pub async fn get_completion_with_trigger_hint_and_owner_hints_without_ir_with_sn
     settings_id: Option<&bsl_analysis_v2::SettingsId>,
     trigger_char_hint: Option<char>,
 ) -> Result<CompletionResult> {
+    get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids_and_global_context(
+        file_content,
+        line,
+        column,
+        file_uri,
+        index_snapshot,
+        metadata_lookup,
+        file_path,
+        resolver,
+        member_access_owner_type_hints,
+        include_flow_sensitive,
+        deps_id,
+        settings_id,
+        None,
+        trigger_char_hint,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn get_completion_with_trigger_hint_and_owner_hints_without_ir_with_snapshot_ids_and_global_context(
+    file_content: &str,
+    line: u32,
+    column: u32,
+    file_uri: Option<&str>,
+    index_snapshot: &IndexSnapshot,
+    metadata_lookup: &TypeMetadataLookup,
+    file_path: &str,
+    resolver: &TypeResolver,
+    member_access_owner_type_hints: Vec<TypeResolution>,
+    include_flow_sensitive: bool,
+    deps_id: Option<&bsl_analysis_v2::DepsSnapshotId>,
+    settings_id: Option<&bsl_analysis_v2::SettingsId>,
+    global_context_index: Option<Arc<GlobalContextIndex>>,
+    trigger_char_hint: Option<char>,
+) -> Result<CompletionResult> {
     let analysis = CompletionAnalysisContext {
         ir_program: None,
         resolver,
@@ -949,6 +1029,7 @@ pub async fn get_completion_with_trigger_hint_and_owner_hints_without_ir_with_sn
         include_flow_sensitive,
         deps_id: deps_id.cloned(),
         settings_id: settings_id.cloned(),
+        global_context_index,
     };
 
     get_completion_with_analysis(
@@ -1018,6 +1099,7 @@ pub async fn get_completion_with_semantic_program_snapshot_v2_with_trigger_hint(
         include_flow_sensitive,
         deps_id: None,
         settings_id: None,
+        global_context_index: None,
     };
 
     get_completion_with_analysis(
@@ -1451,6 +1533,15 @@ fn collect_non_member_candidates(
     add_module_routines_from_ir(Some(analysis), file_content, line, column, candidates, 1);
     breakdown.non_member_module_routines = module_routines_started.elapsed();
 
+    let global_context_started = Instant::now();
+    add_global_context_properties_from_index(
+        analysis.global_context_index.as_deref(),
+        prefix_lower,
+        candidates,
+        1,
+    );
+    let _global_context_elapsed = global_context_started.elapsed();
+
     let immutable_catalog = analysis
         .immutable_non_member_catalog_key()
         .map(|key| get_or_build_immutable_non_member_catalog(&key, metadata_lookup));
@@ -1525,6 +1616,60 @@ fn add_contextual_non_member_symbols_without_ir(
             None,
             None,
             Some(SymbolScope::Local),
+        ));
+    }
+}
+
+fn add_global_context_properties_from_index(
+    global_context_index: Option<&GlobalContextIndex>,
+    prefix_lower: &str,
+    candidates: &mut Vec<Candidate>,
+    priority: u8,
+) {
+    let Some(global_context_index) = global_context_index.filter(|index| index.is_loaded()) else {
+        return;
+    };
+
+    let mut properties: Vec<_> = global_context_index.properties().collect();
+    properties.sort_by(|left, right| {
+        left.normalized_key
+            .cmp(&right.normalized_key)
+            .then_with(|| left.source_key.cmp(&right.source_key))
+    });
+
+    for property in properties {
+        let label = strip_global_context_property_owner(&property.name)
+            .trim()
+            .to_string();
+        if label.is_empty() {
+            continue;
+        }
+
+        let label_lower = label.to_lowercase();
+        if !prefix_lower.is_empty() && match_prefix(&label_lower, prefix_lower) == PrefixMatch::None
+        {
+            continue;
+        }
+
+        let documentation = property.description.as_ref().map(|description| {
+            format!(
+                "{}\n\nSource: Syntax Helper Global context ({})",
+                description.trim(),
+                property.source_key
+            )
+        });
+
+        candidates.push(Candidate::new(
+            CompletionItem::with_details(
+                label,
+                CompletionKind::Property,
+                property.prop_type.clone(),
+                documentation,
+            ),
+            priority,
+            None,
+            None,
+            Some(SymbolScope::Global),
         ));
     }
 }

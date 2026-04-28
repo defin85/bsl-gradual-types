@@ -29,13 +29,13 @@ impl Default for AnalysisHostV2 {
     fn default() -> Self {
         let db = AnalysisDatabase::default();
         let repository = Arc::new(InMemoryTypeRepository::new()) as Arc<dyn TypeRepository>;
-        let platform_signatures_loaded = repository.platform_docs_loaded();
-        let deps_data = Arc::new(SemanticDeps {
-            signature_index: repository.get_signature_index_clone(),
-            resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
-            repository,
-            platform_signatures_loaded,
-        });
+        let deps_data = Arc::new(SemanticDeps::from_parts(
+            repository.clone(),
+            repository.get_signature_index_clone(),
+            Some(Arc::new(TypeResolver::new(repository.clone()))),
+            repository.platform_docs_loaded(),
+            Default::default(),
+        ));
         let deps = DepsSnapshot::new(
             &db,
             DepsSnapshotId::from_hash(""),

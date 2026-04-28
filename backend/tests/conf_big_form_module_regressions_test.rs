@@ -90,6 +90,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
                 name: "Ссылка".to_string(),
                 prop_type: "ДокументСсылка".to_string(),
                 is_readonly: true,
+                collection_item_type: None,
             }],
             ..Default::default()
         },
@@ -154,6 +155,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         signature_index,
         resolver: Some(resolver),
         platform_signatures_loaded: false,
+        global_context_index: Default::default(),
     });
 
     let mut host = AnalysisHostV2::default();

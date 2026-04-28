@@ -78,6 +78,7 @@ impl HoverFormatter {
             return HoverBuilder::new(&self.config)
                 .add_header("Переменная", name)
                 .add_type_info(resolution)
+                .add_provenance_info(resolution)
                 .add_certainty(&resolution.certainty)
                 .add_section("", "**Тип не распознан системой**")
                 .add_section("", "*Возможные причины:*\n* Опечатка в имени типа\n* Тип из конфигурации 1С (требуется Configuration Loader)")
@@ -92,6 +93,7 @@ impl HoverFormatter {
             return HoverBuilder::new(&self.config)
                 .add_header("Переменная", name)
                 .add_type_info(resolution)
+                .add_provenance_info(resolution)
                 .add_certainty(&resolution.certainty)
                 .add_section("", "**Детали типа недоступны**")
                 .add_section("", "*Возможные причины:*\n* Тип не загружен из Syntax Helper\n* Требуется парсинг документации платформы")
@@ -105,6 +107,7 @@ impl HoverFormatter {
                 HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
+                    .add_provenance_info(resolution)
                     .add_certainty(&resolution.certainty)
                     .build()
             }
@@ -114,6 +117,7 @@ impl HoverFormatter {
                 let mut builder = HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
+                    .add_provenance_info(resolution)
                     .add_certainty(&resolution.certainty);
 
                 if !description.trim().is_empty() {
@@ -131,6 +135,7 @@ impl HoverFormatter {
                 let mut builder = HoverBuilder::new(&self.config)
                     .add_header("Переменная", name)
                     .add_type_info(resolution)
+                    .add_provenance_info(resolution)
                     .add_certainty(&resolution.certainty)
                     .add_facet_info(resolution)
                     .add_generic_info(resolution);

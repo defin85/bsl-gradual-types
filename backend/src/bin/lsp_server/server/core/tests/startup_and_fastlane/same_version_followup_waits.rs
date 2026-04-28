@@ -2013,9 +2013,15 @@ async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_r
 
     const V1_FIXTURE: &str = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n";
     const V2_FIXTURE: &str = "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n";
+    const DID_SAVE_PARSE_DELAY_MS: u64 = 100;
     const FOLLOWUP_PUBLISH_BUDGET_MS: u64 = 2000;
 
     let _env_lock = lock_test_env().await;
+    let _did_save_parse_delay_guard = EnvVarGuard::set_with_reload(
+        "BSL_TEST_DID_SAVE_PARSE_DELAY_MS",
+        &DID_SAVE_PARSE_DELAY_MS.to_string(),
+        false,
+    );
     let _debounce_guard =
         EnvVarGuard::set_with_reload("BSL_LSP_DIAGNOSTICS_DEBOUNCE_MS", "1200", true);
 
@@ -2086,6 +2092,26 @@ async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_r
         .get_file_id_v2(&uri)
         .await
         .expect("file id after didOpen");
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let ready = server
+                .latest_ready_parse_snapshots_v2
+                .read()
+                .await
+                .get(&file_id)
+                .cloned();
+            if ready
+                .as_ref()
+                .is_some_and(|state| state.parse_snapshot.file_version == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didOpen must materialize ready parse snapshot before full-replace didChange setup");
+
     let did_change_response = service
         .ready()
         .await
@@ -2112,7 +2138,7 @@ async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_r
         .expect("didChange notification");
     assert!(did_change_response.is_none(), "didChange is a notification");
 
-    tokio::time::timeout(Duration::from_secs(3), async {
+    let did_change_ready_result = tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             let applied_ready = server
                 .analysis_v2
@@ -2138,8 +2164,41 @@ async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_r
             tokio::task::yield_now().await;
         }
     })
-    .await
-    .expect("didChange must materialize applied state and ready parse snapshot for version 2");
+    .await;
+    if did_change_ready_result.is_err() {
+        let analysis = server.analysis_v2.snapshot().await;
+        let applied_version = analysis.file_version(file_id).ok().flatten();
+        let ready_parse_snapshot_version = server
+            .latest_ready_parse_snapshots_v2
+            .read()
+            .await
+            .get(&file_id)
+            .map(|state| state.parse_snapshot.file_version);
+        let task_state = {
+            let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+            tasks.get(&file_id).map(|task| {
+                let target = task
+                    .target
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone();
+                let phase = crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::from_raw(
+                    task.control.phase.load(std::sync::atomic::Ordering::SeqCst),
+                );
+                (
+                    target.requested_version,
+                    target.source,
+                    phase,
+                    task.control.phase_attribution_snapshot().current_phase,
+                    task.control.ready_install_exact_type_index_wait_snapshot(),
+                )
+            })
+        };
+        let did_change_evidence = server.snapshot_did_change_parse_snapshot_evidence(8);
+        panic!(
+            "didChange must materialize applied state and ready parse snapshot for version 2: applied_version={applied_version:?}, ready_parse_snapshot_version={ready_parse_snapshot_version:?}, task_state={task_state:?}, did_change_evidence={did_change_evidence:?}"
+        );
+    }
     tokio::time::timeout(Duration::from_secs(3), async {
         loop {
             if !server
@@ -2175,26 +2234,28 @@ async fn p7_did_save_followup_uses_detached_ready_artifacts_when_only_did_save_r
         .await
         .expect("didSave notification");
     assert!(did_save_response.is_none(), "didSave is a notification");
-    {
-        let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
-        let task = tasks
-            .get(&file_id)
-            .expect("didSave must seed a same-version refresh task for this regression");
-        let target = task
-            .target
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
-        assert_eq!(
-            target.requested_version, 2,
-            "didSave refresh task must target the saved revision"
-        );
-        assert_eq!(
-            target.source,
-            crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave,
-            "regression must exercise the same-version didSave refresh task that now serves as exact-task evidence for the save cycle"
-        );
-    }
+    tokio::time::timeout(Duration::from_millis(500), async {
+        loop {
+            let did_save_task_ready = {
+                let tasks = server.background_parse_snapshot_apply_tasks_v2.lock().await;
+                tasks.get(&file_id).is_some_and(|task| {
+                    let target = task
+                        .target
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    target.requested_version == 2
+                        && target.source
+                            == crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidSave
+                })
+            };
+            if did_save_task_ready {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("didSave must seed a same-version refresh task for this regression");
 
     server
         .latest_ready_parse_snapshots_v2

@@ -1363,4 +1363,29 @@ mod tests {
 
         assert_eq!(apply_text_edit(&previous, range, &edit.new_text), updated);
     }
+
+    #[test]
+    fn whole_text_change_to_parser_edit_keeps_full_replace_incremental_parse_serveable() {
+        let parser = bsl_runtime::system::parser_coordinator::ParserCoordinator::with_fallback();
+        let file_path = PathBuf::from("full-replace-incremental-serveable.bsl");
+        let previous = "Процедура Тест()\n    Возврат 1;\nКонецПроцедуры\n".to_string();
+        let updated =
+            "Процедура Тест()\n    Сообщить(необъявленная);\nКонецПроцедуры\n".to_string();
+        let edit = whole_text_change_to_parser_edit(&previous, &updated)
+            .expect("full replace should produce a parser edit");
+
+        parser
+            .parse_incremental_with_report(file_path.clone(), previous, Vec::new())
+            .expect("seed snapshot");
+        let report = parser
+            .parse_incremental_with_report(file_path, updated, vec![edit])
+            .expect("incremental parse report");
+
+        assert!(
+            report.incremental,
+            "full-replace edit must stay incremental instead of blocking serve-only type index"
+        );
+        assert_eq!(report.fallback_reason, None);
+        assert!(!report.changed_ranges.is_empty());
+    }
 }

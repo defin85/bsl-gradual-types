@@ -48,7 +48,7 @@
 - [x] 6.2 Run targeted runtime converter/parser tests for global-context properties.
 - [x] 6.3 Run targeted `bsl-analysis-v2` inference tests.
 - [x] 6.4 Run targeted `bsl-diagnostics` tests.
-- [x] 6.5 Run CLI check for `examples/conf_big/AccumulationRegisters/АвансовыеПлатежиИностранцевПоНДФЛ/Ext/ManagerModule.bsl` and confirm 0 errors / 0 warnings for the `Метаданные` scenario.
+- [x] 6.5 Run CLI check for `examples/conf_big/AccumulationRegisters/АвансовыеПлатежиИностранцевПоНДФЛ/Ext/ManagerModule.bsl` and confirm 0 errors / 0 warnings for the `Метаданные` scenario. Final closure evidence: `validation/final-cli-diagnostics-closure.md`.
 - [x] 6.6 Run `openspec validate add-syntax-helper-global-context-index --strict --no-interactive`.
 
 ## 7. Global Metadata Manager Collections

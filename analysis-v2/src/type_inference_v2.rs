@@ -1906,10 +1906,13 @@ impl<'a> TypeInferencer<'a> {
             return;
         }
 
-        if let Some(info) = lookup_legacy_metadata_object_collection_fallback(property) {
+        let item_type_name = lookup_legacy_metadata_object_collection_fallback(property)
+            .map(|info| info.item_type_name)
+            .or_else(|| Self::legacy_nested_metadata_collection_item_type(property));
+
+        if let Some(item_type_name) = item_type_name {
             resolution.metadata.notes.push(format!(
-                "{METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX}{}",
-                info.item_type_name
+                "{METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX}{item_type_name}"
             ));
         }
     }

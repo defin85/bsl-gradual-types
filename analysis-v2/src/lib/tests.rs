@@ -1232,6 +1232,111 @@ fn semantic_diagnostics_allow_dynamic_metadata_collection_object_names() {
 }
 
 #[test]
+fn semantic_diagnostics_allow_nested_metadata_collection_names_without_source_item_type() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1424);
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                properties: vec![bsl_shared::domain::types::RawPropertyData {
+                    name: "РегистрыНакопления".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                    collection_item_type: Some("ОбъектМетаданных: РегистрНакопления".to_string()),
+                }],
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "КоллекцияОбъектовМетаданных".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбъектМетаданных: РегистрНакопления".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                properties: vec![bsl_shared::domain::types::RawPropertyData {
+                    name: "Измерения".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбъектМетаданных: Поле".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Platform,
+                properties: vec![bsl_shared::domain::types::RawPropertyData {
+                    name: "Имя".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+        ])
+        .expect("load nested metadata collection diagnostics fixture");
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let global_context_index = Arc::new(bsl_shared::domain::GlobalContextIndex::loaded(vec![
+        bsl_shared::domain::GlobalContextPropertyData {
+            name: "Метаданные".to_string(),
+            english_name: Some("Metadata".to_string()),
+            prop_type: Some("ОбъектМетаданныхКонфигурация".to_string()),
+            is_readonly: true,
+            description: None,
+            contexts: vec!["Global context".to_string()],
+            source_key: "objects/Global context/properties/Metadata".to_string(),
+            source_path: None,
+            normalized_key: bsl_shared::domain::normalize_global_context_property_key("Метаданные"),
+            english_normalized_key: Some(
+                bsl_shared::domain::normalize_global_context_property_key("Metadata"),
+            ),
+            collection_item_type: None,
+        },
+    ]));
+    let deps = Arc::new(SemanticDeps {
+        signature_index: SignatureIndex::new(),
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
+        global_context_index,
+    });
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-nested-metadata-collection-name"),
+        deps,
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Функция Тест() Экспорт\n\
+                 Возврат Метаданные.РегистрыНакопления.СинтетическийРегистр.\
+                 Измерения.ГоловнаяОрганизация.Имя;\n\
+                 КонецФункции",
+        ),
+        version: 1,
+        path: Arc::from("nested-metadata-collection-name.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("ГоловнаяОрганизация")
+                || diagnostic.message.contains("'Имя'")),
+        "nested metadata collection object names must not leave final field access unknown: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn semantic_diagnostics_do_not_report_loaded_global_context_property_as_undeclared() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(1423);

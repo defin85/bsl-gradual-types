@@ -30,11 +30,19 @@ use bsl_shared::ir::{
 use bsl_shared::FORM_DATA_SEMANTICS_NOTE;
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
-use crate::ast_to_ir::{is_global_collection, lookup_global_collection};
+use crate::ast_to_ir::{
+    is_global_collection, lookup_global_collection, lookup_global_context_property,
+    lookup_metadata_object_collection,
+};
 use crate::implicit_bindings::{
     directive_disables_form_context, ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
 };
 use crate::SemanticDeps;
+
+const METADATA_OBJECT_COLLECTION_TYPE_NAME: &str = "КоллекцияОбъектовМетаданных";
+const CONFIGURATION_METADATA_OBJECT_TYPE_NAME: &str = "ОбъектМетаданныхКонфигурация";
+const METADATA_OBJECT_FIELD_TYPE_NAME: &str = "ОбъектМетаданных: Поле";
+const METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX: &str = "metadata_collection_item_type:";
 
 #[derive(Debug, Clone)]
 pub(crate) struct TypeIndex {
@@ -1137,6 +1145,9 @@ impl<'a> TypeInferencer<'a> {
         if is_global_collection(name).is_some() {
             return true;
         }
+        if lookup_global_context_property(name).is_some() {
+            return true;
+        }
 
         let name_lower = name.to_lowercase();
         match env.module_type {
@@ -1352,6 +1363,23 @@ impl<'a> TypeInferencer<'a> {
         } else {
             TypeResolution::inferred_weak(type_name)
         }
+    }
+
+    fn metadata_object_collection_resolution(&self, item_type_name: &str) -> TypeResolution {
+        let mut resolution =
+            self.resolve_platform_descriptor_type(METADATA_OBJECT_COLLECTION_TYPE_NAME);
+        resolution.metadata.notes.push(format!(
+            "{METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX}{item_type_name}"
+        ));
+        resolution
+    }
+
+    fn metadata_collection_item_type(object_type: &TypeResolution) -> Option<&str> {
+        object_type
+            .metadata
+            .notes
+            .iter()
+            .find_map(|note| note.strip_prefix(METADATA_COLLECTION_ITEM_TYPE_NOTE_PREFIX))
     }
 
     fn resolve_configuration_descriptor(&self, kind: MetadataKind, name: &str) -> TypeResolution {
@@ -1709,6 +1737,10 @@ impl<'a> TypeInferencer<'a> {
             return value.clone();
         }
 
+        if let Some(global_property) = lookup_global_context_property(name) {
+            return self.resolve_platform_descriptor_type(global_property.type_name);
+        }
+
         if is_global_collection(name).is_some() {
             return TypeResolution::inferred(name);
         }
@@ -1778,6 +1810,22 @@ impl<'a> TypeInferencer<'a> {
         property: &str,
     ) -> TypeResolution {
         let base_type = object_type.type_name();
+        if base_type == CONFIGURATION_METADATA_OBJECT_TYPE_NAME {
+            if let Some(info) = lookup_metadata_object_collection(property) {
+                return self.metadata_object_collection_resolution(info.item_type_name);
+            }
+        }
+
+        if let Some(item_type_name) = Self::metadata_collection_item_type(object_type) {
+            return self.resolve_platform_descriptor_type(item_type_name);
+        }
+
+        if Self::is_metadata_object_type_name(&base_type) {
+            if let Some(item_type_name) = Self::nested_metadata_collection_item_type(property) {
+                return self.metadata_object_collection_resolution(item_type_name);
+            }
+        }
+
         if let Some(info) = lookup_global_collection(&base_type) {
             // Справочники.Контрагенты -> СправочникМенеджер.Контрагенты
             let manager = format!("{}.{}", info.item_manager_type, property);
@@ -1792,6 +1840,21 @@ impl<'a> TypeInferencer<'a> {
         }
 
         TypeResolution::unknown()
+    }
+
+    fn is_metadata_object_type_name(type_name: &str) -> bool {
+        type_name.starts_with("ОбъектМетаданных:")
+            || type_name.starts_with("MetadataObject:")
+            || type_name == CONFIGURATION_METADATA_OBJECT_TYPE_NAME
+    }
+
+    fn nested_metadata_collection_item_type(property: &str) -> Option<&'static str> {
+        match property {
+            "Измерения" | "Dimensions" | "Реквизиты" | "Attributes" | "Ресурсы" | "Resources" => {
+                Some(METADATA_OBJECT_FIELD_TYPE_NAME)
+            }
+            _ => None,
+        }
     }
 
     fn infer_call(

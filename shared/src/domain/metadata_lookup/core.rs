@@ -6,8 +6,8 @@ use crate::domain::resolver::GenericStrategy;
 use crate::domain::signature_index::MethodSignature;
 use crate::domain::types::{
     ConcreteType, FacetKind, GenericType, MetadataKind, PlatformType, RawMethodData, RawParamData,
-    RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, TypeResolution,
-    FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_SEMANTICS_NOTE,
+    RawPropertyData, RawTabularSectionData, RawTypeData, ResolutionResult, SpecialType,
+    TypeResolution, FORM_DATA_CANONICAL_TYPE_NAME, FORM_DATA_SEMANTICS_NOTE,
 };
 
 const PROPERTY_ORIGIN_REPOSITORY: &str = "repository";
@@ -54,6 +54,11 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_raw_type(&self, resolution: &TypeResolution) -> Option<RawTypeData> {
+        if let Some(non_nullish_resolution) = Self::single_non_nullish_union_resolution(resolution)
+        {
+            return self.get_raw_type(&non_nullish_resolution);
+        }
+
         let type_name = self.extract_type_name(resolution)?;
         self.repository.find_type(&type_name)
     }
@@ -81,6 +86,11 @@ impl TypeMetadataLookup {
     /// }
     /// ```
     pub fn get_methods(&self, resolution: &TypeResolution) -> Vec<RawMethodData> {
+        if let Some(non_nullish_resolution) = Self::single_non_nullish_union_resolution(resolution)
+        {
+            return self.get_methods(&non_nullish_resolution);
+        }
+
         // Специальная обработка для Generic типов (СОХРАНИТЬ существующую логику!)
         if let ResolutionResult::Generic(generic_type) = &resolution.result {
             return self.get_methods_for_generic(generic_type);
@@ -353,6 +363,11 @@ impl TypeMetadataLookup {
         &self,
         resolution: &TypeResolution,
     ) -> Vec<(RawPropertyData, &'static str)> {
+        if let Some(non_nullish_resolution) = Self::single_non_nullish_union_resolution(resolution)
+        {
+            return self.get_properties_with_origin(&non_nullish_resolution);
+        }
+
         let structural_props = self.get_structural_properties_with_origin(resolution);
 
         if let Some(enum_props) = self.get_enum_manager_properties(resolution) {
@@ -929,6 +944,11 @@ impl TypeMetadataLookup {
     /// - **Primitive** и **Special** типы поддерживаются, если загружены из Syntax Helper
     #[allow(clippy::only_used_in_recursion)]
     pub(crate) fn extract_type_name(&self, resolution: &TypeResolution) -> Option<String> {
+        if let Some(non_nullish_resolution) = Self::single_non_nullish_union_resolution(resolution)
+        {
+            return self.extract_type_name(&non_nullish_resolution);
+        }
+
         match &resolution.result {
             ResolutionResult::Concrete(concrete) => match concrete {
                 ConcreteType::Platform(platform) => {
@@ -966,6 +986,36 @@ impl TypeMetadataLookup {
                 result: ResolutionResult::Concrete(inner.as_ref().clone()),
                 ..resolution.clone()
             }),
+        }
+    }
+
+    fn single_non_nullish_union_resolution(resolution: &TypeResolution) -> Option<TypeResolution> {
+        let ResolutionResult::Union(variants) = &resolution.result else {
+            return None;
+        };
+
+        let mut non_nullish_variants = variants
+            .iter()
+            .filter(|variant| !Self::is_nullish_concrete_type(&variant.type_));
+        let first = non_nullish_variants.next()?;
+
+        if non_nullish_variants.next().is_some() {
+            return None;
+        }
+
+        let mut concrete_resolution = resolution.clone();
+        concrete_resolution.result = ResolutionResult::Concrete(first.type_.clone());
+        Some(concrete_resolution)
+    }
+
+    fn is_nullish_concrete_type(concrete_type: &ConcreteType) -> bool {
+        match concrete_type {
+            ConcreteType::Special(SpecialType::Undefined | SpecialType::Null) => true,
+            ConcreteType::Platform(platform) => {
+                let name = platform.name.trim().to_lowercase();
+                matches!(name.as_str(), "неопределено" | "undefined" | "null")
+            }
+            _ => false,
         }
     }
 

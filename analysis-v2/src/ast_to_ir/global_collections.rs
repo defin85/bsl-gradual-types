@@ -18,6 +18,37 @@ pub struct GlobalCollectionInfo {
     pub item_manager_type: &'static str,
 }
 
+/// Информация о предопределенном свойстве глобального контекста 1С.
+#[derive(Debug, Clone, Copy)]
+pub struct GlobalContextPropertyInfo {
+    /// Русское имя свойства.
+    pub name_ru: &'static str,
+    /// Английское имя свойства.
+    pub name_en: &'static str,
+    /// Тип свойства из синтаксис-помощника.
+    pub type_name: &'static str,
+}
+
+/// Информация о коллекции, доступной через глобальный объект `Метаданные`.
+#[derive(Debug, Clone, Copy)]
+pub struct MetadataObjectCollectionInfo {
+    /// Русское имя свойства коллекции.
+    pub name_ru: &'static str,
+    /// Английское имя свойства коллекции.
+    pub name_en: &'static str,
+    /// Тип элемента коллекции из синтаксис-помощника.
+    pub item_type_name: &'static str,
+}
+
+/// Предопределенные свойства глобального контекста, которые доступны как
+/// идентификаторы без объявления.
+pub const GLOBAL_CONTEXT_PROPERTIES_INFO: &[GlobalContextPropertyInfo] =
+    &[GlobalContextPropertyInfo {
+        name_ru: "Метаданные",
+        name_en: "Metadata",
+        type_name: "ОбъектМетаданныхКонфигурация",
+    }];
+
 /// Полный список глобальных коллекций метаданных платформы 1С
 ///
 /// Включает все типы объектов метаданных:
@@ -112,12 +143,103 @@ pub const GLOBAL_COLLECTIONS_INFO: &[GlobalCollectionInfo] = &[
     },
 ];
 
+/// Коллекции объектов метаданных, доступные через
+/// `Метаданные.<ИмяКоллекции>`.
+pub const METADATA_OBJECT_COLLECTIONS_INFO: &[MetadataObjectCollectionInfo] = &[
+    MetadataObjectCollectionInfo {
+        name_ru: "Справочники",
+        name_en: "Catalogs",
+        item_type_name: "ОбъектМетаданных: Справочник",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "Документы",
+        name_en: "Documents",
+        item_type_name: "ОбъектМетаданных: Документ",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "РегистрыСведений",
+        name_en: "InformationRegisters",
+        item_type_name: "ОбъектМетаданных: РегистрСведений",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "РегистрыНакопления",
+        name_en: "AccumulationRegisters",
+        item_type_name: "ОбъектМетаданных: РегистрНакопления",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "РегистрыБухгалтерии",
+        name_en: "AccountingRegisters",
+        item_type_name: "ОбъектМетаданных: РегистрБухгалтерии",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "РегистрыРасчета",
+        name_en: "CalculationRegisters",
+        item_type_name: "ОбъектМетаданных: РегистрРасчета",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "Перечисления",
+        name_en: "Enums",
+        item_type_name: "ОбъектМетаданных: Перечисление",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "Константы",
+        name_en: "Constants",
+        item_type_name: "ОбъектМетаданных: Константа",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "ПланыОбмена",
+        name_en: "ExchangePlans",
+        item_type_name: "ОбъектМетаданных: ПланОбмена",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "ПланыВидовХарактеристик",
+        name_en: "ChartsOfCharacteristicTypes",
+        item_type_name: "ОбъектМетаданных: ПланВидовХарактеристик",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "ПланыСчетов",
+        name_en: "ChartsOfAccounts",
+        item_type_name: "ОбъектМетаданных: ПланСчетов",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "ПланыВидовРасчета",
+        name_en: "ChartsOfCalculationTypes",
+        item_type_name: "ОбъектМетаданных: ПланВидовРасчета",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "БизнесПроцессы",
+        name_en: "BusinessProcesses",
+        item_type_name: "ОбъектМетаданных: БизнесПроцесс",
+    },
+    MetadataObjectCollectionInfo {
+        name_ru: "Задачи",
+        name_en: "Tasks",
+        item_type_name: "ОбъектМетаданных: Задача",
+    },
+];
+
 /// Поиск глобальной коллекции по имени.
 ///
 /// Сравнение case-insensitive для латиницы (eq_ignore_ascii_case).
 /// Для кириллицы используется точное сравнение, т.к. 1С всегда использует корректный регистр.
 pub fn lookup_global_collection(name: &str) -> Option<&'static GlobalCollectionInfo> {
     GLOBAL_COLLECTIONS_INFO
+        .iter()
+        .find(|info| info.name_ru == name || info.name_en.eq_ignore_ascii_case(name))
+}
+
+/// Поиск предопределенного свойства глобального контекста по имени.
+pub fn lookup_global_context_property(name: &str) -> Option<&'static GlobalContextPropertyInfo> {
+    GLOBAL_CONTEXT_PROPERTIES_INFO
+        .iter()
+        .find(|info| info.name_ru == name || info.name_en.eq_ignore_ascii_case(name))
+}
+
+/// Поиск коллекции объектов метаданных по имени свойства `Метаданные`.
+pub fn lookup_metadata_object_collection(
+    name: &str,
+) -> Option<&'static MetadataObjectCollectionInfo> {
+    METADATA_OBJECT_COLLECTIONS_INFO
         .iter()
         .find(|info| info.name_ru == name || info.name_en.eq_ignore_ascii_case(name))
 }

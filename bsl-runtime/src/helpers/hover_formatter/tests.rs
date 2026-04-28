@@ -14,8 +14,9 @@ mod tests {
         ContextRequirements, MethodSignature, SignatureSource,
     };
     use bsl_shared::domain::types::{
-        Certainty, ConcreteType, ParameterInfo, PlatformType, RawMethodData, RawPropertyData,
-        ResolutionMetadata, ResolutionResult, ResolutionSource, TypeResolution,
+        Certainty, ConcreteType, ParameterInfo, PlatformType, RawDataSource, RawMethodData,
+        RawPropertyData, RawTypeData, ResolutionMetadata, ResolutionResult, ResolutionSource,
+        SpecialType, TypeResolution, WeightedType,
     };
     use bsl_shared::formatting::DetailLevel;
     use std::sync::Arc;
@@ -94,6 +95,46 @@ mod tests {
             .build();
         assert!(result_txt.contains("Тест:"));
         assert!(!result_txt.contains("**"));
+    }
+
+    #[test]
+    fn test_format_variable_uses_metadata_for_single_concrete_nullish_union() {
+        let repo = Arc::new(InMemoryTypeRepository::new());
+        repo.load_types(vec![RawTypeData {
+            name: "РезультатЗапроса".to_string(),
+            description: "Результат выполнения запроса".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Пустой".to_string(),
+                english_name: "IsEmpty".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }])
+        .unwrap();
+        let metadata_lookup = TypeMetadataLookup::new(repo);
+        let formatter = HoverFormatter::new(HoverFormatConfig::default(), metadata_lookup);
+        let resolution = TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Union(vec![
+                WeightedType::new(ConcreteType::Special(SpecialType::Undefined)),
+                WeightedType::new(ConcreteType::Platform(PlatformType {
+                    name: "РезультатЗапроса".to_string(),
+                })),
+            ]),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        };
+
+        let hover = formatter.format_variable("РезультатЗапроса", &resolution);
+
+        assert!(!hover.contains("Детали типа недоступны"));
+        assert!(hover.contains("РезультатЗапроса"));
+        assert!(hover.contains("Неопределено"));
+        assert!(hover.contains("Пустой"));
     }
 
     #[test]

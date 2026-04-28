@@ -54,6 +54,60 @@ fn test_assignment_with_undeclared_value_reports_undeclared_variable() {
 }
 
 #[test]
+fn test_metadata_object_collection_member_access_is_dynamic_by_name() {
+    use bsl_shared::domain::types::{RawDataSource, RawTypeData, TypeResolution};
+    use std::sync::Arc;
+
+    let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "КоллекцияОбъектовМетаданных".to_string(),
+            source: RawDataSource::Platform,
+            ..Default::default()
+        }])
+        .expect("load metadata collection type");
+    let metadata = TypeMetadataLookup::new(repository.clone());
+    let validator = TypeValidator::new(&metadata);
+    let resolver = TypeResolver::new(repository);
+    let signature_index = SignatureIndex::new();
+    let mut program = SemanticProgram::new();
+
+    let access_span = Span::new(0, 52);
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::MemberAccess {
+            object_node: None,
+            object_name: Some("Метаданные.РегистрыНакопления".to_string()),
+            object_span: None,
+            member_name: "АвансовыеПлатежиИностранцевПоНДФЛ".to_string(),
+            access_kind: MemberAccessKind::Property,
+        },
+        span: access_span,
+        scope_id: program.symbols.root_scope,
+    });
+
+    let mut visitor =
+        SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+    let mut hints = SemanticTypeHints::default();
+    hints.member_access_object_type_by_span.insert(
+        access_span,
+        TypeResolution::explicit("КоллекцияОбъектовМетаданных"),
+    );
+    visitor.set_type_hints(Some(&hints));
+    let mut context = FlowContext::new(program.symbols.root_scope);
+    visitor.visit_node(&program.nodes[0], &mut context);
+
+    let errors = visitor.into_errors();
+    assert!(
+        errors.is_empty(),
+        "metadata object collection members are configuration object names, got: {:?}",
+        errors
+            .iter()
+            .map(|diag| diag.message.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_visitor_detects_nonexistent_method() {
     use bsl_shared::domain::types::TypeResolution;
     use std::sync::Arc;
@@ -94,6 +148,82 @@ fn test_visitor_detects_nonexistent_method() {
         "Should have error for non-existent method"
     );
     assert!(errors[0].message.contains("НесуществующийМетод"));
+}
+
+#[test]
+fn test_visitor_allows_method_on_single_concrete_nullish_union_receiver() {
+    use bsl_shared::domain::types::{
+        ConcreteType, PlatformType, RawDataSource, RawMethodData, RawTypeData, ResolutionMetadata,
+        ResolutionResult, ResolutionSource, SpecialType, TypeResolution, WeightedType,
+    };
+    use std::sync::Arc;
+
+    let repository = Arc::new(bsl_shared::domain::repository::InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "РезультатЗапроса".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "Пустой".to_string(),
+                english_name: "IsEmpty".to_string(),
+                return_type: "Булево".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }])
+        .unwrap();
+    let metadata = TypeMetadataLookup::new(repository.clone());
+    let validator = TypeValidator::new(&metadata);
+    let resolver = TypeResolver::new(repository);
+    let signature_index = SignatureIndex::new();
+    let mut program = SemanticProgram::new();
+
+    let call_span = Span::new(10, 40);
+    program.nodes.push(SemanticNode {
+        kind: SemanticNodeKind::FunctionCall {
+            function_name: "Пустой".to_string(),
+            object_name: Some("РезультатЗапроса".to_string()),
+            object_node: None,
+            object_span: None,
+            arg_nodes: Vec::new(),
+            arg_spans: Vec::new(),
+        },
+        span: call_span,
+        scope_id: program.symbols.root_scope,
+    });
+
+    let mut visitor =
+        SemanticValidationVisitor::new(&validator, &program, &resolver, &signature_index);
+    let mut hints = SemanticTypeHints::default();
+    hints.call_receiver_type_by_span.insert(
+        call_span,
+        TypeResolution {
+            certainty: Certainty::Known,
+            result: ResolutionResult::Union(vec![
+                WeightedType::new(ConcreteType::Special(SpecialType::Undefined)),
+                WeightedType::new(ConcreteType::Platform(PlatformType {
+                    name: "РезультатЗапроса".to_string(),
+                })),
+            ]),
+            source: ResolutionSource::Static,
+            metadata: ResolutionMetadata::default(),
+            active_facet: None,
+            available_facets: vec![],
+        },
+    );
+    visitor.set_type_hints(Some(&hints));
+    let mut context = FlowContext::new(program.symbols.root_scope);
+    visitor.visit_node(&program.nodes[0], &mut context);
+
+    let errors = visitor.into_errors();
+    assert!(
+        errors.iter().all(|diag| !diag.message.contains("Пустой")),
+        "nullish union receiver with concrete method must not emit NonExistentMethod, got: {:?}",
+        errors
+            .iter()
+            .map(|diag| diag.message.clone())
+            .collect::<Vec<_>>()
+    );
 }
 
 #[test]

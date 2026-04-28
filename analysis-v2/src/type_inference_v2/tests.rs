@@ -318,6 +318,60 @@ fn deps_with_form_attribute_to_value_signature() -> Arc<SemanticDeps> {
     })
 }
 
+fn deps_with_metadata_global_context_types() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "ОбъектМетаданныхКонфигурация".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "РегистрыНакопления".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияОбъектовМетаданных".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбъектМетаданных: РегистрНакопления".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Измерения".to_string(),
+                    prop_type: "КоллекцияОбъектовМетаданных".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбъектМетаданных: Поле".to_string(),
+                source: RawDataSource::Platform,
+                properties: vec![RawPropertyData {
+                    name: "Имя".to_string(),
+                    prop_type: "Строка".to_string(),
+                    is_readonly: true,
+                }],
+                ..Default::default()
+            },
+        ])
+        .expect("load metadata global context platform types");
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(SemanticDeps {
+        repository,
+        signature_index: SignatureIndex::new(),
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+    })
+}
+
 #[test]
 fn builds_type_index_for_simple_assignment_and_method_call() {
     let source = r#"Перем М;
@@ -342,6 +396,37 @@ fn builds_type_index_for_simple_assignment_and_method_call() {
         .type_at_byte_offset(method_call_offset)
         .expect("type at method call");
     assert_eq!(method_call.type_name(), "Число");
+}
+
+#[test]
+fn resolves_metadata_global_context_accumulation_register_dimension_name_chain() {
+    let source = r#"Функция РеквизитГоловнаяОрганизация() Экспорт
+    Возврат Метаданные.РегистрыНакопления.АвансовыеПлатежиИностранцевПоНДФЛ.Измерения.ГоловнаяОрганизация.Имя;
+КонецФункции
+"#;
+    let program = parse(source);
+    let deps = deps_with_metadata_global_context_types();
+    let index = build_type_index_with_path(
+        &program,
+        "AccumulationRegisters/АвансовыеПлатежиИностранцевПоНДФЛ/Ext/ManagerModule.bsl",
+        deps,
+    );
+
+    let metadata_offset = source.find("Метаданные").expect("metadata identifier") as u32;
+    let metadata_type = index
+        .type_at_byte_offset(metadata_offset)
+        .expect("type at Метаданные");
+    assert_eq!(metadata_type.type_name(), "ОбъектМетаданныхКонфигурация");
+    assert!(
+        metadata_type.is_undeclared_variable().is_none(),
+        "Метаданные is a predefined global context property, got: {metadata_type:?}"
+    );
+
+    let name_offset = source.rfind("Имя").expect("final Name property") as u32;
+    let name_type = index
+        .type_at_byte_offset(name_offset)
+        .expect("type at metadata field name");
+    assert_eq!(name_type.type_name(), "Строка");
 }
 
 #[test]

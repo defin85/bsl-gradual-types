@@ -22,6 +22,8 @@ use crate::validators::{
     validation_result_v2_to_diagnostic,
 };
 
+const METADATA_OBJECT_COLLECTION_TYPE_NAME: &str = "КоллекцияОбъектовМетаданных";
+
 /// Semantic validation visitor for BSL code
 ///
 /// Visits semantic nodes and performs type validation,
@@ -646,6 +648,13 @@ impl<'a> SemanticVisitor for SemanticValidationVisitor<'a> {
                 }
 
                 if Self::should_skip_member_validation_for_missing_configuration(object_type) {
+                    return;
+                }
+
+                if object_type
+                    .type_name()
+                    .eq_ignore_ascii_case(METADATA_OBJECT_COLLECTION_TYPE_NAME)
+                {
                     return;
                 }
 

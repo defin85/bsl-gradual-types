@@ -5441,3 +5441,1199 @@ Checked-in evidence для этого gate MUST сохранять хотя бы
 - **AND** по evidence можно понять, когда same-file handoff/token стал observable для этой
   completion path
 
+### Requirement: Same-version didSave heavy follow-up avoids cold exact rebuild when the saved revision is still current (MUST)
+
+После successful same-version `save_fastlane` first publish система MUST NOT по умолчанию
+тратить bounded heavy-follow-up window на seconds-scale cold `parse_exec ->
+exact_ready_snapshot_assembly -> program_lowering`, если:
+
+- exact save target для `(file_id, requested_version, text_hash, save_cycle_sequence)` всё ещё
+  остаётся current;
+- сервер уже имеет matching current-revision state для этого target, достаточный чтобы безопасно
+  seed-ить более быстрый exact rebuild path;
+- newer same-file revision, explicit queue backlog или writer/apply lag не являются primary
+  blocker для данного follow-up.
+
+Для этого система MUST:
+
+- предпочитать reuse-aware same-version exact rebuild path или semantically equivalent exact-safe
+  fast path до cold full rebuild;
+- сохранять canonical live exact install как источник истины для interactive exact consumers;
+- оставаться keyed к exact save target identity и сохранять latest-wins semantics;
+- truthfully fall back, если safe reuse proof отсутствует, mismatched, cancelled или superseded;
+- сохранять request-centric evidence, из которой видно, остался ли blocker в rebuild-stage
+  `parse_exec/program_lowering`, а не в queue/apply attribution.
+
+#### Scenario: Same-version saved revision no longer burns the whole wait inside program_lowering
+
+- **GIVEN** `didSave` уже завершил same-version `save_fastlane` first publish для revision `V`
+- **AND** heavy follow-up всё ещё targeting тот же current save target
+- **AND** matching current-revision state для этого target уже существует
+- **AND** newer revision, explicit queue wait и writer/apply lag не являются primary blocker
+- **WHEN** сервер rebuild-ит exact ready snapshot для richer heavy follow-up
+- **THEN** он использует reuse-aware same-version fast path до cold full
+  `exact_ready_snapshot_assembly/program_lowering`
+- **AND** representative same-version path MUST NOT падать в `shadow_state` только потому, что
+  exact rebuild остался seconds-scale внутри `parse_exec`
+
+#### Scenario: Missing or stale reuse proof preserves truthful fallback
+
+- **GIVEN** same-version fast rebuild path не может быть доказан safe для current save target
+- **OR** target уже superseded, mismatched или cancelled
+- **WHEN** heavy follow-up выбирает exact rebuild branch
+- **THEN** система сохраняет canonical truthful fallback / supersession behavior
+- **AND** не выдаёт `shadow_state` или partial rebuild за canonical exact readiness
+
+### Requirement: Representative save-followup validation fails on rebuild-dominated shadow-state fallback (MUST)
+
+Representative live/perf validation для same-file `didSave` follow-up на `examples/conf_big` MUST
+завершаться ошибкой, если same-version saved revision всё ещё приходит к
+`followup_semantic_path=shadow_state` только потому, что exact ready-snapshot rebuild был
+доминирован rebuild-stage `parse_exec`, включая
+`exact_ready_snapshot_assembly/program_lowering`, а не newer revision supersession или отдельно
+атрибутированный queue/apply blocker.
+
+Checked-in evidence для этого gate MUST сохранять хотя бы один correlation slice, который
+показывает:
+
+- `requested_version` и `save_cycle_sequence` affected follow-up;
+- terminal semantic path (`ready_artifacts`, `detached_ready_artifacts` или `shadow_state`);
+- bounded-wait probe outcome и ready-snapshot task state;
+- dominant phase/checkpoint, включая `program_lowering` attribution, когда он присутствует.
+
+#### Scenario: Live gate fails when same-version rebuild still times out inside exact assembly
+
+- **GIVEN** representative same-file `didSave` profile на крупном модуле
+- **AND** `save_fastlane` already published same-version first refresh
+- **AND** same-version save target остаётся current
+- **WHEN** measured follow-up sample всё ещё приходит к `shadow_state`
+- **AND** exported evidence показывает rebuild-dominated `parse_exec` / `program_lowering`
+- **THEN** representative gate завершается ошибкой
+- **AND** regression не маскируется под old didChange handoff lag, generic client ingress или
+  unrelated output wait
+
+### Requirement: The system MUST treat same-version didSave exact producers as dedicated save-critical producers through detached diagnostics-ready publication
+
+The system MUST treat the corresponding exact producer as a first-class save-critical producer after `save_fastlane` already published the same-version first refresh for a save family, rather than as generic interactive or background work.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent save-family identity;
+- assign the producer a dedicated admission lane and CPU-budget tier, or a semantically equivalent
+  arbitration boundary, distinct from generic interactive exact requests and generic background
+  diagnostics work;
+- prove that the selected CPU-budget acquisition logic actually honors that producer boundary for
+  the worker's CPU class; a lane label that is ignored by the budget implementation MUST NOT count
+  as the dedicated tier;
+- expose producer lifecycle progress that distinguishes at least admitted or started,
+  detached diagnostics-ready published, fully materialized, superseded or cancelled, and failed;
+- expose that lifecycle for the save family itself rather than only retagging one mutable per-file
+  worker with promotion flags after the consumer has already exhausted its bounded wait;
+- treat detached diagnostics-ready publication as the bounded success endpoint for heavy follow-up
+  on that still-current save family;
+- preserve truthful supersession and fallback when a newer same-file revision or newer save cycle
+  overtakes the producer, or when the runtime can no longer prove that the producer remains the
+  best still-current exact candidate;
+- preserve canonical live exact semantics for interactive exact consumers.
+
+#### Scenario: Still-current save family reaches detached exact readiness without defaulting to waiting-only shadow-state terminal publish
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish for revision
+  `V`
+- **AND** heavy follow-up is still targeting the same current save family
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** the same-version `didSave` exact producer is admitted on its save-critical path
+- **THEN** the bounded heavy-follow-up success endpoint is detached diagnostics-ready publication
+  for that same save family
+- **AND** the save cycle does not default to terminal full semantic publication through
+  `shadow_state` solely because the producer was still waiting to start generic exact work
+
+#### Scenario: Truthful non-exact fallback remains when producer continuity is lost
+
+- **GIVEN** heavy follow-up exhausted its initial bounded wait on a same-version `didSave` exact
+  producer
+- **AND** either a newer same-file revision or newer save cycle overtakes that producer, or the
+  runtime can no longer prove that it remains the best still-current exact candidate
+- **WHEN** the runtime finalizes the follow-up path
+- **THEN** it MAY still terminate truthfully through `shadow_state`, `superseded_generation`, or
+  another truthful non-exact outcome
+- **AND** exported evidence preserves why detached exact readiness was not chosen
+
+### Requirement: Representative validation MUST fail when a still-current same-version save family remains producer-queue-bound and falls back before detached-ready publish
+
+Representative live or perf validation for same-file `didSave` follow-up on `examples/conf_big` MUST fail if all of the following are true in the same captured run:
+
+- `save_fastlane` already published quickly for the same save family;
+- the same-version exact producer remains still current for that save family;
+- bounded wait times out in `waiting` before detached diagnostics-ready publication for that save
+  family;
+- heavy follow-up still terminates through `followup_semantic_path=shadow_state`; and
+- semantic query on that fallback branch dominates the heavy-follow-up wall time; and
+- the same run later shows detached or fully materialized exact readiness for that same save
+  family rather than true supersession.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- `requested_version` and `save_cycle_sequence`;
+- producer task state or lifecycle evidence for the same save family;
+- zero-budget and bounded-wait probe outcomes;
+- timeout phase and terminal semantic path;
+- detached diagnostics-ready publication evidence, when it later appears;
+- `semantic_diagnostics_query_ms` for the fallback terminal branch;
+- explicit same-family exact readiness evidence that distinguishes later detached-ready or fully
+  materialized exact readiness from true supersession.
+
+#### Scenario: Live gate fails when the producer never becomes the bounded winner for the still-current save family
+
+- **GIVEN** representative same-file `didSave` profiling on a large module
+- **AND** `save_fastlane` already published the same-version first refresh
+- **AND** the same save family remains still current
+- **WHEN** the exact producer stays queue-bound or waiting-bound past the bounded follow-up window
+- **AND** heavy follow-up therefore terminates through `shadow_state`
+- **AND** exported evidence shows query-dominated semantic work on that fallback branch
+- **AND** the same captured run later shows detached or fully materialized exact readiness for that
+  same save family
+- **THEN** the representative gate fails
+- **AND** the regression is not treated as a truthful steady-state waiting outcome
+
+### Requirement: Started same-version `didSave` exact producers MUST bound parser-base recovery before shadow-state fallback (MUST)
+
+The system MUST NOT let a still-current same-version `didSave` exact producer that already reached lifecycle `started` terminate diagnostics heavy follow-up through `shadow_state` solely because bounded waiting timed out inside `parser_base_recovery`.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent save-family identity;
+- treat `started` as a producer-owned lifecycle boundary that must progress to detached
+  diagnostics-ready publication, full materialization, supersession, cancellation, failure, or
+  explicit continuity loss;
+- keep detached diagnostics-ready publication as the bounded success endpoint for this
+  diagnostics-only follow-up path;
+- preserve the existing bounded wait and relief-valve budgets as the latency envelope and MUST NOT
+  be satisfied solely by widening those budgets;
+- preserve truthful `shadow_state`, supersession, cancellation, failure, or continuity-loss fallback
+  when a newer same-file revision or newer save cycle overtakes the target, or when the runtime can
+  no longer prove the started producer still owns the exact save family;
+- preserve canonical live exact readiness gates for completion, hover, definition, signatureHelp,
+  type-at-position, and semantically equivalent interactive exact consumers;
+- export bounded low-cardinality evidence for lifecycle at timeout and final same-family lifecycle
+  after timeout or fallback.
+
+#### Scenario: Started same-family producer reaches detached diagnostics-ready instead of shadow-state fallback
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish for revision `V`
+- **AND** heavy follow-up is still targeting the same current save family
+- **AND** the exact producer lifecycle for that family has reached `started`
+- **AND** bounded wait would otherwise time out with `followup_ready_snapshot_timeout_leaf=parser_base_recovery`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** runtime resolves the heavy-follow-up path
+- **THEN** the bounded success endpoint is detached diagnostics-ready publication or full exact
+  materialization for that same save family
+- **AND** the terminal diagnostics publish does not use `followup_semantic_path=shadow_state` solely
+  because parser-base recovery was still in progress
+
+#### Scenario: Truthful non-exact terminal outcome remains allowed
+
+- **GIVEN** heavy follow-up is waiting on a started same-version `didSave` exact producer
+- **AND** bounded parser-base recovery cannot progress that producer to detached diagnostics-ready
+  publication within the existing envelope, or the producer no longer owns the exact save family
+- **WHEN** the runtime finalizes the follow-up path
+- **THEN** it MAY terminate through `shadow_state`, supersession, cancellation, failure, or
+  continuity-loss fallback
+- **AND** exported evidence preserves the truthful terminal reason rather than reporting only
+  lifecycle `started`
+
+### Requirement: Representative validation MUST fail on started parser-base timeout followed by shadow-state fallback (MUST)
+
+Representative live or perf validation for same-file `didSave` follow-up on `examples/conf_big` MUST fail if all of the following are true in the same captured run:
+
+- `save_fastlane` already published quickly for the same save family;
+- the follow-up gate/admission path is not the dominant delay;
+- the same-version exact producer lifecycle is `started`;
+- bounded wait times out with `followup_ready_snapshot_timeout_leaf=parser_base_recovery`;
+- the follow-up terminal semantic path is `followup_semantic_path=shadow_state`;
+- semantic diagnostics query dominates the fallback branch; and
+- no per-cycle final lifecycle evidence proves detached/full exact readiness, supersession,
+  cancellation, failure, or continuity loss for that same save family.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- `requested_version`, `save_cycle_sequence`, and save-family identity;
+- `followup_save_fastlane_gate_outcome` and gate/admission wait values;
+- lifecycle at bounded timeout and final lifecycle after timeout/fallback;
+- zero-budget, bounded-wait, and relief-valve outcomes;
+- timeout phase, timeout leaf, subphase/checkpoint, and elapsed values;
+- terminal semantic path and semantic query elapsed values;
+- detached diagnostics-ready publication, full materialization, or truthful non-exact terminal
+  reason for the same save family.
+
+#### Scenario: Live gate rejects the 2026-04-24 started-producer parser-base residual
+
+- **GIVEN** representative same-file `didSave` profiling on a large module
+- **AND** `save_fastlane` already published the same-version first refresh
+- **AND** the exact producer lifecycle reached `started`
+- **AND** bounded wait timed out at `parser_base_recovery`
+- **WHEN** the measured follow-up sample still publishes through `shadow_state`
+- **AND** exported evidence shows query-dominated semantic work on that fallback path
+- **AND** the sample lacks a truthful same-family terminal producer reason beyond `started`
+- **THEN** the representative gate fails
+- **AND** the regression is not treated as the already-closed `refactor-51` waiting-only producer
+  admission case
+
+### Requirement: Same-version `didSave` producers MUST bound program-lowering rebuild before shadow fallback (MUST)
+
+The system MUST NOT let a still-current same-version `didSave` exact producer terminate diagnostics
+heavy follow-up through `shadow_state` solely because bounded waiting timed out inside
+`parse_exec` / `exact_ready_snapshot_assembly` / `program_lowering` after a full program-lowering
+rebuild.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target, or
+  a semantically equivalent save-family identity;
+- distinguish waiting/parser-base residuals from rebuild-dominated `program_lowering` residuals;
+- treat `program_lowering_reuse_outcome=full_rebuild` with same-family later detached-ready
+  publication as a producer boundedness failure, not a normal terminal `shadow_state` outcome;
+- preserve the existing bounded wait and relief-valve budgets as the latency envelope and MUST NOT
+  be satisfied solely by widening those budgets;
+- preserve detached diagnostics-ready publication as the bounded success endpoint for diagnostics
+  follow-up;
+- preserve truthful `shadow_state`, supersession, cancellation, failure, or continuity-loss fallback
+  when a newer same-file revision or newer save cycle overtakes the target, or when the runtime can
+  no longer prove the exact producer still owns the save family;
+- NOT treat bounded-wait expiry, `program_lowering_reuse_outcome=full_rebuild`, or missing reuse
+  alone as a truthful non-exact terminal reason while final same-family lifecycle later proves
+  detached diagnostics-ready publication or full materialization;
+- preserve canonical live exact readiness gates for completion, hover, definition, signatureHelp,
+  type-at-position, and semantically equivalent interactive exact consumers;
+- export bounded low-cardinality evidence for program-lowering reuse outcome, rebuilt/reused units,
+  bounded-wait winner, terminal semantic path, and final same-family lifecycle.
+
+#### Scenario: Program-lowering reuse miss does not end a still-current save family through shadow fallback
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish for revision
+  `V`
+- **AND** heavy follow-up is still targeting the same current save family
+- **AND** bounded wait times out in `parse_exec` with
+  `followup_ready_snapshot_timeout_leaf=program_lowering`
+- **AND** program-lowering evidence reports `program_lowering_reuse_outcome=full_rebuild`
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** the same save family later reaches detached diagnostics-ready publication or full exact
+  materialization
+- **THEN** the runtime treats the sample as a boundedness failure unless heavy follow-up already used
+  detached diagnostics-ready or exported a truthful non-exact terminal reason
+- **AND** the terminal diagnostics publish does not use `followup_semantic_path=shadow_state` solely
+  because program lowering was still rebuilding
+
+#### Scenario: Truthful non-exact terminal outcome remains allowed only with ownership evidence
+
+- **GIVEN** heavy follow-up is waiting on a same-version `didSave` exact producer
+- **AND** bounded program-lowering reuse cannot progress that producer to detached diagnostics-ready
+  publication within the existing envelope
+- **AND** the runtime can prove that the producer no longer owns the exact save family, was
+  superseded, was cancelled, failed, or lost continuity for a reason other than bounded-wait expiry
+  or full-rebuild reuse miss alone
+- **WHEN** the runtime finalizes the follow-up path
+- **THEN** it MAY terminate through `shadow_state`, supersession, cancellation, failure, or
+  continuity-loss fallback
+- **AND** exported evidence preserves the truthful terminal reason rather than reporting only a
+  rebuild timeout
+
+### Requirement: Representative validation MUST fail on program-lowering rebuild followed by shadow fallback (MUST)
+
+Representative live or perf validation for same-file `didSave` follow-up on `examples/conf_big` MUST
+fail if all of the following are true in the same captured run:
+
+- `save_fastlane` already published quickly for the same save family;
+- the follow-up gate/admission path is not the dominant delay;
+- bounded wait times out with `followup_ready_snapshot_timeout_phase=parse_exec`;
+- `followup_ready_snapshot_timeout_leaf=program_lowering`;
+- `program_lowering_reuse_outcome=full_rebuild`;
+- program-lowering rebuilt units are non-zero and reused units are zero, or equivalent evidence shows
+  a full rebuild instead of bounded reuse;
+- the follow-up terminal semantic path is `followup_semantic_path=shadow_state`;
+- the same captured save family later reports `detached_diagnostics_ready_published` or
+  `fully_materialized`; and
+- no per-cycle evidence proves supersession, cancellation, failure, continuity loss, or another
+  truthful non-exact terminal reason that is independent of bounded-wait expiry and full-rebuild
+  reuse miss.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- `requested_version`, `save_cycle_sequence`, and save-family identity;
+- `followup_save_fastlane_gate_outcome` and gate/admission wait values;
+- zero-budget, bounded-wait, and relief-valve outcomes;
+- timeout phase, timeout leaf, subphase/checkpoint, and elapsed values;
+- `program_lowering_reuse_outcome`, rebuilt/reused lowering units, and reuse-plan hit flags when
+  available;
+- terminal semantic path and semantic query elapsed values;
+- lifecycle at bounded timeout and final lifecycle after timeout/fallback.
+
+#### Scenario: Live gate rejects the 2026-04-24 program-lowering rebuild residual
+
+- **GIVEN** representative same-file `didSave` profiling on a large module
+- **AND** `save_fastlane` already published the same-version first refresh
+- **AND** bounded wait timed out at `program_lowering`
+- **AND** program-lowering evidence shows a full rebuild rather than bounded reuse
+- **WHEN** the measured follow-up sample still publishes through `shadow_state`
+- **AND** exported final lifecycle later proves detached diagnostics-ready or full materialization for
+  the same save family
+- **AND** the sample lacks a truthful non-exact terminal reason independent of bounded-wait expiry
+  and full-rebuild reuse miss
+- **THEN** the representative gate fails
+- **AND** the regression is not treated as the already-closed waiting or parser-base residual
+
+### Requirement: Same-version `didSave` first publish MUST remain independently bounded while exact materialization is active (MUST)
+
+After `textDocument/didSave`, `save_fastlane` first publish MUST remain independently bounded and
+auditable even when a still-current same-version exact producer is concurrently inside
+`parser_base_recovery`, `parse_exec`, `program_lowering`, or semantically equivalent exact
+materialization work.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent save-family identity;
+- treat first-publish latency as independently user-visible and MUST NOT hide it behind a later
+  successful `idle_heavy` follow-up;
+- avoid blocking syntax-only `save_fastlane` publication on multi-second exact materialization work
+  unless the runtime exports a truthful first-publish blocker;
+- preserve latest-wins supersession and cancellation when a newer same-file revision or newer save
+  cycle overtakes the target;
+- preserve diagnostics quality truthfulness for syntax-only fallback and MUST NOT publish exact
+  semantic diagnostics before exactness is proven;
+- export low-cardinality evidence for first-publish profile, publish kind, elapsed time, syntax
+  diagnostics query elapsed time, syntax work mode, and the relevant exact materialization blocker
+  when one is known.
+
+#### Scenario: Slow syntax-only first publish is not hidden by later detached-ready success
+
+- **GIVEN** `didSave` starts a same-version save family for revision `V`
+- **AND** `save_fastlane` first publish uses syntax-only diagnostics
+- **AND** a still-current same-family exact producer is also inside `parser_base_recovery`,
+  `parse_exec`, or equivalent exact materialization work
+- **WHEN** first publish spends multiple seconds in syntax diagnostics query or another
+  first-publish blocker
+- **THEN** representative validation treats that first-publish latency as a failure unless the
+  runtime exports a truthful first-publish blocker allowed by the contract
+- **AND** a later `idle_heavy` publish through `detached_ready_artifacts` does not erase the
+  first-publish failure
+
+#### Scenario: Fast first publish remains compatible with later exact follow-up
+
+- **GIVEN** `didSave` starts a same-version save family for revision `V`
+- **AND** exact materialization for that family is still in progress
+- **WHEN** `save_fastlane` can publish syntax-only diagnostics from bounded current-document state
+- **THEN** first publish completes within the existing fastlane envelope
+- **AND** heavy follow-up may still wait for exact `ready_artifacts` or `detached_ready_artifacts`
+  under the separate follow-up contract
+
+### Requirement: Same-version `didSave` detached-ready follow-up MUST bound exact materialization latency (MUST)
+
+The system MUST treat a still-current same-version `didSave` heavy follow-up as an exact
+materialization latency residual when it publishes through `detached_ready_artifacts` but the same
+captured cycle also shows that exact materialization exceeded the bounded wait and relief-valve
+envelope due to `parser_base_recovery`, `program_lowering`, full rebuild, or semantically equivalent
+producer work.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash, save_cycle_sequence)` target,
+  or a semantically equivalent save-family identity;
+- keep detached diagnostics-ready publication as the correct diagnostics-only terminal endpoint;
+- treat `detached_ready_artifacts` after bounded-wait timeout and relief-valve timeout as a latency
+  residual unless the runtime exports truthful supersession, cancellation, failure, continuity
+  loss, or another contract-approved non-exact reason;
+- treat `program_lowering_reuse_outcome=full_rebuild` with non-zero rebuilt units and zero reused
+  units as a first-class exact materialization residual on representative same-file saves;
+- preserve the existing bounded wait and relief-valve budgets as the latency envelope and MUST NOT
+  be satisfied solely by widening those budgets;
+- preserve canonical live exact readiness gates for completion, hover, definition, signatureHelp,
+  type-at-position, and semantically equivalent interactive exact consumers;
+- export bounded evidence for wait outcomes, timeout phase/leaf, parser-base and program-lowering
+  phase timings, reuse/rebuild counts, terminal semantic path, follow-up elapsed time, and final
+  same-family lifecycle.
+
+#### Scenario: Detached-ready terminal path is still a failure when exact full rebuild misses the envelope
+
+- **GIVEN** `didSave` already completed the same-version `save_fastlane` first publish for revision
+  `V`
+- **AND** heavy follow-up is still targeting the same current save family
+- **AND** bounded wait times out in `parse_exec` with
+  `followup_ready_snapshot_timeout_leaf=program_lowering`
+- **AND** relief valve also times out
+- **AND** `program_lowering_reuse_outcome=full_rebuild`
+- **AND** program-lowering evidence reports non-zero rebuilt units and zero reused units
+- **AND** no newer same-file revision or newer save cycle supersedes that target
+- **WHEN** the same save family later publishes heavy follow-up through `detached_ready_artifacts`
+- **THEN** representative validation treats the sample as an exact materialization latency failure
+  unless a truthful terminal reason independent of bounded-wait expiry and full-rebuild reuse miss
+  is exported
+- **AND** the sample is not accepted merely because the terminal semantic path avoided
+  `shadow_state`
+
+#### Scenario: Bounded detached-ready follow-up remains success
+
+- **GIVEN** `didSave` already completed same-version `save_fastlane` first publish
+- **AND** heavy follow-up waits on a still-current exact producer
+- **WHEN** matching `ready_artifacts` or `detached_ready_artifacts` become available within the
+  bounded wait or contract-approved relief envelope
+- **THEN** heavy follow-up publishes through that exact diagnostics-ready artifact
+- **AND** exported evidence identifies the winner and elapsed time without reporting an exact
+  materialization latency failure
+
+### Requirement: Representative validation MUST distinguish detached-ready correctness from materialization latency (MUST)
+
+The system MUST make representative live or perf validation for same-file `didSave` follow-up on
+`examples/conf_big` fail when a captured save family satisfies either of these residual contours:
+
+- first-publish contour:
+  `save_fastlane` syntax-only first publish takes multiple seconds, syntax diagnostics query is the
+  dominant first-publish cost, and no truthful first-publish blocker explains the delay; or
+- detached-ready materialization contour:
+  heavy follow-up eventually publishes through `detached_ready_artifacts`, but the same cycle shows
+  bounded-wait timeout, relief-valve timeout, `timeout_phase=parse_exec`,
+  `timeout_leaf=program_lowering` or equivalent exact materialization blocker,
+  `program_lowering_reuse_outcome=full_rebuild`, zero reused units, non-zero rebuilt units, and no
+  truthful supersession, cancellation, failure, or continuity-loss reason.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- `requested_version`, `save_cycle_sequence`, and save-family identity;
+- first publish profile, publish kind, elapsed time, syntax diagnostics query elapsed time, and
+  syntax work mode;
+- zero-budget, bounded-wait, and relief-valve outcomes;
+- timeout phase, timeout leaf, subphase/checkpoint, and elapsed values;
+- `parser_base_recovery` and `program_lowering` phase timings;
+- `program_lowering_reuse_outcome`, rebuilt/reused lowering units, and reuse-plan hit flags when
+  available;
+- terminal semantic path, semantic diagnostics query elapsed, and follow-up publish elapsed;
+- lifecycle at bounded timeout and final lifecycle after timeout/fallback.
+
+#### Scenario: Live gate rejects the 2026-04-24 detached-ready materialization residual
+
+- **GIVEN** representative same-file `didSave` profiling on a large module
+- **AND** completion transport and output handoff are not the dominant delay
+- **AND** one save cycle publishes syntax-only `save_fastlane` only after multi-second syntax query
+- **OR** another save cycle publishes heavy follow-up through `detached_ready_artifacts` only after
+  bounded wait timeout, relief-valve timeout, and full `program_lowering` rebuild
+- **WHEN** exported evidence lacks a truthful supersession, cancellation, failure, continuity-loss,
+  or first-publish blocker reason for the corresponding delay
+- **THEN** the representative gate fails
+- **AND** the regression is not treated as the already-closed terminal `shadow_state` fallback
+  contour
+
+### Requirement: Canonical ready install MUST bound exact type-index wait after detached diagnostics-ready publication (MUST)
+
+The system MUST bound canonical ready snapshot install after detached diagnostics-ready
+publication. After same-file `didChange` or same-version `didSave` promotion publishes detached
+diagnostics-ready artifacts for the current text, canonical ready snapshot install MUST either reach
+exact type-index readiness inside the explicit checked-in readiness envelope or export a truthful
+low-cardinality blocker before reporting materialization success.
+
+This behavior MUST:
+
+- keep detached diagnostics-ready publication distinct from canonical live ready snapshot install;
+- preserve canonical exact gates for completion, hover, definition, signatureHelp,
+  type-at-position, and semantically equivalent interactive exact consumers;
+- wait only for the exact requested file version and MUST NOT install a canonical ready snapshot
+  for a stale or mismatched version;
+- preserve latest-wins supersession, cancellation, retarget, and latest-version-mismatch outcomes;
+- expose ready-install wait elapsed time, explicit wait ceiling or deadline class, outcome, active
+  requested version, type-index task phase, exact readiness boolean, current canonical ready
+  snapshot version, parse snapshot metadata state, and serve-only blocked state when available;
+- treat multi-second canonical materialization latency after detached diagnostics-ready publication
+  as a residual unless the report proves a contract-approved blocker such as supersession,
+  cancellation, retarget, latest-version mismatch, continuity loss, type-index invalidation, or
+  serve-only blocked readiness;
+- preserve checked-in p56 baseline comparison for canonical materialization latency, including the
+  baseline p50/p95, observed p50/p95, and deltas or equivalent pass/fail evidence;
+- satisfy the contract without widening existing readiness or relief budgets as the primary remedy
+  and without replacing a tens-of-seconds residual with an implicit unreported wait.
+
+#### Scenario: Detached diagnostics-ready does not hide canonical type-index wait
+
+- **GIVEN** a same-file edit publishes detached diagnostics-ready artifacts for revision `V`
+- **AND** the canonical ready snapshot is still installed for an older revision `V-1`
+- **AND** exact type-index readiness for `V` is false
+- **AND** a type-index precompute task for `V` is active but not ready
+- **WHEN** canonical ready snapshot install waits for exact type-index readiness before
+  `record_ready_parse_snapshot_v2`
+- **THEN** the report records the ready-install wait elapsed time and blocker state
+- **AND** representative validation treats multi-second waiting as a failure unless the blocker is
+  a truthful contract-approved outcome
+- **AND** detached diagnostics-ready publication alone does not satisfy canonical live ready
+  install acceptance
+
+#### Scenario: Canonical ready install succeeds after exact type-index readiness
+
+- **GIVEN** a same-file edit targets revision `V`
+- **AND** detached diagnostics-ready artifacts may already be published for diagnostics follow-up
+- **WHEN** exact type-index readiness for `V` is available within the explicit checked-in readiness
+  envelope
+- **THEN** canonical ready snapshot install records success for revision `V`
+- **AND** materialization metrics report bounded ready-install/type-index wait evidence
+- **AND** interactive exact consumers continue to observe only canonical exact-ready state
+
+### Requirement: Ready snapshot materialization metrics MUST use effective source attribution after promotion (MUST)
+
+The system MUST attribute ready-parse-snapshot materialization metrics, phase metrics, and
+lifecycle source labels to the effective target source after same-version promotion or retarget,
+while preserving the original worker-start source as separate evidence.
+
+This behavior MUST:
+
+- record `original_source` from the worker-start target;
+- record `effective_source` from the target used for final canonical ready install and
+  materialization metric emission;
+- record a low-cardinality promotion or retarget event when a same-version `didSave` mutates or
+  promotes a running `didChange` target;
+- prevent final materialization histograms from being silently attributed only to `did_change` when
+  the effective target was promoted to `did_save`;
+- prevent ready-snapshot phase metrics and lifecycle terminal labels from being silently attributed
+  only to the worker-start source after promotion or retarget;
+- refresh or otherwise derive the effective source immediately before detached diagnostics-ready
+  publication, canonical ready install, lifecycle completion, materialization metric emission, and
+  phase metric emission;
+- preserve lifecycle and save-family identity for same-version didSave exact producers;
+- avoid unbounded metric labels such as file paths, text hashes, or diagnostic text.
+
+#### Scenario: didSave promotion updates effective materialization source
+
+- **GIVEN** a background parse snapshot worker starts from a `didChange` target for revision `V`
+- **AND** a same-version `didSave` for the same text promotes or mutates that target before final
+  materialization
+- **WHEN** the worker records canonical ready snapshot materialization
+- **THEN** the metric uses `effective_source=did_save`
+- **AND** the report still preserves `original_source=did_change`
+- **AND** the report identifies the promotion event as same-version didSave promotion
+
+#### Scenario: Pure didChange materialization remains didChange attributed
+
+- **GIVEN** a background parse snapshot worker starts from `didChange`
+- **AND** no didSave promotion, retarget, or source mutation occurs before final materialization
+- **WHEN** the worker records canonical ready snapshot materialization
+- **THEN** both original and effective source are reported as `did_change`
+- **AND** the didChange materialization histogram remains valid evidence for a pure didChange
+  canonical ready-install path
+
+### Requirement: Representative validation MUST fail unexplained high didChange canonical materialization latency (MUST)
+
+Representative live validation for same-file p56 save/change flows on `examples/conf_big` MUST fail
+when canonical ready snapshot materialization remains high after detached diagnostics-ready
+publication and the report lacks phase/source evidence that truthfully explains the delay.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- detached diagnostics-ready publication elapsed time and terminal outcome;
+- canonical ready-install exact type-index wait elapsed time, explicit ceiling/deadline class, and
+  outcome;
+- original source, effective source, and promotion/retarget event;
+- observed latest version and current canonical ready snapshot version;
+- exact type-index readiness boolean;
+- type-index precompute task phase, active requested version, and work class;
+- parse snapshot metadata state and serve-only blocked state when available;
+- final canonical ready snapshot source and version;
+- blocker class when the target is superseded, cancelled, retargeted, latest-version mismatched,
+  invalidated, or blocked for serve-only readiness.
+- checked-in baseline comparison for canonical materialization p50/p95.
+
+#### Scenario: p56 gate rejects unexplained tens-of-seconds didChange materialization
+
+- **GIVEN** representative p56 validation publishes diagnostics follow-up through detached
+  diagnostics-ready artifacts inside the bounded window
+- **AND** the same report records `did_change_ready_snapshot_materialization_ms` p50 or p95 in the
+  tens of seconds
+- **AND** per-cycle evidence shows the latest observed version is newer than the canonical ready
+  snapshot version
+- **AND** exact type-index readiness is false with a type-index task still active or no parse
+  snapshot metadata available
+- **WHEN** the report lacks a truthful blocker or source-promotion explanation
+- **THEN** representative validation fails this canonical materialization residual
+- **AND** the failure is not counted as a refactor-54 detached diagnostics-ready acceptance gap
+
+#### Scenario: p56 gate accepts bounded or truthfully classified canonical materialization
+
+- **GIVEN** representative p56 validation publishes detached diagnostics-ready artifacts quickly
+- **WHEN** canonical ready install either reaches exact type-index readiness inside the explicit
+  checked-in envelope or exports a truthful blocker/source-promotion classification
+- **THEN** the report records both detached and canonical timelines
+- **AND** the validation accepts the sample without weakening canonical exact gates
+
+### Requirement: Pure didChange canonical ready materialization MUST stay within the checked-in p56 baseline (MUST)
+
+The system MUST restore representative pure didChange canonical ready snapshot
+materialization latency to the checked-in p56 baseline. For a still-current
+non-save-cycle didChange revision, canonical ready snapshot install MUST reach
+exact type-index readiness and emit successful materialization evidence within
+the checked-in p56 baseline envelope.
+
+This behavior MUST:
+
+- apply to pure didChange targets without `save_cycle_sequence`;
+- preserve canonical exact gates for completion, hover, definition,
+  signatureHelp, type-at-position, and semantically equivalent exact consumers;
+- use the checked-in p56 materialization baseline as the acceptance reference,
+  including `p50 <= 3226ms` and `p95 <= 3329ms` unless a later approved change
+  updates the baseline with evidence;
+- expose non-save-cycle didChange ready-install/type-index wait elapsed time,
+  ceiling/deadline class, terminal outcome, active requested version, observed
+  latest version, current canonical ready snapshot version, exact readiness,
+  type-index task phase, parse snapshot metadata state, and serve-only blocked
+  state when available;
+- treat a still-current pure didChange deadline or blocker as a failed readiness
+  outcome for this baseline, not as successful materialization;
+- preserve latest-wins supersession, cancellation, retarget, and
+  latest-version-mismatch outcomes as non-success terminal outcomes that do not
+  enter successful pure didChange materialization histograms;
+- avoid satisfying the baseline by widening thresholds, weakening exact
+  readiness, or counting later didSave/save-cycle blocker classifications as a
+  didChange pass.
+
+#### Scenario: Current pure didChange installs canonical ready snapshot within baseline
+
+- **GIVEN** a pure didChange target for current revision `V`
+- **AND** no same-version didSave promotion or save-cycle target owns the final
+  canonical install
+- **WHEN** exact type-index readiness for `V` becomes available before the
+  checked-in p56 baseline is exceeded
+- **THEN** canonical ready snapshot install records success for `V`
+- **AND** the successful pure didChange materialization sample contributes to
+  the p56 didChange baseline view
+- **AND** representative validation reports `did_change_materialization_within_baseline=true`
+
+#### Scenario: Current pure didChange blocker does not count as materialization success
+
+- **GIVEN** a pure didChange target for current revision `V`
+- **AND** exact type-index readiness for `V` is not available before the
+  checked-in p56 baseline is exceeded
+- **WHEN** the ready-install wait exports a deadline or blocker outcome
+- **THEN** the target is recorded as a non-success ready-install blocker
+- **AND** the sample does not enter successful pure didChange materialization
+  histograms
+- **AND** representative validation fails unless a later approved requirement
+  explicitly changes the pure didChange acceptance contract
+
+#### Scenario: Superseded didChange is excluded with a terminal reason
+
+- **GIVEN** a pure didChange target for revision `V`
+- **AND** a newer revision supersedes `V` before canonical ready install
+- **WHEN** the worker exits before successful materialization
+- **THEN** the report records a superseded, cancelled, retargeted, or
+  latest-version-mismatch terminal reason
+- **AND** the sample is excluded from successful pure didChange materialization
+  latency
+
+### Requirement: Materialization metrics MUST distinguish pure didChange success from blockers and save-cycle work (MUST)
+
+The system MUST keep successful pure didChange canonical materialization samples
+separate from classified ready-install blockers and from didSave-promoted or
+save-cycle canonical install work.
+
+This behavior MUST:
+
+- preserve enough low-cardinality evidence to identify whether a sample is
+  successful pure didChange, promoted didSave/save-cycle, or non-success blocker;
+- prevent `did_change_ready_snapshot_materialization_ms` acceptance from being
+  satisfied by a later save-cycle `ready_install_exact_type_index_wait` blocker;
+- prevent classified non-success blockers from being emitted as successful
+  materialization latency samples;
+- preserve original/effective source attribution introduced by refactor-55;
+- export counts for successful pure didChange samples, excluded didChange
+  samples, promoted/save-cycle samples, and blocker classes in representative
+  reports;
+- avoid unbounded labels such as file paths, text hashes, or diagnostic text.
+
+#### Scenario: Save-cycle blocker cannot mask pure didChange baseline failure
+
+- **GIVEN** representative p56 validation records a later same-version
+  didSave/save-cycle exact type-index blocker
+- **AND** pure didChange successful materialization p50 or p95 exceeds the
+  checked-in baseline
+- **WHEN** validation evaluates the didChange baseline contract
+- **THEN** validation fails `did_change_materialization_within_baseline`
+- **AND** the later save-cycle blocker remains visible as separate evidence but
+  does not make the pure didChange baseline pass
+
+#### Scenario: Promoted save-cycle materialization is reported separately
+
+- **GIVEN** a worker starts from didChange and is later promoted by same-version
+  didSave
+- **WHEN** the worker emits final canonical install or blocker evidence
+- **THEN** the report preserves `original_source=did_change` and
+  `effective_source=did_save`
+- **AND** the sample is attributed to the promoted/save-cycle class rather than
+  successful pure didChange baseline materialization
+
+### Requirement: Representative p56 validation MUST require didChange materialization baseline success (MUST)
+
+The system MUST make representative live validation for the p56 same-file flow
+on `examples/conf_big` reject current-source runs where pure didChange canonical
+ready snapshot materialization remains above the checked-in baseline.
+
+Checked-in p56 evidence MUST include:
+
+- successful pure didChange materialization sample count and p50/p95;
+- baseline p50/p95 and observed-vs-baseline deltas;
+- excluded didChange non-success count and terminal reasons;
+- didSave-promoted/save-cycle sample count;
+- ready-install exact type-index wait state for pure didChange targets;
+- final canonical ready snapshot source and version;
+- explicit `did_change_materialization_within_baseline` pass/fail value.
+
+#### Scenario: p56 rejects high pure didChange canonical materialization
+
+- **GIVEN** representative p56 validation reports successful pure didChange
+  materialization p50 or p95 above the checked-in baseline
+- **WHEN** a later save-cycle ready-install blocker is also truthfully classified
+- **THEN** validation still fails the didChange materialization baseline
+- **AND** the report points to pure didChange ready-install/type-index evidence
+  rather than treating the save-cycle blocker as acceptance
+
+#### Scenario: p56 accepts restored didChange baseline
+
+- **GIVEN** representative p56 validation records successful pure didChange
+  materialization samples
+- **AND** observed p50 and p95 are within the checked-in baseline
+- **AND** any save-cycle blocker or promotion evidence is reported separately
+- **WHEN** validation evaluates the current-source run
+- **THEN** `did_change_materialization_within_baseline=true`
+- **AND** the run can pass without weakening canonical exact readiness
+
+### Requirement: Runtime saturation taxonomy MUST be lane-aware and contract-complete (MUST)
+
+The system MUST keep generic runtime saturation gauges and dedicated runtime-lane
+saturation gauges as separate bounded taxonomy surfaces.
+
+The generic saturation-gauge surface MUST:
+
+- represent only global runtime budget facts such as interactive/background
+  waiters, interactive/background/shared permits, and total queue depth;
+- keep `queue_depth_total` as the existing compatibility view over generic
+  interactive/background runtime waiters unless a separate change explicitly
+  redefines that gauge;
+- accept only low-cardinality `saturation_metric` values that are explicitly
+  allowlisted;
+- provide deterministic drilldown and legacy projection for every accepted
+  generic saturation value;
+- fail tests before merge if a new generic value lacks allowlist or projection
+  coverage.
+
+Dedicated lane saturation MUST:
+
+- expose a stable `did_save_followup` value through a bounded runtime-lane
+  surface, or a semantically equivalent first-class lane family visible in the
+  exported metric name or bounded dimensions;
+- preserve `queue_depth`, `quota`, and `active_slots` visibility for that lane;
+- source those lane facts from didSave-follow-up admission state, not by folding
+  `CpuBudgetSaturationSnapshot.did_save_followup_*` into generic saturation
+  metrics;
+- not require ad hoc generic saturation values such as
+  `waiters_did_save_followup` or `permits_did_save_followup` for acceptance.
+
+Representative live metrics or incident bundles captured for this change MUST
+report both of these counters as absent or equal to `0` after this contract is
+implemented:
+
+- `intellisense_v2_observability_contract_violation_total`
+- `intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric`
+
+#### Scenario: didSave follow-up saturation is visible without generic saturation violations
+
+- **GIVEN** the didSave-follow-up admission state contains lane quota,
+  active-slot, or queue-depth facts
+- **WHEN** observability metrics are exported
+- **THEN** generic runtime saturation gauges remain available for global
+  interactive/background/shared budget and total queue-depth facts
+- **AND** dedicated lane gauges expose `lane=did_save_followup` with bounded
+  saturation metrics `quota`, `active_slots`, and `queue_depth`
+- **AND** generic `queue_depth_total` does not silently absorb
+  didSave-follow-up lane queue depth
+- **AND** the export reports absent or zero
+  `intellisense_v2_observability_contract_violation_reason_invalid_saturation_metric`
+
+#### Scenario: new generic saturation values require complete projection
+
+- **GIVEN** a runtime producer introduces a new generic `saturation_metric` value
+- **WHEN** the value is not allowlisted or lacks drilldown/legacy projection
+- **THEN** contract tests fail before the value can ship
+- **AND** the value is not silently accepted as an unprojected metric
+
+#### Scenario: representative bundle stays trustworthy for saturation analysis
+
+- **GIVEN** a representative LSP observability bundle is captured after this
+  change
+- **WHEN** an operator reviews runtime saturation
+- **THEN** `intellisense_v2_observability_contract_violation_total` is absent or
+  zero
+- **AND** `invalid_saturation_metric` is absent or zero
+- **AND** didSave-follow-up lane saturation remains separately attributable
+- **AND** no conclusion depends on reconstructing lane saturation from generic
+  interactive/background buckets
+
+#### Scenario: invalid lane-specific labels stay rejected on the generic path
+
+- **GIVEN** a producer attempts to emit `waiters_did_save_followup` or
+  `permits_did_save_followup` through the generic `SaturationGauge` path
+- **WHEN** canonical event validation runs
+- **THEN** the event is rejected as `invalid_saturation_metric`
+- **AND** no generic drilldown or legacy saturation gauge is exported for that
+  label
+- **AND** the implementation must instead use the dedicated runtime-lane
+  saturation family for didSave-follow-up lane visibility
+
+### Requirement: Current-context and didSave ready-install contention MUST be bounded and attributable (MUST)
+
+The system MUST keep completion handling isolated from concurrent
+current-context and diagnostics readiness work, while making the non-completion
+work itself bounded and attributable.
+
+For `bsl.getCurrentContext`, representative request evidence MUST identify the
+request route, generation/version, broker role where applicable, readiness wait
+result, parse source, supersession or budget outcome, wall time, and final
+status. Equivalent same-generation bursts MUST share bounded expensive work, and
+requests for stale generations MUST stop, downgrade, or report supersession once
+newer work makes their result obsolete. A current-context request MUST NOT remain
+visible only as an aged completion contender without its own request outcome.
+
+For same-file `didSave` follow-up readiness/install work, seconds-scale
+`ready_install`, `snapshot_with_deps`, or `wait_for_file_version` residuals MUST
+either be removed by bounded runtime behavior or exported through explicit
+low-cardinality blocker buckets. A generic `ready_install` number without
+lower-level attribution is not sufficient acceptance evidence when the residual
+is materially larger than parse execution.
+
+Representative live metrics or incident bundles captured for this change MUST
+keep observability integrity intact:
+
+- `intellisense_v2_observability_contract_violation_total` absent or `0`;
+- invalid saturation metric violations absent or `0`;
+- generic saturation and dedicated runtime-lane surfaces still bounded and
+  contract-complete.
+
+#### Scenario: Post-saturation bundle isolates readiness contention
+
+- **GIVEN** a representative bundle captured after the saturation contract fix
+  shows `observability_contract_violation_total=0`
+- **AND** completion probes do not show seconds-scale client pre-send,
+  transport ingress, or output handoff waits
+- **WHEN** same-file `didSave` follow-up or `bsl.getCurrentContext` work shows
+  seconds-scale elapsed time
+- **THEN** the incident evidence classifies the residual as current-context or
+  readiness/install contention, not as a UI, transport, or completion-path
+  regression
+- **AND** the bundle contains first-class evidence for the affected
+  current-context requests or didSave readiness blockers
+
+#### Scenario: Current-context bursts stay latest-only and bounded
+
+- **GIVEN** multiple `bsl.getCurrentContext` requests target the same document
+  generation or an equivalent ready-snapshot key
+- **AND** a newer generation arrives while older requests are in flight
+- **WHEN** the current-context handler processes the burst
+- **THEN** at most one expensive leader performs work per equivalent key
+- **AND** followers complete through a bounded shared result, budget exhaustion,
+  or supersession outcome
+- **AND** obsolete generation work does not continue as opaque seconds-scale
+  background contention
+- **AND** each request outcome is exported in current-context request evidence
+
+#### Scenario: didSave follow-up does not hide seconds-scale ready-install waits
+
+- **GIVEN** a same-file `didSave` follow-up has fast parse execution but
+  seconds-scale readiness/install elapsed time
+- **WHEN** the save timeline or incident bundle is exported
+- **THEN** the residual is attributed to explicit blocker buckets such as exact
+  file-version wait, exact type-index wait, runtime lane queue wait,
+  `snapshot_with_deps` queue/exec wait, publish/apply lock wait, supersession,
+  or unclassified residual
+- **AND** validation fails if the only explanation is a generic
+  seconds-scale `ready_install` value
+
+#### Scenario: Completion remains healthy under current-context and readiness load
+
+- **GIVEN** concurrent current-context requests and same-file diagnostics
+  readiness work are in flight
+- **WHEN** a completion request for the same document arrives
+- **THEN** completion ingress, handler execution, and output handoff remain
+  within the existing bounded completion contract
+- **AND** current-context contender ages are treated as advisory concurrency
+  evidence unless the completion timeline itself shows blocking
+- **AND** accepting the change requires the observability contract violation
+  counters to remain absent or zero
+
+### Requirement: Post-refactor-58 didSave program-lowering tail MUST be bounded and attributable (MUST)
+
+The system MUST NOT accept a seconds-scale exact `program_lowering` tail as a
+generic readiness success after a clean post-refactor-58 bundle proves that
+completion ingress/egress, current-context attribution, `ready_install`, and
+measured `snapshot_with_deps` are not the dominant blockers for a same-version
+`didSave` heavy follow-up.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash,
+  save_cycle_sequence)` target, or a semantically equivalent save-family
+  identity;
+- preserve bounded `save_fastlane` first publish as independently user-visible;
+- preserve detached diagnostics-ready artifacts as the correct diagnostics-only
+  terminal endpoint without treating eventual detached-ready publication as
+  sufficient when exact assembly arrives after a seconds-scale tail;
+- distinguish `ready_install`, measured `snapshot_with_deps`,
+  semantic diagnostics, and exact `parse_exec -> exact_ready_snapshot_assembly
+  -> program_lowering` time in the request-centric save trace;
+- reject or refine a generic `followup_readiness_blocker_bucket=snapshot_with_deps`
+  explanation when `snapshot_with_deps_ms` is small and the dominant measured
+  residual is exact program lowering;
+- export program-lowering reuse outcome, rebuilt/reused lowering unit counts,
+  reuse-plan source and hit flags end-to-end through backend diagnostics-save
+  timeline evidence, VS Code custom request typing, incident-bundle raw JSON, and
+  human-readable summary when program lowering dominates;
+- treat missing program-lowering reuse evidence as a validation gap when the
+  program-lowering tail is seconds-scale;
+- allow a truthful required-full-rebuild reason only when exported evidence
+  proves reuse was unavailable or unsafe for the exact save family, including
+  reuse outcome, rebuilt/reused unit counts, reuse-plan source/hit flags, and a
+  low-cardinality invalidation reason;
+- allow truthful supersession, cancellation, failure, or continuity-loss reasons
+  when exact assembly cannot be bounded;
+- preserve canonical exact readiness for completion, hover, definition,
+  signatureHelp, type-at-position, and semantically equivalent interactive exact
+  consumers;
+- preserve observability integrity: contract violations and invalid saturation
+  metric violations MUST remain absent or zero in representative validation.
+
+#### Scenario: Program-lowering tail is not accepted as generic snapshot-with-deps
+
+- **GIVEN** a representative post-refactor-58 bundle has clean observability
+  integrity
+- **AND** completion `service_future_to_first_poll_wait_ms` and output handoff
+  remain bounded
+- **AND** `save_fastlane` first publish for a same-version `didSave` save family
+  completes quickly
+- **AND** the same follow-up has small `ready_install_ms` and small measured
+  `snapshot_with_deps_ms`
+- **AND** exact `parse_exec -> exact_ready_snapshot_assembly ->
+  program_lowering` is seconds-scale and dominates the follow-up tail
+- **WHEN** diagnostics-save timeline and incident bundle evidence are exported
+- **THEN** the residual is classified as exact assembly/program-lowering
+  materialization tail, or as a truthful required-full-rebuild/supersession/
+  cancellation/failure/continuity-loss outcome
+- **AND** representative validation does not accept the sample as merely a
+  generic `snapshot_with_deps` blocker
+
+#### Scenario: Missing lowering reuse evidence is fail-visible
+
+- **GIVEN** same-version `didSave` heavy follow-up times out with
+  `followup_ready_snapshot_timeout_leaf=program_lowering`
+- **AND** program lowering is the dominant exact assembly checkpoint
+- **WHEN** request-centric diagnostics-save evidence is exported
+- **THEN** the backend timeline, VS Code custom request type, incident-bundle raw
+  JSON, and human-readable summary include program-lowering reuse outcome,
+  rebuilt/reused lowering unit counts, reuse-plan source, and reuse-plan hit flags
+  when available
+- **AND** if those fields are unavailable, the bundle or representative report
+  records an explicit missing-evidence gap instead of treating the residual as
+  accepted
+
+### Requirement: Representative post-refactor-58 validation MUST gate didSave program-lowering tail (MUST)
+
+Representative validation for this change MUST use a post-refactor-58 large
+module save-follow-up scenario and fail when a captured same-file `didSave`
+cycle has the residual shape shown by
+`/home/egor/code/temp/bsl-observability-incident-2026-04-27T08-39-19Z`:
+
+- installed runtime includes refactor-58 current-context and diagnostics-save
+  readiness attribution surfaces;
+- observability contract violations are absent or `0`;
+- invalid saturation metric violations are absent or `0`;
+- completion fail-closed count is `0`, and completion ingress/egress do not
+  explain the incident;
+- first publish is bounded;
+- `ready_install` is not the dominant residual;
+- measured `snapshot_with_deps_ms` is not the dominant residual;
+- full follow-up publishes through `detached_ready_artifacts`;
+- `timeout_phase=parse_exec` and `timeout_leaf=program_lowering` or
+  semantically equivalent exact assembly evidence is present;
+- exact assembly/program-lowering elapsed time is seconds-scale;
+- no save-cycle-local evidence proves required full rebuild with reuse outcome,
+  rebuilt/reused unit counts, reuse-plan source/hit flags, and invalidation
+  reason, or proves supersession, cancellation, failure, or continuity loss; and
+- lowering reuse evidence is either missing or proves a reuse miss that remains
+  above the latency envelope.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- comparison against the `refactor-08` live report or a later checked-in
+  baseline that shows the speed improvement being preserved;
+- comparison against the pre-refactor-58 readiness/install bundle when relevant;
+- request count and source status for completion, current-context, and
+  diagnostics-save timelines;
+- `requested_version`, `save_cycle_sequence`, first publish elapsed, full
+  follow-up elapsed, terminal semantic path, and readiness blocker bucket;
+- measured `ready_install`, `snapshot_with_deps`, semantic diagnostics,
+  `parse_exec`, exact assembly, program conversion, and program lowering
+  timings;
+- bounded-wait and relief-valve outcomes;
+- program-lowering reuse outcome, lowering unit counts, reuse-plan source and hit
+  flags, plus the source/projection status proving those fields survived through
+  backend timeline, VS Code custom request typing, incident-bundle raw JSON, and
+  human-readable summary, or an explicit missing-evidence gap.
+
+#### Scenario: Fresh post-refactor-58 bundle drives the next narrow change
+
+- **GIVEN** runtime git `033ac549` or a later equivalent includes refactor-58
+  current-context and readiness attribution
+- **AND** the captured bundle proves the old ready-install residual is no longer
+  dominant
+- **AND** completion and current-context evidence stay bounded or attributable
+- **WHEN** the same bundle still shows a seconds-scale `didSave` follow-up tail
+  dominated by exact program lowering
+- **THEN** the next acceptance gate targets program-lowering tail boundedness
+  and evidence completeness
+- **AND** the change is not considered complete by reclassifying the sample under
+  generic `snapshot_with_deps` alone
+
+### Requirement: didSave exact lowering reuse continuity MUST be explicit and bounded (MUST)
+
+For a same-file `didSave` heavy follow-up, exact ready-snapshot assembly MUST
+not rely solely on opportunistic parser AST cache residency to decide whether
+program lowering can be reused. When a prior ready snapshot, didChange parse
+snapshot, same-text ready snapshot, or semantically equivalent save-family source
+is available and validates against the target file/version/text, the system MUST
+derive or reuse a lowering reuse seed from that source before falling back to a
+full program-lowering rebuild.
+
+This behavior MUST:
+
+- remain keyed to the exact `(file_id, requested_version, text_hash,
+  save_cycle_sequence)` target, or a semantically equivalent save-family
+  identity;
+- validate seed compatibility by text hash, base version, changed ranges,
+  parser-tree compatibility, or an equivalent fail-closed check before reuse;
+- allow the existing parser AST cache as a fast seed source without making cache
+  residency the only acceptance path;
+- prefer deterministic seed selection when multiple seed sources are available;
+- retain at least one compatible seed for the still-current save family until
+  terminal publication, supersession, cancellation, failure, or an explicit
+  bounded-retention eviction with a recorded reason;
+- prevent bounded retention from becoming an accepted steady-state excuse for
+  immediate full rebuilds in the representative large-module save scenario;
+- preserve bounded `save_fastlane` first publish as independently user-visible;
+- preserve canonical exact readiness for completion, hover, definition,
+  signatureHelp, type-at-position, and semantically equivalent interactive exact
+  consumers;
+- preserve detached diagnostics-ready artifacts as a diagnostics-only endpoint,
+  without treating eventual detached publication as sufficient when exact
+  assembly performs an unproved seconds-scale full rebuild;
+- export the selected lowering reuse seed source or reuse-plan build source in
+  request-centric diagnostics-save evidence;
+- treat `full_rebuild` with `reuse_plan_build_source=null` as acceptable only
+  when a low-cardinality required-full-rebuild, supersession, cancellation,
+  failure, unsafe-seed, or continuity-loss reason is exported for the same trace;
+- preserve program-lowering reuse outcome, rebuilt/reused lowering unit counts,
+  reuse-plan source/hit flags, seed source, candidate count, eviction reason, and
+  failure reason end-to-end through backend diagnostics-save timeline evidence,
+  VS Code custom request typing, incident-bundle raw JSON, and human-readable
+  summary when program lowering dominates; and
+- preserve observability integrity: contract violations and invalid saturation
+  metric violations MUST remain absent or zero in representative validation.
+
+#### Scenario: Later same-file save does not silently lose lowering reuse
+
+- **GIVEN** a large same-file save sequence has a prior follow-up that proves
+  successful lowering reuse for the file family
+- **AND** a later same-file `didSave` follow-up reaches exact
+  `program_lowering`
+- **AND** a compatible ready snapshot, didChange parse snapshot, same-text ready
+  snapshot, or equivalent save-family source is available
+- **AND** the save family has not reached a terminal, superseded, cancelled, or
+  failed state
+- **WHEN** exact ready-snapshot assembly builds the program-lowering reuse plan
+- **THEN** the reuse seed source is selected deterministically and exported
+- **AND** the follow-up does not silently fall back to `full_rebuild` because an
+  opportunistic AST cache lookup missed
+- **AND** if the seed was evicted by bounded retention, the trace records the
+  eviction reason and the validation treats normal steady-state eviction as a
+  failure for this scenario
+
+#### Scenario: Required full rebuild is explicit
+
+- **GIVEN** a same-file `didSave` heavy follow-up has
+  `followup_ready_snapshot_timeout_leaf=program_lowering`
+- **AND** program lowering is the dominant exact assembly checkpoint
+- **AND** lowering reuse cannot be safely derived from any valid seed source
+- **WHEN** request-centric diagnostics-save evidence is exported
+- **THEN** the trace includes `full_rebuild` with rebuilt/reused unit counts
+- **AND** the trace includes a low-cardinality reason proving why reuse was
+  unavailable or unsafe
+- **AND** if the reason is `seed_evicted` or equivalent, the trace also exposes
+  whether eviction was caused by terminal cleanup, supersession, cancellation,
+  failure, or bounded capacity pressure
+- **AND** missing seed source with no reason is reported as a validation gap
+
+### Requirement: Representative post-refactor-59 validation MUST gate lowering reuse continuity (MUST)
+
+Representative validation for this change MUST use a post-refactor-59 large
+module save-follow-up scenario and fail when a captured same-file `didSave`
+cycle has the residual shape shown by
+`/home/egor/code/temp/bsl-observability-incident-2026-04-27T11-07-23Z`:
+
+- installed runtime includes `refactor-59` program-lowering tail classification
+  and current-context same-text ready-snapshot follow-up behavior;
+- observability contract violations are absent or `0`;
+- invalid saturation metric violations are absent or `0`;
+- completion fallback/stale counters are `0`, and completion ingress/egress do
+  not explain the incident;
+- at least one same-file save cycle proves successful lowering reuse with a
+  concrete source and high reused-unit count;
+- a later same-file save cycle reaches `program_lowering_tail`;
+- first publish remains bounded;
+- measured ready-install, output handoff, client pre-send, and generic
+  transport waits are not the dominant residual;
+- exact assembly/program-lowering elapsed time is seconds-scale;
+- `reuse_outcome=full_rebuild` rebuilds nearly all lowering units; and
+- no save-cycle-local evidence proves required full rebuild with seed source,
+  reuse-plan build source, hit flags, unit counts, and a required-full-rebuild
+  or continuity-loss reason; and
+- no evidence proves that seed eviction was a justified bounded-retention event
+  rather than normal steady-state loss of the active save-family seed.
+
+Checked-in evidence for this gate MUST preserve at least:
+
+- runtime git identity and bundle path;
+- comparison against the previous `2026-04-27T08-39-19Z` post-refactor-58/59
+  baseline;
+- completion request count, p95 duration, fallback/stale counters, and
+  client/transport/handoff timing envelope;
+- current-context route/status summary so concurrent broker parses remain
+  visible but are not misclassified as the primary didSave tail cause;
+- diagnostics-save `requested_version`, `save_cycle_sequence`, first publish
+  elapsed, full follow-up elapsed, terminal semantic path, and readiness blocker
+  bucket;
+- measured `snapshot_with_deps`, semantic diagnostics, `parse_exec`, exact
+  assembly, program conversion, and program lowering timings;
+- bounded-wait and relief-valve outcomes;
+- program-lowering reuse outcome, lowering unit counts, reuse-plan source/hit
+  flags, selected seed source, seed candidate count, eviction reason, and
+  failure/required-full-rebuild reason.
+
+#### Scenario: The 2026-04-27T11:07 bundle drives a continuity fix
+
+- **GIVEN** runtime git `5691e618` includes the refactor-59 classifier and
+  projection fixes
+- **AND** the captured bundle has one save cycle with
+  `reuse_plan_build_source=borrowed`, `2088` reused units, and `0` rebuilt units
+- **AND** a later save cycle has `program_lowering_tail`, `full_rebuild`,
+  `0` reused units, `2088` rebuilt units, `take_if_unique_hit=false`,
+  `borrowed_cache_hit=false`, and no build source
+- **WHEN** the change is validated
+- **THEN** the later cycle is fixed by a valid save-family seed or rejected with
+  a truthful required-full-rebuild/continuity-loss reason
+- **AND** a bounded-retention eviction reason is accepted only if it proves
+  terminal cleanup, supersession, cancellation, failure, or capacity pressure
+  outside the representative steady-state path
+- **AND** the change is not considered complete by classification or
+  instrumentation-only improvements.
+

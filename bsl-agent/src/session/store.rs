@@ -22,6 +22,8 @@ pub struct PersistedSession {
     #[serde(default)]
     pub configuration_path: Option<String>,
     #[serde(default)]
+    pub rules_config_path: Option<String>,
+    #[serde(default)]
     pub mode: Option<String>,
     pub analysis_revision: u64,
     pub created_at: u64,

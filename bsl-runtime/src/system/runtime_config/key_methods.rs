@@ -21,6 +21,7 @@ impl RuntimeKey {
             | RuntimeKey::WebPort
             | RuntimeKey::StaticPath
             | RuntimeKey::ProjectPath
+            | RuntimeKey::RulesConfigPath
             | RuntimeKey::PlatformVersion
             | RuntimeKey::SyntaxHelperPath => KeyMutability::StartupOnly,
             _ => KeyMutability::Runtime,

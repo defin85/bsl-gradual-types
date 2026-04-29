@@ -236,6 +236,14 @@ fn workspace_warnings(settings: &WorkspaceSettings) -> Vec<String> {
             warnings.push(format!("unknown mode: {mode}"));
         }
     }
+    if let Some(path) = settings.rules_config_path.as_deref() {
+        if !path.is_file() {
+            warnings.push(format!(
+                "rules_config_path is not readable; default semantic rules will be used: {}",
+                path.display()
+            ));
+        }
+    }
     warnings
 }
 
@@ -259,6 +267,7 @@ async fn start_semantic_runtime(
         settings.platform_docs_archive.clone(),
         settings.configuration_path.clone(),
         settings.platform_version.clone(),
+        settings.rules_config_path.clone(),
         None,
         None,
     );

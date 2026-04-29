@@ -6,13 +6,18 @@ use tokio::sync::mpsc;
 
 use crate::data::loaders::progress::ProgressUpdate;
 use crate::system::platform_version::normalize_platform_version;
-use crate::system::{build_deps_bundle_v2, DepsBundleV2, StartupError, SystemCoordinator};
+use crate::system::runtime_config::{global_runtime_config, RuntimeKey};
+use crate::system::{
+    build_deps_bundle_v2_with_semantic_rules_config, load_semantic_rules_config_report,
+    resolve_semantic_rules_config_path, DepsBundleV2, StartupError, SystemCoordinator,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct StartupInputs {
     pub syntax_helper_path: Option<PathBuf>,
     pub configuration_path: Option<PathBuf>,
     pub platform_version: Option<String>,
+    pub rules_config_path: Option<PathBuf>,
     pub cache_enabled: Option<bool>,
     pub strict_fingerprint: Option<bool>,
 }
@@ -22,6 +27,7 @@ pub struct EffectiveStartupInputs {
     pub syntax_helper_path: Option<PathBuf>,
     pub configuration_path: Option<PathBuf>,
     pub platform_version: Option<String>,
+    pub rules_config_path: Option<PathBuf>,
     pub cache_enabled: bool,
     pub strict_fingerprint: bool,
 }
@@ -49,6 +55,7 @@ impl StartupInputs {
             platform_version: platform_version
                 .and_then(non_empty_string)
                 .map(str::to_string),
+            rules_config_path: None,
             cache_enabled,
             strict_fingerprint,
         }
@@ -58,6 +65,7 @@ impl StartupInputs {
         syntax_helper_path: Option<PathBuf>,
         configuration_path: Option<PathBuf>,
         platform_version: Option<String>,
+        rules_config_path: Option<PathBuf>,
         cache_enabled: Option<bool>,
         strict_fingerprint: Option<bool>,
     ) -> Self {
@@ -65,6 +73,7 @@ impl StartupInputs {
             syntax_helper_path,
             configuration_path,
             platform_version,
+            rules_config_path,
             cache_enabled,
             strict_fingerprint,
         }
@@ -104,10 +113,22 @@ impl StartupInputs {
             )));
         }
 
+        let runtime_rules_config_path = self
+            .rules_config_path
+            .is_none()
+            .then(|| global_runtime_config().get_pathbuf(RuntimeKey::RulesConfigPath))
+            .flatten();
+        let explicit_rules_config_path = self.rules_config_path.or(runtime_rules_config_path);
+        let rules_config_path = resolve_semantic_rules_config_path(
+            explicit_rules_config_path.as_deref(),
+            configuration_path.as_deref(),
+        );
+
         Ok(Self {
             syntax_helper_path,
             configuration_path,
             platform_version,
+            rules_config_path,
             cache_enabled: self.cache_enabled,
             strict_fingerprint: self.strict_fingerprint,
         })
@@ -147,11 +168,25 @@ pub async fn startup_v2(
     let coordinator_for_build = coordinator.clone();
     let platform_docs_root = inputs.syntax_helper_path.clone();
     let config_root = inputs.configuration_path.clone();
+    let rules_config_path = inputs.rules_config_path.clone();
+    let semantic_rules_report = load_semantic_rules_config_report(rules_config_path.as_deref());
+    for diagnostic in &semantic_rules_report.diagnostics {
+        tracing::warn!(
+            "startup_v2 semantic rules config diagnostic: path={}, message={}",
+            rules_config_path
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            diagnostic.message
+        );
+    }
+    let semantic_rules_config = semantic_rules_report.config;
     let build_result = tokio::task::spawn_blocking(move || {
-        build_deps_bundle_v2(
+        build_deps_bundle_v2_with_semantic_rules_config(
             coordinator_for_build.as_ref(),
             platform_docs_root.as_deref(),
             config_root.as_deref(),
+            Some(&semantic_rules_config),
         )
     })
     .await;
@@ -180,6 +215,7 @@ pub async fn startup_v2(
             syntax_helper_path: inputs.syntax_helper_path,
             configuration_path: inputs.configuration_path,
             platform_version: inputs.platform_version,
+            rules_config_path: inputs.rules_config_path,
             cache_enabled,
             strict_fingerprint,
         },

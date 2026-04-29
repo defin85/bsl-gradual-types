@@ -4,9 +4,10 @@ use bsl_analysis_v2::semantic_rules::{
     CommonModuleFactoryTargetMode,
 };
 use serde::Deserialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const SEMANTIC_RULES_CONFIG_SCHEMA_VERSION: &str = "semantic-rules-v1";
+pub const SEMANTIC_RULES_CONFIG_FILE_NAME: &str = "bsl-rules.toml";
 
 #[derive(Debug, Clone)]
 pub struct SemanticRulesConfig {
@@ -112,6 +113,32 @@ fn parse_semantic_rules_config_toml_with_identity(
 
 pub fn load_semantic_rules_config(path: Option<&Path>) -> Result<SemanticRulesConfig> {
     Ok(load_semantic_rules_config_report(path).config)
+}
+
+pub fn resolve_semantic_rules_config_path(
+    explicit_rules_config: Option<&Path>,
+    default_start: Option<&Path>,
+) -> Option<PathBuf> {
+    explicit_rules_config
+        .map(normalize_rules_path_best_effort)
+        .or_else(|| discover_semantic_rules_config(default_start))
+}
+
+pub fn discover_semantic_rules_config(start: Option<&Path>) -> Option<PathBuf> {
+    let start = start?;
+    let mut current = if start.is_file() {
+        start.parent()?
+    } else {
+        start
+    };
+
+    loop {
+        let candidate = current.join(SEMANTIC_RULES_CONFIG_FILE_NAME);
+        if candidate.is_file() {
+            return Some(normalize_rules_path_best_effort(candidate.as_path()));
+        }
+        current = current.parent()?;
+    }
 }
 
 pub fn load_semantic_rules_config_report(path: Option<&Path>) -> SemanticRulesConfigLoadReport {
@@ -297,6 +324,10 @@ fn resolve_rules_path(path: &Path) -> String {
         .unwrap_or_else(|_| path.to_path_buf())
         .to_string_lossy()
         .into_owned()
+}
+
+fn normalize_rules_path_best_effort(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn common_module_factory_registry_hash(registry: &CommonModuleFactoryRegistry) -> String {

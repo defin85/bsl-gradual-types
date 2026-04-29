@@ -15,6 +15,8 @@ pub struct WebServerConfig {
     pub static_files_path: Option<PathBuf>,
     /// Path to BSL project configuration
     pub project_path: Option<PathBuf>,
+    /// Path to semantic rules config (`bsl-rules.toml`)
+    pub rules_config_path: Option<PathBuf>,
     /// Path to 1C syntax helper directory
     pub syntax_helper_path: Option<PathBuf>,
     /// 1C platform version (e.g., "8.3.25")
@@ -36,6 +38,7 @@ impl Default for WebServerConfig {
             port: 8080,
             static_files_path: None,
             project_path: None,
+            rules_config_path: None,
             syntax_helper_path: None,
             platform_version: None,
             enable_cors: true,
@@ -91,6 +94,10 @@ impl WebServerConfig {
             config.project_path = Some(project_path);
         }
 
+        if let Some(rules_config_path) = store.get_pathbuf(RuntimeKey::RulesConfigPath) {
+            config.rules_config_path = Some(rules_config_path);
+        }
+
         if let Some(syntax_helper_path) = store.get_pathbuf(RuntimeKey::SyntaxHelperPath) {
             config.syntax_helper_path = Some(syntax_helper_path);
         }
@@ -144,6 +151,9 @@ impl WebServerConfig {
         if let Some(project_path) = cli_config.project_path {
             self.project_path = Some(project_path);
         }
+        if let Some(rules_config_path) = cli_config.rules_config_path {
+            self.rules_config_path = Some(rules_config_path);
+        }
         if let Some(syntax_helper_path) = cli_config.syntax_helper_path {
             self.syntax_helper_path = Some(syntax_helper_path);
         }
@@ -172,6 +182,7 @@ pub struct CliConfig {
     pub port: Option<u16>,
     pub static_files_path: Option<PathBuf>,
     pub project_path: Option<PathBuf>,
+    pub rules_config_path: Option<PathBuf>,
     pub syntax_helper_path: Option<PathBuf>,
     pub platform_version: Option<String>,
     pub enable_cors: Option<bool>,

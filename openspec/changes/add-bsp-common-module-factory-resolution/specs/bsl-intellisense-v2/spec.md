@@ -10,7 +10,7 @@ When the argument is dynamic, the target module is unavailable, or configuration
 
 Common-module factory recognition SHALL be backed by a centralized semantic pattern registry. The registry SHALL include built-in BSP defaults and SHALL provide a project/user override mechanism to enable, disable, or add rules without modifying core inference code.
 
-Project/user overrides SHALL be stored in `bsl-rules.toml` by default. VS Code SHALL use `bslAnalyzer.rulesConfig` as the explicit rules file path when it is set and SHALL use the repo-local `<workspace>/bsl-rules.toml` path when it is not set. CLI entrypoints SHALL use the same file format and SHALL provide default discovery plus an explicit path override.
+Project/user overrides SHALL be stored in `bsl-rules.toml` by default. VS Code SHALL use `bslAnalyzer.rulesConfig` as the explicit rules file path when it is set and SHALL use the repo-local `<workspace>/bsl-rules.toml` path when it is not set. CLI entrypoints SHALL use the same file format and SHALL provide default discovery plus an explicit path override. Web startup/reload and `bsl-agent` workspace startup SHALL use the same effective registry loading contract rather than falling back to a surface-local default registry.
 
 The effective registry SHALL participate in semantic settings/cache identity so registry changes invalidate affected semantic artifacts. The identity SHALL include the built-in registry schema/version, the resolved rules file path when present, the rules file content hash, parse status, and the normalized enabled rule set.
 
@@ -60,6 +60,13 @@ Malformed project rules SHALL fail closed: the system SHALL report a configurati
 - **WHEN** the rules file content changes or the explicit rules path changes
 - **THEN** the effective semantic settings identity changes
 - **AND** cached semantic artifacts for the old registry are not reused
+
+#### Scenario: Web and MCP agent startup use the same rules registry
+
+- **GIVEN** a workspace has `bsl-rules.toml` that disables the built-in BSP common-module factory rule
+- **WHEN** v2 deps are built through web startup, web snapshot reload, or `bsl-agent` workspace startup
+- **THEN** the effective semantic deps use the same disabled registry as CLI and VS Code/LSP
+- **AND** the normalized startup inputs expose the effective rules config path for snapshot metadata and reload/resume continuity
 
 #### Scenario: Malformed rules config fails closed
 

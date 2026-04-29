@@ -74,6 +74,38 @@ impl SessionManager {
         Ok(Some(canonical))
     }
 
+    fn normalize_optional_rules_config_path(
+        raw: Option<String>,
+        default_root: Option<&Path>,
+    ) -> Option<PathBuf> {
+        let raw = raw?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+
+        let path = PathBuf::from(trimmed);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            default_root
+                .map(|root| root.join(&path))
+                .unwrap_or(path)
+        };
+        Some(std::fs::canonicalize(&path).unwrap_or(path))
+    }
+
+    fn discover_workspace_rules_config(
+        configuration_path: Option<&Path>,
+        roots: &[RootEntry],
+    ) -> Option<PathBuf> {
+        bsl_runtime::system::discover_semantic_rules_config(configuration_path).or_else(|| {
+            roots.iter().find_map(|root| {
+                bsl_runtime::system::discover_semantic_rules_config(Some(root.path.as_path()))
+            })
+        })
+    }
+
     pub async fn open(
         self: &Arc<Self>,
         params: WorkspaceOpenParams,
@@ -123,6 +155,14 @@ impl SessionManager {
             });
         }
 
+        let configuration_path =
+            Self::normalize_optional_path(params.configuration_path, "configuration_path")?;
+        let rules_config_path = Self::normalize_optional_rules_config_path(
+            params.rules_config_path,
+            roots.first().map(|root| root.path.as_path()),
+        )
+        .or_else(|| Self::discover_workspace_rules_config(configuration_path.as_deref(), &roots));
+
         let settings = WorkspaceSettings {
             platform_docs_archive: Self::normalize_optional_path(
                 params.platform_docs_archive,
@@ -132,10 +172,8 @@ impl SessionManager {
                 let trimmed = value.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             }),
-            configuration_path: Self::normalize_optional_path(
-                params.configuration_path,
-                "configuration_path",
-            )?,
+            configuration_path,
+            rules_config_path,
             mode: normalize_mode(params.mode),
             env_overrides: HashMap::new(),
             dev_env_overrides: HashMap::new(),
@@ -803,6 +841,10 @@ impl SessionManager {
                     .as_ref()
                     .map(|path| path.to_string_lossy().to_string()),
                 platform_version: inputs.platform_version.clone(),
+                rules_config_path: inputs
+                    .rules_config_path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().to_string()),
                 cache_enabled: inputs.cache_enabled,
                 strict_fingerprint: inputs.strict_fingerprint,
             },
@@ -843,6 +885,14 @@ impl SessionManager {
             .ok_or_else(|| rmcp::ErrorData::invalid_params("session not found", None))?;
 
         let (roots, root_dtos) = restore_roots(&persisted.roots)?;
+        let configuration_path =
+            Self::normalize_optional_path(persisted.configuration_path, "configuration_path")?;
+        let rules_config_path = Self::normalize_optional_rules_config_path(
+            persisted.rules_config_path,
+            roots.first().map(|root| root.path.as_path()),
+        )
+        .or_else(|| Self::discover_workspace_rules_config(configuration_path.as_deref(), &roots));
+
         let settings = WorkspaceSettings {
             platform_docs_archive: Self::normalize_optional_path(
                 persisted.platform_docs_archive,
@@ -852,10 +902,8 @@ impl SessionManager {
                 let trimmed = value.trim();
                 (!trimmed.is_empty()).then(|| trimmed.to_string())
             }),
-            configuration_path: Self::normalize_optional_path(
-                persisted.configuration_path,
-                "configuration_path",
-            )?,
+            configuration_path,
+            rules_config_path,
             mode: normalize_mode(persisted.mode),
             env_overrides: persisted.env_overrides,
             dev_env_overrides: persisted.dev_env_overrides,

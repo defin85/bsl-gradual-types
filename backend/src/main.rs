@@ -32,6 +32,10 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     project_path: Option<PathBuf>,
 
+    /// Path to semantic rules config (bsl-rules.toml)
+    #[arg(long, value_name = "PATH")]
+    rules_config_path: Option<PathBuf>,
+
     /// Path to 1C syntax helper directory
     #[arg(long, value_name = "PATH")]
     syntax_helper_path: Option<PathBuf>,
@@ -72,6 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         port: args.port,
         static_files_path: args.static_files_path,
         project_path: args.project_path,
+        rules_config_path: args.rules_config_path,
         syntax_helper_path: args.syntax_helper_path,
         platform_version: args.platform_version,
         enable_cors: args.enable_cors,
@@ -104,6 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.syntax_helper_path.clone(),
         config.project_path.clone(),
         config.platform_version.clone(),
+        config.rules_config_path.clone(),
         config.cache_enabled,
         config.strict_fingerprint,
     );

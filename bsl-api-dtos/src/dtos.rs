@@ -129,6 +129,8 @@ pub struct SnapshotInputsDto {
     pub syntax_helper_path: Option<String>,
     pub configuration_path: Option<String>,
     pub platform_version: Option<String>,
+    #[serde(default)]
+    pub rules_config_path: Option<String>,
     pub cache_enabled: bool,
     pub strict_fingerprint: bool,
 }

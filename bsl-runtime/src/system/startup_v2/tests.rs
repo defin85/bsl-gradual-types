@@ -1,6 +1,8 @@
 use super::*;
 
+use crate::system::build_deps_bundle_v2;
 use std::fs;
+use std::sync::Arc;
 use tempfile::TempDir;
 
 #[test]
@@ -64,6 +66,35 @@ fn startup_inputs_normalize_converts_configuration_xml_to_root_dir() {
 }
 
 #[test]
+fn startup_inputs_normalize_discovers_repo_local_rules_config_from_configuration_root() {
+    let temp = TempDir::new().expect("TempDir");
+    let repo_root = temp.path().join("repo");
+    let config_root = repo_root.join("src").join("cf");
+    fs::create_dir_all(&config_root).expect("create config root");
+    fs::write(
+        repo_root.join("bsl-rules.toml"),
+        "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+    )
+    .expect("write rules config");
+
+    let inputs = StartupInputs {
+        configuration_path: Some(config_root),
+        platform_version: Some("8.3.25".to_string()),
+        ..Default::default()
+    };
+
+    let normalized = inputs.normalize().expect("normalize");
+    assert_eq!(
+        normalized
+            .rules_config_path
+            .as_deref()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str()),
+        Some("bsl-rules.toml")
+    );
+}
+
+#[test]
 fn lsp_and_web_startup_inputs_normalize_identically() {
     let temp = TempDir::new().expect("TempDir");
     let platform_root = temp.path().join("platform");
@@ -87,6 +118,7 @@ fn lsp_and_web_startup_inputs_normalize_identically() {
         Some(platform_root),
         Some(config_xml),
         Some("Version8_3_25".to_string()),
+        None,
         Some(true),
         Some(false),
     );
@@ -105,6 +137,10 @@ fn lsp_and_web_startup_inputs_normalize_identically() {
     assert_eq!(
         lsp_normalized.platform_version.as_deref(),
         web_normalized.platform_version.as_deref()
+    );
+    assert_eq!(
+        lsp_normalized.rules_config_path.as_deref(),
+        web_normalized.rules_config_path.as_deref()
     );
     assert_eq!(lsp_normalized.cache_enabled, web_normalized.cache_enabled);
     assert_eq!(
@@ -286,4 +322,35 @@ fn changing_configuration_fingerprint_changes_deps_and_index_ids() {
 
     assert_ne!(left.meta.index_snapshot_id, right.meta.index_snapshot_id);
     assert_ne!(left.deps_id.as_str(), right.deps_id.as_str());
+}
+
+#[tokio::test]
+async fn startup_v2_uses_explicit_rules_config_registry() {
+    let temp = TempDir::new().expect("TempDir");
+    let rules_path = temp.path().join("bsl-rules.toml");
+    fs::write(
+        &rules_path,
+        "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+    )
+    .expect("write rules config");
+
+    let inputs = StartupInputs {
+        rules_config_path: Some(rules_path.clone()),
+        ..Default::default()
+    };
+
+    let startup = startup_v2(Arc::new(SystemCoordinator::new()), inputs, None)
+        .await
+        .expect("startup");
+
+    assert_eq!(
+        startup.inputs.rules_config_path.as_deref(),
+        Some(rules_path.as_path())
+    );
+    assert!(startup
+        .deps_bundle_v2
+        .semantic_deps
+        .common_module_factory_registry
+        .rules()
+        .is_empty());
 }

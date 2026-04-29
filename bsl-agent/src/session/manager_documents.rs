@@ -87,6 +87,11 @@ impl SessionManager {
                 .configuration_path
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
+            rules_config_path: session
+                .settings
+                .rules_config_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
             mode: session.settings.mode.clone(),
             analysis_revision: session.analysis_revision,
             created_at: session.created_at,

@@ -24,6 +24,7 @@ async fn metrics_endpoint_returns_observability_payload() {
             syntax_helper_path: None,
             configuration_path: None,
             platform_version: None,
+            rules_config_path: None,
             cache_enabled: true,
             strict_fingerprint: false,
         })),

@@ -93,6 +93,7 @@ struct WorkspaceSettings {
     platform_docs_archive: Option<PathBuf>,
     platform_version: Option<String>,
     configuration_path: Option<PathBuf>,
+    rules_config_path: Option<PathBuf>,
     mode: Option<String>,
     env_overrides: HashMap<String, serde_json::Value>,
     dev_env_overrides: HashMap<String, serde_json::Value>,

@@ -54,3 +54,11 @@
 - [x] 6.5 Prove and fix default VS Code/LSP rules-file propagation so watched `bsl-rules.toml`/explicit rules file changes and `rulesConfig` setting changes rebuild semantic deps identity.
 - [x] 6.6 Re-run focused Rust, VS Code, formatting, and OpenSpec validation for the review-closure slice.
 - [x] 6.7 Prove and fix malformed `bsl-rules.toml` identity so read-but-unparseable files preserve content hash and still invalidate semantic deps when their content changes.
+
+## 7. Uniform Surface Closure
+
+- [x] 7.1 Move effective rules-config loading into the shared `startup_v2` path so web and agent startup deps cannot silently use a default registry.
+- [x] 7.2 Add web server `rules_config_path` configuration/CLI/env propagation and preserve the effective path across snapshot reload.
+- [x] 7.3 Add `bsl-agent` `workspace_open` rules-config input, default discovery from configuration/workspace roots, persistence/resume, and snapshot metadata exposure.
+- [x] 7.4 Add focused regressions proving web/runtime and `bsl-agent` startup use disabled/custom rules from `bsl-rules.toml`.
+- [x] 7.5 Re-run focused runtime/backend/agent tests, `cargo fmt --all -- --check`, and `openspec validate add-bsp-common-module-factory-resolution --strict --no-interactive`.

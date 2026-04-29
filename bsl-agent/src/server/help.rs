@@ -4,7 +4,7 @@ pub(super) fn build_mcp_help_response(
     tool_name: Option<String>,
 ) -> Result<McpHelpResponse, rmcp::ErrorData> {
     let mut quickstart = vec![
-        "workspace_open(roots[], platform_docs_archive?, configuration_path?, platform_version?, mode?)".to_string(),
+        "workspace_open(roots[], platform_docs_archive?, configuration_path?, platform_version?, rulesConfigPath?, mode?)".to_string(),
         "workspace_status(session_id) poll until ready=true".to_string(),
         "workspace_get_settings/workspace_update_settings use camelCase overrides payload (legacy snake_case accepted)".to_string(),
         "workspace_get_observability_metrics(session_id)".to_string(),
@@ -18,6 +18,7 @@ pub(super) fn build_mcp_help_response(
     let mut notes = vec![
         "Multi-root: prefer absolute paths; server resolves via deterministic longest-prefix match against roots[].".to_string(),
         "If configuration_path is set and platform_version is omitted, bsl-agent tries to infer platform_version from config dump; otherwise INVALID_PARAMS.".to_string(),
+        "Rules config: pass rulesConfigPath explicitly or let startup discover bsl-rules.toml from configuration_path/roots.".to_string(),
         "Async: all semantic tools are *_start and return job_id; fetch result via job_result.".to_string(),
     ];
 
@@ -31,7 +32,7 @@ pub(super) fn build_mcp_help_response(
                 }));
                 examples.push(serde_json::json!({
                     "name": "workspace_open",
-                    "arguments": { "roots": ["/ws/config", "/ws/ext1"], "configuration_path": "/ws/config", "platform_version": "8.3.25" }
+                    "arguments": { "roots": ["/ws/config", "/ws/ext1"], "configuration_path": "/ws/config", "platform_version": "8.3.25", "rulesConfigPath": "/ws/bsl-rules.toml" }
                 }));
                 notes.push("Single-session: calling workspace_open again with different params requires workspace_close first.".to_string());
             }

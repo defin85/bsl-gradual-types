@@ -427,6 +427,7 @@ pub async fn reload_snapshot(State(state): State<AppState>) -> impl IntoResponse
         current_inputs.syntax_helper_path.clone(),
         current_inputs.configuration_path.clone(),
         current_inputs.platform_version.clone(),
+        current_inputs.rules_config_path.clone(),
         Some(current_inputs.cache_enabled),
         Some(current_inputs.strict_fingerprint),
     );
@@ -479,6 +480,10 @@ fn snapshot_meta_dto(
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string()),
             platform_version: inputs.platform_version.clone(),
+            rules_config_path: inputs
+                .rules_config_path
+                .as_ref()
+                .map(|path| path.to_string_lossy().to_string()),
             cache_enabled: inputs.cache_enabled,
             strict_fingerprint: inputs.strict_fingerprint,
         },

@@ -52,6 +52,7 @@ fn startup_inputs(
         syntax_helper_path,
         configuration_path,
         platform_version: platform_version.map(str::to_string),
+        rules_config_path: None,
         cache_enabled: true,
         strict_fingerprint: false,
     }
@@ -130,6 +131,7 @@ fn test_state_with_empty_deps_bundle() -> AppState {
             syntax_helper_path: None,
             configuration_path: None,
             platform_version: None,
+            rules_config_path: None,
             cache_enabled: true,
             strict_fingerprint: false,
         })),
@@ -184,6 +186,7 @@ fn test_state_with_empty_deps_bundle_and_polluted_search_index() -> AppState {
             syntax_helper_path: None,
             configuration_path: None,
             platform_version: None,
+            rules_config_path: None,
             cache_enabled: true,
             strict_fingerprint: false,
         })),

@@ -591,6 +591,7 @@ async fn definition_without_target_does_not_emit_bounded_public_reason_metric() 
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -712,6 +713,7 @@ async fn definition_resolves_object_module_member_definition_via_shared_exact_ty
                 platform_docs_archive: None,
                 platform_version: Some("8.3.25".to_string()),
                 configuration_path: Some(config_root.to_string_lossy().to_string()),
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -783,6 +785,57 @@ async fn wait_startup(job_manager: &JobManager, open: &WorkspaceOpenResponse) {
 }
 
 #[tokio::test]
+async fn workspace_open_discovers_rules_config_from_root_and_applies_registry() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    let rules_path = temp.path().join("bsl-rules.toml");
+    std::fs::write(
+        &rules_path,
+        "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+    )
+    .expect("write rules config");
+
+    let manager = Arc::new(SessionManager::new());
+    let job_manager = Arc::new(JobManager::new());
+    let open = manager
+        .open(
+            WorkspaceOpenParams {
+                roots: vec![temp.path().to_string_lossy().to_string()],
+                platform_docs_archive: None,
+                platform_version: None,
+                configuration_path: None,
+                rules_config_path: None,
+                mode: None,
+            },
+            Arc::clone(&job_manager),
+        )
+        .await
+        .expect("open");
+    wait_startup(job_manager.as_ref(), &open).await;
+
+    let meta = manager
+        .http_deps_meta(Some(&open.session_id))
+        .await
+        .expect("deps meta");
+    assert_eq!(
+        meta.inputs.rules_config_path.as_deref(),
+        Some(rules_path.to_string_lossy().as_ref())
+    );
+
+    let sessions = manager.sessions.read().await;
+    let session = sessions.values().next().expect("session should be present");
+    let startup = session.startup.as_ref().expect("startup should be ready");
+    assert!(
+        startup
+            .deps_bundle_v2
+            .semantic_deps
+            .common_module_factory_registry
+            .rules()
+            .is_empty(),
+        "bsl-agent startup must use discovered bsl-rules.toml instead of default registry"
+    );
+}
+
+#[tokio::test]
 async fn observability_metrics_rejects_not_ready_session_deterministically() {
     let manager = SessionManager::new();
     let session_uuid = uuid::Uuid::new_v4();
@@ -804,6 +857,7 @@ async fn observability_metrics_rejects_not_ready_session_deterministically() {
                     platform_docs_archive: None,
                     platform_version: None,
                     configuration_path: None,
+                    rules_config_path: None,
                     mode: None,
                     env_overrides: HashMap::new(),
                     dev_env_overrides: HashMap::new(),
@@ -852,6 +906,7 @@ async fn observability_metrics_exposes_unified_stage_contract_for_ready_session(
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -936,6 +991,7 @@ async fn http_snapshot_status_returns_empty_entries_for_ready_session_without_tr
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -967,6 +1023,7 @@ async fn http_snapshot_status_orders_tracked_documents_and_distinguishes_shadow_
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1057,6 +1114,7 @@ async fn bsl_members_does_not_execute_parse_result_query_on_semantic_path() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1154,6 +1212,7 @@ async fn semantic_mcp_tools_do_not_backfill_from_polluted_search_index_on_defaul
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1293,6 +1352,7 @@ async fn documents_set_and_clear_bump_revision_only_on_change() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1358,6 +1418,7 @@ async fn context_pack_and_expand_are_deterministic_and_budgeted() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1487,6 +1548,7 @@ async fn flow_sensitive_flags_are_explicit_in_mcp_responses() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1624,6 +1686,7 @@ async fn type_at_position_and_members_emit_interactive_runtime_exec_metrics() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1736,6 +1799,7 @@ async fn type_at_position_members_and_definition_emit_shared_type_index_reason_m
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1881,6 +1945,7 @@ async fn symbol_search_and_references_work_via_bounded_blocking_workers() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),
@@ -1949,6 +2014,7 @@ async fn batch_symbol_search_does_not_starve_members_query() {
                 platform_docs_archive: None,
                 platform_version: None,
                 configuration_path: None,
+                rules_config_path: None,
                 mode: None,
             },
             Arc::clone(&job_manager),

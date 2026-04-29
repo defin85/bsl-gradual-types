@@ -29,6 +29,13 @@ pub struct WorkspaceOpenParams {
     pub platform_version: Option<String>,
     #[serde(default)]
     pub configuration_path: Option<String>,
+    #[serde(
+        default,
+        rename = "rulesConfigPath",
+        alias = "rules_config_path",
+        alias = "rulesConfig"
+    )]
+    pub rules_config_path: Option<String>,
     #[serde(default)]
     pub mode: Option<String>,
 }

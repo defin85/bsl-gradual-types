@@ -48,9 +48,10 @@ pub use runtime_config::{
     RuntimeConfigStore, RuntimeKey, ValueSource,
 };
 pub use semantic_rules_config::{
-    load_semantic_rules_config, load_semantic_rules_config_report,
-    parse_semantic_rules_config_toml, SemanticRulesConfig, SemanticRulesConfigDiagnostic,
-    SemanticRulesConfigIdentity, SemanticRulesConfigLoadReport, SemanticRulesConfigParseStatus,
+    discover_semantic_rules_config, load_semantic_rules_config, load_semantic_rules_config_report,
+    parse_semantic_rules_config_toml, resolve_semantic_rules_config_path, SemanticRulesConfig,
+    SemanticRulesConfigDiagnostic, SemanticRulesConfigIdentity, SemanticRulesConfigLoadReport,
+    SemanticRulesConfigParseStatus,
 };
 pub use startup_v2::{startup_v2, EffectiveStartupInputs, StartupInputs, StartupResultV2};
 pub use system_coordinator::{

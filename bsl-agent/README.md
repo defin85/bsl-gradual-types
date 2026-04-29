@@ -15,6 +15,8 @@ Most behavior is configured via MCP tool inputs (not env):
 - `platform_docs_archive` - path to 1C Syntax Helper (file or directory)
 - `platform_version` - e.g. `8.3.27`
 - `configuration_path` - path to config dump (optional)
+- `rulesConfigPath` / `rules_config_path` - explicit semantic rules config path (optional);
+  when omitted, `bsl-agent` discovers `bsl-rules.toml` from `configuration_path` or workspace roots
 - `mode` - optional mode switch
 
 Notes:
@@ -39,6 +41,7 @@ Disk cache (shared with backend startup):
 - `BSL_CACHE_CLEANUP_INTERVAL_SECS` - cleanup loop period (default: `300`)
 - `BSL_CACHE_TOUCH_INTERVAL_SECS` - keep-alive touch interval (default: `60`)
 - `BSL_CACHE_SWR=1|true|yes|0|false|no` - stale-while-revalidate mode (default: enabled)
+- `BSL_RULES_CONFIG_PATH` - shared startup fallback when no explicit or discovered rules path is supplied; prefer `workspace_open.rulesConfigPath` for `bsl-agent`
 
 In-memory AST cache:
 - `BSL_AST_CACHE_CAPACITY` - LRU capacity (default: 64)
@@ -186,6 +189,7 @@ repo_root="$(pwd)" && tmpdir="$(mktemp -d)" && blocker="$tmpdir/not-a-dir" && pr
 
 - `workspace_open.mode="default"` is accepted as default mode (no warning).
 - If `configuration_path` is set and `platform_version` is omitted, `bsl-agent` tries to infer it from the config dump (CompatibilityMode). If it cannot infer, `workspace_open` fails with `INVALID_PARAMS`.
+- `workspace_open.rulesConfigPath` accepts camelCase, snake_case (`rules_config_path`), or legacy `rulesConfig`; explicit paths override default `bsl-rules.toml` discovery.
 - Multi-root file references: `DocumentRef` / `FileRef.doc` accept absolute paths (string or `{ "path": "/abs/..." }`). The server resolves them via deterministic longest-prefix match against `roots[]`.
 - `workspace_documents_set.files[]` also accepts plain absolute paths (strings) to mark documents as hot (no overlay).
 - `bsl_diagnostics_start.scope` accepts `"project"` / `"hot"` as strings; for a single file use `{ "kind": "file", "document": <DocumentRef> }` (string `"file"` is invalid).

@@ -94,6 +94,7 @@ fn build_lookup_and_deps() -> (TypeMetadataLookup, Arc<bsl_analysis_v2::Semantic
         signature_index: SignatureIndex::new(),
         resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     (lookup, deps)

@@ -765,6 +765,7 @@ fn build_non_member_completion_fixture(
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -1444,6 +1445,7 @@ async fn completion_non_member_warm_snapshot_reuses_immutable_catalogs() {
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -1539,6 +1541,7 @@ async fn completion_non_member_cache_keeps_local_and_contextual_candidates_stabl
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let deps_id = DepsSnapshotId::from_hash("refactor-13-local-contextual");
@@ -1719,6 +1722,7 @@ async fn completion_non_member_semantic_path_ignores_polluted_index_snapshot() {
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -1829,6 +1833,7 @@ async fn completion_resolves_variable_type_for_member_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -1938,6 +1943,7 @@ async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact(
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2069,6 +2075,7 @@ async fn completion_unknown_bare_receiver_member_access_ignores_polluted_index_s
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2187,6 +2194,7 @@ async fn completion_member_access_does_not_reconstruct_type_name_without_canonic
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2303,6 +2311,7 @@ async fn completion_implicit_form_object_member_access_resolves_from_ir_without_
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2428,6 +2437,7 @@ async fn completion_resolves_implicit_form_object_member_access_with_shared_hint
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2539,6 +2549,7 @@ async fn completion_uses_owner_hint_for_member_access_when_flow_sensitive_is_ena
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2609,6 +2620,7 @@ fn implicit_module_context_owner_resolution_uses_shared_exact_owner_hints_for_su
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2734,6 +2746,7 @@ fn implicit_module_context_owner_resolution_fails_closed_outside_supported_modul
         resolver: Some(resolver.clone()),
         repository: repo,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2825,6 +2838,7 @@ async fn completion_resolves_nested_member_access_chain() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -2937,6 +2951,7 @@ async fn completion_supports_member_access_after_method_call() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3030,6 +3045,7 @@ async fn completion_supports_member_access_after_index_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3123,6 +3139,7 @@ async fn completion_supports_member_access_after_map_index_access() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3216,6 +3233,7 @@ async fn completion_does_not_infer_map_index_owner_without_shared_hint() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3308,6 +3326,7 @@ async fn completion_does_not_infer_type_name_member_access_without_canonical_own
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3407,6 +3426,7 @@ async fn completion_does_not_infer_type_name_member_chain_without_canonical_owne
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3507,6 +3527,7 @@ async fn completion_supports_member_access_after_ternary_expression() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3633,6 +3654,7 @@ async fn completion_supports_member_access_after_choice_expression() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();
@@ -3761,6 +3783,7 @@ async fn completion_substitutes_faceted_metadata_name_in_return_type() {
         resolver: Some(resolver.clone()),
         repository: repo.clone(),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let mut host = AnalysisHostV2::default();

@@ -1,7 +1,26 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { CommandHandler } from '../types';
 import { getLanguageClient } from '../lsp';
 import { updateStatusBar } from '../lsp/progress';
+import { BslAnalyzerConfig } from '../config/configHelper';
+
+function resolveRulesConfigUri(workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
+    const configuredPath = BslAnalyzerConfig.rulesConfig.trim();
+    if (!configuredPath) {
+        return vscode.Uri.joinPath(workspaceFolder.uri, 'bsl-rules.toml');
+    }
+
+    if (/^[a-z][a-z0-9+.-]*:/i.test(configuredPath)) {
+        return vscode.Uri.parse(configuredPath);
+    }
+
+    if (path.isAbsolute(configuredPath)) {
+        return vscode.Uri.file(configuredPath);
+    }
+
+    return vscode.Uri.joinPath(workspaceFolder.uri, configuredPath);
+}
 
 /**
  * Register configuration-related commands
@@ -24,7 +43,7 @@ export function registerConfigurationCommands(
             vscode.window.showWarningMessage('No workspace folder found');
             return;
         }
-        const rulesFile = vscode.Uri.joinPath(firstFolder.uri, 'bsl-rules.toml');
+        const rulesFile = resolveRulesConfigUri(firstFolder);
 
         try {
             await vscode.workspace.fs.stat(rulesFile);

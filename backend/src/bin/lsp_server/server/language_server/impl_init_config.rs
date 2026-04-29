@@ -502,6 +502,7 @@ impl BslLanguageServer {
                         let mut merged = guard.clone().unwrap_or(LspConfig {
                             platform_docs_archive: None,
                             configuration_path: None,
+                            rules_config: None,
                             platform_version: None,
                             cache_enabled: None,
                             strict_fingerprint: None,
@@ -513,6 +514,9 @@ impl BslLanguageServer {
                         }
                         if new_config.configuration_path.is_some() {
                             merged.configuration_path = new_config.configuration_path;
+                        }
+                        if new_config.rules_config.is_some() {
+                            merged.rules_config = new_config.rules_config;
                         }
                         if new_config.platform_version.is_some() {
                             merged.platform_version = new_config.platform_version;
@@ -612,6 +616,7 @@ impl BslLanguageServer {
                             let mut merged = guard.clone().unwrap_or(LspConfig {
                                 platform_docs_archive: None,
                                 configuration_path: None,
+                                rules_config: None,
                                 platform_version: None,
                                 cache_enabled: None,
                                 strict_fingerprint: None,

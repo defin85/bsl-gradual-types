@@ -493,6 +493,7 @@ async fn prime_server_with_workspace_setup(
     *server.config.write().await = Some(crate::config::LspConfig {
         platform_docs_archive: Some(setup.platform_docs_archive.to_string_lossy().to_string()),
         configuration_path: Some(setup.configuration_path.to_string_lossy().to_string()),
+        rules_config: None,
         platform_version: Some(setup.platform_version.clone()),
         cache_enabled: Some(true),
         strict_fingerprint: Some(false),

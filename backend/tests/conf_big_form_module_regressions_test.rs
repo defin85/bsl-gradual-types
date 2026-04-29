@@ -155,6 +155,7 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         signature_index,
         resolver: Some(resolver),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 

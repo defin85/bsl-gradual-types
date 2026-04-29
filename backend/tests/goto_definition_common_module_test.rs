@@ -30,6 +30,7 @@ fn empty_semantic_deps() -> Arc<SemanticDeps> {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -161,6 +162,7 @@ fn goto_definition_resolves_common_module_namespace_and_method() {
         signature_index: signature_index.clone(),
         resolver: Some(resolver.clone()),
         platform_signatures_loaded: repo.platform_docs_loaded(),
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -596,6 +598,7 @@ fn goto_definition_resolves_object_module_method_without_request_time_hints() {
         signature_index: signature_index.clone(),
         resolver: Some(resolver.clone()),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -1357,6 +1360,7 @@ fn goto_definition_resolves_common_module_method_with_deps_bundle_v2_snapshot() 
         signature_index: signature_index.clone(),
         resolver: Some(resolver.clone()),
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 

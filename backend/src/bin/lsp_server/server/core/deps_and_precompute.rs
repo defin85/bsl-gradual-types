@@ -305,11 +305,46 @@ impl BslLanguageServer {
     ) {
         let build_started = Instant::now();
         let coordinator = self.coordinator.clone();
+        let rules_config_path = {
+            let config = self.config.read().await;
+            config
+                .as_ref()
+                .and_then(|cfg| cfg.rules_config.as_deref())
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        };
+        let semantic_rules_report = load_semantic_rules_config_report(rules_config_path.as_deref());
+        for diagnostic in &semantic_rules_report.diagnostics {
+            warn!(
+                "deps_update_v2 semantic rules config diagnostic: reason={}, path={}, message={}",
+                reason,
+                rules_config_path
+                    .as_deref()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                diagnostic.message
+            );
+        }
+        let semantic_rules_config = semantic_rules_report.config;
+        if !semantic_rules_report.diagnostics.is_empty() {
+            let client = self.client.clone();
+            let message = semantic_rules_report
+                .diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>()
+                .join("; ");
+            tokio::spawn(async move {
+                client.log_message(MessageType::WARNING, message).await;
+            });
+        }
         let bundle_result = tokio::task::spawn_blocking(move || {
-            build_deps_bundle_v2(
+            build_deps_bundle_v2_with_semantic_rules_config(
                 coordinator.as_ref(),
                 platform_docs_root.as_deref(),
                 config_root.as_deref(),
+                Some(&semantic_rules_config),
             )
         })
         .await;

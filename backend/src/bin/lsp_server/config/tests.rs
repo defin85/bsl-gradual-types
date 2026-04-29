@@ -5,6 +5,7 @@ fn lsp_config_deserializes_feature_flags_from_initialization_options() {
     let raw = serde_json::json!({
         "platformDocsArchive": "/tmp/syntax_helper",
         "configurationPath": "/tmp/conf/Configuration.xml",
+        "rulesConfig": "/tmp/conf/bsl-rules.toml",
         "cacheEnabled": true,
         "strictFingerprint": false,
         "enableTypeHints": true,
@@ -19,6 +20,10 @@ fn lsp_config_deserializes_feature_flags_from_initialization_options() {
     assert_eq!(
         cfg.configuration_path.as_deref(),
         Some("/tmp/conf/Configuration.xml")
+    );
+    assert_eq!(
+        cfg.rules_config.as_deref(),
+        Some("/tmp/conf/bsl-rules.toml")
     );
     assert_eq!(cfg.cache_enabled, Some(true));
     assert_eq!(cfg.strict_fingerprint, Some(false));

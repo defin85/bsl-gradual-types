@@ -123,6 +123,7 @@ fn create_test_deps() -> Arc<bsl_analysis_v2::SemanticDeps> {
         resolver: Some(resolver),
         repository,
         platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }

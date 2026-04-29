@@ -40,6 +40,7 @@ use crate::ast_to_ir::{
 use crate::implicit_bindings::{
     directive_disables_form_context, ImplicitBindingResolver, FORM_CONTEXT_BOUND_SYMBOL_KEYS,
 };
+use crate::semantic_rules::CommonModuleFactoryTargetMode;
 use crate::SemanticDeps;
 
 const METADATA_OBJECT_COLLECTION_TYPE_NAME: &str = "КоллекцияОбъектовМетаданных";
@@ -1992,6 +1993,15 @@ impl<'a> TypeInferencer<'a> {
                     return resolved;
                 }
 
+                if let Some(resolved) =
+                    self.try_resolve_common_module_factory_call(&receiver, property, args)
+                {
+                    if let Some(target) = method_target {
+                        self.record_method_target(expr_span(function), call_span, target, facts);
+                    }
+                    return resolved;
+                }
+
                 let resolved = self.infer_method_call(&receiver, property);
                 if let Some(target) = method_target {
                     self.record_method_target(expr_span(function), call_span, target, facts);
@@ -2219,6 +2229,91 @@ impl<'a> TypeInferencer<'a> {
             Expression::Number { value, .. } => Some(value.to_string()),
             Expression::Boolean { value, .. } => Some(value.to_string()),
             _ => None,
+        }
+    }
+
+    fn extract_static_string(&self, expr: &Expression) -> Option<String> {
+        match expr {
+            Expression::String { value, .. } => Some(value.clone()),
+            Expression::Binary {
+                left,
+                operator,
+                right,
+                ..
+            } if operator == "+" => {
+                let mut value = self.extract_static_string(left)?;
+                value.push_str(&self.extract_static_string(right)?);
+                Some(value)
+            }
+            _ => None,
+        }
+    }
+
+    fn try_resolve_common_module_factory_call(
+        &self,
+        receiver: &TypeResolution,
+        method: &str,
+        args: &[Expression],
+    ) -> Option<TypeResolution> {
+        if receiver.is_unknown() || receiver.is_dynamic() {
+            return None;
+        }
+
+        let owner_type = signature_lookup_type_name(receiver);
+        let rule = self
+            .deps
+            .common_module_factory_registry
+            .find_rule(&owner_type, method)?;
+        let Some(target_name) = args
+            .get(rule.argument_index)
+            .and_then(|arg| self.extract_static_string(arg))
+        else {
+            return Some(Self::unresolved_common_module_factory_target());
+        };
+        let target_name = target_name.trim();
+        if target_name.is_empty() {
+            return Some(Self::unresolved_common_module_factory_target());
+        }
+
+        if !target_name.contains('.') {
+            return Some(self.resolve_common_module_factory_target(target_name));
+        }
+
+        match rule.target_mode {
+            CommonModuleFactoryTargetMode::CommonModule => {
+                Some(Self::unresolved_common_module_factory_target())
+            }
+            CommonModuleFactoryTargetMode::CommonModuleOrManager => {
+                Some(self.resolve_dotted_common_module_factory_target(target_name))
+            }
+        }
+    }
+
+    fn unresolved_common_module_factory_target() -> TypeResolution {
+        TypeResolution::inferred_weak("Dynamic")
+    }
+
+    fn resolve_common_module_factory_target(&self, target_name: &str) -> TypeResolution {
+        let type_name = format!("ОбщиеМодули.{target_name}");
+        if self.deps.repository.find_type(&type_name).is_some()
+            || !self.signature_index.get_type_methods(&type_name).is_empty()
+        {
+            return TypeResolution::metadata_type(
+                MetadataKind::CommonModule,
+                target_name,
+                Some(FacetKind::Singleton),
+            );
+        }
+
+        Self::unresolved_common_module_factory_target()
+    }
+
+    fn resolve_dotted_common_module_factory_target(&self, target_name: &str) -> TypeResolution {
+        let resolved = self.resolver.resolve_expression_sync(target_name);
+        if resolved.is_unknown() || resolved.is_dynamic() {
+            Self::unresolved_common_module_factory_target()
+        } else {
+            resolved
         }
     }
 

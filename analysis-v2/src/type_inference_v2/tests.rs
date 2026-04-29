@@ -1,6 +1,7 @@
 use super::*;
 use bsl_shared::domain::repository::InMemoryTypeRepository;
 use bsl_shared::domain::signature_index::{MethodSignature, SignatureSource};
+use bsl_shared::domain::type_definition_location::TypeDefinitionLocation;
 use bsl_shared::domain::type_id::TypeId;
 use bsl_shared::domain::types::{
     FacetKind, MetadataKind, ParameterInfo, PrimitiveType, RawAttributeData, RawDataSource,
@@ -13,7 +14,7 @@ use bsl_shared::domain::{
 };
 use bsl_shared::TypeRepository;
 use bsl_syntax::ParseOptions;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn parse(code: &str) -> Program {
     let parsed = bsl_syntax::parse(code, &ParseOptions::default()).expect("parse ok");
@@ -145,6 +146,7 @@ fn deps_with_array_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -177,6 +179,128 @@ fn deps_with_common_module_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
+        global_context_index: Default::default(),
+    })
+}
+
+fn deps_with_bsp_common_module_factory_fixture() -> Arc<SemanticDeps> {
+    deps_with_bsp_common_module_factory_fixture_registry(Default::default())
+}
+
+fn deps_with_bsp_common_module_factory_fixture_registry(
+    common_module_factory_registry: Arc<crate::semantic_rules::CommonModuleFactoryRegistry>,
+) -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "ОбщиеМодули.ОбщегоНазначения".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Singleton],
+                kind: Some(MetadataKind::CommonModule),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбщиеМодули.УправлениеДоступом".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Singleton],
+                kind: Some(MetadataKind::CommonModule),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "ОбщиеМодули.МойПомощник".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Singleton],
+                kind: Some(MetadataKind::CommonModule),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Справочники.НастройкиОбменСБанками".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Catalog),
+                ..Default::default()
+            },
+        ])
+        .expect("load common module types");
+
+    let mut sigs = SignatureIndex::new();
+    sigs.add_config_method(
+        TypeId::new("ОбщиеМодули.ОбщегоНазначения"),
+        MethodSignature::new(
+            "ОбщийМодуль".to_string(),
+            Some("ОбщиеМодули.ОбщегоНазначения".to_string()),
+            vec![ParameterInfo {
+                name: "ИмяМодуля".to_string(),
+                type_name: Some("Строка".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            Some("Неопределено".to_string()),
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            Default::default(),
+        ),
+    );
+    sigs.add_config_method(
+        TypeId::new("ОбщиеМодули.УправлениеДоступом"),
+        MethodSignature::new(
+            "ПриЧтенииНаСервере".to_string(),
+            Some("ОбщиеМодули.УправлениеДоступом".to_string()),
+            vec![],
+            None,
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            Default::default(),
+        ),
+    );
+    sigs.add_config_method(
+        TypeId::new("ОбщиеМодули.МойПомощник"),
+        MethodSignature::new(
+            "ПолучитьМодуль".to_string(),
+            Some("ОбщиеМодули.МойПомощник".to_string()),
+            vec![ParameterInfo {
+                name: "ИмяМодуля".to_string(),
+                type_name: Some("Строка".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            Some("Неопределено".to_string()),
+            None,
+            None,
+            SignatureSource::Configuration,
+            None,
+            Default::default(),
+        ),
+    );
+    repository_impl.set_signature_index(sigs.clone());
+    repository_impl.add_config_method_definition_location(
+        "ОбщиеМодули.УправлениеДоступом",
+        "ПриЧтенииНаСервере",
+        TypeDefinitionLocation::user_defined(
+            PathBuf::from("CommonModules/УправлениеДоступом/Ext/Module.bsl"),
+            0,
+            25,
+        ),
+    );
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(SemanticDeps {
+        repository,
+        signature_index: sigs,
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+        common_module_factory_registry,
         global_context_index: Default::default(),
     })
 }
@@ -237,6 +361,7 @@ fn deps_with_universal_collection_types() -> Arc<SemanticDeps> {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -279,6 +404,7 @@ fn deps_with_document_create_document_method() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -347,6 +473,7 @@ fn deps_with_form_attribute_to_value_signature() -> Arc<SemanticDeps> {
         signature_index: sigs,
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -411,6 +538,7 @@ fn deps_with_metadata_global_context_types_for_dimension_item_type(
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: global_context_index_with_property(
             "Метаданные",
             Some("Metadata"),
@@ -434,6 +562,7 @@ fn deps_with_loaded_global_context_property(
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: global_context_index_with_property(name, english_name, prop_type),
     })
 }
@@ -729,6 +858,7 @@ fn metadata_collection_property_uses_repository_before_legacy_table() {
         signature_index: SignatureIndex::new(),
         resolver: Some(Arc::new(TypeResolver::new(repository))),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: global_context_index_with_property(
             "Метаданные",
             Some("Metadata"),
@@ -804,6 +934,7 @@ fn metadata_collection_item_type_note_comes_from_source_property_instance() {
         signature_index: SignatureIndex::new(),
         resolver: Some(Arc::new(TypeResolver::new(repository))),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: global_context_index_with_property(
             "Метаданные",
             Some("Metadata"),
@@ -884,6 +1015,7 @@ fn metadata_collection_element_name_uses_item_type_before_collection_properties(
         signature_index: SignatureIndex::new(),
         resolver: Some(Arc::new(TypeResolver::new(repository))),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: global_context_index_with_property(
             "Метаданные",
             Some("Metadata"),
@@ -991,6 +1123,7 @@ fn semantic_program_index_materializes_configuration_symbol_exact_span_and_defin
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -1573,6 +1706,262 @@ fn resolves_common_module_method_return_type_from_signature_index() {
 }
 
 #[test]
+fn resolves_bsp_common_module_factory_literal_target() {
+    let source = r#"Процедура Тест()
+    МодульУправлениеДоступом = ОбщегоНазначения.ОбщийМодуль("УправлениеДоступом");
+    МодульУправлениеДоступом.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let call_prefix = "МодульУправлениеДоступом.";
+    let offset = (source
+        .find("МодульУправлениеДоступом.ПриЧтенииНаСервере")
+        .expect("module method call")
+        + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("factory receiver type");
+    assert_eq!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+    assert_eq!(receiver.active_facet, Some(FacetKind::Singleton));
+}
+
+#[test]
+fn resolves_bsp_common_module_factory_concatenated_literal_target() {
+    let source = r#"Процедура Тест()
+    МодульУправлениеДоступом = ОбщегоНазначения.ОбщийМодуль("Управление" + "Доступом");
+    МодульУправлениеДоступом.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let call_prefix = "МодульУправлениеДоступом.";
+    let offset = (source
+        .find("МодульУправлениеДоступом.ПриЧтенииНаСервере")
+        .expect("module method call")
+        + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("factory receiver type");
+    assert_eq!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+}
+
+#[test]
+fn keeps_bsp_common_module_factory_dynamic_argument_unknown() {
+    let source = r#"Процедура Тест(ИмяМодуля)
+    Модуль = ОбщегоНазначения.ОбщийМодуль(ИмяМодуля);
+    Модуль.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let call_prefix = "Модуль.";
+    let offset =
+        (source.find("Модуль.ПриЧтенииНаСервере").expect("call") + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("dynamic factory receiver type");
+    assert!(receiver.is_unknown() || receiver.is_dynamic());
+}
+
+#[test]
+fn keeps_bsp_common_module_factory_missing_and_unindexed_targets_unknown() {
+    for source in [
+        r#"Процедура Тест()
+    Модуль = ОбщегоНазначения.ОбщийМодуль();
+    Модуль.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#,
+        r#"Процедура Тест()
+    Модуль = ОбщегоНазначения.ОбщийМодуль("НетТакогоМодуля");
+    Модуль.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#,
+    ] {
+        let program = parse(source);
+        let deps = deps_with_bsp_common_module_factory_fixture();
+        let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+        let call_prefix = "Модуль.";
+        let offset =
+            (source.find("Модуль.ПриЧтенииНаСервере").expect("call") + call_prefix.len()) as u32;
+        let receiver = index
+            .call_receiver_type_at_byte_offset(offset)
+            .expect("factory receiver type");
+        assert!(
+            receiver.is_unknown() || receiver.is_dynamic(),
+            "missing/unindexed factory targets must stay unknown or dynamic, got {receiver:?}"
+        );
+    }
+}
+
+#[test]
+fn uses_common_module_factory_registry_from_semantic_deps_snapshot() {
+    let source = r#"Процедура Тест()
+    МодульУправлениеДоступом = ОбщегоНазначения.ОбщийМодуль("УправлениеДоступом");
+    МодульУправлениеДоступом.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture_registry(Arc::new(
+        crate::semantic_rules::CommonModuleFactoryRegistry::new(Vec::new()),
+    ));
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let call_prefix = "МодульУправлениеДоступом.";
+    let offset = (source
+        .find("МодульУправлениеДоступом.ПриЧтенииНаСервере")
+        .expect("module method call")
+        + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("factory receiver type");
+    assert_ne!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+}
+
+#[test]
+fn common_module_factory_resolved_target_populates_ide_semantic_facts() {
+    let source = r#"Процедура Тест()
+    МодульУправлениеДоступом = ОбщегоНазначения.ОбщийМодуль("УправлениеДоступом");
+    МодульУправлениеДоступом.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let assignment_offset = source
+        .find("МодульУправлениеДоступом")
+        .expect("assignment target") as u32;
+    let assigned = index
+        .assignment_value_type_at_byte_offset(assignment_offset)
+        .expect("factory assignment value type");
+    assert_eq!(assigned.type_name(), "ОбщиеМодули.УправлениеДоступом");
+
+    let usage_offset = source
+        .rfind("МодульУправлениеДоступом")
+        .expect("assigned variable usage") as u32;
+    let hover_type = index
+        .type_at_byte_offset(usage_offset)
+        .expect("type at assigned variable usage");
+    assert_eq!(hover_type.type_name(), "ОбщиеМодули.УправлениеДоступом");
+
+    let method_offset = source.find("ПриЧтенииНаСервере").expect("method") as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(method_offset)
+        .expect("factory receiver type");
+    assert_eq!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+
+    let method_target = index
+        .call_method_target_at_byte_offset(method_offset)
+        .expect("factory method target");
+    assert_eq!(
+        method_target.owner_type.as_deref(),
+        Some("ОбщиеМодули.УправлениеДоступом")
+    );
+    assert!(method_target.signature.is_some());
+    assert!(
+        method_target.definition_location.is_some(),
+        "go-to-definition consumers need a navigable method target"
+    );
+
+    let member_target = index
+        .member_method_target_at_byte_offset(method_offset)
+        .expect("factory member method target");
+    let definition = member_target
+        .definition_location
+        .as_ref()
+        .expect("member method definition location");
+    let path = definition.primary_path().expect("definition path");
+    assert_eq!(
+        path,
+        Path::new("CommonModules/УправлениеДоступом/Ext/Module.bsl")
+    );
+}
+
+#[test]
+fn resolves_custom_common_module_factory_rule_from_registry() {
+    let source = r#"Процедура Тест()
+    МодульУправлениеДоступом = МойПомощник.ПолучитьМодуль("УправлениеДоступом");
+    МодульУправлениеДоступом.ПриЧтенииНаСервере();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture_registry(Arc::new(
+        crate::semantic_rules::CommonModuleFactoryRegistry::new(vec![
+            crate::semantic_rules::CommonModuleFactoryRule {
+                id: "custom-helper".to_string(),
+                owner: "ОбщиеМодули.МойПомощник".to_string(),
+                method: "ПолучитьМодуль".to_string(),
+                argument_index: 0,
+                target_mode: crate::semantic_rules::CommonModuleFactoryTargetMode::CommonModule,
+                enabled: true,
+            },
+        ]),
+    ));
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let call_prefix = "МодульУправлениеДоступом.";
+    let offset = (source
+        .find("МодульУправлениеДоступом.ПриЧтенииНаСервере")
+        .expect("module method call")
+        + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("factory receiver type");
+    assert_eq!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+}
+
+#[test]
+fn resolves_bsp_common_module_factory_dotted_manager_target() {
+    let source = r#"Процедура Тест()
+    Менеджер = ОбщегоНазначения.ОбщийМодуль("Справочники.НастройкиОбменСБанками");
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let offset = source.find("Менеджер").expect("assignment target") as u32;
+    let assigned = index
+        .assignment_value_type_at_byte_offset(offset)
+        .expect("dotted factory assignment type");
+    assert_eq!(
+        assigned.type_name(),
+        "СправочникМенеджер.НастройкиОбменСБанками"
+    );
+}
+
+#[test]
+fn resolves_conf_big_advance_report_bsp_common_module_factory_regression() {
+    let source =
+        include_str!("../../../examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl");
+    let program = parse(source);
+    let deps = deps_with_bsp_common_module_factory_fixture();
+    let index = build_type_index_with_path(
+        &program,
+        "CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl",
+        deps,
+    );
+
+    let call_prefix = "МодульУправлениеДоступом.";
+    let offset = (source
+        .find("МодульУправлениеДоступом.ПриЧтенииНаСервере")
+        .expect("conf_big factory call")
+        + call_prefix.len()) as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(offset)
+        .expect("conf_big factory receiver type");
+    assert_eq!(receiver.type_name(), "ОбщиеМодули.УправлениеДоступом");
+}
+
+#[test]
 fn resolves_local_function_return_type_defined_later_in_common_module_file() {
     let source = r#"Процедура Тест()
     x = ФункцияКотораяВозвращаетСтроку();
@@ -1990,6 +2379,7 @@ fn seeds_form_module_context_for_elements_property_access() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2065,6 +2455,7 @@ fn seeds_form_module_context_for_this_object_and_parameters() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2128,6 +2519,7 @@ fn form_module_object_seed_contains_form_data_semantics_metadata_notes() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2230,6 +2622,7 @@ fn resolves_form_module_object_link_property_from_object_facet() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2276,6 +2669,7 @@ fn resolves_form_module_object_link_property_without_platform_object_properties(
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2322,6 +2716,7 @@ fn resolves_form_module_object_deletion_mark_property_without_platform_object_pr
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2368,6 +2763,7 @@ fn resolves_catalog_form_module_object_link_property_without_platform_object_pro
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2438,6 +2834,7 @@ fn form_module_object_member_resolution_does_not_leak_form_shape() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2508,6 +2905,7 @@ fn form_module_object_resolves_tabular_projection_without_form_shape_leakage() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2626,6 +3024,7 @@ fn seeds_catalog_object_module_context_for_hierarchical_catalogs() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2728,6 +3127,7 @@ fn object_module_bare_identifier_without_canonical_binding_stays_undeclared() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2776,6 +3176,7 @@ fn recordset_module_bare_identifier_without_canonical_binding_stays_undeclared()
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2824,6 +3225,7 @@ fn object_module_explicit_this_object_member_stays_available() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2868,6 +3270,7 @@ fn recordset_module_explicit_object_member_stays_available() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2919,6 +3322,7 @@ fn form_module_bare_identifier_does_not_use_applied_owner_fallback() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -3084,6 +3488,7 @@ fn universal_collection_effects_do_not_mutate_type_repository() {
             repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>
         ))),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let before = repository_impl.get_all_types();

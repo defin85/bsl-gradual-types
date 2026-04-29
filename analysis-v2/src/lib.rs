@@ -13,6 +13,7 @@ pub use ast_to_ir::AstToIrConverter;
 
 mod derived_artifacts;
 mod implicit_bindings;
+pub mod semantic_rules;
 mod type_inference_v2;
 use derived_artifacts::{
     CompletionHeadArtifactKey, DerivedArtifactsCache, TypeIndexArtifact, TypeIndexArtifactKey,
@@ -38,6 +39,8 @@ use bsl_shared::ir::{SemanticConstructorTarget, SemanticMethodTarget, SemanticPr
 use bsl_shared::utils::hash::hash_content;
 use bsl_syntax::ParseOptions;
 use tree_sitter::Tree;
+
+use crate::semantic_rules::CommonModuleFactoryRegistry;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
@@ -113,6 +116,7 @@ pub struct SemanticDeps {
     /// Явный флаг: платформа (Syntax Helper) загружена и SignatureIndex считается полным
     /// для целей диагностики "Неопределенная процедура или функция".
     pub platform_signatures_loaded: bool,
+    pub common_module_factory_registry: Arc<CommonModuleFactoryRegistry>,
     pub global_context_index: Arc<GlobalContextIndex>,
 }
 
@@ -129,6 +133,25 @@ impl SemanticDeps {
             signature_index,
             resolver,
             platform_signatures_loaded,
+            common_module_factory_registry: Default::default(),
+            global_context_index,
+        }
+    }
+
+    pub fn from_parts_with_common_module_factory_registry(
+        repository: Arc<dyn TypeRepository>,
+        signature_index: SignatureIndex,
+        resolver: Option<Arc<TypeResolver>>,
+        platform_signatures_loaded: bool,
+        global_context_index: Arc<GlobalContextIndex>,
+        common_module_factory_registry: Arc<CommonModuleFactoryRegistry>,
+    ) -> Self {
+        Self {
+            repository,
+            signature_index,
+            resolver,
+            platform_signatures_loaded,
+            common_module_factory_registry,
             global_context_index,
         }
     }
@@ -189,6 +212,10 @@ impl std::fmt::Debug for SemanticDeps {
             .field(
                 "global_context_loaded",
                 &self.global_context_index.is_loaded(),
+            )
+            .field(
+                "common_module_factory_rules",
+                &self.common_module_factory_registry.rules().len(),
             )
             .field("global_context_len", &self.global_context_index.len())
             .finish_non_exhaustive()

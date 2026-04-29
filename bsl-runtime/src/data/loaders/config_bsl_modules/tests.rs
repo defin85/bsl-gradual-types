@@ -120,6 +120,59 @@ fn indexes_common_module_exports_and_global_functions() {
 }
 
 #[test]
+fn indexes_access_control_common_module_export_under_common_module_owner() {
+    let tmp = TempDir::new().unwrap();
+    let module_path = tmp
+        .path()
+        .join("CommonModules")
+        .join("УправлениеДоступом")
+        .join("Ext")
+        .join("Module.bsl");
+
+    write(
+        &module_path,
+        r#"
+Процедура ПриЧтенииНаСервере(Форма, ТекущийОбъект) Экспорт
+КонецПроцедуры
+"#,
+    );
+
+    let mut cm = UniversalMetadataObject::new(
+        "CommonModule".to_string(),
+        "УправлениеДоступом".to_string(),
+        "00000000-0000-0000-0000-000000000000".to_string(),
+    );
+    cm.common_module_path = Some(module_path.clone());
+    cm.common_module_properties = Some(CommonModuleProperties {
+        server: true,
+        client_managed_application: false,
+        client_ordinary_application: false,
+        external_connection: false,
+        server_call: false,
+        global: false,
+        privileged: false,
+        compile: true,
+        return_values_reuse: ReturnValuesReuse::DontUse,
+    });
+
+    let indexed = index_configuration_bsl_modules(tmp.path(), &[cm]).unwrap();
+    assert!(indexed.config_methods.iter().any(|(owner, method)| {
+        owner == "ОбщиеМодули.УправлениеДоступом" && method.name == "ПриЧтенииНаСервере"
+    }));
+    assert!(indexed
+        .definition_locations
+        .iter()
+        .any(
+            |(owner, method, _)| owner == "ОбщиеМодули.УправлениеДоступом"
+                && method == "ПриЧтенииНаСервере"
+        ));
+    assert!(!indexed
+        .global_functions
+        .iter()
+        .any(|(name, _)| name == "ПриЧтенииНаСервере"));
+}
+
+#[test]
 fn infers_function_return_type_union() {
     let tmp = TempDir::new().unwrap();
     let module_path = tmp

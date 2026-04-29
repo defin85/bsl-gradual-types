@@ -27,11 +27,16 @@ use bsl_shared::engine::CliAnalysisResult;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticNodeKind;
 use formatters::CliFormatter;
-use runtime::{prepare_cli_file_operation, prepare_cli_text_operation, CliPreparedFileOperation};
+use runtime::{
+    prepare_cli_file_operation, prepare_cli_file_operation_with_rules_config,
+    prepare_cli_text_operation, prepare_cli_text_operation_with_rules_config,
+    CliPreparedFileOperation,
+};
 
 #[tokio::main]
 async fn main() {
     let args = CliArgs::parse();
+    let rules_config = args.rules_config.clone();
 
     // Инициализация логирования
     if args.verbose {
@@ -51,25 +56,58 @@ async fn main() {
                 args.verbose,
                 errors_only,
                 show_inference,
+                rules_config.as_deref(),
             )
             .await
         }
         Commands::Check { path, strict } => {
-            check_command(&path, &args.format, args.verbose, strict).await
+            check_command(
+                &path,
+                &args.format,
+                args.verbose,
+                strict,
+                rules_config.as_deref(),
+            )
+            .await
         }
         Commands::Complete {
             expression,
             path,
             limit,
-        } => complete_command(&expression, path.as_deref(), &args.format, limit).await,
+        } => {
+            complete_command(
+                &expression,
+                path.as_deref(),
+                &args.format,
+                limit,
+                rules_config.as_deref(),
+            )
+            .await
+        }
         Commands::Info { expression, path } => {
-            info_command(&expression, path.as_deref(), &args.format).await
+            info_command(
+                &expression,
+                path.as_deref(),
+                &args.format,
+                rules_config.as_deref(),
+            )
+            .await
         }
         Commands::AnalyzeIr {
             path,
             show_ir,
             show_symbols,
-        } => analyze_ir_command(&path, &args.format, args.verbose, show_ir, show_symbols).await,
+        } => {
+            analyze_ir_command(
+                &path,
+                &args.format,
+                args.verbose,
+                show_ir,
+                show_symbols,
+                rules_config.as_deref(),
+            )
+            .await
+        }
         Commands::Cache {
             config_path,
             action,
@@ -89,12 +127,13 @@ async fn analyze_command(
     verbose: bool,
     errors_only: bool,
     _show_inference: bool,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<()> {
     println!("{} {}", "🚀 Анализ BSL кода:".green().bold(), path.cyan());
 
     if Path::new(path).is_file() {
         // Анализ одного файла
-        let result = analyze_file_v2(path, DetailLevel::Full).await?;
+        let result = analyze_file_v2(path, DetailLevel::Full, rules_config).await?;
         let output = CliFormatter::format_analysis(&result, format, verbose, errors_only);
         println!("{}", output);
     } else if Path::new(path).is_dir() {
@@ -116,11 +155,17 @@ async fn check_command(
     _format: &CliOutputFormat,
     verbose: bool,
     strict: bool,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<()> {
     println!("{} {}", "🔍 Проверка типов:".blue().bold(), path.cyan());
 
-    let prepared =
-        prepare_cli_file_operation(path, SemanticOperation::Diagnostics, DetailLevel::Full).await?;
+    let prepared = prepare_cli_file_operation_with_rules_config(
+        path,
+        SemanticOperation::Diagnostics,
+        DetailLevel::Full,
+        rules_config,
+    )
+    .await?;
     let syntax = prepared.syntax_diagnostics()?;
     let semantic = prepared.semantic_diagnostics(false)?;
 
@@ -189,6 +234,7 @@ async fn complete_command(
     file_path: Option<&str>,
     format: &CliOutputFormat,
     limit: usize,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<()> {
     println!(
         "{} {}",
@@ -196,7 +242,7 @@ async fn complete_command(
         expression.cyan()
     );
 
-    let completions = collect_cli_completion_items(expression, file_path).await?;
+    let completions = collect_cli_completion_items(expression, file_path, rules_config).await?;
 
     let output = CliFormatter::format_completions(&completions, format, limit);
     println!("{}", output);
@@ -209,6 +255,7 @@ async fn info_command(
     expression: &str,
     file_path: Option<&str>,
     format: &CliOutputFormat,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<()> {
     println!(
         "{} {}",
@@ -216,7 +263,7 @@ async fn info_command(
         expression.cyan()
     );
 
-    let resolution = resolve_cli_expression_type(expression, file_path).await?;
+    let resolution = resolve_cli_expression_type(expression, file_path, rules_config).await?;
 
     let output = CliFormatter::format_type_info(expression, &resolution, format);
     println!("{}", output);
@@ -231,12 +278,17 @@ async fn analyze_ir_command(
     verbose: bool,
     show_ir: bool,
     show_symbols: bool,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<()> {
     println!("{} {}", "🎯 IR-based анализ:".green().bold(), path.cyan());
 
-    let prepared =
-        prepare_cli_file_operation(path, SemanticOperation::TypeAtPosition, DetailLevel::Full)
-            .await?;
+    let prepared = prepare_cli_file_operation_with_rules_config(
+        path,
+        SemanticOperation::TypeAtPosition,
+        DetailLevel::Full,
+        rules_config,
+    )
+    .await?;
 
     println!("📝 Парсинг → IR...");
 
@@ -375,13 +427,15 @@ async fn cache_command(config_path: &str, action: CacheCommand) -> anyhow::Resul
 async fn analyze_file_v2(
     path: &str,
     diagnostics_detail_level: DetailLevel,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<CliAnalysisResult> {
     let start_time = std::time::Instant::now();
 
-    let prepared = prepare_cli_file_operation(
+    let prepared = prepare_cli_file_operation_with_rules_config(
         path,
         SemanticOperation::TypeAtPosition,
         diagnostics_detail_level,
+        rules_config,
     )
     .await?;
     let ir = prepared.ir_program()?;
@@ -575,13 +629,15 @@ fn cli_completion_owner_hints(
 async fn collect_cli_completion_items(
     expression: &str,
     file_path: Option<&str>,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<Vec<CompletionItem>> {
     let inline = inline_cli_completion_expression(expression, file_path)?;
-    let prepared = prepare_cli_text_operation(
+    let prepared = prepare_cli_text_operation_with_rules_config(
         inline.file_text.clone(),
         inline.file_path.clone(),
         SemanticOperation::Completion,
         DetailLevel::Full,
+        rules_config,
     )
     .await?;
     let ir_program = prepared.ir_program()?;
@@ -618,13 +674,15 @@ async fn collect_cli_completion_items(
 async fn resolve_cli_expression_type(
     expression: &str,
     file_path: Option<&str>,
+    rules_config: Option<&str>,
 ) -> anyhow::Result<TypeResolution> {
     let (file_text, file_path, probe_offset) = inline_cli_resolution_probe(expression, file_path)?;
-    let prepared = prepare_cli_text_operation(
+    let prepared = prepare_cli_text_operation_with_rules_config(
         file_text,
         file_path,
         SemanticOperation::TypeAtPosition,
         DetailLevel::Full,
+        rules_config,
     )
     .await?;
 
@@ -673,7 +731,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_uses_shared_runtime_snapshot() {
-        let completions = collect_cli_completion_items("Новый Массив.", None)
+        let completions = collect_cli_completion_items("Новый Массив.", None, None)
             .await
             .expect("cli completions");
         let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
@@ -685,7 +743,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_preserves_canonical_generic_owner_hint() {
-        let completions = collect_cli_completion_items("(Новый Массив()).", None)
+        let completions = collect_cli_completion_items("(Новый Массив()).", None, None)
             .await
             .expect("cli parenthesized completions");
         let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
@@ -765,7 +823,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_type_info_uses_shared_runtime_snapshot() {
-        let resolution = resolve_cli_expression_type("Новый Массив", None)
+        let resolution = resolve_cli_expression_type("Новый Массив", None, None)
             .await
             .expect("cli type info");
         assert!(
@@ -777,7 +835,7 @@ mod tests {
 
     #[tokio::test]
     async fn cli_inline_completion_preserves_object_module_binding_facets() {
-        let without_path = collect_cli_completion_items("Объект.", None)
+        let without_path = collect_cli_completion_items("Объект.", None, None)
             .await
             .expect("cli completion without module path");
         let without_path_labels: Vec<_> = without_path.into_iter().map(|item| item.label).collect();
@@ -786,10 +844,13 @@ mod tests {
             "synthetic inline completion must stay unresolved for object-module-only binding without --path, labels={without_path_labels:?}"
         );
 
-        let completions =
-            collect_cli_completion_items("Объект.", Some("Documents/Док1/Ext/ObjectModule.bsl"))
-                .await
-                .expect("cli object module completions");
+        let completions = collect_cli_completion_items(
+            "Объект.",
+            Some("Documents/Док1/Ext/ObjectModule.bsl"),
+            None,
+        )
+        .await
+        .expect("cli object module completions");
         let labels: Vec<_> = completions.into_iter().map(|item| item.label).collect();
 
         assert!(
@@ -804,10 +865,13 @@ mod tests {
 
     #[tokio::test]
     async fn cli_type_info_preserves_object_module_binding_facets() {
-        let resolution =
-            resolve_cli_expression_type("Объект", Some("Documents/Док1/Ext/ObjectModule.bsl"))
-                .await
-                .expect("cli object module type info");
+        let resolution = resolve_cli_expression_type(
+            "Объект",
+            Some("Documents/Док1/Ext/ObjectModule.bsl"),
+            None,
+        )
+        .await
+        .expect("cli object module type info");
 
         assert!(
             user_facing_resolution_type_name(&resolution).contains("Док1"),

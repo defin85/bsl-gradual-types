@@ -128,6 +128,7 @@ mod lsp_completion_tests {
             signature_index: SignatureIndex::new(),
             resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
             platform_signatures_loaded: false,
+            common_module_factory_registry: Default::default(),
             global_context_index: Default::default(),
         });
         let result = completion_with_shared_snapshot(
@@ -163,6 +164,7 @@ mod lsp_completion_tests {
             signature_index: SignatureIndex::new(),
             resolver: Some(Arc::new(TypeResolver::new(deps_repo))),
             platform_signatures_loaded: false,
+            common_module_factory_registry: Default::default(),
             global_context_index: Default::default(),
         });
 

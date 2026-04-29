@@ -159,6 +159,7 @@ export function buildClientOptions(
     const initializationOptions = {
         platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
         configurationPath: BslAnalyzerConfig.configurationPath,
+        rulesConfig: BslAnalyzerConfig.rulesConfig,
         platformVersion: BslAnalyzerConfig.platformVersion,
         cacheEnabled: BslAnalyzerConfig.cacheEnabled,
         enableTypeHints: typeHintsEnabled,
@@ -168,6 +169,7 @@ export function buildClientOptions(
     outputChannel.appendLine(`Sending initializationOptions to LSP:`);
     outputChannel.appendLine(`   platformDocsArchive: ${initializationOptions.platformDocsArchive || 'NOT SET'}`);
     outputChannel.appendLine(`   configurationPath: ${initializationOptions.configurationPath || 'NOT SET'}`);
+    outputChannel.appendLine(`   rulesConfig: ${initializationOptions.rulesConfig || 'NOT SET'}`);
     outputChannel.appendLine(`   platformVersion: ${initializationOptions.platformVersion || 'NOT SET'}`);
     outputChannel.appendLine(`   cacheEnabled: ${initializationOptions.cacheEnabled}`);
     outputChannel.appendLine(`   enableTypeHints: ${initializationOptions.enableTypeHints}`);

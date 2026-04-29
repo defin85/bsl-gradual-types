@@ -5,13 +5,14 @@ use anyhow::Context;
 use tracing::warn;
 use walkdir::WalkDir;
 
+use bsl_analysis_v2::semantic_rules::CommonModuleFactoryRegistry;
 use bsl_analysis_v2::{DepsSnapshotId, SemanticDeps};
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
 use bsl_shared::domain::GlobalContextAvailability;
 use bsl_shared::domain::GlobalContextIndex;
 
-use super::{IndexSnapshot, SystemCoordinator};
+use super::{IndexSnapshot, SemanticRulesConfig, SystemCoordinator};
 
 #[derive(Clone)]
 pub struct DepsBundleV2 {
@@ -39,6 +40,20 @@ pub fn build_deps_bundle_v2(
     platform_docs_root: Option<&Path>,
     config_root: Option<&Path>,
 ) -> anyhow::Result<DepsBundleV2> {
+    build_deps_bundle_v2_with_semantic_rules_config(
+        coordinator,
+        platform_docs_root,
+        config_root,
+        None,
+    )
+}
+
+pub fn build_deps_bundle_v2_with_semantic_rules_config(
+    coordinator: &SystemCoordinator,
+    platform_docs_root: Option<&Path>,
+    config_root: Option<&Path>,
+    semantic_rules_config: Option<&SemanticRulesConfig>,
+) -> anyhow::Result<DepsBundleV2> {
     let strict = coordinator.strict_fingerprint();
 
     let platform_fingerprint = platform_docs_root
@@ -58,11 +73,22 @@ pub fn build_deps_bundle_v2(
     let index_snapshot = coordinator.intellisense_index().snapshot();
     let index_snapshot_id = index_snapshot.id.as_str().to_string();
 
+    let default_semantic_rules_config;
+    let semantic_rules_config = match semantic_rules_config {
+        Some(config) => config,
+        None => {
+            default_semantic_rules_config = SemanticRulesConfig::default();
+            &default_semantic_rules_config
+        }
+    };
+    let common_module_factory_registry =
+        Arc::new(semantic_rules_config.common_module_factories.clone());
     let (semantic_deps, repo_stats) =
-        build_semantic_deps_snapshot(coordinator).context("build_semantic_deps_snapshot")?;
+        build_semantic_deps_snapshot(coordinator, common_module_factory_registry)
+            .context("build_semantic_deps_snapshot")?;
 
     let deps_payload = format!(
-        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};platform_signatures_loaded={};global_context_fp={};strict_fingerprint={}",
+        "schema={};platform_version={};platform_fp={};config_fp={};index_snapshot_id={};repo.total_types={};repo.platform_types={};repo.configuration_types={};repo.user_defined_types={};platform_signatures_loaded={};global_context_fp={};strict_fingerprint={};semantic_rules={}",
         bsl_analysis_v2::DEPS_SCHEMA_VERSION,
         platform_version,
         platform_fingerprint.as_deref().unwrap_or("none"),
@@ -75,6 +101,7 @@ pub fn build_deps_bundle_v2(
         semantic_deps.platform_signatures_loaded,
         semantic_deps.global_context_index.fingerprint(),
         strict,
+        semantic_rules_config.identity.cache_key_payload(),
     );
 
     let deps_id =
@@ -121,6 +148,7 @@ fn global_context_degraded_reason(index: &GlobalContextIndex) -> Option<String> 
 
 fn build_semantic_deps_snapshot(
     coordinator: &SystemCoordinator,
+    common_module_factory_registry: Arc<CommonModuleFactoryRegistry>,
 ) -> anyhow::Result<(
     Arc<SemanticDeps>,
     bsl_shared::domain::repository::RepositoryStats,
@@ -133,13 +161,16 @@ fn build_semantic_deps_snapshot(
         let platform_signatures_loaded = repository.platform_docs_loaded();
         let stats = repository.get_stats();
         return Ok((
-            Arc::new(SemanticDeps::from_parts(
-                repository,
-                signature_index,
-                Some(resolver),
-                platform_signatures_loaded,
-                Arc::new(GlobalContextIndex::unavailable()),
-            )),
+            Arc::new(
+                SemanticDeps::from_parts_with_common_module_factory_registry(
+                    repository,
+                    signature_index,
+                    Some(resolver),
+                    platform_signatures_loaded,
+                    Arc::new(GlobalContextIndex::unavailable()),
+                    common_module_factory_registry,
+                ),
+            ),
             stats,
         ));
     };
@@ -171,13 +202,16 @@ fn build_semantic_deps_snapshot(
     let resolver = Arc::new(TypeResolver::new(repository.clone()));
 
     Ok((
-        Arc::new(SemanticDeps::from_parts(
-            repository,
-            signature_index,
-            Some(resolver),
-            platform_signatures_loaded,
-            global_context_index,
-        )),
+        Arc::new(
+            SemanticDeps::from_parts_with_common_module_factory_registry(
+                repository,
+                signature_index,
+                Some(resolver),
+                platform_signatures_loaded,
+                global_context_index,
+                common_module_factory_registry,
+            ),
+        ),
         stats,
     ))
 }
@@ -328,5 +362,61 @@ mod tests {
         let right = build_deps_bundle_v2(&coordinator, None, None).expect("right deps bundle");
 
         assert_ne!(left.deps_id.as_str(), right.deps_id.as_str());
+    }
+
+    #[test]
+    fn deps_snapshot_carries_typed_common_module_factory_registry() {
+        let coordinator = SystemCoordinator::new();
+        install_domain_bundle(
+            &coordinator,
+            global_context_index_for("Метаданные", "ОбъектМетаданныхКонфигурация"),
+        );
+        let config = crate::system::parse_semantic_rules_config_toml(
+            "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+        )
+        .expect("rules config");
+
+        let bundle = build_deps_bundle_v2_with_semantic_rules_config(
+            &coordinator,
+            None,
+            None,
+            Some(&config),
+        )
+        .expect("deps bundle");
+
+        assert_eq!(
+            bundle
+                .semantic_deps
+                .common_module_factory_registry
+                .rules()
+                .len(),
+            0
+        );
+    }
+
+    #[test]
+    fn deps_snapshot_id_includes_semantic_rules_identity() {
+        let coordinator = SystemCoordinator::new();
+        install_domain_bundle(
+            &coordinator,
+            global_context_index_for("Метаданные", "ОбъектМетаданныхКонфигурация"),
+        );
+        let default_bundle = build_deps_bundle_v2(&coordinator, None, None).expect("default");
+        let disabled_bsp = crate::system::parse_semantic_rules_config_toml(
+            "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+        )
+        .expect("rules config");
+        let custom_bundle = build_deps_bundle_v2_with_semantic_rules_config(
+            &coordinator,
+            None,
+            None,
+            Some(&disabled_bsp),
+        )
+        .expect("custom");
+
+        assert_ne!(
+            default_bundle.deps_id.as_str(),
+            custom_bundle.deps_id.as_str()
+        );
     }
 }

@@ -10,7 +10,8 @@ use bsl_backend::application::{
     ObservabilityOrigin, ObservabilityStage, PreparedOperationSnapshot, SemanticOperation,
 };
 use bsl_backend::system::{
-    build_deps_bundle_v2, global_runtime_config, RuntimeKey, SystemCoordinator,
+    build_deps_bundle_v2_with_semantic_rules_config, global_runtime_config,
+    parse_semantic_rules_config_toml, RuntimeKey, SemanticRulesConfig, SystemCoordinator,
 };
 use bsl_shared::domain::types::{ParseError, TypeDiagnostic, TypeResolution};
 use bsl_shared::domain::{TypeMetadataLookup, TypeResolver};
@@ -22,6 +23,8 @@ pub(crate) struct CliPreparedFileOperation {
     pub(crate) coordinator: Arc<SystemCoordinator>,
     pub(crate) metadata_lookup: TypeMetadataLookup,
     pub(crate) resolver: Arc<TypeResolver>,
+    pub(crate) _rules_config_path: Option<PathBuf>,
+    pub(crate) _rules_config: SemanticRulesConfig,
     pub(crate) prepared: PreparedOperationSnapshot,
     pub(crate) file_id: V2FileId,
 }
@@ -143,12 +146,29 @@ pub(crate) async fn prepare_cli_file_operation(
     operation: SemanticOperation,
     diagnostics_detail_level: DetailLevel,
 ) -> anyhow::Result<CliPreparedFileOperation> {
+    prepare_cli_file_operation_with_rules_config(path, operation, diagnostics_detail_level, None)
+        .await
+}
+
+pub(crate) async fn prepare_cli_file_operation_with_rules_config(
+    path: &str,
+    operation: SemanticOperation,
+    diagnostics_detail_level: DetailLevel,
+    rules_config_override: Option<&str>,
+) -> anyhow::Result<CliPreparedFileOperation> {
     let file_text = Arc::<str>::from(
         std::fs::read_to_string(path).with_context(|| format!("read CLI file {}", path))?,
     );
     let file_path = Arc::<str>::from(Path::new(path).to_string_lossy().into_owned());
 
-    prepare_cli_text_operation(file_text, file_path, operation, diagnostics_detail_level).await
+    prepare_cli_text_operation_with_rules_config(
+        file_text,
+        file_path,
+        operation,
+        diagnostics_detail_level,
+        rules_config_override,
+    )
+    .await
 }
 
 pub(crate) async fn prepare_cli_text_operation(
@@ -157,15 +177,39 @@ pub(crate) async fn prepare_cli_text_operation(
     operation: SemanticOperation,
     diagnostics_detail_level: DetailLevel,
 ) -> anyhow::Result<CliPreparedFileOperation> {
+    prepare_cli_text_operation_with_rules_config(
+        file_text,
+        file_path,
+        operation,
+        diagnostics_detail_level,
+        None,
+    )
+    .await
+}
+
+pub(crate) async fn prepare_cli_text_operation_with_rules_config(
+    file_text: Arc<str>,
+    file_path: Arc<str>,
+    operation: SemanticOperation,
+    diagnostics_detail_level: DetailLevel,
+    rules_config_override: Option<&str>,
+) -> anyhow::Result<CliPreparedFileOperation> {
     let coordinator = Arc::new(SystemCoordinator::new());
     let syntax_helper_path = detect_cli_syntax_helper_path();
     coordinator
         .start_with_paths(syntax_helper_path.as_deref(), None, None, None)
         .await?;
 
-    let deps_bundle =
-        build_deps_bundle_v2(coordinator.as_ref(), syntax_helper_path.as_deref(), None)
-            .context("build cli deps bundle")?;
+    let (rules_config_path, rules_config) =
+        load_cli_rules_config(Path::new(file_path.as_ref()), rules_config_override)?;
+
+    let deps_bundle = build_deps_bundle_v2_with_semantic_rules_config(
+        coordinator.as_ref(),
+        syntax_helper_path.as_deref(),
+        None,
+        Some(&rules_config),
+    )
+    .context("build cli deps bundle")?;
 
     let settings = ExecutionSettings {
         settings_id: cli_settings_id(diagnostics_detail_level),
@@ -249,9 +293,63 @@ pub(crate) async fn prepare_cli_text_operation(
         coordinator,
         metadata_lookup,
         resolver,
+        _rules_config_path: rules_config_path,
+        _rules_config: rules_config,
         prepared,
         file_id,
     })
+}
+
+fn load_cli_rules_config(
+    file_path: &Path,
+    rules_config_override: Option<&str>,
+) -> anyhow::Result<(Option<PathBuf>, SemanticRulesConfig)> {
+    let Some(path) = resolve_cli_rules_config_path(file_path, rules_config_override)? else {
+        return Ok((None, SemanticRulesConfig::default()));
+    };
+
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("read CLI rules config {}", path.display()))?;
+    let config = parse_semantic_rules_config_toml(&content)
+        .with_context(|| format!("parse CLI rules config {}", path.display()))?;
+    Ok((Some(path), config))
+}
+
+fn resolve_cli_rules_config_path(
+    file_path: &Path,
+    rules_config_override: Option<&str>,
+) -> anyhow::Result<Option<PathBuf>> {
+    if let Some(raw) = rules_config_override
+        .map(str::trim)
+        .filter(|raw| !raw.is_empty())
+    {
+        let path = PathBuf::from(raw);
+        return Ok(Some(if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .context("resolve current directory for --rules-config")?
+                .join(path)
+        }));
+    }
+
+    if let Some(found) = discover_bsl_rules_config(file_path.parent()) {
+        return Ok(Some(found));
+    }
+
+    let cwd = std::env::current_dir().context("resolve current directory for rules discovery")?;
+    Ok(discover_bsl_rules_config(Some(cwd.as_path())))
+}
+
+fn discover_bsl_rules_config(start: Option<&Path>) -> Option<PathBuf> {
+    let mut current = start?;
+    loop {
+        let candidate = current.join("bsl-rules.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        current = current.parent()?;
+    }
 }
 
 #[cfg(test)]
@@ -337,5 +435,56 @@ mod tests {
             "expected shared runtime array resolution, got {:?}",
             resolution
         );
+    }
+
+    #[test]
+    fn cli_rules_config_discovers_bsl_rules_toml_from_file_parent() {
+        let temp = TempDir::new().expect("tempdir");
+        let module_dir = temp.path().join("CommonModules").join("Модуль").join("Ext");
+        fs::create_dir_all(&module_dir).expect("module dir");
+        let rules_path = temp.path().join("bsl-rules.toml");
+        fs::write(&rules_path, "[semantic.common_module_factories]\n").expect("rules file");
+
+        let discovered =
+            resolve_cli_rules_config_path(&module_dir.join("Module.bsl"), None).expect("resolve");
+
+        assert_eq!(discovered.as_deref(), Some(rules_path.as_path()));
+    }
+
+    #[test]
+    fn cli_rules_config_override_parses_custom_rules_file() {
+        let temp = TempDir::new().expect("tempdir");
+        let rules_path = temp.path().join("custom-rules.toml");
+        fs::write(
+            &rules_path,
+            r#"
+[semantic.common_module_factories]
+builtin_bsp = false
+
+[[semantic.common_module_factories.rules]]
+id = "cli-custom"
+owner = "ОбщиеМодули.МойПомощник"
+method = "ПолучитьМодуль"
+argument_index = 0
+target_mode = "common_module"
+"#,
+        )
+        .expect("rules file");
+
+        let (loaded_path, config) = load_cli_rules_config(
+            Path::new("inline.bsl"),
+            Some(rules_path.to_string_lossy().as_ref()),
+        )
+        .expect("load rules");
+
+        assert_eq!(loaded_path.as_deref(), Some(rules_path.as_path()));
+        assert!(config
+            .common_module_factories
+            .find_rule("ОбщиеМодули.МойПомощник", "ПолучитьМодуль")
+            .is_some());
+        assert!(config
+            .common_module_factories
+            .find_rule("ОбщиеМодули.ОбщегоНазначения", "ОбщийМодуль")
+            .is_none());
     }
 }

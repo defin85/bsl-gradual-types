@@ -19,7 +19,8 @@ use tracing::{debug, info, warn};
 use bsl_analysis_v2::{AnalysisHostV2, DepsSnapshotId, FileId as V2FileId, SettingsId};
 use bsl_backend::system::fs_utils::read_bsl_file;
 use bsl_backend::system::{
-    build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
+    build_deps_bundle_v2, build_deps_bundle_v2_with_semantic_rules_config,
+    load_semantic_rules_config_report, DepsBundleV2, DepsBundleV2Meta, SystemCoordinator,
 };
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;

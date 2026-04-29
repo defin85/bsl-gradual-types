@@ -18,6 +18,10 @@ pub struct CliArgs {
     #[arg(short, long, default_value = "table", global = true)]
     pub format: CliOutputFormat,
 
+    /// Path to bsl-rules.toml semantic rules config
+    #[arg(long, global = true)]
+    pub rules_config: Option<String>,
+
     /// Subcommands
     #[command(subcommand)]
     pub command: Commands,
@@ -150,6 +154,23 @@ mod tests {
         assert!(
             parsed.is_ok(),
             "public CLI type info must accept a real module path for canonical module-context semantics: {parsed:?}"
+        );
+    }
+
+    #[test]
+    fn cli_accepts_global_rules_config_override() {
+        let parsed = CliArgs::try_parse_from([
+            "bsl-cli",
+            "--rules-config",
+            "config/bsl-rules.toml",
+            "check",
+            "Module.bsl",
+        ])
+        .expect("parse cli args");
+
+        assert_eq!(
+            parsed.rules_config.as_deref(),
+            Some("config/bsl-rules.toml")
         );
     }
 }

@@ -16,6 +16,7 @@ pub mod persistent_cache; // Milestone 2.4: Межсессионное кеши�
 mod platform_version;
 pub mod positioning; // UTF-16 <-> byte offsets for LSP/tree-sitter
 pub mod runtime_config;
+pub mod semantic_rules_config;
 pub mod startup_v2;
 pub mod system_coordinator;
 pub mod tree_cache;
@@ -24,7 +25,10 @@ pub mod tree_sitter_adapter;
 // Re-export simplified components (specific imports to avoid conflicts)
 pub use ast_cache::{AstCache, AstCacheStats};
 pub use basic_observability::{BasicObservability, SimpleMetrics, StructuredLogger};
-pub use deps_bundle_v2::{build_deps_bundle_v2, DepsBundleV2, DepsBundleV2Meta};
+pub use deps_bundle_v2::{
+    build_deps_bundle_v2, build_deps_bundle_v2_with_semantic_rules_config, DepsBundleV2,
+    DepsBundleV2Meta,
+};
 pub use disk_cache::{
     CacheCleanupReport, CacheEntry, CacheManifest, DiskCache, DiskCacheKey, DiskCacheStatsSnapshot,
 };
@@ -42,6 +46,11 @@ pub use positioning::{byte_offset_to_utf16, utf16_to_byte_offset, LineIndex};
 pub use runtime_config::{
     global_runtime_config, ApplyOverridesReport, ConfigTier, ConfigValue, RuntimeConfigSnapshot,
     RuntimeConfigStore, RuntimeKey, ValueSource,
+};
+pub use semantic_rules_config::{
+    load_semantic_rules_config, load_semantic_rules_config_report,
+    parse_semantic_rules_config_toml, SemanticRulesConfig, SemanticRulesConfigDiagnostic,
+    SemanticRulesConfigIdentity, SemanticRulesConfigLoadReport, SemanticRulesConfigParseStatus,
 };
 pub use startup_v2::{startup_v2, EffectiveStartupInputs, StartupInputs, StartupResultV2};
 pub use system_coordinator::{

@@ -234,6 +234,7 @@ fn collect_type_at_position_preserves_available_facets_for_object_module_binding
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -305,6 +306,7 @@ fn collect_type_at_position_preserves_available_facets_for_recordset_module_bind
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -390,6 +392,7 @@ fn semantic_helpers_fail_closed_without_precomputed_type_index() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -519,6 +522,7 @@ fn collect_members_uses_exact_owner_hint_on_default_path() {
         signature_index: SignatureIndex::new(),
         resolver: Some(resolver),
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
     let coordinator = Arc::new(SystemCoordinator::new());

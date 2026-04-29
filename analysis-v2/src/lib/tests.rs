@@ -352,6 +352,7 @@ fn deps_and_settings_ids_are_read_from_snapshot() {
             signature_index: SignatureIndex::new(),
             resolver: None,
             platform_signatures_loaded: false,
+            common_module_factory_registry: Default::default(),
             global_context_index: Default::default(),
         }),
     });
@@ -379,6 +380,7 @@ fn deps_and_settings_ids_are_read_from_snapshot() {
                 signature_index: SignatureIndex::new(),
                 resolver: None,
                 platform_signatures_loaded: false,
+                common_module_factory_registry: Default::default(),
                 global_context_index: Default::default(),
             }),
         });
@@ -1199,6 +1201,7 @@ fn semantic_diagnostics_allow_dynamic_metadata_collection_object_names() {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index,
     });
 
@@ -1302,6 +1305,7 @@ fn semantic_diagnostics_allow_nested_metadata_collection_names_without_source_it
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index,
     });
 
@@ -1363,6 +1367,7 @@ fn semantic_diagnostics_do_not_report_loaded_global_context_property_as_undeclar
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index,
     });
 
@@ -1396,6 +1401,143 @@ fn semantic_diagnostics_do_not_report_loaded_global_context_property_as_undeclar
 }
 
 #[test]
+fn semantic_diagnostics_allow_bsp_common_module_factory_known_method() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1425);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-bsp-common-module-factory-known-method"),
+        deps: bsp_common_module_factory_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Процедура Тест()\n\
+                 Модуль = ОбщегоНазначения.ОбщийМодуль(\"УправлениеДоступом\");\n\
+                 Модуль.ПриЧтенииНаСервере();\n\
+                 КонецПроцедуры",
+        ),
+        version: 1,
+        path: Arc::from("bsp-common-module-factory-known-method.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("ПриЧтенииНаСервере")),
+        "known BSP factory target method must not produce a false missing-method diagnostic: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_allow_conf_big_bsp_common_module_factory_call() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1428);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-conf-big-bsp-common-module-factory"),
+        deps: bsp_common_module_factory_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(include_str!(
+            "../../../examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl"
+        )),
+        version: 1,
+        path: Arc::from("CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("ПриЧтенииНаСервере")),
+        "conf_big BSP factory call must not produce a false missing-method diagnostic: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_report_missing_method_for_bsp_common_module_factory_known_target() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1426);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-bsp-common-module-factory-missing-method"),
+        deps: bsp_common_module_factory_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Процедура Тест()\n\
+                 Модуль = ОбщегоНазначения.ОбщийМодуль(\"УправлениеДоступом\");\n\
+                 Модуль.НесуществующийМетод();\n\
+                 КонецПроцедуры",
+        ),
+        version: 1,
+        path: Arc::from("bsp-common-module-factory-missing-method.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.message.contains("НесуществующийМетод")),
+        "known BSP factory target must still report genuinely missing methods: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn semantic_diagnostics_keep_dynamic_bsp_common_module_factory_target_fail_closed() {
+    let mut host = AnalysisHostV2::default();
+    let file_id = FileId(1427);
+
+    host.apply_change(Change::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("deps-bsp-common-module-factory-dynamic-target"),
+        deps: bsp_common_module_factory_semantic_deps(),
+    });
+    host.apply_change(Change::SetFile {
+        file_id,
+        text: Arc::from(
+            "Процедура Тест(ИмяМодуля)\n\
+                 Модуль = ОбщегоНазначения.ОбщийМодуль(ИмяМодуля);\n\
+                 Модуль.ПриЧтенииНаСервере();\n\
+                 КонецПроцедуры",
+        ),
+        version: 1,
+        path: Arc::from("bsp-common-module-factory-dynamic-target.bsl"),
+    });
+
+    let diagnostics = host
+        .analysis()
+        .semantic_diagnostics(file_id)
+        .unwrap()
+        .expect("semantic diagnostics");
+
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| !diagnostic.message.contains("ПриЧтенииНаСервере")),
+        "dynamic BSP factory target must stay fail-closed without high-confidence missing-method diagnostics: {diagnostics:#?}"
+    );
+}
+
+#[test]
 fn semantic_diagnostics_depend_on_deps_id() {
     let mut host = AnalysisHostV2::default();
     let file_id = FileId(1);
@@ -1414,6 +1556,7 @@ fn semantic_diagnostics_depend_on_deps_id() {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -1769,6 +1912,7 @@ fn semantic_diagnostics_do_not_include_flow_sensitive_null_safety_by_default() {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     });
 
@@ -2360,6 +2504,91 @@ fn default_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded,
+        common_module_factory_registry: Default::default(),
+        global_context_index: Default::default(),
+    })
+}
+
+fn bsp_common_module_factory_semantic_deps() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбщиеМодули.ОбщегоНазначения".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Configuration,
+                facets: vec![bsl_shared::domain::types::FacetKind::Singleton],
+                kind: Some(bsl_shared::domain::types::MetadataKind::CommonModule),
+                ..Default::default()
+            },
+            bsl_shared::domain::types::RawTypeData {
+                name: "ОбщиеМодули.УправлениеДоступом".to_string(),
+                source: bsl_shared::domain::types::RawDataSource::Configuration,
+                facets: vec![bsl_shared::domain::types::FacetKind::Singleton],
+                kind: Some(bsl_shared::domain::types::MetadataKind::CommonModule),
+                ..Default::default()
+            },
+        ])
+        .expect("load BSP common module fixture types");
+
+    let mut sigs = SignatureIndex::new();
+    sigs.add_config_method(
+        bsl_shared::domain::type_id::TypeId::new("ОбщиеМодули.ОбщегоНазначения"),
+        bsl_shared::domain::signature_index::MethodSignature::new(
+            "ОбщийМодуль".to_string(),
+            Some("ОбщиеМодули.ОбщегоНазначения".to_string()),
+            vec![bsl_shared::domain::types::ParameterInfo {
+                name: "ИмяМодуля".to_string(),
+                type_name: Some("Строка".to_string()),
+                is_optional: false,
+                default_value: None,
+                description: None,
+            }],
+            Some("Неопределено".to_string()),
+            None,
+            None,
+            bsl_shared::domain::signature_index::SignatureSource::Configuration,
+            None,
+            Default::default(),
+        ),
+    );
+    sigs.add_config_method(
+        bsl_shared::domain::type_id::TypeId::new("ОбщиеМодули.УправлениеДоступом"),
+        bsl_shared::domain::signature_index::MethodSignature::new(
+            "ПриЧтенииНаСервере".to_string(),
+            Some("ОбщиеМодули.УправлениеДоступом".to_string()),
+            vec![
+                bsl_shared::domain::types::ParameterInfo {
+                    name: "Форма".to_string(),
+                    type_name: None,
+                    is_optional: true,
+                    default_value: None,
+                    description: None,
+                },
+                bsl_shared::domain::types::ParameterInfo {
+                    name: "ТекущийОбъект".to_string(),
+                    type_name: None,
+                    is_optional: true,
+                    default_value: None,
+                    description: None,
+                },
+            ],
+            None,
+            None,
+            None,
+            bsl_shared::domain::signature_index::SignatureSource::Configuration,
+            None,
+            Default::default(),
+        ),
+    );
+    repository_impl.set_signature_index(sigs.clone());
+
+    let repository = repository_impl.clone() as Arc<dyn TypeRepository>;
+    Arc::new(SemanticDeps {
+        signature_index: sigs,
+        resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
+        repository,
+        platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -2414,6 +2643,7 @@ fn universal_collection_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }
@@ -2435,6 +2665,7 @@ fn array_semantic_deps() -> Arc<SemanticDeps> {
         resolver: Some(Arc::new(TypeResolver::new(repository.clone()))),
         repository,
         platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
     })
 }

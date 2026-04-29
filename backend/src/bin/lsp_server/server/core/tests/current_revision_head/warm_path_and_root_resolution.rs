@@ -387,6 +387,7 @@ async fn p32_foreign_document_skips_config_semantic_diagnostics() {
     *server.config.write().await = Some(crate::config::LspConfig {
         platform_docs_archive: None,
         configuration_path: Some(configured_root.to_string_lossy().to_string()),
+        rules_config: None,
         platform_version: Some("8.3.25".to_string()),
         cache_enabled: Some(true),
         strict_fingerprint: Some(false),

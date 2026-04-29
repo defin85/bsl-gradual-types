@@ -17,6 +17,9 @@ pub struct LspConfig {
     /// Path to Configuration.xml of 1C configuration
     pub configuration_path: Option<String>,
 
+    /// Path to `bsl-rules.toml` semantic rules configuration.
+    pub rules_config: Option<String>,
+
     /// 1C platform version (e.g., "8.3.25")
     /// Reserved for future versioned type loading
     #[allow(dead_code)]

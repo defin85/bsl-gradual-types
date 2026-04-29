@@ -800,7 +800,7 @@ fn is_uri_scheme_char(ch: char) -> bool {
 }
 
 fn is_semantic_rules_file_event(event: &FileEvent, effective_rules_path: Option<&Path>) -> bool {
-    if let Some(event_path) = event.uri.to_file_path().ok() {
+    if let Ok(event_path) = event.uri.to_file_path() {
         if let Some(effective_rules_path) = effective_rules_path {
             if paths_equivalent(&event_path, effective_rules_path) {
                 return true;

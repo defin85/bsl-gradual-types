@@ -155,16 +155,11 @@ pub struct PropertyInfo {
 }
 
 /// Provenance class for a Syntax Helper property page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PropertySourceKind {
+    #[default]
     TypeProperty,
     GlobalContextProperty,
-}
-
-impl Default for PropertySourceKind {
-    fn default() -> Self {
-        Self::TypeProperty
-    }
 }
 
 impl PropertyInfo {

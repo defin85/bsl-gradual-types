@@ -143,6 +143,7 @@ fn detect_cli_syntax_helper_path() -> Option<PathBuf> {
         })
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_cli_file_operation(
     path: &str,
     operation: SemanticOperation,
@@ -173,6 +174,7 @@ pub(crate) async fn prepare_cli_file_operation_with_rules_config(
     .await
 }
 
+#[cfg(test)]
 pub(crate) async fn prepare_cli_text_operation(
     file_text: Arc<str>,
     file_path: Arc<str>,

@@ -27,9 +27,10 @@ use bsl_shared::engine::CliAnalysisResult;
 use bsl_shared::formatting::DetailLevel;
 use bsl_shared::ir::SemanticNodeKind;
 use formatters::CliFormatter;
+#[cfg(test)]
+use runtime::{prepare_cli_file_operation, prepare_cli_text_operation};
 use runtime::{
-    prepare_cli_file_operation, prepare_cli_file_operation_with_rules_config,
-    prepare_cli_text_operation, prepare_cli_text_operation_with_rules_config,
+    prepare_cli_file_operation_with_rules_config, prepare_cli_text_operation_with_rules_config,
     CliPreparedFileOperation,
 };
 

@@ -144,7 +144,7 @@ pub fn load_semantic_rules_config_report(path: Option<&Path>) -> SemanticRulesCo
     match parse_semantic_rules_config_toml_with_identity(
         &content,
         Some(resolved_path.clone()),
-        Some(content_hash),
+        Some(content_hash.clone()),
     ) {
         Ok(config) => SemanticRulesConfigLoadReport {
             config,
@@ -153,6 +153,7 @@ pub fn load_semantic_rules_config_report(path: Option<&Path>) -> SemanticRulesCo
         Err(err) => {
             let mut config = SemanticRulesConfig::default();
             config.identity.resolved_path = Some(resolved_path);
+            config.identity.content_hash = Some(content_hash);
             config.identity.parse_status = SemanticRulesConfigParseStatus::Malformed;
             SemanticRulesConfigLoadReport {
                 config,
@@ -437,13 +438,18 @@ target_mode = "manager"
     #[test]
     fn malformed_rules_config_load_report_uses_default_registry_with_diagnostic() {
         let temp = tempfile::NamedTempFile::new().expect("temp file");
-        std::fs::write(temp.path(), "not = [valid").expect("write malformed rules");
+        let malformed_content = "not = [valid";
+        std::fs::write(temp.path(), malformed_content).expect("write malformed rules");
 
         let report = load_semantic_rules_config_report(Some(temp.path()));
 
         assert_eq!(
             report.config.identity.parse_status,
             SemanticRulesConfigParseStatus::Malformed
+        );
+        assert_eq!(
+            report.config.identity.content_hash.as_deref(),
+            Some(blake3::hash(malformed_content.as_bytes()).to_hex().as_str())
         );
         assert_eq!(report.diagnostics.len(), 1);
         assert!(report

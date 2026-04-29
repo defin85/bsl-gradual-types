@@ -53,3 +53,4 @@
 - [x] 6.4 Fix `bslAnalyzer.configureRules` creation flow so VS Code creates the default rules file directly instead of calling an unimplemented backend `bslAnalyzer.createRulesConfig` command.
 - [x] 6.5 Prove and fix default VS Code/LSP rules-file propagation so watched `bsl-rules.toml`/explicit rules file changes and `rulesConfig` setting changes rebuild semantic deps identity.
 - [x] 6.6 Re-run focused Rust, VS Code, formatting, and OpenSpec validation for the review-closure slice.
+- [x] 6.7 Prove and fix malformed `bsl-rules.toml` identity so read-but-unparseable files preserve content hash and still invalidate semantic deps when their content changes.

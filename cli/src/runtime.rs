@@ -521,7 +521,7 @@ target_mode = "common_module"
             bsl_backend::system::SemanticRulesConfigParseStatus::Malformed
         );
         assert!(config.identity.resolved_path.is_some());
-        assert!(config.identity.content_hash.is_none());
+        assert!(config.identity.content_hash.is_some());
         assert!(config
             .common_module_factories
             .find_rule("ОбщиеМодули.ОбщегоНазначения", "ОбщийМодуль")

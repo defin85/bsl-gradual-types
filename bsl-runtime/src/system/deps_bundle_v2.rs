@@ -419,4 +419,52 @@ mod tests {
             custom_bundle.deps_id.as_str()
         );
     }
+
+    #[test]
+    fn deps_snapshot_id_changes_when_malformed_rules_content_changes() {
+        let coordinator = SystemCoordinator::new();
+        install_domain_bundle(
+            &coordinator,
+            global_context_index_for("Метаданные", "ОбъектМетаданныхКонфигурация"),
+        );
+        let temp = tempfile::NamedTempFile::new().expect("rules file");
+
+        std::fs::write(temp.path(), "not = [valid").expect("initial malformed rules");
+        let first_config = crate::system::load_semantic_rules_config_report(Some(temp.path()));
+        let first_bundle = build_deps_bundle_v2_with_semantic_rules_config(
+            &coordinator,
+            None,
+            None,
+            Some(&first_config.config),
+        )
+        .expect("first malformed bundle");
+
+        std::fs::write(temp.path(), "still = [broken").expect("updated malformed rules");
+        let second_config = crate::system::load_semantic_rules_config_report(Some(temp.path()));
+        let second_bundle = build_deps_bundle_v2_with_semantic_rules_config(
+            &coordinator,
+            None,
+            None,
+            Some(&second_config.config),
+        )
+        .expect("second malformed bundle");
+
+        assert_eq!(
+            first_config.config.identity.parse_status,
+            crate::system::SemanticRulesConfigParseStatus::Malformed
+        );
+        assert_eq!(
+            second_config.config.identity.parse_status,
+            crate::system::SemanticRulesConfigParseStatus::Malformed
+        );
+        assert_ne!(
+            first_config.config.identity.content_hash,
+            second_config.config.identity.content_hash
+        );
+        assert_ne!(
+            first_bundle.deps_id.as_str(),
+            second_bundle.deps_id.as_str(),
+            "malformed rules content changes must still invalidate semantic deps identity"
+        );
+    }
 }

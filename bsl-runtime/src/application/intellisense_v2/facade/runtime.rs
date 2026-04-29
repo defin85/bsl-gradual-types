@@ -191,7 +191,22 @@ impl IntellisenseV2Facade {
 
                 while let Some((queue_priority, cmd)) = if !pending_interactive_commands.is_empty()
                 {
-                    if let Some(command) = promote_interactive_current_revision_apply_command(
+                    let fair_queued_command = if interactive_streak >= INTERACTIVE_BURST_QUOTA {
+                        try_recv_next_writer_command_nonblocking(
+                            &interactive_rx,
+                            &background_rx,
+                            &mut pending_did_save_followup_commands,
+                            &mut pending_background_commands,
+                            &mut interactive_streak,
+                            &mut interactive_closed,
+                            &mut background_closed,
+                        )
+                    } else {
+                        None
+                    };
+                    if let Some(command) = fair_queued_command {
+                        Some(command)
+                    } else if let Some(command) = promote_interactive_current_revision_apply_command(
                         &interactive_rx,
                         &mut pending_interactive_commands,
                     ) {

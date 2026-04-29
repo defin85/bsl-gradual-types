@@ -982,6 +982,71 @@ async fn background_commands_make_progress_under_interactive_flood() {
     runtime.shutdown_for_test().await;
 }
 
+#[tokio::test]
+async fn background_commands_make_progress_with_pending_interactive_and_fresh_lsp_applies() {
+    let _env_lock = lock_test_env().await;
+    let _apply_delay_guard = EnvVarGuard::set("BSL_TEST_RUNTIME_APPLY_SET_FILE_DELAY_MS", "5");
+
+    let runtime = IntellisenseV2Facade::new(
+        AnalysisHostV2::default(),
+        Arc::new(IndexSnapshot::empty(IndexSnapshotId::from_hash("p7"))),
+        None,
+    );
+    let file_a = FileId(215);
+    let file_b = FileId(216);
+
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id: file_a,
+            text: Arc::from("x = 1;"),
+            version: 1,
+            path: Arc::from("interactive_fresh_applies_a.bsl"),
+        }],
+    );
+    runtime.apply_changes_interactive(
+        ObservabilityOrigin::Lsp,
+        vec![Change::SetFile {
+            file_id: file_b,
+            text: Arc::from("y = 1;"),
+            version: 1,
+            path: Arc::from("interactive_fresh_applies_b.bsl"),
+        }],
+    );
+
+    let background_ack = runtime.enqueue_test_noop(RuntimeQueuePriority::Background);
+    let stop = Arc::new(AtomicBool::new(false));
+    let flood_task = tokio::spawn({
+        let runtime = runtime.clone();
+        let stop = stop.clone();
+        async move {
+            let mut version = 2;
+            while !stop.load(Ordering::Relaxed) {
+                runtime.apply_changes_interactive(
+                    ObservabilityOrigin::Lsp,
+                    vec![Change::SetFile {
+                        file_id: file_a,
+                        text: Arc::from(format!("x = {version};")),
+                        version,
+                        path: Arc::from("interactive_fresh_applies_a.bsl"),
+                    }],
+                );
+                version += 1;
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+    });
+
+    timeout(Duration::from_millis(220), background_ack)
+        .await
+        .expect("background command should make progress despite pending interactive backlog and fresh LSP applies")
+        .expect("background noop ack");
+    stop.store(true, Ordering::Relaxed);
+    flood_task.await.expect("flood task join");
+
+    runtime.shutdown_for_test().await;
+}
+
 fn make_deps() -> Arc<SemanticDeps> {
     let repository: Arc<dyn TypeRepository> = Arc::new(InMemoryTypeRepository::new());
     let signature_index = repository.get_signature_index_clone();

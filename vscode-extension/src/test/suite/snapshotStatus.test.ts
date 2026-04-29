@@ -125,6 +125,25 @@ suite('Snapshot Status Test Suite', () => {
         }
     });
 
+    test('shows unavailable immediately while active BSL snapshot hydration is pending', async () => {
+        stubActiveBslEditor('file:///snapshot-status-pending.bsl');
+        sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').returns(
+            new Promise(() => {})
+        );
+
+        const disposable = initializeSnapshotStatus(outputChannelStub, statusBarStub);
+        await flushPromises();
+
+        try {
+            const snapshot = getActiveSnapshotStatusSnapshot();
+            assert.strictEqual(snapshot.kind, 'unavailable');
+            assert.match(statusBarStub.text, /unavailable/i);
+            assert.strictEqual(statusBarStub.show.callCount > 0, true);
+        } finally {
+            disposable.dispose();
+        }
+    });
+
     test('hydrates shadow-only status for active BSL document', async () => {
         stubActiveBslEditor('file:///snapshot-status-shadow.bsl');
         sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({

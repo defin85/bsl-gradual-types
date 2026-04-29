@@ -368,4 +368,66 @@ suite('Client Options Test Suite', () => {
             clock.restore();
         }
     });
+
+    test('default LanguageClient path hydrates missing snapshot status before empty hover retry', async () => {
+        const recorder = new CompletionProbeRecorder({
+            store: new CompletionProbeStore(4),
+        });
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const document = createDocument(12, 'ТаблЗнач1 = Новый ТаблицаЗначений;');
+        const options = buildClientOptions(outputChannel, recorder);
+        const provideHover = options.middleware?.provideHover;
+
+        assert.ok(provideHover, 'default client path must expose provideHover middleware');
+
+        sandbox
+            .stub(snapshotStatusModule, 'getSnapshotStatusForUri')
+            .withArgs(document.uri.toString())
+            .returns(undefined);
+        const refreshStub = sandbox
+            .stub(snapshotStatusModule, 'refreshSnapshotStatusForUri')
+            .withArgs(document.uri.toString())
+            .resolves({
+                schemaVersion: 1,
+                uri: document.uri.toString(),
+                requestedVersion: 12,
+                readyVersion: 12,
+                state: 'ready',
+                exact: true,
+                taskState: 'ready_same_revision',
+                updatedAtMs: 2,
+            });
+        const primeStub = sandbox
+            .stub(customRequestsModule, 'primeExactTypeIndex')
+            .resolves({
+                accepted: true,
+                alreadyReady: false,
+                observedVersion: 12,
+                action: 'promoted',
+            });
+        const next = sandbox.stub();
+        next.onFirstCall().resolves(null);
+        next.onSecondCall().resolves(
+            new vscode.Hover(new vscode.MarkdownString('`ТаблицаЗначений`'))
+        );
+
+        const cancellationSource = new vscode.CancellationTokenSource();
+        try {
+            const hover = await provideHover!(
+                document,
+                new vscode.Position(0, 5),
+                cancellationSource.token,
+                next
+            );
+
+            assert.ok(hover instanceof vscode.Hover, 'hydrated ready snapshot must trigger retry');
+            assert.strictEqual(refreshStub.callCount, 1, 'missing status must be fetched once');
+            assert.strictEqual(next.callCount, 2, 'hover middleware must retry after hydration');
+            assert.strictEqual(primeStub.callCount, 1, 'ready snapshot retry must prime exact index once');
+        } finally {
+            cancellationSource.dispose();
+        }
+    });
 });

@@ -11,7 +11,11 @@ import {
     getSharedCompletionProbeRecorder,
 } from '../../providers/completionProbeRecorder';
 import { primeExactTypeIndex, SnapshotStatusResponse } from '../customRequests';
-import { getSnapshotStatusForUri, onSnapshotStatusChange } from '../snapshotStatus';
+import {
+    getSnapshotStatusForUri,
+    onSnapshotStatusChange,
+    refreshSnapshotStatusForUri,
+} from '../snapshotStatus';
 
 const HOVER_COLD_RETRY_WAIT_MS = 12_000;
 
@@ -142,8 +146,14 @@ async function waitForColdHoverRetrySnapshot(
     token: vscode.CancellationToken
 ): Promise<SnapshotStatusResponse | null> {
     const uri = document.uri.toString();
-    const initialStatus = getSnapshotStatusForUri(uri);
+    let initialStatus = getSnapshotStatusForUri(uri);
+    if (!initialStatus && !token.isCancellationRequested) {
+        initialStatus = await refreshSnapshotStatusForUri(uri);
+    }
     if (!snapshotStatusNeedsColdHoverRetry(initialStatus, document.version)) {
+        if (snapshotStatusReadyForRetry(initialStatus, document.version)) {
+            return initialStatus ?? null;
+        }
         return null;
     }
 

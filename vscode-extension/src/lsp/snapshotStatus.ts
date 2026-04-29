@@ -168,32 +168,38 @@ async function hydrateActiveEditorSnapshotStatus(editor?: vscode.TextEditor): Pr
     activeUri = uri;
     activeUnavailableMessage = null;
 
-    const cached = snapshotStatusCache.get(uri);
-    if (cached) {
-        renderCurrentSnapshotStatus();
-        fireSnapshotStatusChange();
-    }
+    renderCurrentSnapshotStatus();
+    fireSnapshotStatusChange();
+    await refreshSnapshotStatusForUri(uri);
+}
 
+export async function refreshSnapshotStatusForUri(
+    uri: string
+): Promise<SnapshotStatusResponse | undefined> {
     const result = await getSnapshotStatusFetchResult({ uri });
     if (activeUri !== uri) {
-        return;
+        if (result.kind === 'ok') {
+            applySnapshotStatusUpdate(result.response);
+            return result.response;
+        }
+        return undefined;
     }
 
     switch (result.kind) {
         case 'ok':
             applySnapshotStatusUpdate(result.response);
-            return;
+            return result.response;
         case 'unsupported':
             snapshotStatusUnsupported = true;
             activeUnavailableMessage = null;
             renderCurrentSnapshotStatus();
             fireSnapshotStatusChange();
-            return;
+            return undefined;
         case 'error':
             activeUnavailableMessage = result.message;
             renderCurrentSnapshotStatus();
             fireSnapshotStatusChange();
-            return;
+            return undefined;
     }
 }
 

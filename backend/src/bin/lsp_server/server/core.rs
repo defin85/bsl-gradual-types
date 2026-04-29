@@ -38,6 +38,7 @@ use super::{
 mod capability_registration;
 #[path = "core/deps_and_precompute.rs"]
 mod deps_and_precompute;
+pub(crate) use deps_and_precompute::resolve_lsp_rules_config_path;
 pub(crate) use deps_and_precompute::CompletionArtifactPollTraceV2;
 pub(crate) use deps_and_precompute::CompletionArtifactWaitOutcomeV2;
 pub(crate) use deps_and_precompute::ExactTypeIndexWaitOutcomeV2;
@@ -1029,6 +1030,7 @@ impl BslLanguageServer {
             client,
             diagnostics_counts: Arc::new(RwLock::new(HashMap::new())),
             config: Arc::new(RwLock::new(None)),
+            workspace_roots: Arc::new(RwLock::new(Vec::new())),
             settings: Arc::new(RwLock::new(default_settings)),
             completion_snippet_support: Arc::new(RwLock::new(false)),
             auto_reindex_paused: Arc::new(RwLock::new(false)),

@@ -1285,12 +1285,19 @@ impl BslLanguageServer {
     }
 }
 
-fn resolve_lsp_rules_config_path(
+pub(crate) fn resolve_lsp_rules_config_path(
     explicit_rules_config: Option<&str>,
     config_root: Option<&std::path::Path>,
 ) -> Option<PathBuf> {
     if let Some(path) = explicit_rules_config {
-        return Some(PathBuf::from(path));
+        let path = PathBuf::from(path);
+        return Some(if path.is_absolute() {
+            path
+        } else if let Some(config_root) = config_root {
+            config_root.join(path)
+        } else {
+            path
+        });
     }
 
     discover_lsp_bsl_rules_config(config_root)
@@ -1341,5 +1348,20 @@ mod tests {
         );
 
         assert_eq!(resolved.as_deref(), Some(explicit_rules_path.as_path()));
+    }
+
+    #[test]
+    fn lsp_rules_config_resolves_relative_explicit_path_from_config_root() {
+        let temp = TempDir::new().expect("tempdir");
+        let configuration_dir = temp.path().join("src").join("Configuration");
+        fs::create_dir_all(&configuration_dir).expect("configuration dir");
+        let expected = configuration_dir.join("config").join("custom-rules.toml");
+
+        let resolved = resolve_lsp_rules_config_path(
+            Some("config/custom-rules.toml"),
+            Some(&configuration_dir),
+        );
+
+        assert_eq!(resolved.as_deref(), Some(expected.as_path()));
     }
 }

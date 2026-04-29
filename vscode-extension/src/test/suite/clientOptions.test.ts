@@ -63,6 +63,75 @@ suite('Client Options Test Suite', () => {
         assert.strictEqual((options.initializationOptions as any).rulesConfig, configuredPath);
     });
 
+    test('initialization rulesConfig resolves relative configured path from workspace', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const workspaceRoot = path.join('/tmp', 'bsl-project');
+        sandbox.stub(BslAnalyzerConfig, 'rulesConfig').get(() => 'config/custom-rules.toml');
+        sandbox.stub(vscode.workspace, 'workspaceFolders').get(() => [
+            {
+                uri: vscode.Uri.file(workspaceRoot),
+                name: 'bsl-project',
+                index: 0,
+            } as vscode.WorkspaceFolder,
+        ]);
+
+        const options = buildClientOptions(outputChannel);
+
+        assert.strictEqual(
+            (options.initializationOptions as any).rulesConfig,
+            path.join(workspaceRoot, 'config', 'custom-rules.toml')
+        );
+    });
+
+    test('default LanguageClient path watches rules config files', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const watchedPatterns: string[] = [];
+        sandbox.stub(vscode.workspace, 'createFileSystemWatcher').callsFake((pattern: any) => {
+            watchedPatterns.push(String(pattern));
+            return {
+                dispose: sinon.stub(),
+                onDidChange: sinon.stub(),
+                onDidCreate: sinon.stub(),
+                onDidDelete: sinon.stub(),
+            } as unknown as vscode.FileSystemWatcher;
+        });
+
+        buildClientOptions(outputChannel);
+
+        assert.ok(
+            watchedPatterns.includes('**/*bsl-rules.toml'),
+            `default LSP client must watch semantic rules config changes, got ${watchedPatterns.join(', ')}`
+        );
+    });
+
+    test('default LanguageClient path watches explicit relative rulesConfig', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const watchedPatterns: string[] = [];
+        sandbox.stub(BslAnalyzerConfig, 'rulesConfig').get(() => 'config/custom-rules.toml');
+        sandbox.stub(vscode.workspace, 'createFileSystemWatcher').callsFake((pattern: any) => {
+            watchedPatterns.push(String(pattern));
+            return {
+                dispose: sinon.stub(),
+                onDidChange: sinon.stub(),
+                onDidCreate: sinon.stub(),
+                onDidDelete: sinon.stub(),
+            } as unknown as vscode.FileSystemWatcher;
+        });
+
+        buildClientOptions(outputChannel);
+
+        assert.ok(
+            watchedPatterns.includes('config/custom-rules.toml'),
+            `explicit relative rulesConfig must be watched, got ${watchedPatterns.join(', ')}`
+        );
+    });
+
     test('default LanguageClient path wires didChange and completion middleware into probe recorder', async () => {
         const clock = sinon.useFakeTimers({ now: 1_700_000_010_000 });
         const recorder = new CompletionProbeRecorder({

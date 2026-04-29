@@ -6,6 +6,7 @@ impl BslLanguageServer {
         params: InitializeParams,
     ) -> JsonRpcResult<InitializeResult> {
         info!("Initializing BSL Language Server");
+        *self.workspace_roots.write().await = workspace_roots_from_initialize_params(&params);
 
         // DEBUG: Log ClientCapabilities
         debug!(
@@ -494,9 +495,25 @@ impl BslLanguageServer {
     // CONFIGURATION
     // ========================================================================
 
+    pub(super) async fn lsp_did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let effective_rules_path = self.current_effective_rules_config_path().await;
+        if !params
+            .changes
+            .iter()
+            .any(|event| is_semantic_rules_file_event(event, effective_rules_path.as_deref()))
+        {
+            return;
+        }
+
+        self.refresh_semantic_rules_deps_v2("rules_config_watched_file")
+            .await;
+    }
+
     pub(super) async fn lsp_did_change_configuration(&self, params: DidChangeConfigurationParams) {
         info!("Received didChangeConfiguration");
 
+        let mut rules_config_changed = false;
+        let first_workspace_root = self.first_workspace_root().await;
         if let Some(settings_value) = params.settings.as_object() {
             if let Some(bsl_analyzer_value) = settings_value.get("bslAnalyzer") {
                 match serde_json::from_value::<LspConfig>(bsl_analyzer_value.clone()) {
@@ -520,7 +537,14 @@ impl BslLanguageServer {
                             merged.configuration_path = new_config.configuration_path;
                         }
                         if new_config.rules_config.is_some() {
-                            merged.rules_config = new_config.rules_config;
+                            let next_rules_config = new_config.rules_config.map(|path| {
+                                normalize_lsp_rules_config_setting_for_storage(
+                                    path,
+                                    first_workspace_root.as_deref(),
+                                )
+                            });
+                            rules_config_changed = merged.rules_config != next_rules_config;
+                            merged.rules_config = next_rules_config;
                         }
                         if new_config.platform_version.is_some() {
                             merged.platform_version = new_config.platform_version;
@@ -668,10 +692,287 @@ impl BslLanguageServer {
             }
         }
 
+        if rules_config_changed {
+            self.refresh_semantic_rules_deps_v2("rules_config_setting_changed")
+                .await;
+        }
         self.sync_v2_globals().await;
+    }
+
+    async fn refresh_semantic_rules_deps_v2(&self, reason: &'static str) {
+        let (platform_docs_root, config_root) = self.current_dependency_roots_from_config().await;
+        self.deps_update_v2(reason, platform_docs_root, config_root)
+            .await;
+        self.sync_v2_globals().await;
+    }
+
+    async fn current_dependency_roots_from_config(&self) -> (Option<PathBuf>, Option<PathBuf>) {
+        let config = self.config.read().await;
+        let platform_docs_root = config
+            .as_ref()
+            .and_then(|cfg| cfg.platform_docs_archive.as_deref())
+            .map(PathBuf::from);
+        let config_root = config
+            .as_ref()
+            .and_then(|cfg| cfg.configuration_path.as_deref())
+            .map(PathBuf::from);
+        (platform_docs_root, config_root)
+    }
+
+    async fn current_effective_rules_config_path(&self) -> Option<PathBuf> {
+        let config = self.config.read().await;
+        let explicit = config
+            .as_ref()
+            .and_then(|cfg| cfg.rules_config.as_deref())
+            .map(str::trim)
+            .filter(|path| !path.is_empty());
+        let config_root = config
+            .as_ref()
+            .and_then(|cfg| cfg.configuration_path.as_deref())
+            .map(PathBuf::from);
+        resolve_lsp_rules_config_path(explicit, config_root.as_deref())
+    }
+
+    async fn first_workspace_root(&self) -> Option<PathBuf> {
+        self.workspace_roots.read().await.first().cloned()
     }
 
     // ========================================================================
     // FILE MANAGEMENT
     // ========================================================================
+}
+
+fn workspace_roots_from_initialize_params(params: &InitializeParams) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(workspace_folders) = &params.workspace_folders {
+        roots.extend(
+            workspace_folders
+                .iter()
+                .filter_map(|folder| folder.uri.to_file_path().ok()),
+        );
+    }
+    if roots.is_empty() {
+        if let Some(root_uri) = &params.root_uri {
+            if let Ok(path) = root_uri.to_file_path() {
+                roots.push(path);
+            }
+        }
+    }
+    if roots.is_empty() {
+        #[allow(deprecated)]
+        let root_path = params.root_path.as_deref();
+        if let Some(root_path) = root_path {
+            let root_path = root_path.trim();
+            if !root_path.is_empty() {
+                roots.push(PathBuf::from(root_path));
+            }
+        }
+    }
+    roots
+}
+
+fn normalize_lsp_rules_config_setting_for_storage(
+    configured_path: String,
+    workspace_root: Option<&Path>,
+) -> String {
+    let configured_path = configured_path.trim();
+    if configured_path.is_empty() || is_uri_like_path(configured_path) {
+        return configured_path.to_string();
+    }
+
+    let path = PathBuf::from(configured_path);
+    if path.is_absolute() {
+        return configured_path.to_string();
+    }
+
+    workspace_root
+        .map(|root| root.join(path).to_string_lossy().to_string())
+        .unwrap_or_else(|| configured_path.to_string())
+}
+
+fn is_uri_like_path(path: &str) -> bool {
+    path.find(':')
+        .is_some_and(|index| path[..index].chars().all(is_uri_scheme_char))
+}
+
+fn is_uri_scheme_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '+' | '-' | '.')
+}
+
+fn is_semantic_rules_file_event(event: &FileEvent, effective_rules_path: Option<&Path>) -> bool {
+    if let Some(event_path) = event.uri.to_file_path().ok() {
+        if let Some(effective_rules_path) = effective_rules_path {
+            if paths_equivalent(&event_path, effective_rules_path) {
+                return true;
+            }
+        }
+    }
+
+    semantic_rules_file_name(&event.uri)
+        .as_deref()
+        .is_some_and(|name| name == "bsl-rules.toml" || name.ends_with("-bsl-rules.toml"))
+}
+
+fn semantic_rules_file_name(uri: &Url) -> Option<String> {
+    uri.to_file_path().ok().and_then(|path| {
+        path.file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+    })
+}
+
+fn paths_equivalent(left: &Path, right: &Path) -> bool {
+    normalize_path_for_compare(left) == normalize_path_for_compare(right)
+}
+
+fn normalize_path_for_compare(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_backend::system::SystemCoordinator;
+    use std::sync::Arc;
+    use tempfile::TempDir;
+    use tower_lsp::LspService;
+
+    fn create_lsp_test_server() -> BslLanguageServer {
+        let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let server_holder_for_service = server_holder.clone();
+        let (_service, _socket) = LspService::new(|client| {
+            let server = BslLanguageServer::new(client, Arc::new(SystemCoordinator::new()));
+            *server_holder_for_service
+                .lock()
+                .expect("server holder lock") = Some(server.clone());
+            server
+        });
+
+        let server = server_holder
+            .lock()
+            .expect("server holder lock")
+            .clone()
+            .expect("server instance");
+        server
+    }
+
+    fn lsp_config_with_rules_config(rules_path: &std::path::Path) -> LspConfig {
+        LspConfig {
+            platform_docs_archive: None,
+            configuration_path: rules_path
+                .parent()
+                .map(|path| path.to_string_lossy().to_string()),
+            rules_config: Some(rules_path.to_string_lossy().to_string()),
+            platform_version: Some("8.3.25".to_string()),
+            cache_enabled: Some(true),
+            strict_fingerprint: Some(false),
+            enable_type_hints: Some(false),
+            enable_code_actions: Some(false),
+        }
+    }
+
+    #[tokio::test]
+    async fn rules_config_watched_file_change_rebuilds_deps_snapshot_identity() {
+        let temp = TempDir::new().expect("tempdir");
+        let rules_path = temp.path().join("bsl-rules.toml");
+        std::fs::write(
+            &rules_path,
+            "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+        )
+        .expect("initial rules config");
+
+        let server = create_lsp_test_server();
+        *server.config.write().await = Some(lsp_config_with_rules_config(&rules_path));
+        server
+            .deps_update_v2(
+                "test_initial_rules_config",
+                None,
+                Some(temp.path().to_path_buf()),
+            )
+            .await;
+        let before = server
+            .last_deps_id_v2
+            .read()
+            .await
+            .clone()
+            .expect("initial deps id");
+
+        std::fs::write(
+            &rules_path,
+            "[semantic.common_module_factories]\nbuiltin_bsp = true\n",
+        )
+        .expect("updated rules config");
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&rules_path).expect("rules file url"),
+                typ: FileChangeType::CHANGED,
+            }],
+        };
+        server.lsp_did_change_watched_files(params).await;
+
+        let after = server
+            .last_deps_id_v2
+            .read()
+            .await
+            .clone()
+            .expect("updated deps id");
+        assert_ne!(
+            before.as_str(),
+            after.as_str(),
+            "rules file content change must rebuild deps with a new semantic rules identity"
+        );
+    }
+
+    #[tokio::test]
+    async fn relative_rules_config_setting_change_is_stored_as_workspace_path() {
+        let temp = TempDir::new().expect("tempdir");
+        let workspace_root = temp.path();
+        let configuration_dir = workspace_root.join("src").join("Configuration");
+        let rules_path = workspace_root.join("config").join("custom-rules.toml");
+        std::fs::create_dir_all(&configuration_dir).expect("configuration dir");
+        std::fs::create_dir_all(rules_path.parent().expect("rules parent")).expect("rules dir");
+        std::fs::write(
+            &rules_path,
+            "[semantic.common_module_factories]\nbuiltin_bsp = false\n",
+        )
+        .expect("rules config");
+
+        let server = create_lsp_test_server();
+        *server.workspace_roots.write().await = vec![workspace_root.to_path_buf()];
+        *server.config.write().await = Some(LspConfig {
+            platform_docs_archive: None,
+            configuration_path: Some(configuration_dir.to_string_lossy().to_string()),
+            rules_config: None,
+            platform_version: Some("8.3.25".to_string()),
+            cache_enabled: Some(true),
+            strict_fingerprint: Some(false),
+            enable_type_hints: Some(false),
+            enable_code_actions: Some(false),
+        });
+
+        server
+            .lsp_did_change_configuration(DidChangeConfigurationParams {
+                settings: serde_json::json!({
+                    "bslAnalyzer": {
+                        "rulesConfig": "config/custom-rules.toml"
+                    }
+                }),
+            })
+            .await;
+
+        let config = server.config.read().await.clone().expect("server config");
+        assert_eq!(
+            config.rules_config.as_deref(),
+            Some(rules_path.to_string_lossy().as_ref()),
+            "relative VS Code rulesConfig setting must be normalized against workspace root"
+        );
+        assert_eq!(
+            server
+                .current_effective_rules_config_path()
+                .await
+                .as_deref(),
+            Some(rules_path.as_path())
+        );
+    }
 }

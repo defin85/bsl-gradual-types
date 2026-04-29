@@ -51,4 +51,5 @@
 - [x] 6.2 Prove and fix CLI rules loading so discovered or explicit `bsl-rules.toml` uses the runtime loader, preserves resolved path/content hash identity, and fails closed with diagnostics on malformed TOML.
 - [x] 6.3 Prove and fix LSP/VS Code rules discovery so an empty `bslAnalyzer.rulesConfig` resolves to repo-local `bsl-rules.toml`, while an explicit path still overrides the default.
 - [x] 6.4 Fix `bslAnalyzer.configureRules` creation flow so VS Code creates the default rules file directly instead of calling an unimplemented backend `bslAnalyzer.createRulesConfig` command.
-- [x] 6.5 Re-run focused Rust, VS Code, formatting, and OpenSpec validation for the review-closure slice.
+- [x] 6.5 Prove and fix default VS Code/LSP rules-file propagation so watched `bsl-rules.toml`/explicit rules file changes and `rulesConfig` setting changes rebuild semantic deps identity.
+- [x] 6.6 Re-run focused Rust, VS Code, formatting, and OpenSpec validation for the review-closure slice.

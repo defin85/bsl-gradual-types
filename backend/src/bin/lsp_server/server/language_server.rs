@@ -42,6 +42,7 @@ use crate::progress::log_progress_to_file;
 use crate::progress_bridge::{LspWorkDoneReporter, ProgressReporter};
 use crate::types::{GetCurrentContextParams, ServerStatus, ServerStatusParams};
 
+use super::core::resolve_lsp_rules_config_path;
 use super::BslLanguageServer;
 
 #[path = "language_server/helpers.rs"]
@@ -104,6 +105,10 @@ impl LanguageServer for BslLanguageServer {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         self.lsp_did_change_configuration(params).await
+    }
+
+    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        self.lsp_did_change_watched_files(params).await
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {

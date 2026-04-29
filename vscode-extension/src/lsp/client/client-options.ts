@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import {
     LanguageClientOptions,
     RevealOutputChannelOn,
@@ -16,17 +17,69 @@ const HOVER_COLD_RETRY_WAIT_MS = 12_000;
 
 export function resolveRulesConfigForInitialization(): string {
     const configuredPath = BslAnalyzerConfig.rulesConfig.trim();
+    const firstFolder = vscode.workspace.workspaceFolders?.[0];
     if (configuredPath) {
-        return configuredPath;
+        return resolveRulesConfigPath(configuredPath, firstFolder);
     }
 
-    const firstFolder = vscode.workspace.workspaceFolders?.[0];
     if (!firstFolder) {
         return '';
     }
 
     const rulesUri = vscode.Uri.joinPath(firstFolder.uri, 'bsl-rules.toml');
     return rulesUri.scheme === 'file' ? rulesUri.fsPath : rulesUri.toString();
+}
+
+function resolveRulesConfigPath(
+    configuredPath: string,
+    firstFolder: vscode.WorkspaceFolder | undefined
+): string {
+    if (/^[a-z][a-z0-9+.-]*:/i.test(configuredPath)) {
+        const uri = vscode.Uri.parse(configuredPath);
+        return uri.scheme === 'file' ? uri.fsPath : uri.toString();
+    }
+    if (path.isAbsolute(configuredPath)) {
+        return configuredPath;
+    }
+    if (!firstFolder) {
+        return configuredPath;
+    }
+
+    const uri = vscode.Uri.joinPath(firstFolder.uri, configuredPath);
+    return uri.scheme === 'file' ? uri.fsPath : uri.toString();
+}
+
+export function createRulesConfigFileWatchers(): vscode.FileSystemWatcher[] {
+    const watchers = [
+        vscode.workspace.createFileSystemWatcher('**/*bsl-rules.toml')
+    ];
+    const configuredPath = BslAnalyzerConfig.rulesConfig.trim();
+    const explicitPattern = explicitRulesConfigWatcherPattern(configuredPath);
+    if (explicitPattern) {
+        watchers.push(vscode.workspace.createFileSystemWatcher(explicitPattern));
+    }
+
+    return watchers;
+}
+
+function explicitRulesConfigWatcherPattern(
+    configuredPath: string
+): vscode.GlobPattern | undefined {
+    if (!configuredPath) {
+        return undefined;
+    }
+    if (/^[a-z][a-z0-9+.-]*:/i.test(configuredPath)) {
+        const uri = vscode.Uri.parse(configuredPath);
+        if (uri.scheme !== 'file') {
+            return undefined;
+        }
+        return new vscode.RelativePattern(path.dirname(uri.fsPath), path.basename(uri.fsPath));
+    }
+    if (path.isAbsolute(configuredPath)) {
+        return new vscode.RelativePattern(path.dirname(configuredPath), path.basename(configuredPath));
+    }
+
+    return configuredPath;
 }
 
 function hoverHasVisibleContent(result: vscode.Hover | null | undefined): boolean {
@@ -199,7 +252,8 @@ export function buildClientOptions(
             fileEvents: [
                 vscode.workspace.createFileSystemWatcher('**/*.bsl'),
                 vscode.workspace.createFileSystemWatcher('**/*.os'),
-                vscode.workspace.createFileSystemWatcher('**/Configuration.xml')
+                vscode.workspace.createFileSystemWatcher('**/Configuration.xml'),
+                ...createRulesConfigFileWatchers()
             ],
             // MILESTONE 3.6: Синхронизируем ОБЕ секции настроек (bslAnalyzer + bsl)
             configurationSection: ['bslAnalyzer', 'bsl']

@@ -446,7 +446,11 @@ impl BslLanguageServer {
         match result {
             Ok(startup) => {
                 info!("Platform types loaded successfully");
+                let platform_docs_root = startup.inputs.syntax_helper_path.clone();
+                let config_root = startup.inputs.configuration_path.clone();
                 self.apply_deps_bundle_v2("start_with_paths", startup.deps_bundle_v2)
+                    .await;
+                self.deps_update_v2("startup_rules_config", platform_docs_root, config_root)
                     .await;
                 self.sync_v2_globals().await;
                 self.finish_full_index_operation_success(

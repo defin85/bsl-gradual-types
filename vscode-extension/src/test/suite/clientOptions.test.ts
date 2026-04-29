@@ -1,6 +1,8 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
+import { BslAnalyzerConfig } from '../../config/configHelper';
 import { buildClientOptions } from '../../lsp/client/client-options';
 import * as customRequestsModule from '../../lsp/customRequests';
 import type { SnapshotStatusResponse } from '../../lsp/customRequests';
@@ -25,6 +27,40 @@ suite('Client Options Test Suite', () => {
 
     teardown(() => {
         sandbox.restore();
+    });
+
+    test('initialization rulesConfig defaults to workspace bsl-rules.toml', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const workspaceRoot = path.join('/tmp', 'bsl-project');
+        sandbox.stub(BslAnalyzerConfig, 'rulesConfig').get(() => '');
+        sandbox.stub(vscode.workspace, 'workspaceFolders').get(() => [
+            {
+                uri: vscode.Uri.file(workspaceRoot),
+                name: 'bsl-project',
+                index: 0,
+            } as vscode.WorkspaceFolder,
+        ]);
+
+        const options = buildClientOptions(outputChannel);
+
+        assert.strictEqual(
+            (options.initializationOptions as any).rulesConfig,
+            path.join(workspaceRoot, 'bsl-rules.toml')
+        );
+    });
+
+    test('initialization rulesConfig keeps explicit configured path', () => {
+        const outputChannel = {
+            appendLine: sinon.stub(),
+        } as unknown as vscode.OutputChannel;
+        const configuredPath = path.join('/tmp', 'custom-bsl-rules.toml');
+        sandbox.stub(BslAnalyzerConfig, 'rulesConfig').get(() => configuredPath);
+
+        const options = buildClientOptions(outputChannel);
+
+        assert.strictEqual((options.initializationOptions as any).rulesConfig, configuredPath);
     });
 
     test('default LanguageClient path wires didChange and completion middleware into probe recorder', async () => {

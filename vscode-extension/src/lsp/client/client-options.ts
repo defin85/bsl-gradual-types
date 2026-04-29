@@ -14,6 +14,21 @@ import { getSnapshotStatusForUri, onSnapshotStatusChange } from '../snapshotStat
 
 const HOVER_COLD_RETRY_WAIT_MS = 12_000;
 
+export function resolveRulesConfigForInitialization(): string {
+    const configuredPath = BslAnalyzerConfig.rulesConfig.trim();
+    if (configuredPath) {
+        return configuredPath;
+    }
+
+    const firstFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!firstFolder) {
+        return '';
+    }
+
+    const rulesUri = vscode.Uri.joinPath(firstFolder.uri, 'bsl-rules.toml');
+    return rulesUri.scheme === 'file' ? rulesUri.fsPath : rulesUri.toString();
+}
+
 function hoverHasVisibleContent(result: vscode.Hover | null | undefined): boolean {
     if (!result) {
         return false;
@@ -159,7 +174,7 @@ export function buildClientOptions(
     const initializationOptions = {
         platformDocsArchive: BslAnalyzerConfig.platformDocsArchive,
         configurationPath: BslAnalyzerConfig.configurationPath,
-        rulesConfig: BslAnalyzerConfig.rulesConfig,
+        rulesConfig: resolveRulesConfigForInitialization(),
         platformVersion: BslAnalyzerConfig.platformVersion,
         cacheEnabled: BslAnalyzerConfig.cacheEnabled,
         enableTypeHints: typeHintsEnabled,

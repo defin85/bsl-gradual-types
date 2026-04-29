@@ -307,12 +307,12 @@ impl BslLanguageServer {
         let coordinator = self.coordinator.clone();
         let rules_config_path = {
             let config = self.config.read().await;
-            config
+            let explicit = config
                 .as_ref()
                 .and_then(|cfg| cfg.rules_config.as_deref())
                 .map(str::trim)
-                .filter(|path| !path.is_empty())
-                .map(PathBuf::from)
+                .filter(|path| !path.is_empty());
+            resolve_lsp_rules_config_path(explicit, config_root.as_deref())
         };
         let semantic_rules_report = load_semantic_rules_config_report(rules_config_path.as_deref());
         for diagnostic in &semantic_rules_report.diagnostics {
@@ -1282,5 +1282,64 @@ impl BslLanguageServer {
                 );
             }
         }
+    }
+}
+
+fn resolve_lsp_rules_config_path(
+    explicit_rules_config: Option<&str>,
+    config_root: Option<&std::path::Path>,
+) -> Option<PathBuf> {
+    if let Some(path) = explicit_rules_config {
+        return Some(PathBuf::from(path));
+    }
+
+    discover_lsp_bsl_rules_config(config_root)
+}
+
+fn discover_lsp_bsl_rules_config(start: Option<&std::path::Path>) -> Option<PathBuf> {
+    let mut current = start?;
+    loop {
+        let candidate = current.join("bsl-rules.toml");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        current = current.parent()?;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn lsp_rules_config_discovers_repo_local_bsl_rules_from_config_root() {
+        let temp = TempDir::new().expect("tempdir");
+        let configuration_dir = temp.path().join("src").join("Configuration");
+        fs::create_dir_all(&configuration_dir).expect("configuration dir");
+        let rules_path = temp.path().join("bsl-rules.toml");
+        fs::write(&rules_path, "[semantic.common_module_factories]\n").expect("rules file");
+
+        let resolved = resolve_lsp_rules_config_path(None, Some(configuration_dir.as_path()));
+
+        assert_eq!(resolved.as_deref(), Some(rules_path.as_path()));
+    }
+
+    #[test]
+    fn lsp_rules_config_explicit_path_overrides_default() {
+        let temp = TempDir::new().expect("tempdir");
+        let default_rules_path = temp.path().join("bsl-rules.toml");
+        let explicit_rules_path = temp.path().join("custom-bsl-rules.toml");
+        fs::write(&default_rules_path, "[semantic.common_module_factories]\n")
+            .expect("default rules file");
+
+        let resolved = resolve_lsp_rules_config_path(
+            Some(explicit_rules_path.to_string_lossy().as_ref()),
+            Some(temp.path()),
+        );
+
+        assert_eq!(resolved.as_deref(), Some(explicit_rules_path.as_path()));
     }
 }

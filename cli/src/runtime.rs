@@ -11,7 +11,8 @@ use bsl_backend::application::{
 };
 use bsl_backend::system::{
     build_deps_bundle_v2_with_semantic_rules_config, global_runtime_config,
-    parse_semantic_rules_config_toml, RuntimeKey, SemanticRulesConfig, SystemCoordinator,
+    load_semantic_rules_config_report, RuntimeKey, SemanticRulesConfig,
+    SemanticRulesConfigDiagnostic, SystemCoordinator,
 };
 use bsl_shared::domain::types::{ParseError, TypeDiagnostic, TypeResolution};
 use bsl_shared::domain::{TypeMetadataLookup, TypeResolver};
@@ -25,6 +26,7 @@ pub(crate) struct CliPreparedFileOperation {
     pub(crate) resolver: Arc<TypeResolver>,
     pub(crate) _rules_config_path: Option<PathBuf>,
     pub(crate) _rules_config: SemanticRulesConfig,
+    pub(crate) _rules_config_diagnostics: Vec<SemanticRulesConfigDiagnostic>,
     pub(crate) prepared: PreparedOperationSnapshot,
     pub(crate) file_id: V2FileId,
 }
@@ -200,7 +202,7 @@ pub(crate) async fn prepare_cli_text_operation_with_rules_config(
         .start_with_paths(syntax_helper_path.as_deref(), None, None, None)
         .await?;
 
-    let (rules_config_path, rules_config) =
+    let (rules_config_path, rules_config, rules_config_diagnostics) =
         load_cli_rules_config(Path::new(file_path.as_ref()), rules_config_override)?;
 
     let deps_bundle = build_deps_bundle_v2_with_semantic_rules_config(
@@ -295,6 +297,7 @@ pub(crate) async fn prepare_cli_text_operation_with_rules_config(
         resolver,
         _rules_config_path: rules_config_path,
         _rules_config: rules_config,
+        _rules_config_diagnostics: rules_config_diagnostics,
         prepared,
         file_id,
     })
@@ -303,16 +306,20 @@ pub(crate) async fn prepare_cli_text_operation_with_rules_config(
 fn load_cli_rules_config(
     file_path: &Path,
     rules_config_override: Option<&str>,
-) -> anyhow::Result<(Option<PathBuf>, SemanticRulesConfig)> {
+) -> anyhow::Result<(
+    Option<PathBuf>,
+    SemanticRulesConfig,
+    Vec<SemanticRulesConfigDiagnostic>,
+)> {
     let Some(path) = resolve_cli_rules_config_path(file_path, rules_config_override)? else {
-        return Ok((None, SemanticRulesConfig::default()));
+        return Ok((None, SemanticRulesConfig::default(), Vec::new()));
     };
 
-    let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("read CLI rules config {}", path.display()))?;
-    let config = parse_semantic_rules_config_toml(&content)
-        .with_context(|| format!("parse CLI rules config {}", path.display()))?;
-    Ok((Some(path), config))
+    let report = load_semantic_rules_config_report(Some(&path));
+    for diagnostic in &report.diagnostics {
+        eprintln!("warning: {}", diagnostic.message);
+    }
+    Ok((Some(path), report.config, report.diagnostics))
 }
 
 fn resolve_cli_rules_config_path(
@@ -471,13 +478,20 @@ target_mode = "common_module"
         )
         .expect("rules file");
 
-        let (loaded_path, config) = load_cli_rules_config(
+        let (loaded_path, config, diagnostics) = load_cli_rules_config(
             Path::new("inline.bsl"),
             Some(rules_path.to_string_lossy().as_ref()),
         )
         .expect("load rules");
 
         assert_eq!(loaded_path.as_deref(), Some(rules_path.as_path()));
+        assert!(diagnostics.is_empty());
+        assert_eq!(
+            config.identity.parse_status,
+            bsl_backend::system::SemanticRulesConfigParseStatus::Parsed
+        );
+        assert!(config.identity.resolved_path.is_some());
+        assert!(config.identity.content_hash.is_some());
         assert!(config
             .common_module_factories
             .find_rule("ОбщиеМодули.МойПомощник", "ПолучитьМодуль")
@@ -486,5 +500,31 @@ target_mode = "common_module"
             .common_module_factories
             .find_rule("ОбщиеМодули.ОбщегоНазначения", "ОбщийМодуль")
             .is_none());
+    }
+
+    #[test]
+    fn cli_rules_config_malformed_uses_fail_closed_default_registry() {
+        let temp = TempDir::new().expect("tempdir");
+        let rules_path = temp.path().join("broken-rules.toml");
+        fs::write(&rules_path, "not = [valid").expect("rules file");
+
+        let (loaded_path, config, diagnostics) = load_cli_rules_config(
+            Path::new("inline.bsl"),
+            Some(rules_path.to_string_lossy().as_ref()),
+        )
+        .expect("load malformed rules fail-closed");
+
+        assert_eq!(loaded_path.as_deref(), Some(rules_path.as_path()));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(
+            config.identity.parse_status,
+            bsl_backend::system::SemanticRulesConfigParseStatus::Malformed
+        );
+        assert!(config.identity.resolved_path.is_some());
+        assert!(config.identity.content_hash.is_none());
+        assert!(config
+            .common_module_factories
+            .find_rule("ОбщиеМодули.ОбщегоНазначения", "ОбщийМодуль")
+            .is_some());
     }
 }

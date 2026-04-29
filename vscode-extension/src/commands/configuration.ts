@@ -5,7 +5,20 @@ import { getLanguageClient } from '../lsp';
 import { updateStatusBar } from '../lsp/progress';
 import { BslAnalyzerConfig } from '../config/configHelper';
 
-function resolveRulesConfigUri(workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
+export const DEFAULT_RULES_CONFIG_CONTENT = `[semantic.common_module_factories]
+builtin_bsp = true
+
+# Add project-specific helpers with:
+# [[semantic.common_module_factories.rules]]
+# id = "custom-library-module"
+# owner = "CommonModules.MyLibrary"
+# method = "Module"
+# argument_index = 0
+# target_mode = "common_module"
+# enabled = true
+`;
+
+export function resolveRulesConfigUri(workspaceFolder: vscode.WorkspaceFolder): vscode.Uri {
     const configuredPath = BslAnalyzerConfig.rulesConfig.trim();
     if (!configuredPath) {
         return vscode.Uri.joinPath(workspaceFolder.uri, 'bsl-rules.toml');
@@ -57,15 +70,10 @@ export function registerConfigurationCommands(
 
             if (createFile) {
                 try {
-                    const client = getLanguageClient();
-                    if (!client) {
-                        throw new Error('LSP client is not running');
-                    }
-                    await client.sendRequest('workspace/executeCommand', {
-                        command: 'bslAnalyzer.createRulesConfig',
-                        arguments: [rulesFile.toString()]
-                    });
-
+                    await vscode.workspace.fs.writeFile(
+                        rulesFile,
+                        Buffer.from(DEFAULT_RULES_CONFIG_CONTENT, 'utf8')
+                    );
                     const document = await vscode.workspace.openTextDocument(rulesFile);
                     await vscode.window.showTextDocument(document);
                 } catch (error) {

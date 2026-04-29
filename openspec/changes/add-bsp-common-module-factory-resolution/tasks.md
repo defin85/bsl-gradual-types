@@ -44,3 +44,11 @@
 - [x] 5.3 Run targeted backend/runtime tests that cover configuration module indexing.
 - [x] 5.4 Run `cargo fmt --all -- --check`.
 - [x] 5.5 Run `openspec validate add-bsp-common-module-factory-resolution --strict --no-interactive`.
+
+## 6. Finish-to-100 Review Closure
+
+- [x] 6.1 Prove and fix same-id project overrides so `enabled = false` disables the built-in BSP common-module factory rule instead of being shadowed by the earlier built-in entry.
+- [x] 6.2 Prove and fix CLI rules loading so discovered or explicit `bsl-rules.toml` uses the runtime loader, preserves resolved path/content hash identity, and fails closed with diagnostics on malformed TOML.
+- [x] 6.3 Prove and fix LSP/VS Code rules discovery so an empty `bslAnalyzer.rulesConfig` resolves to repo-local `bsl-rules.toml`, while an explicit path still overrides the default.
+- [x] 6.4 Fix `bslAnalyzer.configureRules` creation flow so VS Code creates the default rules file directly instead of calling an unimplemented backend `bslAnalyzer.createRulesConfig` command.
+- [x] 6.5 Re-run focused Rust, VS Code, formatting, and OpenSpec validation for the review-closure slice.

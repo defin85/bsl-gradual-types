@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use bsl_analysis_v2::semantic_rules::{
-    CommonModuleFactoryRegistry, CommonModuleFactoryRule, CommonModuleFactoryTargetMode,
+    normalized_rule_key, CommonModuleFactoryRegistry, CommonModuleFactoryRule,
+    CommonModuleFactoryTargetMode,
 };
 use serde::Deserialize;
 use std::path::Path;
@@ -221,7 +222,13 @@ impl RawRulesConfig {
         if factories.builtin_bsp {
             rules.push(CommonModuleFactoryRule::builtin_bsp_common_module());
         }
-        rules.extend(factories.rules.into_iter().map(Into::into));
+        for rule in factories
+            .rules
+            .into_iter()
+            .map(CommonModuleFactoryRule::from)
+        {
+            apply_common_module_factory_override(&mut rules, rule);
+        }
         let common_module_factories = CommonModuleFactoryRegistry::new(rules);
 
         SemanticRulesConfig {
@@ -233,6 +240,28 @@ impl RawRulesConfig {
             ),
             common_module_factories,
         }
+    }
+}
+
+fn apply_common_module_factory_override(
+    rules: &mut Vec<CommonModuleFactoryRule>,
+    override_rule: CommonModuleFactoryRule,
+) {
+    let override_id = normalized_rule_key(&override_rule.id);
+    if let Some(existing_index) = rules
+        .iter()
+        .position(|rule| normalized_rule_key(&rule.id) == override_id)
+    {
+        if override_rule.enabled {
+            rules[existing_index] = override_rule;
+        } else {
+            rules.remove(existing_index);
+        }
+        return;
+    }
+
+    if override_rule.enabled {
+        rules.push(override_rule);
     }
 }
 
@@ -355,6 +384,35 @@ enabled = true
             custom.target_mode,
             CommonModuleFactoryTargetMode::CommonModule
         );
+    }
+
+    #[test]
+    fn project_rule_can_disable_builtin_by_same_id() {
+        let parsed = parse_semantic_rules_config_toml(
+            r#"
+[semantic.common_module_factories]
+builtin_bsp = true
+
+[[semantic.common_module_factories.rules]]
+id = "bsp-common-purpose-common-module"
+owner = "ОбщиеМодули.ОбщегоНазначения"
+method = "ОбщийМодуль"
+argument_index = 0
+target_mode = "common_module_or_manager"
+enabled = false
+"#,
+        )
+        .expect("parse disabled builtin override");
+
+        assert!(parsed
+            .common_module_factories
+            .find_rule("ОбщиеМодули.ОбщегоНазначения", "ОбщийМодуль")
+            .is_none());
+        assert!(!parsed
+            .common_module_factories
+            .rules()
+            .iter()
+            .any(|rule| rule.id == "bsp-common-purpose-common-module"));
     }
 
     #[test]

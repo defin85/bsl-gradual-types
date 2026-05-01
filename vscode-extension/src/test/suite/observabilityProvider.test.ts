@@ -190,7 +190,7 @@ suite('Observability Provider Test Suite', () => {
         sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
             kind: 'ok',
             response: {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 uri: 'file:///snapshot-observability-test.bsl',
                 requestedVersion: 21,
                 readyVersion: 21,
@@ -200,6 +200,17 @@ suite('Observability Provider Test Suite', () => {
                 phase: 'materializing',
                 trigger: 'did_save',
                 fallbackReason: 'shadow_state_reused',
+                reason: {
+                    code: 'ready',
+                    message: 'Requested revision has canonical snapshot artifacts',
+                },
+                artifacts: {
+                    shadowState: { state: 'ready', version: 21 },
+                    readyParseSnapshot: { state: 'ready', version: 21 },
+                    exactTypeIndex: { state: 'ready', version: 21 },
+                    completionHead: { state: 'missing', version: 21 },
+                },
+                recommendation: 'open_timeline',
                 updatedAtMs: 600,
             },
         });
@@ -210,19 +221,37 @@ suite('Observability Provider Test Suite', () => {
 
         try {
             const items = (provider as any).getSnapshotItems();
-            const labels = items.map((item: any) => item.label);
-            assert.deepStrictEqual(labels.slice(0, 7), [
-                'State: ready (exact)',
-                'Requested revision: 21',
-                'Ready revision: 21',
-                'Task state: ready_same_revision',
-                'Phase: materializing',
-                'Trigger: did_save',
-                'Fallback: shadow_state_reused',
+            assert.deepStrictEqual(items.map((item: any) => item.label), [
+                'Summary',
+                'Why',
+                'Artifacts',
+                'Worker',
+                'Last Failure',
+                'Recent Transitions',
+                'Actions',
             ]);
+
+            const summaryLabels = (provider as any).getSnapshotSummaryItems().map((item: any) => item.label);
+            assert.ok(summaryLabels.includes('State: ready (exact)'));
+            assert.ok(summaryLabels.includes('Requested revision: 21'));
+            assert.ok(summaryLabels.includes('Ready revision: 21'));
+            assert.ok(summaryLabels.includes('Task state: ready_same_revision'));
+
+            const whyLabels = (provider as any).getSnapshotWhyItems().map((item: any) => item.label);
+            assert.ok(whyLabels.includes('Code: ready'));
+            assert.ok(whyLabels.includes('Fallback: shadow_state_reused'));
+            assert.ok(whyLabels.includes('Recommendation: open_timeline'));
+
+            const artifactLabels = (provider as any).getSnapshotArtifactItems().map((item: any) => item.label);
+            assert.ok(artifactLabels.includes('Shadow state: ready | v21'));
+            assert.ok(artifactLabels.includes('Ready parse snapshot: ready | v21'));
+            assert.ok(artifactLabels.includes('Exact type index: ready | v21'));
+            assert.ok(artifactLabels.includes('Completion head: missing | v21'));
+
+            const historyLabels = (provider as any).getSnapshotHistoryItems().map((item: any) => item.label);
             assert.ok(
-                labels.some((label: string) => label.startsWith('Updated: ')),
-                `expected Updated label, got ${labels.join(', ')}`
+                historyLabels.some((label: string) => label.includes('ready requested=21 ready=21')),
+                `expected recent transition label, got ${historyLabels.join(', ')}`
             );
         } finally {
             provider.dispose();

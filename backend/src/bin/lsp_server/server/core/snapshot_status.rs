@@ -1,8 +1,10 @@
 use std::sync::atomic::Ordering;
 
 use bsl_shared::api::dtos::{
-    SnapshotPhaseDto, SnapshotReadinessDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
-    SnapshotTriggerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
+    SnapshotArtifactStateDto, SnapshotArtifactStatusDto, SnapshotArtifactsDto,
+    SnapshotFailureStageDto, SnapshotLastFailureDto, SnapshotPhaseDto, SnapshotReadinessDto,
+    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotStatusReasonDto,
+    SnapshotTaskStateDto, SnapshotTriggerDto, SnapshotWorkerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
 };
 
 use super::super::{
@@ -15,9 +17,13 @@ use crate::server::unix_timestamp_ms;
 #[derive(Debug, Clone, Copy)]
 struct SnapshotTaskObservationV2 {
     state: SnapshotTaskStateDto,
+    target_version: i32,
     phase: Option<SnapshotPhaseDto>,
     trigger: Option<SnapshotTriggerDto>,
+    age_ms: Option<u64>,
 }
+
+const SNAPSHOT_DIAGNOSTIC_TEXT_LIMIT: usize = 160;
 
 fn snapshot_trigger_from_source(
     source: BackgroundParseSnapshotApplyTaskSourceV2,
@@ -68,8 +74,53 @@ fn snapshot_status_eq_for_live_notification(
     right.phase = None;
     left.trigger = None;
     right.trigger = None;
+    if let Some(worker) = left.worker.as_mut() {
+        worker.phase = None;
+        worker.trigger = None;
+        worker.age_ms = None;
+    }
+    if let Some(worker) = right.worker.as_mut() {
+        worker.phase = None;
+        worker.trigger = None;
+        worker.age_ms = None;
+    }
 
     left == right
+}
+
+fn snapshot_duration_ms(started_at: std::time::Instant) -> u64 {
+    let millis = started_at.elapsed().as_millis();
+    u64::try_from(millis).unwrap_or(u64::MAX)
+}
+
+fn bounded_snapshot_detail(value: impl AsRef<str>) -> String {
+    let mut sanitized = value
+        .as_ref()
+        .chars()
+        .map(|ch| if ch.is_control() { ' ' } else { ch })
+        .collect::<String>();
+    sanitized = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if sanitized.chars().count() <= SNAPSHOT_DIAGNOSTIC_TEXT_LIMIT {
+        return sanitized;
+    }
+
+    sanitized
+        .chars()
+        .take(SNAPSHOT_DIAGNOSTIC_TEXT_LIMIT)
+        .collect::<String>()
+}
+
+fn snapshot_artifact(
+    state: SnapshotArtifactStateDto,
+    version: Option<i32>,
+    detail: Option<String>,
+) -> SnapshotArtifactStatusDto {
+    SnapshotArtifactStatusDto {
+        state,
+        version: version.map(i64::from),
+        age_ms: None,
+        detail: detail.map(bounded_snapshot_detail),
+    }
 }
 
 impl BslLanguageServer {
@@ -174,6 +225,12 @@ impl BslLanguageServer {
         let current_text_hash = shadow_state
             .as_ref()
             .map(|state| *blake3::hash(state.text.as_bytes()).as_bytes());
+        let apply_enqueued_at = self
+            .latest_apply_enqueued_at_v2
+            .read()
+            .await
+            .get(&file_id)
+            .copied();
         let task_observation = {
             let tasks = self.background_parse_snapshot_apply_tasks_v2.lock().await;
             tasks.get(&file_id).map(|task| {
@@ -192,8 +249,10 @@ impl BslLanguageServer {
                     } else {
                         SnapshotTaskStateDto::InFlightOtherRevision
                     },
+                    target_version: target.requested_version,
                     phase: snapshot_phase_from_control(task.control.as_ref()),
                     trigger: Some(snapshot_trigger_from_source(target.source)),
+                    age_ms: apply_enqueued_at.map(snapshot_duration_ms),
                 }
             })
         };
@@ -246,7 +305,8 @@ impl BslLanguageServer {
             failed_state
                 .as_ref()
                 .map(|failed_state| failed_state.reason.as_ref().to_string())
-        };
+        }
+        .map(bounded_snapshot_detail);
 
         let (state, exact, task_state, phase, trigger) = if ready_matches_requested {
             (
@@ -342,6 +402,141 @@ impl BslLanguageServer {
             )
         };
 
+        let exact_type_index_ready = self
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_type_index_serve_only_ready(file_id)
+            .ok();
+        let completion_head_ready = self
+            .analysis_v2
+            .snapshot()
+            .await
+            .current_completion_head_ready(file_id)
+            .ok();
+
+        let matching_worker = matches!(
+            task_observation.as_ref().map(|task| task.state),
+            Some(SnapshotTaskStateDto::InFlightSameRevision)
+        );
+        let shadow_artifact = shadow_state.as_ref().map(|shadow| {
+            let artifact_state = if Some(shadow.version) == requested_version {
+                SnapshotArtifactStateDto::Ready
+            } else {
+                SnapshotArtifactStateDto::Stale
+            };
+            snapshot_artifact(artifact_state, Some(shadow.version), None)
+        });
+        let ready_parse_artifact = Some(snapshot_artifact(
+            if ready_matches_requested {
+                SnapshotArtifactStateDto::Ready
+            } else if ready_state.is_some() {
+                SnapshotArtifactStateDto::Stale
+            } else if matching_worker {
+                SnapshotArtifactStateDto::Building
+            } else if failed_state.is_some() {
+                SnapshotArtifactStateDto::Failed
+            } else {
+                SnapshotArtifactStateDto::Missing
+            },
+            ready_version,
+            fallback_reason.clone(),
+        ));
+        let exact_type_index_artifact = Some(snapshot_artifact(
+            if state == SnapshotReadinessStateDto::Ready && exact {
+                SnapshotArtifactStateDto::Ready
+            } else {
+                match exact_type_index_ready {
+                    Some(true) => SnapshotArtifactStateDto::Ready,
+                    Some(false) if matching_worker => SnapshotArtifactStateDto::Building,
+                    Some(false) if failed_state.is_some() => SnapshotArtifactStateDto::Failed,
+                    Some(false) => SnapshotArtifactStateDto::Missing,
+                    None => SnapshotArtifactStateDto::Unknown,
+                }
+            },
+            requested_version,
+            None,
+        ));
+        let completion_head_artifact = Some(snapshot_artifact(
+            match completion_head_ready {
+                Some(true) => SnapshotArtifactStateDto::Ready,
+                Some(false) if matching_worker => SnapshotArtifactStateDto::Building,
+                Some(false) => SnapshotArtifactStateDto::Missing,
+                None => SnapshotArtifactStateDto::Unknown,
+            },
+            requested_version,
+            None,
+        ));
+
+        let reason = Some(match state {
+            SnapshotReadinessStateDto::Ready => SnapshotStatusReasonDto {
+                code: "ready".to_string(),
+                message: "Requested revision has canonical snapshot artifacts".to_string(),
+            },
+            SnapshotReadinessStateDto::Building => SnapshotStatusReasonDto {
+                code: "building".to_string(),
+                message: "A matching snapshot worker is building the requested revision"
+                    .to_string(),
+            },
+            SnapshotReadinessStateDto::ShadowOnly => SnapshotStatusReasonDto {
+                code: if ready_is_stale {
+                    "shadow_only_ready_snapshot_stale"
+                } else {
+                    "shadow_only_exact_missing"
+                }
+                .to_string(),
+                message:
+                    "Only the editor shadow is current; exact snapshot artifacts are not ready"
+                        .to_string(),
+            },
+            SnapshotReadinessStateDto::Stale => SnapshotStatusReasonDto {
+                code: "ready_snapshot_stale".to_string(),
+                message: "The latest ready snapshot is older than the requested revision"
+                    .to_string(),
+            },
+            SnapshotReadinessStateDto::Failed => SnapshotStatusReasonDto {
+                code: "snapshot_build_failed".to_string(),
+                message: "The last matching snapshot build failed".to_string(),
+            },
+            SnapshotReadinessStateDto::Idle => SnapshotStatusReasonDto {
+                code: "idle".to_string(),
+                message: "No matching snapshot worker or ready artifact is active".to_string(),
+            },
+        });
+
+        let worker = task_observation.map(|task| SnapshotWorkerDto {
+            target_version: Some(i64::from(task.target_version)),
+            phase: task.phase,
+            trigger: task.trigger,
+            age_ms: task.age_ms,
+            cancellation_reason: None,
+            superseded_by_version: requested_version
+                .filter(|requested| *requested != task.target_version)
+                .map(i64::from),
+        });
+        let last_failure = failed_state
+            .as_ref()
+            .map(|failed_state| SnapshotLastFailureDto {
+                stage: SnapshotFailureStageDto::SnapshotBuild,
+                reason: bounded_snapshot_detail(failed_state.reason.as_ref()),
+                message: fallback_reason.clone(),
+                requested_version: Some(i64::from(failed_state.requested_version)),
+                occurred_at_ms: None,
+            });
+        let recommendation = match state {
+            SnapshotReadinessStateDto::Ready => None,
+            SnapshotReadinessStateDto::Building => Some(SnapshotRecommendationDto::Wait),
+            SnapshotReadinessStateDto::ShadowOnly => {
+                Some(SnapshotRecommendationDto::PrimeExactIndex)
+            }
+            SnapshotReadinessStateDto::Stale | SnapshotReadinessStateDto::Idle => {
+                Some(SnapshotRecommendationDto::Refresh)
+            }
+            SnapshotReadinessStateDto::Failed => {
+                Some(SnapshotRecommendationDto::ExportIncidentBundle)
+            }
+        };
+
         SnapshotReadinessDto {
             schema_version: SNAPSHOT_READINESS_SCHEMA_VERSION,
             uri,
@@ -357,6 +552,16 @@ impl BslLanguageServer {
             trigger,
             updated_at_ms: 0,
             fallback_reason,
+            reason,
+            artifacts: Some(SnapshotArtifactsDto {
+                shadow_state: shadow_artifact,
+                ready_parse_snapshot: ready_parse_artifact,
+                exact_type_index: exact_type_index_artifact,
+                completion_head: completion_head_artifact,
+            }),
+            worker,
+            last_failure,
+            recommendation,
         }
     }
 }

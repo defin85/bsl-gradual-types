@@ -34,7 +34,7 @@ use bsl_shared::FORM_DATA_SEMANTICS_NOTE;
 use bsl_syntax::ast::{CompilerDirective, Expression, ParseError, Program, Statement};
 
 use crate::ast_to_ir::{
-    is_global_collection, lookup_global_collection,
+    is_global_collection, lookup_global_collection, lookup_global_collection_by_manager_type,
     lookup_legacy_metadata_object_collection_fallback,
 };
 use crate::implicit_bindings::{
@@ -1880,7 +1880,9 @@ impl<'a> TypeInferencer<'a> {
             }
         }
 
-        if let Some(info) = lookup_global_collection(&base_type) {
+        if let Some(info) = lookup_global_collection(&base_type)
+            .or_else(|| lookup_global_collection_by_manager_type(&base_type))
+        {
             // Справочники.Контрагенты -> СправочникМенеджер.Контрагенты
             let manager = format!("{}.{}", info.item_manager_type, property);
             return self.resolver.resolve_expression_sync(&manager);

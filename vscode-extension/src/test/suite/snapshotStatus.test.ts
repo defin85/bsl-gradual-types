@@ -6,9 +6,11 @@ import * as customRequestsModule from '../../lsp/customRequests';
 import {
     formatSnapshotStatusLogLine,
     getActiveSnapshotStatusSnapshot,
+    getSnapshotStatusHistoryForUri,
     handleSnapshotStatusNotification,
     initializeSnapshotStatus,
     resetSnapshotStatusForTests,
+    sanitizeSnapshotDetail,
 } from '../../lsp/snapshotStatus';
 
 async function flushPromises(): Promise<void> {
@@ -97,13 +99,28 @@ suite('Snapshot Status Test Suite', () => {
         sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
             kind: 'ok',
             response: {
-                schemaVersion: 1,
+                schemaVersion: 2,
                 uri: 'file:///snapshot-status-building.bsl',
                 requestedVersion: 9,
                 state: 'building',
                 exact: false,
                 taskState: 'in_flight_same_revision',
                 phase: 'parsing',
+                reason: {
+                    code: 'building',
+                    message: 'A matching snapshot worker is building the requested revision',
+                },
+                worker: {
+                    targetVersion: 9,
+                    phase: 'parsing',
+                    trigger: 'did_change',
+                    ageMs: 42,
+                },
+                artifacts: {
+                    readyParseSnapshot: { state: 'building', version: 9 },
+                    exactTypeIndex: { state: 'building', version: 9 },
+                },
+                recommendation: 'wait',
                 updatedAtMs: 300,
             },
         });
@@ -120,6 +137,8 @@ suite('Snapshot Status Test Suite', () => {
             assert.strictEqual(snapshot.status.state, 'building');
             assert.strictEqual(snapshot.status.phase, 'parsing');
             assert.match(statusBarStub.text, /building v9/i);
+            assert.match(statusBarStub.tooltip, /reason=building/);
+            assert.match(statusBarStub.tooltip, /worker target=v9 phase=parsing/);
         } finally {
             disposable.dispose();
         }
@@ -219,7 +238,8 @@ suite('Snapshot Status Test Suite', () => {
         try {
             const snapshot = getActiveSnapshotStatusSnapshot();
             assert.strictEqual(snapshot.kind, 'unsupported');
-            assert.strictEqual(statusBarStub.hide.callCount > 0, true);
+            assert.match(statusBarStub.text, /unsupported/i);
+            assert.strictEqual(statusBarStub.show.callCount > 0, true);
         } finally {
             disposable.dispose();
         }
@@ -263,6 +283,51 @@ suite('Snapshot Status Test Suite', () => {
             assert.strictEqual(snapshot.status.state, 'ready');
             assert.strictEqual(snapshot.status.updatedAtMs, 500);
             assert.match(statusBarStub.text, /ready v12/i);
+            const history = getSnapshotStatusHistoryForUri('file:///snapshot-status-stale.bsl');
+            assert.strictEqual(history.length, 1);
+            assert.strictEqual(history[0].updatedAtMs, 500);
+        } finally {
+            disposable.dispose();
+        }
+    });
+
+    test('transition history keeps bounded accepted updates', async () => {
+        const uri = 'file:///snapshot-status-history.bsl';
+        stubActiveBslEditor(uri);
+        sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
+            kind: 'ok',
+            response: {
+                schemaVersion: 2,
+                uri,
+                requestedVersion: 1,
+                readyVersion: 1,
+                state: 'ready',
+                exact: true,
+                taskState: 'ready_same_revision',
+                updatedAtMs: 1000,
+            },
+        });
+
+        const disposable = initializeSnapshotStatus(outputChannelStub, statusBarStub);
+        await flushPromises();
+
+        try {
+            for (let index = 0; index < 25; index += 1) {
+                handleSnapshotStatusNotification({
+                    schemaVersion: 2,
+                    uri,
+                    requestedVersion: index + 2,
+                    state: index % 2 === 0 ? 'building' : 'shadow_only',
+                    exact: false,
+                    taskState: 'in_flight_same_revision',
+                    updatedAtMs: 1001 + index,
+                });
+            }
+
+            const history = getSnapshotStatusHistoryForUri(uri);
+            assert.strictEqual(history.length, 20);
+            assert.strictEqual(history[0].updatedAtMs, 1006);
+            assert.strictEqual(history[19].updatedAtMs, 1025);
         } finally {
             disposable.dispose();
         }
@@ -270,7 +335,7 @@ suite('Snapshot Status Test Suite', () => {
 
     test('snapshot status log line includes bounded readiness details', () => {
         const line = formatSnapshotStatusLogLine({
-            schemaVersion: 1,
+            schemaVersion: 2,
             uri: 'file:///snapshot-status-log.bsl',
             requestedVersion: 17,
             readyVersion: 16,
@@ -280,6 +345,25 @@ suite('Snapshot Status Test Suite', () => {
             phase: 'parsing',
             trigger: 'did_change',
             fallbackReason: 'input_edit_conversion_failed',
+            reason: {
+                code: 'shadow_only_exact_missing',
+                message: 'Only the editor shadow is current',
+            },
+            artifacts: {
+                readyParseSnapshot: {
+                    state: 'stale',
+                    version: 16,
+                    detail: 'fallback\nreason\twith whitespace',
+                },
+                exactTypeIndex: { state: 'missing', version: 17 },
+            },
+            lastFailure: {
+                stage: 'snapshot_build',
+                reason: 'build_snapshot_aborted',
+                message: `line1\n${'x'.repeat(220)}`,
+                requestedVersion: 17,
+            },
+            recommendation: 'prime_exact_index',
             updatedAtMs: 777,
         });
 
@@ -290,6 +374,19 @@ suite('Snapshot Status Test Suite', () => {
         assert.ok(line.includes('phase=parsing'));
         assert.ok(line.includes('trigger=did_change'));
         assert.ok(line.includes('fallback=input_edit_conversion_failed'));
+        assert.ok(line.includes('reason=shadow_only_exact_missing'));
+        assert.ok(line.includes('readyParse=stale version=v16 detail=fallback reason with whitespace'));
+        assert.ok(line.includes('lastFailure=snapshot_build'));
+        assert.ok(line.includes('recommendation=prime_exact_index'));
+        assert.ok(!line.includes('\n'));
         assert.ok(line.includes('updatedAtMs=777'));
+    });
+
+    test('sanitizeSnapshotDetail removes control whitespace and caps free text', () => {
+        const sanitized = sanitizeSnapshotDetail(`line1\nline2\t${'x'.repeat(220)}`);
+        assert.ok(sanitized);
+        assert.ok(!sanitized.includes('\n'));
+        assert.ok(!sanitized.includes('\t'));
+        assert.strictEqual(sanitized.length, 160);
     });
 });

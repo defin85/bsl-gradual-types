@@ -99,7 +99,7 @@ export async function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(statusBarItem);
 
         snapshotStatusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-        snapshotStatusBarItem.command = 'bslAnalyzer.refreshObservability';
+        snapshotStatusBarItem.command = 'bslAnalyzer.openSnapshotReadiness';
         snapshotStatusBarItem.hide();
         context.subscriptions.push(snapshotStatusBarItem);
 
@@ -435,6 +435,18 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
             vscode.commands.registerCommand('bslAnalyzer.refreshObservability', () => {
                 outputChannel.appendLine('🔄 Refreshing Observability panel');
                 observabilityProvider.refresh();
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.openSnapshotReadiness', async () => {
+                outputChannel.appendLine('🔎 Opening Snapshot Readiness diagnostics');
+                try {
+                    await vscode.commands.executeCommand('bslAnalyzer.observability.focus');
+                } catch (error) {
+                    outputChannel.appendLine(`⚠️ Failed to focus Observability panel: ${error}`);
+                }
+                observabilityProvider.refresh(false);
             })
         );
 

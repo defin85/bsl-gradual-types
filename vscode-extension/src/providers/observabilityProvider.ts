@@ -3,8 +3,14 @@ import { BslOverviewItem } from './items';
 import { BslAnalyzerConfig } from '../config/configHelper';
 import { getLanguageClient } from '../lsp/client';
 import { getObservabilityMetricsWithRequest } from '../lsp/customRequests';
+import type { SnapshotArtifactStatus, SnapshotStatusResponse } from '../lsp/customRequests';
 import { getServerStatusSnapshot, onServerStatusChange } from '../lsp/serverStatus';
-import { getActiveSnapshotStatusSnapshot, onSnapshotStatusChange } from '../lsp/snapshotStatus';
+import {
+    getActiveSnapshotStatusHistory,
+    getActiveSnapshotStatusSnapshot,
+    onSnapshotStatusChange,
+    sanitizeSnapshotDetail,
+} from '../lsp/snapshotStatus';
 
 type ObservabilitySection =
     | 'obs-status'
@@ -14,7 +20,14 @@ type ObservabilitySection =
     | 'obs-rates'
     | 'obs-counters'
     | 'obs-gauges'
-    | 'obs-actions';
+    | 'obs-actions'
+    | 'obs-snapshot-summary'
+    | 'obs-snapshot-why'
+    | 'obs-snapshot-artifacts'
+    | 'obs-snapshot-worker'
+    | 'obs-snapshot-failure'
+    | 'obs-snapshot-history'
+    | 'obs-snapshot-actions';
 
 type HistogramPoint = {
     p50?: number;
@@ -168,6 +181,20 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
                 return this.getGaugeItems();
             case 'obs-actions':
                 return this.getActionItems();
+            case 'obs-snapshot-summary':
+                return Promise.resolve(this.getSnapshotSummaryItems());
+            case 'obs-snapshot-why':
+                return Promise.resolve(this.getSnapshotWhyItems());
+            case 'obs-snapshot-artifacts':
+                return Promise.resolve(this.getSnapshotArtifactItems());
+            case 'obs-snapshot-worker':
+                return Promise.resolve(this.getSnapshotWorkerItems());
+            case 'obs-snapshot-failure':
+                return Promise.resolve(this.getSnapshotFailureItems());
+            case 'obs-snapshot-history':
+                return Promise.resolve(this.getSnapshotHistoryItems());
+            case 'obs-snapshot-actions':
+                return Promise.resolve(this.getSnapshotActionItems());
             default:
                 return Promise.resolve([]);
         }
@@ -303,58 +330,219 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
                 return [item];
             }
             case 'ok': {
-                const status = snapshot.status;
-                const items = [
-                    new BslOverviewItem(
-                        `State: ${status.state}${status.exact ? ' (exact)' : ''}`,
-                        vscode.TreeItemCollapsibleState.None
-                    ),
-                    new BslOverviewItem(
-                        `Requested revision: ${status.requestedVersion ?? 'n/a'}`,
-                        vscode.TreeItemCollapsibleState.None
-                    ),
-                    new BslOverviewItem(
-                        `Ready revision: ${status.readyVersion ?? 'n/a'}`,
-                        vscode.TreeItemCollapsibleState.None
-                    ),
-                    new BslOverviewItem(
-                        `Task state: ${status.taskState}`,
-                        vscode.TreeItemCollapsibleState.None
-                    ),
+                return [
+                    new BslOverviewItem('Summary', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot-summary'),
+                    new BslOverviewItem('Why', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot-why'),
+                    new BslOverviewItem('Artifacts', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot-artifacts'),
+                    new BslOverviewItem('Worker', vscode.TreeItemCollapsibleState.Collapsed, 'obs-snapshot-worker'),
+                    new BslOverviewItem('Last Failure', vscode.TreeItemCollapsibleState.Collapsed, 'obs-snapshot-failure'),
+                    new BslOverviewItem('Recent Transitions', vscode.TreeItemCollapsibleState.Collapsed, 'obs-snapshot-history'),
+                    new BslOverviewItem('Actions', vscode.TreeItemCollapsibleState.Collapsed, 'obs-snapshot-actions'),
                 ];
-                if (status.phase) {
-                    items.push(
-                        new BslOverviewItem(
-                            `Phase: ${status.phase}`,
-                            vscode.TreeItemCollapsibleState.None
-                        )
-                    );
-                }
-                if (status.trigger) {
-                    items.push(
-                        new BslOverviewItem(
-                            `Trigger: ${status.trigger}`,
-                            vscode.TreeItemCollapsibleState.None
-                        )
-                    );
-                }
-                if (status.fallbackReason) {
-                    items.push(
-                        new BslOverviewItem(
-                            `Fallback: ${status.fallbackReason}`,
-                            vscode.TreeItemCollapsibleState.None
-                        )
-                    );
-                }
-                items.push(
-                    new BslOverviewItem(
-                        `Updated: ${formatRelativeTime(status.updatedAtMs)}`,
-                        vscode.TreeItemCollapsibleState.None
-                    )
-                );
-                return items;
             }
         }
+    }
+
+    private getSnapshotSummaryItems(): BslOverviewItem[] {
+        const status = this.currentSnapshotStatus();
+        if (!status) {
+            return [new BslOverviewItem('Snapshot: unavailable', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        const items = [
+            new BslOverviewItem(
+                `State: ${status.state}${status.exact ? ' (exact)' : ''}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+            new BslOverviewItem(
+                `Requested revision: ${status.requestedVersion ?? 'n/a'}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+            new BslOverviewItem(
+                `Ready revision: ${status.readyVersion ?? 'n/a'}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+            new BslOverviewItem(
+                `Task state: ${status.taskState}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+            new BslOverviewItem(
+                `Schema: v${status.schemaVersion}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+            new BslOverviewItem(
+                `Updated: ${formatRelativeTime(status.updatedAtMs)}`,
+                vscode.TreeItemCollapsibleState.None
+            ),
+        ];
+        return items;
+    }
+
+    private getSnapshotWhyItems(): BslOverviewItem[] {
+        const status = this.currentSnapshotStatus();
+        if (!status) {
+            return [new BslOverviewItem('Why: unavailable', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        const items: BslOverviewItem[] = [];
+        if (status.reason) {
+            items.push(new BslOverviewItem(`Code: ${status.reason.code}`, vscode.TreeItemCollapsibleState.None));
+            const message = sanitizeSnapshotDetail(status.reason.message);
+            if (message) {
+                items.push(new BslOverviewItem(`Message: ${message}`, vscode.TreeItemCollapsibleState.None));
+            }
+        } else {
+            items.push(new BslOverviewItem('Code: unavailable in legacy payload', vscode.TreeItemCollapsibleState.None));
+        }
+        if (status.fallbackReason) {
+            items.push(
+                new BslOverviewItem(
+                    `Fallback: ${sanitizeSnapshotDetail(status.fallbackReason) ?? status.fallbackReason}`,
+                    vscode.TreeItemCollapsibleState.None
+                )
+            );
+        }
+        if (status.recommendation) {
+            items.push(new BslOverviewItem(`Recommendation: ${status.recommendation}`, vscode.TreeItemCollapsibleState.None));
+        }
+        return items;
+    }
+
+    private getSnapshotArtifactItems(): BslOverviewItem[] {
+        const status = this.currentSnapshotStatus();
+        if (!status?.artifacts) {
+            return [new BslOverviewItem('Artifacts: unavailable in legacy payload', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        return [
+            this.snapshotArtifactItem('Shadow state', status.artifacts.shadowState),
+            this.snapshotArtifactItem('Ready parse snapshot', status.artifacts.readyParseSnapshot),
+            this.snapshotArtifactItem('Exact type index', status.artifacts.exactTypeIndex),
+            this.snapshotArtifactItem('Completion head', status.artifacts.completionHead),
+        ];
+    }
+
+    private getSnapshotWorkerItems(): BslOverviewItem[] {
+        const status = this.currentSnapshotStatus();
+        const worker = status?.worker;
+        if (!worker) {
+            return [new BslOverviewItem('Worker: not active', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        const items: BslOverviewItem[] = [];
+        if (typeof worker.targetVersion === 'number') {
+            items.push(new BslOverviewItem(`Target revision: ${worker.targetVersion}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (worker.phase) {
+            items.push(new BslOverviewItem(`Phase: ${worker.phase}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (worker.trigger) {
+            items.push(new BslOverviewItem(`Trigger: ${worker.trigger}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (typeof worker.ageMs === 'number') {
+            items.push(new BslOverviewItem(`Age: ${formatMs(worker.ageMs)}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (worker.cancellationReason) {
+            items.push(
+                new BslOverviewItem(
+                    `Cancellation: ${sanitizeSnapshotDetail(worker.cancellationReason) ?? worker.cancellationReason}`,
+                    vscode.TreeItemCollapsibleState.None
+                )
+            );
+        }
+        if (typeof worker.supersededByVersion === 'number') {
+            items.push(new BslOverviewItem(`Superseded by: ${worker.supersededByVersion}`, vscode.TreeItemCollapsibleState.None));
+        }
+        return items.length > 0
+            ? items
+            : [new BslOverviewItem('Worker: details unavailable', vscode.TreeItemCollapsibleState.None)];
+    }
+
+    private getSnapshotFailureItems(): BslOverviewItem[] {
+        const status = this.currentSnapshotStatus();
+        const failure = status?.lastFailure;
+        if (!failure) {
+            return [new BslOverviewItem('Last failure: none for current revision', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        const items = [
+            new BslOverviewItem(`Stage: ${failure.stage}`, vscode.TreeItemCollapsibleState.None),
+            new BslOverviewItem(`Reason: ${sanitizeSnapshotDetail(failure.reason) ?? failure.reason}`, vscode.TreeItemCollapsibleState.None),
+        ];
+        if (failure.message) {
+            items.push(new BslOverviewItem(`Message: ${sanitizeSnapshotDetail(failure.message) ?? failure.message}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (typeof failure.requestedVersion === 'number') {
+            items.push(new BslOverviewItem(`Requested revision: ${failure.requestedVersion}`, vscode.TreeItemCollapsibleState.None));
+        }
+        if (typeof failure.occurredAtMs === 'number') {
+            items.push(new BslOverviewItem(`Occurred: ${formatRelativeTime(failure.occurredAtMs)}`, vscode.TreeItemCollapsibleState.None));
+        }
+        return items;
+    }
+
+    private getSnapshotHistoryItems(): BslOverviewItem[] {
+        const history = getActiveSnapshotStatusHistory();
+        if (history.length === 0) {
+            return [new BslOverviewItem('Recent transitions: none', vscode.TreeItemCollapsibleState.None)];
+        }
+
+        return history
+            .slice()
+            .reverse()
+            .map((status) => {
+                const label = `${formatRelativeTime(status.updatedAtMs)}: ${status.state} requested=${status.requestedVersion ?? 'n/a'} ready=${status.readyVersion ?? 'n/a'}`;
+                return new BslOverviewItem(label, vscode.TreeItemCollapsibleState.None);
+            });
+    }
+
+    private getSnapshotActionItems(): BslOverviewItem[] {
+        const refreshItem = new BslOverviewItem('Refresh Snapshot Status', vscode.TreeItemCollapsibleState.None);
+        refreshItem.command = {
+            command: 'bslAnalyzer.refreshObservability',
+            title: 'Refresh Snapshot Status',
+        };
+        refreshItem.iconPath = new vscode.ThemeIcon('refresh');
+
+        const timelineItem = new BslOverviewItem('Open Completion Timeline', vscode.TreeItemCollapsibleState.None);
+        timelineItem.command = {
+            command: 'bslAnalyzer.refreshCompletionTimeline',
+            title: 'Open Completion Timeline',
+        };
+        timelineItem.iconPath = new vscode.ThemeIcon('timeline-view-icon');
+
+        const exportItem = new BslOverviewItem('Export Incident Bundle', vscode.TreeItemCollapsibleState.None);
+        exportItem.command = {
+            command: 'bslAnalyzer.exportObservabilityIncidentBundle',
+            title: 'Export Observability Incident Bundle',
+        };
+        exportItem.iconPath = new vscode.ThemeIcon('export');
+
+        return [refreshItem, timelineItem, exportItem];
+    }
+
+    private currentSnapshotStatus(): SnapshotStatusResponse | undefined {
+        const snapshot = getActiveSnapshotStatusSnapshot();
+        return snapshot.kind === 'ok' ? snapshot.status : undefined;
+    }
+
+    private snapshotArtifactItem(label: string, artifact: SnapshotArtifactStatus | undefined): BslOverviewItem {
+        if (!artifact) {
+            return new BslOverviewItem(`${label}: unknown`, vscode.TreeItemCollapsibleState.None);
+        }
+
+        const parts = [`${label}: ${artifact.state}`];
+        if (typeof artifact.version === 'number') {
+            parts.push(`v${artifact.version}`);
+        }
+        if (typeof artifact.ageMs === 'number') {
+            parts.push(`age=${formatMs(artifact.ageMs)}`);
+        }
+        const detail = sanitizeSnapshotDetail(artifact.detail);
+        if (detail) {
+            parts.push(detail);
+        }
+        return new BslOverviewItem(parts.join(' | '), vscode.TreeItemCollapsibleState.None);
     }
 
     private async getLatencyItems(): Promise<BslOverviewItem[]> {

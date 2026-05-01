@@ -769,6 +769,11 @@ mod tests {
             trigger: fixture.trigger,
             updated_at_ms: fixture.updated_at_ms,
             fallback_reason: fixture.fallback_reason.map(str::to_string),
+            reason: None,
+            artifacts: None,
+            worker: None,
+            last_failure: None,
+            recommendation: None,
         }
     }
 

@@ -3155,20 +3155,13 @@ impl BslLanguageServer {
                             prepare_apply_age_at_start,
                             exact_wait_budget,
                         );
-                    // Aged non-member shadow-current-revision requests already have truthful
-                    // current-revision shadow text plus support-bundle state. Once the immediate
-                    // window closes, first response must stay bounded on the lightweight/no-IR
-                    // path instead of synchronously reacquiring a fresh snapshot just to recheck
-                    // exact readiness before terminal decision.
-                    let use_non_member_shadow_lightweight_fallback = !member_access_request
-                        && prepared.kind == "shadow_current_revision_fast_path"
-                        && !allow_shadow_current_revision_empty_success
-                        && !exact_ready_before_wait
-                        && !exact_hit_candidate;
+                    // Non-member completion owns cursor-local candidates such as local variables
+                    // through the v2 IR scope chain. After the immediate empty-success window,
+                    // shadow-current-revision requests must reacquire/query IR instead of using
+                    // the no-IR support-bundle fallback, otherwise local symbols disappear.
                     let use_lightweight_query_bundle = (head_route_candidate
                         && !exact_hit_candidate)
-                        || allow_shadow_current_revision_empty_success
-                        || use_non_member_shadow_lightweight_fallback;
+                        || allow_shadow_current_revision_empty_success;
 
                     set_current_request_completion_phase("query_bundle");
                     let query_bundle_started = Instant::now();

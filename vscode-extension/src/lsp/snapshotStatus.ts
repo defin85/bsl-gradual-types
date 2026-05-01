@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 
 import {
     getSnapshotStatusFetchResult,
-    SnapshotStatusResponse,
 } from './customRequests';
+import type { SnapshotArtifactStatus, SnapshotStatusResponse } from './customRequests';
 
 type ActiveSnapshotStatusView =
     | { kind: 'inactive' }
@@ -17,9 +17,13 @@ let activeUri: string | null = null;
 let snapshotStatusUnsupported = false;
 let activeUnavailableMessage: string | null = null;
 const snapshotStatusCache = new Map<string, SnapshotStatusResponse>();
+const snapshotStatusHistory = new Map<string, SnapshotStatusResponse[]>();
 const statusListeners = new Set<() => void>();
 const subscriptions: vscode.Disposable[] = [];
 let initialized = false;
+
+const SNAPSHOT_TRANSITION_HISTORY_LIMIT = 20;
+const SNAPSHOT_TEXT_DETAIL_LIMIT = 160;
 
 function isBslEditor(
     editor: vscode.TextEditor | undefined
@@ -35,6 +39,108 @@ function fireSnapshotStatusChange(): void {
 
 function formatRevision(value: number | undefined): string {
     return typeof value === 'number' ? `v${value}` : 'n/a';
+}
+
+export function sanitizeSnapshotDetail(value: string | undefined): string | undefined {
+    if (!value) {
+        return undefined;
+    }
+
+    const compact = value.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (compact.length <= SNAPSHOT_TEXT_DETAIL_LIMIT) {
+        return compact;
+    }
+
+    return compact.slice(0, SNAPSHOT_TEXT_DETAIL_LIMIT);
+}
+
+function formatArtifactStatus(name: string, artifact: SnapshotArtifactStatus | undefined): string | undefined {
+    if (!artifact || typeof artifact !== 'object') {
+        return undefined;
+    }
+
+    const parts = [`${name}=${artifact.state}`];
+    if (typeof artifact.version === 'number') {
+        parts.push(`version=${formatRevision(artifact.version)}`);
+    }
+    const detail = sanitizeSnapshotDetail(artifact.detail);
+    if (detail) {
+        parts.push(`detail=${detail}`);
+    }
+    return parts.join(' ');
+}
+
+function pushSnapshotStatusHistory(cacheKey: string, status: SnapshotStatusResponse): void {
+    const history = snapshotStatusHistory.get(cacheKey) ?? [];
+    const last = history[history.length - 1];
+    if (
+        last
+        && last.updatedAtMs === status.updatedAtMs
+        && last.state === status.state
+        && last.taskState === status.taskState
+    ) {
+        return;
+    }
+
+    history.push(status);
+    if (history.length > SNAPSHOT_TRANSITION_HISTORY_LIMIT) {
+        history.splice(0, history.length - SNAPSHOT_TRANSITION_HISTORY_LIMIT);
+    }
+    snapshotStatusHistory.set(cacheKey, history);
+}
+
+function buildSnapshotDiagnosticLines(status: SnapshotStatusResponse): string[] {
+    const lines: string[] = [];
+    if (status.reason) {
+        lines.push(`reason=${sanitizeSnapshotDetail(status.reason.code) ?? status.reason.code}`);
+        const message = sanitizeSnapshotDetail(status.reason.message);
+        if (message) {
+            lines.push(`reasonMessage=${message}`);
+        }
+    }
+    if (status.worker) {
+        const workerParts = ['worker'];
+        if (typeof status.worker.targetVersion === 'number') {
+            workerParts.push(`target=${formatRevision(status.worker.targetVersion)}`);
+        }
+        if (status.worker.phase) {
+            workerParts.push(`phase=${status.worker.phase}`);
+        }
+        if (status.worker.trigger) {
+            workerParts.push(`trigger=${status.worker.trigger}`);
+        }
+        if (typeof status.worker.ageMs === 'number') {
+            workerParts.push(`ageMs=${status.worker.ageMs}`);
+        }
+        lines.push(workerParts.join(' '));
+    }
+    if (status.artifacts) {
+        const artifacts = [
+            formatArtifactStatus('shadow', status.artifacts.shadowState),
+            formatArtifactStatus('readyParse', status.artifacts.readyParseSnapshot),
+            formatArtifactStatus('exactIndex', status.artifacts.exactTypeIndex),
+            formatArtifactStatus('completionHead', status.artifacts.completionHead),
+        ].filter((value): value is string => !!value);
+        lines.push(...artifacts);
+    }
+    if (status.lastFailure) {
+        const failureParts = [
+            `lastFailure=${status.lastFailure.stage}`,
+            `reason=${sanitizeSnapshotDetail(status.lastFailure.reason) ?? 'unknown'}`,
+        ];
+        if (typeof status.lastFailure.requestedVersion === 'number') {
+            failureParts.push(`requested=${formatRevision(status.lastFailure.requestedVersion)}`);
+        }
+        const message = sanitizeSnapshotDetail(status.lastFailure.message);
+        if (message) {
+            failureParts.push(`message=${message}`);
+        }
+        lines.push(failureParts.join(' '));
+    }
+    if (status.recommendation) {
+        lines.push(`recommendation=${status.recommendation}`);
+    }
+    return lines;
 }
 
 export function formatSnapshotStatusLogLine(status: SnapshotStatusResponse): string {
@@ -54,8 +160,9 @@ export function formatSnapshotStatusLogLine(status: SnapshotStatusResponse): str
         parts.push(`trigger=${status.trigger}`);
     }
     if (status.fallbackReason) {
-        parts.push(`fallback=${status.fallbackReason}`);
+        parts.push(`fallback=${sanitizeSnapshotDetail(status.fallbackReason) ?? status.fallbackReason}`);
     }
+    parts.push(...buildSnapshotDiagnosticLines(status));
 
     parts.push(`updatedAtMs=${status.updatedAtMs}`);
     return parts.join(' ');
@@ -80,8 +187,9 @@ function renderStatusBar(status: SnapshotStatusResponse): void {
         detailLines.push(`trigger=${status.trigger}`);
     }
     if (status.fallbackReason) {
-        detailLines.push(`fallback=${status.fallbackReason}`);
+        detailLines.push(`fallback=${sanitizeSnapshotDetail(status.fallbackReason) ?? status.fallbackReason}`);
     }
+    detailLines.push(...buildSnapshotDiagnosticLines(status));
 
     switch (status.state) {
         case 'building':
@@ -121,8 +229,12 @@ function renderCurrentSnapshotStatus(): void {
     const snapshot = getActiveSnapshotStatusSnapshot();
     switch (snapshot.kind) {
         case 'inactive':
-        case 'unsupported':
             statusBarItem.hide();
+            break;
+        case 'unsupported':
+            statusBarItem.text = '$(warning) BSL Snap: unsupported';
+            statusBarItem.tooltip = 'Live snapshot readiness\nunsupported by current server';
+            statusBarItem.show();
             break;
         case 'unavailable':
             statusBarItem.text = '$(warning) BSL Snap: unavailable';
@@ -149,6 +261,7 @@ function applySnapshotStatusUpdate(status: SnapshotStatusResponse): void {
     snapshotStatusUnsupported = false;
     activeUnavailableMessage = null;
     snapshotStatusCache.set(cacheKey, status);
+    pushSnapshotStatusHistory(cacheKey, status);
     if (activeUri === cacheKey) {
         renderCurrentSnapshotStatus();
     }
@@ -209,6 +322,7 @@ export function initializeSnapshotStatus(
 ): vscode.Disposable {
     outputChannel = channel;
     statusBarItem = statusBar;
+    statusBarItem.command = 'bslAnalyzer.openSnapshotReadiness';
 
     if (!initialized) {
         initialized = true;
@@ -218,7 +332,10 @@ export function initializeSnapshotStatus(
             }),
             vscode.workspace.onDidCloseTextDocument((document) => {
                 if (activeUri === document.uri.toString()) {
+                    activeUri = null;
                     activeUnavailableMessage = null;
+                    snapshotStatusHistory.delete(document.uri.toString());
+                    snapshotStatusCache.delete(document.uri.toString());
                     renderCurrentSnapshotStatus();
                     fireSnapshotStatusChange();
                 }
@@ -235,6 +352,11 @@ export function initializeSnapshotStatus(
         initialized = false;
         outputChannel = undefined;
         statusBarItem = undefined;
+        activeUri = null;
+        snapshotStatusUnsupported = false;
+        activeUnavailableMessage = null;
+        snapshotStatusCache.clear();
+        snapshotStatusHistory.clear();
     });
 }
 
@@ -275,6 +397,14 @@ export function getSnapshotStatusForUri(uri: string): SnapshotStatusResponse | u
     return snapshotStatusCache.get(uri);
 }
 
+export function getSnapshotStatusHistoryForUri(uri: string): SnapshotStatusResponse[] {
+    return [...(snapshotStatusHistory.get(uri) ?? [])];
+}
+
+export function getActiveSnapshotStatusHistory(): SnapshotStatusResponse[] {
+    return activeUri ? getSnapshotStatusHistoryForUri(activeUri) : [];
+}
+
 export function resetSnapshotStatusForTests(): void {
     for (const disposable of subscriptions.splice(0, subscriptions.length)) {
         disposable.dispose();
@@ -285,6 +415,7 @@ export function resetSnapshotStatusForTests(): void {
     snapshotStatusUnsupported = false;
     activeUnavailableMessage = null;
     snapshotStatusCache.clear();
+    snapshotStatusHistory.clear();
     statusListeners.clear();
     initialized = false;
 }

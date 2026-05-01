@@ -928,6 +928,88 @@ async fn p7_type_index_precompute_slot_coalesces_rapid_versions_without_respawn_
 }
 
 #[tokio::test]
+async fn p7_non_member_completion_keeps_local_variables_when_exact_index_not_ready() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура Тест()\n\
+    ТаблЗнач = Новый ТаблицаЗначений;\n\
+    Целевой = ТаблЗна\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_non_member_local_variable_completion.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, Instant::now() - Duration::from_secs(1));
+
+    let completion_position = find_utf16_position_after_marker(fixture, "Целевой = ТаблЗна");
+    let completion_items = lsp_completion_items_with_request(
+        &mut service,
+        12002,
+        &uri,
+        completion_position,
+        Some(CompletionContext {
+            trigger_kind: CompletionTriggerKind::INVOKED,
+            trigger_character: None,
+        }),
+    )
+    .await;
+    let timeline = lsp_get_completion_timeline(&mut service, 12003, 10).await;
+    assert!(
+        completion_items.iter().any(|item| {
+            item.label == "ТаблЗнач" && item.kind == Some(CompletionItemKind::VARIABLE)
+        }),
+        "non-member completion must keep local variable candidates when exact index is not ready, items={completion_items:?}, timeline={timeline:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
 async fn p7_waiting_completion_promotes_matching_type_index_precompute_to_interactive() {
     const FIXTURE: &str = "Процедура Тест()\n    S = Новый Структура;\n    S.Вставить(\"Количество\", 10);\n    ДляCompletion = S.\nКонецПроцедуры\n";
 

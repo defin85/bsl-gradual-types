@@ -88,9 +88,7 @@ impl SessionManager {
         let path = if path.is_absolute() {
             path
         } else {
-            default_root
-                .map(|root| root.join(&path))
-                .unwrap_or(path)
+            default_root.map(|root| root.join(&path)).unwrap_or(path)
         };
         Some(std::fs::canonicalize(&path).unwrap_or(path))
     }
@@ -425,7 +423,8 @@ impl SessionManager {
             }
         }
         tracked.sort_by(|left, right| {
-            (left.path.as_str(), left.root_id.as_str()).cmp(&(right.path.as_str(), right.root_id.as_str()))
+            (left.path.as_str(), left.root_id.as_str())
+                .cmp(&(right.path.as_str(), right.root_id.as_str()))
         });
 
         let updated_at_ms = session
@@ -459,6 +458,11 @@ impl SessionManager {
                     }),
                     updated_at_ms,
                     fallback_reason: None,
+                    reason: None,
+                    artifacts: None,
+                    worker: None,
+                    last_failure: None,
+                    recommendation: None,
                 }
             })
             .collect();

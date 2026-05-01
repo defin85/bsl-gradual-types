@@ -205,7 +205,14 @@ async fn detached_ready_artifact_does_not_weaken_hover_fail_closed_gate() {
                 text_hash,
                 save_cycle_sequence: 1,
                 text: text.clone(),
-                parse_snapshot: parse_snapshot_for_test(file_id, 1, text.as_ref(), Vec::new(), true, None),
+                parse_snapshot: parse_snapshot_for_test(
+                    file_id,
+                    1,
+                    text.as_ref(),
+                    Vec::new(),
+                    true,
+                    None,
+                ),
                 syntax_errors_complete: true,
             },
         );
@@ -275,6 +282,26 @@ async fn snapshot_status_request_reports_exact_ready_for_matching_snapshot() {
     assert_eq!(status.state, SnapshotReadinessStateDto::Ready);
     assert!(status.exact, "matching ready snapshot must be exact");
     assert_eq!(status.task_state, SnapshotTaskStateDto::ReadySameRevision);
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code.as_str()),
+        Some("ready")
+    );
+    let artifacts = status.artifacts.as_ref().expect("schema v2 artifacts");
+    assert_eq!(
+        artifacts
+            .ready_parse_snapshot
+            .as_ref()
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Ready)
+    );
+    assert_eq!(
+        artifacts
+            .exact_type_index
+            .as_ref()
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Ready)
+    );
+    assert_eq!(status.recommendation, None);
     assert!(status.updated_at_ms > 0);
 
     harness.shutdown().await;
@@ -305,6 +332,11 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
             text: text.clone(),
         },
     );
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, std::time::Instant::now());
     server
         .background_parse_snapshot_apply_tasks_v2
         .lock()
@@ -347,6 +379,22 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
         SnapshotTaskStateDto::InFlightSameRevision
     );
     assert_eq!(status.phase, Some(SnapshotPhaseDto::Parsing));
+    let worker = status.worker.as_ref().expect("schema v2 worker");
+    assert_eq!(worker.target_version, Some(3));
+    assert_eq!(worker.phase, Some(SnapshotPhaseDto::Parsing));
+    assert!(
+        worker.age_ms.is_some(),
+        "worker age should be populated from enqueue time"
+    );
+    assert_eq!(
+        status
+            .artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.ready_parse_snapshot.as_ref())
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Building)
+    );
+    assert_eq!(status.recommendation, Some(SnapshotRecommendationDto::Wait));
 
     harness.shutdown().await;
 }
@@ -443,8 +491,7 @@ async fn snapshot_status_updated_at_is_monotonic_across_building_to_ready_transi
             text: text.clone(),
         },
     );
-    let waiting_control =
-        Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    let waiting_control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
     waiting_control.phase.store(
         crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting as u8,
         Ordering::SeqCst,
@@ -525,7 +572,7 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
         .latest_received_file_versions_v2
         .write()
         .await
-        .insert(file_id, 21);
+        .insert(file_id, 22);
     server.latest_document_shadow_state_v2.write().await.insert(
         file_id,
         DocumentShadowStateV2 {
@@ -598,7 +645,7 @@ async fn snapshot_status_live_notifications_coalesce_phase_only_building_transit
         file_id,
         ReadyParseSnapshotStateV2 {
             text: text.clone(),
-            parse_snapshot: parse_snapshot_for_test(file_id, 21, text.as_ref(), vec![], true, None),
+            parse_snapshot: parse_snapshot_for_test(file_id, 22, text.as_ref(), vec![], true, None),
             source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
             syntax_errors_complete: true,
             phase_attribution: crate::server::ReadyParseSnapshotPhaseAttributionV2::default(),
@@ -640,6 +687,30 @@ async fn snapshot_status_request_reports_shadow_only_when_only_shadow_state_is_c
     assert_eq!(status.task_state, SnapshotTaskStateDto::Absent);
     assert_eq!(status.requested_version, Some(5));
     assert_eq!(status.ready_version, None);
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code.as_str()),
+        Some("shadow_only_exact_missing")
+    );
+    assert_eq!(
+        status
+            .artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.shadow_state.as_ref())
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Ready)
+    );
+    assert_eq!(
+        status
+            .artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.exact_type_index.as_ref())
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Missing)
+    );
+    assert_eq!(
+        status.recommendation,
+        Some(SnapshotRecommendationDto::PrimeExactIndex)
+    );
 
     harness.shutdown().await;
 }
@@ -673,6 +744,53 @@ async fn snapshot_status_request_reports_failed_when_last_build_aborted() {
         status.fallback_reason.as_deref(),
         Some("build_snapshot_aborted")
     );
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code.as_str()),
+        Some("snapshot_build_failed")
+    );
+    let failure = status
+        .last_failure
+        .as_ref()
+        .expect("schema v2 last failure");
+    assert_eq!(failure.stage, SnapshotFailureStageDto::SnapshotBuild);
+    assert_eq!(failure.reason, "build_snapshot_aborted");
+    assert_eq!(failure.requested_version, Some(17));
+    assert_eq!(
+        status
+            .artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.ready_parse_snapshot.as_ref())
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Failed)
+    );
+    assert_eq!(
+        status.recommendation,
+        Some(SnapshotRecommendationDto::ExportIncidentBundle)
+    );
 
     harness.shutdown().await;
+}
+
+#[test]
+fn snapshot_status_legacy_v1_payload_deserializes_without_diagnostics() {
+    let status: SnapshotReadinessDto = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 1,
+        "uri": "file:///legacy-v1-snapshot-status.bsl",
+        "requestedVersion": 7,
+        "readyVersion": 6,
+        "state": "stale",
+        "exact": false,
+        "taskState": "ready_stale_revision",
+        "updatedAtMs": 100
+    }))
+    .expect("legacy v1 snapshot readiness payload");
+
+    assert_eq!(status.schema_version, 1);
+    assert_eq!(status.state, SnapshotReadinessStateDto::Stale);
+    assert_eq!(status.requested_version, Some(7));
+    assert!(status.reason.is_none());
+    assert!(status.artifacts.is_none());
+    assert!(status.worker.is_none());
+    assert!(status.last_failure.is_none());
+    assert!(status.recommendation.is_none());
 }

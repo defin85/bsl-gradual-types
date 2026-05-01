@@ -161,7 +161,7 @@ pub struct SnapshotMetaDto {
     pub inputs: SnapshotInputsDto,
 }
 
-pub const SNAPSHOT_READINESS_SCHEMA_VERSION: u32 = 1;
+pub const SNAPSHOT_READINESS_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -277,6 +277,99 @@ impl fmt::Display for SnapshotTriggerDto {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotArtifactStateDto {
+    Unknown,
+    Missing,
+    Building,
+    Ready,
+    Stale,
+    Failed,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotFailureStageDto {
+    SnapshotBuild,
+    ReadyParseSnapshot,
+    ExactTypeIndex,
+    CompletionHead,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotRecommendationDto {
+    Wait,
+    Refresh,
+    PrimeExactIndex,
+    OpenTimeline,
+    ExportIncidentBundle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotStatusReasonDto {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotArtifactStatusDto {
+    pub state: SnapshotArtifactStateDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotArtifactsDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shadow_state: Option<SnapshotArtifactStatusDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready_parse_snapshot: Option<SnapshotArtifactStatusDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exact_type_index: Option<SnapshotArtifactStatusDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_head: Option<SnapshotArtifactStatusDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotWorkerDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub phase: Option<SnapshotPhaseDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger: Option<SnapshotTriggerDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cancellation_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub superseded_by_version: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SnapshotLastFailureDto {
+    pub stage: SnapshotFailureStageDto,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_version: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotReadinessDto {
@@ -303,6 +396,16 @@ pub struct SnapshotReadinessDto {
     pub updated_at_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<SnapshotStatusReasonDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifacts: Option<SnapshotArtifactsDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worker: Option<SnapshotWorkerDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_failure: Option<SnapshotLastFailureDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<SnapshotRecommendationDto>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -110,6 +110,31 @@ fn global_context_index_with_property(
     ]))
 }
 
+fn global_context_index_with_properties(
+    properties: &[(&str, Option<&str>, &str)],
+) -> Arc<GlobalContextIndex> {
+    Arc::new(GlobalContextIndex::loaded(
+        properties
+            .iter()
+            .map(
+                |(name, english_name, prop_type)| GlobalContextPropertyData {
+                    name: (*name).to_string(),
+                    english_name: english_name.map(str::to_string),
+                    prop_type: Some((*prop_type).to_string()),
+                    is_readonly: true,
+                    description: None,
+                    contexts: vec!["Global context".to_string()],
+                    source_key: format!("objects/Global context/properties/{name}"),
+                    source_path: None,
+                    normalized_key: normalize_global_context_property_key(name),
+                    english_normalized_key: english_name.map(normalize_global_context_property_key),
+                    collection_item_type: None,
+                },
+            )
+            .collect(),
+    ))
+}
+
 fn deps_with_array_method() -> Arc<SemanticDeps> {
     let repository_impl = Arc::new(InMemoryTypeRepository::new());
     repository_impl
@@ -406,6 +431,62 @@ fn deps_with_document_create_document_method() -> Arc<SemanticDeps> {
         platform_signatures_loaded: true,
         common_module_factory_registry: Default::default(),
         global_context_index: Default::default(),
+    })
+}
+
+fn deps_with_loaded_global_collection_managers() -> Arc<SemanticDeps> {
+    let repository_impl = Arc::new(InMemoryTypeRepository::new());
+    repository_impl
+        .load_types(vec![
+            RawTypeData {
+                name: "Документы.РеализацияТоваровУслуг".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Object, FacetKind::Reference],
+                kind: Some(MetadataKind::Document),
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "Перечисления.ВидыОперацийАвансовыйОтчет".to_string(),
+                source: RawDataSource::Configuration,
+                facets: vec![FacetKind::Manager, FacetKind::Reference],
+                kind: Some(MetadataKind::Enum),
+                enum_values: vec!["Командировка".to_string()],
+                ..Default::default()
+            },
+        ])
+        .expect("load configuration metadata");
+
+    let mut sigs = SignatureIndex::new();
+    sigs.add_platform_method(
+        TypeId::new("ДокументМенеджер"),
+        MethodSignature::new(
+            "Выбрать".to_string(),
+            Some("ДокументМенеджер".to_string()),
+            vec![],
+            Some("ДокументВыборка.<Имя документа>".to_string()),
+            None,
+            None,
+            SignatureSource::Platform,
+            None,
+            Default::default(),
+        ),
+    );
+    repository_impl.set_signature_index(sigs.clone());
+
+    let repository =
+        repository_impl.clone() as Arc<dyn bsl_shared::domain::repository::TypeRepository>;
+    let resolver = Arc::new(TypeResolver::new(repository.clone()));
+
+    Arc::new(SemanticDeps {
+        repository,
+        signature_index: sigs,
+        resolver: Some(resolver),
+        platform_signatures_loaded: true,
+        common_module_factory_registry: Default::default(),
+        global_context_index: global_context_index_with_properties(&[
+            ("Документы", Some("Documents"), "ДокументыМенеджер"),
+            ("Перечисления", Some("Enums"), "ПеречисленияМенеджер"),
+        ]),
     })
 }
 
@@ -739,6 +820,68 @@ fn loaded_global_manager_collection_resolves_from_global_context_index() {
             .iter()
             .any(|note| note == GLOBAL_CONTEXT_SOURCE_NOTE),
         "loaded manager collection should come from GlobalContextIndex: {resolution:?}"
+    );
+}
+
+#[test]
+fn loaded_global_collection_manager_type_preserves_document_member_chain() {
+    let source = r#"Процедура Тест()
+    Док = Документы.РеализацияТоваровУслуг.Выбрать();
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_collection_managers();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let manager_offset = source
+        .find("РеализацияТоваровУслуг")
+        .expect("document manager member") as u32;
+    let manager_type = index
+        .type_at_byte_offset(manager_offset)
+        .expect("type at document manager member");
+    assert_eq!(
+        manager_type.type_name(),
+        "ДокументМенеджер.РеализацияТоваровУслуг"
+    );
+
+    let method_offset = source.find("Выбрать").expect("select method") as u32;
+    let receiver = index
+        .call_receiver_type_at_byte_offset(method_offset)
+        .expect("receiver type at document select call");
+    assert_eq!(
+        receiver.type_name(),
+        "ДокументМенеджер.РеализацияТоваровУслуг"
+    );
+}
+
+#[test]
+fn loaded_global_collection_manager_type_preserves_enum_value_chain() {
+    let source = r#"Процедура Тест()
+    Значение = Перечисления.ВидыОперацийАвансовыйОтчет.Командировка;
+КонецПроцедуры
+"#;
+    let program = parse(source);
+    let deps = deps_with_loaded_global_collection_managers();
+    let index = build_type_index_with_path(&program, "test.bsl", deps);
+
+    let enum_offset = source
+        .find("ВидыОперацийАвансовыйОтчет")
+        .expect("enum manager member") as u32;
+    let enum_manager = index
+        .type_at_byte_offset(enum_offset)
+        .expect("type at enum manager member");
+    assert_eq!(
+        enum_manager.type_name(),
+        "ПеречислениеМенеджер.ВидыОперацийАвансовыйОтчет"
+    );
+
+    let value_offset = source.find("Командировка").expect("enum value") as u32;
+    let enum_value = index
+        .type_at_byte_offset(value_offset)
+        .expect("type at enum value");
+    assert_eq!(
+        enum_value.type_name(),
+        "ПеречислениеСсылка.ВидыОперацийАвансовыйОтчет"
     );
 }
 

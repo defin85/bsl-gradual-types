@@ -22,7 +22,8 @@ use bsl_backend::system::{
     IndexSnapshot, IndexSnapshotId, TypeKind,
 };
 use bsl_shared::api::dtos::{
-    SnapshotPhaseDto, SnapshotReadinessDto, SnapshotReadinessStateDto, SnapshotTaskStateDto,
+    SnapshotArtifactStateDto, SnapshotFailureStageDto, SnapshotPhaseDto, SnapshotReadinessDto,
+    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotTaskStateDto,
 };
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;

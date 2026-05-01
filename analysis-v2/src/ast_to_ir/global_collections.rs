@@ -212,6 +212,19 @@ pub fn lookup_global_collection(name: &str) -> Option<&'static GlobalCollectionI
         .find(|info| info.name_ru == name || info.name_en.eq_ignore_ascii_case(name))
 }
 
+/// Поиск глобальной коллекции по типу менеджера коллекции из Syntax Helper.
+///
+/// Например, глобальное свойство `Документы` в Syntax Helper имеет тип
+/// `ДокументыМенеджер`, но дальнейший доступ `Документы.Заказ` должен
+/// обрабатываться как доступ к коллекции `Документы`.
+pub fn lookup_global_collection_by_manager_type(
+    type_name: &str,
+) -> Option<&'static GlobalCollectionInfo> {
+    GLOBAL_COLLECTIONS_INFO
+        .iter()
+        .find(|info| info.collection_manager_type.eq_ignore_ascii_case(type_name))
+}
+
 /// Legacy fallback lookup for a metadata object collection property.
 ///
 /// Callers must try repository/Syntax Helper property data before this fallback.

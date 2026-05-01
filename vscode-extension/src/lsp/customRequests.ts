@@ -124,6 +124,64 @@ export type SnapshotTrigger =
     | 'documents_set'
     | 'job';
 
+export type SnapshotArtifactState =
+    | 'unknown'
+    | 'missing'
+    | 'building'
+    | 'ready'
+    | 'stale'
+    | 'failed';
+
+export type SnapshotFailureStage =
+    | 'snapshot_build'
+    | 'ready_parse_snapshot'
+    | 'exact_type_index'
+    | 'completion_head'
+    | 'unknown';
+
+export type SnapshotRecommendation =
+    | 'wait'
+    | 'refresh'
+    | 'prime_exact_index'
+    | 'open_timeline'
+    | 'export_incident_bundle';
+
+export interface SnapshotStatusReason {
+    code: string;
+    message: string;
+}
+
+export interface SnapshotArtifactStatus {
+    state: SnapshotArtifactState;
+    version?: number;
+    ageMs?: number;
+    detail?: string;
+}
+
+export interface SnapshotArtifacts {
+    shadowState?: SnapshotArtifactStatus;
+    readyParseSnapshot?: SnapshotArtifactStatus;
+    exactTypeIndex?: SnapshotArtifactStatus;
+    completionHead?: SnapshotArtifactStatus;
+}
+
+export interface SnapshotWorker {
+    targetVersion?: number;
+    phase?: SnapshotPhase;
+    trigger?: SnapshotTrigger;
+    ageMs?: number;
+    cancellationReason?: string;
+    supersededByVersion?: number;
+}
+
+export interface SnapshotLastFailure {
+    stage: SnapshotFailureStage;
+    reason: string;
+    message?: string;
+    requestedVersion?: number;
+    occurredAtMs?: number;
+}
+
 export interface SnapshotStatusResponse {
     schemaVersion: number;
     uri?: string;
@@ -139,6 +197,11 @@ export interface SnapshotStatusResponse {
     trigger?: SnapshotTrigger;
     updatedAtMs: number;
     fallbackReason?: string;
+    reason?: SnapshotStatusReason;
+    artifacts?: SnapshotArtifacts;
+    worker?: SnapshotWorker;
+    lastFailure?: SnapshotLastFailure;
+    recommendation?: SnapshotRecommendation;
 }
 
 export type SnapshotStatusFetchResult =

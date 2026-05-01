@@ -533,6 +533,11 @@
                 "category": "BSL Analyzer"
             },
             {
+                "command": "bslAnalyzer.refreshSnapshotStatus",
+                "title": "Refresh Snapshot Status",
+                "category": "BSL Analyzer"
+            },
+            {
                 "command": "bslAnalyzer.refreshCompletionTimeline",
                 "title": "Refresh Completion Timeline",
                 "category": "BSL Analyzer"
@@ -793,6 +798,9 @@
                 },
                 {
                     "command": "bslAnalyzer.openSnapshotReadiness"
+                },
+                {
+                    "command": "bslAnalyzer.refreshSnapshotStatus"
                 },
                 {
                     "command": "bslAnalyzer.refreshCompletionTimeline"

@@ -3,8 +3,9 @@ use std::sync::atomic::Ordering;
 use bsl_shared::api::dtos::{
     SnapshotArtifactStateDto, SnapshotArtifactStatusDto, SnapshotArtifactsDto,
     SnapshotFailureStageDto, SnapshotLastFailureDto, SnapshotPhaseDto, SnapshotReadinessDto,
-    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotStatusReasonDto,
-    SnapshotTaskStateDto, SnapshotTriggerDto, SnapshotWorkerDto, SNAPSHOT_READINESS_SCHEMA_VERSION,
+    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotStatusReasonCodeDto,
+    SnapshotStatusReasonDto, SnapshotTaskStateDto, SnapshotTriggerDto, SnapshotWorkerDto,
+    SNAPSHOT_READINESS_SCHEMA_VERSION,
 };
 
 use super::super::{
@@ -470,36 +471,35 @@ impl BslLanguageServer {
 
         let reason = Some(match state {
             SnapshotReadinessStateDto::Ready => SnapshotStatusReasonDto {
-                code: "ready".to_string(),
+                code: SnapshotStatusReasonCodeDto::Ready,
                 message: "Requested revision has canonical snapshot artifacts".to_string(),
             },
             SnapshotReadinessStateDto::Building => SnapshotStatusReasonDto {
-                code: "building".to_string(),
+                code: SnapshotStatusReasonCodeDto::Building,
                 message: "A matching snapshot worker is building the requested revision"
                     .to_string(),
             },
             SnapshotReadinessStateDto::ShadowOnly => SnapshotStatusReasonDto {
                 code: if ready_is_stale {
-                    "shadow_only_ready_snapshot_stale"
+                    SnapshotStatusReasonCodeDto::ShadowOnlyReadySnapshotStale
                 } else {
-                    "shadow_only_exact_missing"
-                }
-                .to_string(),
+                    SnapshotStatusReasonCodeDto::ShadowOnlyExactMissing
+                },
                 message:
                     "Only the editor shadow is current; exact snapshot artifacts are not ready"
                         .to_string(),
             },
             SnapshotReadinessStateDto::Stale => SnapshotStatusReasonDto {
-                code: "ready_snapshot_stale".to_string(),
+                code: SnapshotStatusReasonCodeDto::ReadySnapshotStale,
                 message: "The latest ready snapshot is older than the requested revision"
                     .to_string(),
             },
             SnapshotReadinessStateDto::Failed => SnapshotStatusReasonDto {
-                code: "snapshot_build_failed".to_string(),
+                code: SnapshotStatusReasonCodeDto::SnapshotBuildFailed,
                 message: "The last matching snapshot build failed".to_string(),
             },
             SnapshotReadinessStateDto::Idle => SnapshotStatusReasonDto {
-                code: "idle".to_string(),
+                code: SnapshotStatusReasonCodeDto::Idle,
                 message: "No matching snapshot worker or ready artifact is active".to_string(),
             },
         });

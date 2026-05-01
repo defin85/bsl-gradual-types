@@ -146,8 +146,17 @@ export type SnapshotRecommendation =
     | 'open_timeline'
     | 'export_incident_bundle';
 
+export type SnapshotStatusReasonCode =
+    | 'ready'
+    | 'building'
+    | 'shadow_only_ready_snapshot_stale'
+    | 'shadow_only_exact_missing'
+    | 'ready_snapshot_stale'
+    | 'snapshot_build_failed'
+    | 'idle';
+
 export interface SnapshotStatusReason {
-    code: string;
+    code: SnapshotStatusReasonCode;
     message: string;
 }
 
@@ -391,6 +400,18 @@ export async function getIndexState(
 
 let snapshotStatusUnsupported = false;
 let primeExactTypeIndexUnsupported = false;
+const SNAPSHOT_STATUS_ERROR_MESSAGE_LIMIT = 160;
+
+function sanitizeSnapshotStatusErrorMessage(error: unknown): string {
+    const raw = error instanceof Error ? error.message : String(error);
+    const compact = raw.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!compact) {
+        return 'snapshot status request failed';
+    }
+    return compact.length <= SNAPSHOT_STATUS_ERROR_MESSAGE_LIMIT
+        ? compact
+        : compact.slice(0, SNAPSHOT_STATUS_ERROR_MESSAGE_LIMIT);
+}
 
 export function resetSnapshotStatusCapabilityCacheForTests(): void {
     snapshotStatusUnsupported = false;
@@ -420,8 +441,8 @@ export async function getSnapshotStatusFetchResult(
             logger.warn('[Snapshot Status] LSP server does not support bsl/getSnapshotStatus');
             return { kind: 'unsupported' };
         }
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error('Failed to get snapshot status', error);
+        const message = sanitizeSnapshotStatusErrorMessage(error);
+        logger.error(`[Snapshot Status] Failed to get snapshot status: ${message}`);
         return { kind: 'error', message };
     }
 }

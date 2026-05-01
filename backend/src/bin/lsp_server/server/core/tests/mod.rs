@@ -23,7 +23,8 @@ use bsl_backend::system::{
 };
 use bsl_shared::api::dtos::{
     SnapshotArtifactStateDto, SnapshotFailureStageDto, SnapshotPhaseDto, SnapshotReadinessDto,
-    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotTaskStateDto,
+    SnapshotReadinessStateDto, SnapshotRecommendationDto, SnapshotStatusReasonCodeDto,
+    SnapshotTaskStateDto,
 };
 use bsl_syntax::ParseOptions;
 use futures::StreamExt;

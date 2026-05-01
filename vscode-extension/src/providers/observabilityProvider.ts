@@ -88,6 +88,11 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
     private compactModeEnabled = false;
     private autoRefreshTimer: NodeJS.Timeout | null = null;
     private disposables: vscode.Disposable[] = [];
+    private readonly snapshotRootItem = new BslOverviewItem(
+        'Snapshot Readiness',
+        vscode.TreeItemCollapsibleState.Expanded,
+        'obs-snapshot'
+    );
 
     constructor(outputChannel: vscode.OutputChannel) {
         this.outputChannel = outputChannel;
@@ -137,6 +142,32 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
         this._onDidChangeTreeData.fire();
     }
 
+    async focusSnapshotReadiness(treeView?: vscode.TreeView<BslOverviewItem>): Promise<void> {
+        try {
+            await vscode.commands.executeCommand('bslAnalyzer.observability.focus');
+        } catch (error) {
+            const message = sanitizeSnapshotDetail(String(error)) ?? 'unknown focus error';
+            this.outputChannel.appendLine(`Failed to focus Observability panel: ${message}`);
+        }
+
+        this.refresh(false);
+
+        if (!treeView) {
+            return;
+        }
+
+        try {
+            await treeView.reveal(this.snapshotRootItem, {
+                expand: true,
+                focus: true,
+                select: true,
+            });
+        } catch (error) {
+            const message = sanitizeSnapshotDetail(String(error)) ?? 'unknown reveal error';
+            this.outputChannel.appendLine(`Failed to reveal Snapshot Readiness node: ${message}`);
+        }
+    }
+
     getTreeItem(element: BslOverviewItem): vscode.TreeItem {
         return element;
     }
@@ -146,7 +177,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
             if (this.compactModeEnabled) {
                 return Promise.resolve([
                     new BslOverviewItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'obs-status'),
-                    new BslOverviewItem('Snapshot Readiness', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot'),
+                    this.snapshotRootItem,
                     new BslOverviewItem('SLA Metrics', vscode.TreeItemCollapsibleState.Expanded, 'obs-sla'),
                     new BslOverviewItem('Actions', vscode.TreeItemCollapsibleState.Expanded, 'obs-actions'),
                 ]);
@@ -154,7 +185,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
 
             return Promise.resolve([
                 new BslOverviewItem('Status', vscode.TreeItemCollapsibleState.Expanded, 'obs-status'),
-                new BslOverviewItem('Snapshot Readiness', vscode.TreeItemCollapsibleState.Expanded, 'obs-snapshot'),
+                this.snapshotRootItem,
                 new BslOverviewItem('Key Latencies', vscode.TreeItemCollapsibleState.Expanded, 'obs-latency'),
                 new BslOverviewItem('Rates', vscode.TreeItemCollapsibleState.Collapsed, 'obs-rates'),
                 new BslOverviewItem('Counters', vscode.TreeItemCollapsibleState.Collapsed, 'obs-counters'),
@@ -322,8 +353,9 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
                 return [item];
             }
             case 'unavailable': {
+                const message = sanitizeSnapshotDetail(snapshot.message) ?? 'snapshot status is unavailable';
                 const item = new BslOverviewItem(
-                    `Snapshot: unavailable (${snapshot.message})`,
+                    `Snapshot: unavailable (${message})`,
                     vscode.TreeItemCollapsibleState.None
                 );
                 item.iconPath = new vscode.ThemeIcon('warning');
@@ -499,7 +531,7 @@ export class ObservabilityProvider implements vscode.TreeDataProvider<BslOvervie
     private getSnapshotActionItems(): BslOverviewItem[] {
         const refreshItem = new BslOverviewItem('Refresh Snapshot Status', vscode.TreeItemCollapsibleState.None);
         refreshItem.command = {
-            command: 'bslAnalyzer.refreshObservability',
+            command: 'bslAnalyzer.refreshSnapshotStatus',
             title: 'Refresh Snapshot Status',
         };
         refreshItem.iconPath = new vscode.ThemeIcon('refresh');

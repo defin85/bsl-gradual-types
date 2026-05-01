@@ -48,6 +48,7 @@ suite('Commands Test Suite', () => {
         const refreshCommands = [
             'bslAnalyzer.refreshOverview',
             'bslAnalyzer.refreshCacheDashboard',
+            'bslAnalyzer.refreshSnapshotStatus',
             'bslAnalyzer.refreshDiagnostics',
             'bslAnalyzer.refreshTypeRepository',
             'bslAnalyzer.goToDiagnostic',

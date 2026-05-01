@@ -308,10 +308,42 @@ pub enum SnapshotRecommendationDto {
     ExportIncidentBundle,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SnapshotStatusReasonCodeDto {
+    Ready,
+    Building,
+    ShadowOnlyReadySnapshotStale,
+    ShadowOnlyExactMissing,
+    ReadySnapshotStale,
+    SnapshotBuildFailed,
+    Idle,
+}
+
+impl SnapshotStatusReasonCodeDto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::Building => "building",
+            Self::ShadowOnlyReadySnapshotStale => "shadow_only_ready_snapshot_stale",
+            Self::ShadowOnlyExactMissing => "shadow_only_exact_missing",
+            Self::ReadySnapshotStale => "ready_snapshot_stale",
+            Self::SnapshotBuildFailed => "snapshot_build_failed",
+            Self::Idle => "idle",
+        }
+    }
+}
+
+impl fmt::Display for SnapshotStatusReasonCodeDto {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotStatusReasonDto {
-    pub code: String,
+    pub code: SnapshotStatusReasonCodeDto,
     pub message: String,
 }
 

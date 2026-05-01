@@ -41,6 +41,7 @@ suite('Extension Test Suite', () => {
             'bslAnalyzer.refreshDiagnostics',
             'bslAnalyzer.refreshTypeRepository',
             'bslAnalyzer.openSnapshotReadiness',
+            'bslAnalyzer.refreshSnapshotStatus',
             'bslAnalyzer.refreshCompletionTimeline',
             'bslAnalyzer.exportObservabilityIncidentBundle',
             'bslAnalyzer.goToDiagnostic',

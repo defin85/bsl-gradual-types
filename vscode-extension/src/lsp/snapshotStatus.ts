@@ -238,7 +238,7 @@ function renderCurrentSnapshotStatus(): void {
             break;
         case 'unavailable':
             statusBarItem.text = '$(warning) BSL Snap: unavailable';
-            statusBarItem.tooltip = `Live snapshot readiness\n${snapshot.message}`;
+            statusBarItem.tooltip = `Live snapshot readiness\n${sanitizeSnapshotDetail(snapshot.message) ?? 'snapshot status is unavailable'}`;
             statusBarItem.show();
             break;
         case 'ok':
@@ -309,7 +309,7 @@ export async function refreshSnapshotStatusForUri(
             fireSnapshotStatusChange();
             return undefined;
         case 'error':
-            activeUnavailableMessage = result.message;
+            activeUnavailableMessage = sanitizeSnapshotDetail(result.message) ?? 'snapshot status is unavailable';
             renderCurrentSnapshotStatus();
             fireSnapshotStatusChange();
             return undefined;
@@ -388,7 +388,10 @@ export function getActiveSnapshotStatusSnapshot(): ActiveSnapshotStatusView {
         return { kind: 'ok', status };
     }
     if (activeUnavailableMessage) {
-        return { kind: 'unavailable', message: activeUnavailableMessage };
+        return {
+            kind: 'unavailable',
+            message: sanitizeSnapshotDetail(activeUnavailableMessage) ?? 'snapshot status is unavailable',
+        };
     }
     return { kind: 'unavailable', message: 'snapshot status is not available yet' };
 }

@@ -9,6 +9,7 @@ import {
     getSnapshotStatusHistoryForUri,
     handleSnapshotStatusNotification,
     initializeSnapshotStatus,
+    refreshSnapshotStatus,
     resetSnapshotStatusForTests,
     sanitizeSnapshotDetail,
 } from '../../lsp/snapshotStatus';
@@ -158,6 +159,96 @@ suite('Snapshot Status Test Suite', () => {
             assert.strictEqual(snapshot.kind, 'unavailable');
             assert.match(statusBarStub.text, /unavailable/i);
             assert.strictEqual(statusBarStub.show.callCount > 0, true);
+        } finally {
+            disposable.dispose();
+        }
+    });
+
+    test('sanitizes unavailable error detail before rendering', async () => {
+        stubActiveBslEditor('file:///snapshot-status-error.bsl');
+        const rawMessage = `first line\nsecond line\t${'x'.repeat(220)}`;
+        sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
+            kind: 'error',
+            message: rawMessage,
+        });
+
+        const disposable = initializeSnapshotStatus(outputChannelStub, statusBarStub);
+        await flushPromises();
+
+        try {
+            const snapshot = getActiveSnapshotStatusSnapshot();
+            assert.strictEqual(snapshot.kind, 'unavailable');
+            if (snapshot.kind !== 'unavailable') {
+                return;
+            }
+            assert.ok(!snapshot.message.includes('\n'));
+            assert.ok(!snapshot.message.includes('\t'));
+            assert.strictEqual(snapshot.message.length, 160);
+            assert.match(statusBarStub.text, /unavailable/i);
+            assert.ok(!statusBarStub.tooltip.includes('second line\t'));
+            assert.ok(!statusBarStub.tooltip.includes('x'.repeat(180)));
+        } finally {
+            disposable.dispose();
+        }
+    });
+
+    test('refreshSnapshotStatus fetches fresh active editor status', async () => {
+        const uri = 'file:///snapshot-status-refresh.bsl';
+        stubActiveBslEditor(uri);
+        const fetchStub = sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult');
+        fetchStub.onFirstCall().resolves({
+            kind: 'ok',
+            response: {
+                schemaVersion: 2,
+                uri,
+                requestedVersion: 1,
+                readyVersion: 1,
+                state: 'ready',
+                exact: true,
+                taskState: 'ready_same_revision',
+                updatedAtMs: 100,
+            },
+        });
+        fetchStub.onSecondCall().resolves({
+            kind: 'ok',
+            response: {
+                schemaVersion: 2,
+                uri,
+                requestedVersion: 2,
+                state: 'building',
+                exact: false,
+                taskState: 'in_flight_same_revision',
+                reason: {
+                    code: 'building',
+                    message: 'A matching snapshot worker is building the requested revision',
+                },
+                updatedAtMs: 200,
+            },
+        });
+
+        const disposable = initializeSnapshotStatus(outputChannelStub, statusBarStub);
+        await flushPromises();
+
+        try {
+            let snapshot = getActiveSnapshotStatusSnapshot();
+            assert.strictEqual(snapshot.kind, 'ok');
+            if (snapshot.kind !== 'ok') {
+                return;
+            }
+            assert.strictEqual(snapshot.status.state, 'ready');
+
+            await refreshSnapshotStatus();
+            await flushPromises();
+
+            snapshot = getActiveSnapshotStatusSnapshot();
+            assert.strictEqual(fetchStub.callCount, 2);
+            assert.strictEqual(snapshot.kind, 'ok');
+            if (snapshot.kind !== 'ok') {
+                return;
+            }
+            assert.strictEqual(snapshot.status.state, 'building');
+            assert.strictEqual(snapshot.status.requestedVersion, 2);
+            assert.match(statusBarStub.text, /building v2/i);
         } finally {
             disposable.dispose();
         }

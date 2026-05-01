@@ -185,6 +185,50 @@ suite('Observability Provider Test Suite', () => {
         }
     });
 
+    test('snapshot actions should refresh live snapshot status', async () => {
+        const provider = new ObservabilityProvider(outputChannelStub);
+
+        try {
+            const items = (provider as any).getSnapshotActionItems();
+            const refreshItem = items.find((item: any) =>
+                item.command?.title === 'Refresh Snapshot Status'
+            );
+            assert.ok(refreshItem, 'snapshot refresh action should be present');
+            assert.strictEqual(refreshItem.command.command, 'bslAnalyzer.refreshSnapshotStatus');
+        } finally {
+            provider.dispose();
+        }
+    });
+
+    test('focusSnapshotReadiness should focus Observability and reveal Snapshot Readiness', async () => {
+        const provider = new ObservabilityProvider(outputChannelStub);
+        const executeCommandStub = sinon
+            .stub(vscode.commands, 'executeCommand')
+            .resolves(undefined);
+        const revealStub = sinon.stub().resolves(undefined);
+        const treeView = {
+            reveal: revealStub,
+        } as unknown as vscode.TreeView<any>;
+
+        try {
+            await provider.focusSnapshotReadiness(treeView);
+
+            assert.ok(
+                executeCommandStub.calledWith('bslAnalyzer.observability.focus'),
+                'Observability view should be focused before reveal'
+            );
+            assert.strictEqual(revealStub.callCount, 1);
+            assert.strictEqual(revealStub.firstCall.args[0].label, 'Snapshot Readiness');
+            assert.deepStrictEqual(revealStub.firstCall.args[1], {
+                expand: true,
+                focus: true,
+                select: true,
+            });
+        } finally {
+            provider.dispose();
+        }
+    });
+
     test('snapshot section should expose exact snapshot details from shared snapshot store', async () => {
         stubActiveBslEditor();
         sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
@@ -253,6 +297,31 @@ suite('Observability Provider Test Suite', () => {
                 historyLabels.some((label: string) => label.includes('ready requested=21 ready=21')),
                 `expected recent transition label, got ${historyLabels.join(', ')}`
             );
+        } finally {
+            provider.dispose();
+            snapshotDisposable.dispose();
+        }
+    });
+
+    test('snapshot unavailable tree item sanitizes error detail', async () => {
+        stubActiveBslEditor('file:///snapshot-observability-error.bsl');
+        sinon.stub(customRequestsModule, 'getSnapshotStatusFetchResult').resolves({
+            kind: 'error',
+            message: `first line\nsecond line\t${'x'.repeat(220)}`,
+        });
+
+        const snapshotDisposable = initializeSnapshotStatus(outputChannelStub, snapshotStatusBarStub);
+        const provider = new ObservabilityProvider(outputChannelStub);
+        await flushPromises();
+
+        try {
+            const items = (provider as any).getSnapshotItems();
+            assert.strictEqual(items.length, 1);
+            const label = String(items[0].label);
+            assert.ok(label.startsWith('Snapshot: unavailable ('));
+            assert.ok(!label.includes('\n'));
+            assert.ok(!label.includes('\t'));
+            assert.ok(!label.includes('x'.repeat(180)));
         } finally {
             provider.dispose();
             snapshotDisposable.dispose();

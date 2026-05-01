@@ -716,6 +716,54 @@ async fn snapshot_status_request_reports_shadow_only_when_only_shadow_state_is_c
 }
 
 #[tokio::test]
+async fn snapshot_status_request_reports_stale_when_ready_snapshot_lags_requested_revision() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-stale.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 8);
+    server.latest_ready_parse_snapshots_v2.write().await.insert(
+        file_id,
+        ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot: parse_snapshot_for_test(file_id, 7, text.as_ref(), vec![], true, None),
+            source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+            syntax_errors_complete: true,
+            phase_attribution: crate::server::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
+        },
+    );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::Stale);
+    assert!(!status.exact);
+    assert_eq!(status.task_state, SnapshotTaskStateDto::ReadyStaleRevision);
+    assert_eq!(status.requested_version, Some(8));
+    assert_eq!(status.ready_version, Some(7));
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code),
+        Some(SnapshotStatusReasonCodeDto::ReadySnapshotStale)
+    );
+    assert_eq!(
+        status
+            .artifacts
+            .as_ref()
+            .and_then(|artifacts| artifacts.ready_parse_snapshot.as_ref())
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Stale)
+    );
+    assert_eq!(status.recommendation, Some(SnapshotRecommendationDto::Refresh));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
 async fn snapshot_status_request_reports_failed_when_last_build_aborted() {
     let coordinator = Arc::new(SystemCoordinator::new());
     let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
@@ -793,4 +841,51 @@ fn snapshot_status_legacy_v1_payload_deserializes_without_diagnostics() {
     assert!(status.worker.is_none());
     assert!(status.last_failure.is_none());
     assert!(status.recommendation.is_none());
+}
+
+#[test]
+fn snapshot_status_schema_v2_payload_deserializes_unknown_artifact_detail() {
+    let status: SnapshotReadinessDto = serde_json::from_value(serde_json::json!({
+        "schemaVersion": 2,
+        "uri": "file:///unknown-detail-snapshot-status.bsl",
+        "state": "idle",
+        "exact": false,
+        "taskState": "absent",
+        "updatedAtMs": 101,
+        "reason": {
+            "code": "idle",
+            "message": "No matching snapshot worker or ready artifact is active"
+        },
+        "artifacts": {
+            "exactTypeIndex": {
+                "state": "unknown"
+            },
+            "completionHead": {
+                "state": "unknown"
+            }
+        }
+    }))
+    .expect("schema v2 snapshot readiness payload with unknown details");
+
+    assert_eq!(status.schema_version, 2);
+    assert_eq!(status.state, SnapshotReadinessStateDto::Idle);
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code),
+        Some(SnapshotStatusReasonCodeDto::Idle)
+    );
+    let artifacts = status.artifacts.as_ref().expect("schema v2 artifacts");
+    assert_eq!(
+        artifacts
+            .exact_type_index
+            .as_ref()
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Unknown)
+    );
+    assert_eq!(
+        artifacts
+            .completion_head
+            .as_ref()
+            .map(|artifact| artifact.state),
+        Some(SnapshotArtifactStateDto::Unknown)
+    );
 }

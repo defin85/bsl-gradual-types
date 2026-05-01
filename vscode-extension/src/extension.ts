@@ -26,7 +26,7 @@ import { initializeContextProvider } from './lsp/contextProvider';
 import { initializeStatsProvider } from './lsp/statsProvider';
 // MILESTONE 2.20.3: Server Status Handler (rust-analyzer approach)
 import { initializeServerStatus } from './lsp/serverStatus';
-import { initializeSnapshotStatus } from './lsp/snapshotStatus';
+import { initializeSnapshotStatus, refreshSnapshotStatus } from './lsp/snapshotStatus';
 import { initializeExactIndexWarmup } from './lsp/exactIndexWarmup';
 import {
     getPlatformDocsArchive,
@@ -439,14 +439,17 @@ function registerSidebarProviders(context: vscode.ExtensionContext) {
         );
 
         context.subscriptions.push(
+            vscode.commands.registerCommand('bslAnalyzer.refreshSnapshotStatus', async () => {
+                outputChannel.appendLine('🔄 Refreshing Snapshot Readiness status');
+                await refreshSnapshotStatus();
+                observabilityProvider.refresh(false);
+            })
+        );
+
+        context.subscriptions.push(
             vscode.commands.registerCommand('bslAnalyzer.openSnapshotReadiness', async () => {
                 outputChannel.appendLine('🔎 Opening Snapshot Readiness diagnostics');
-                try {
-                    await vscode.commands.executeCommand('bslAnalyzer.observability.focus');
-                } catch (error) {
-                    outputChannel.appendLine(`⚠️ Failed to focus Observability panel: ${error}`);
-                }
-                observabilityProvider.refresh(false);
+                await observabilityProvider.focusSnapshotReadiness(observabilityTreeView);
             })
         );
 

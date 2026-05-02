@@ -1146,6 +1146,14 @@ impl<'a> TypeInferencer<'a> {
     }
 
     fn allow_source_recovered_identifier_receiver(&self, name: &str, env: &TypeEnv) -> bool {
+        let name_lower = name.to_lowercase();
+        if env
+            .variable_resolution(&name_lower)
+            .is_some_and(|resolution| !resolution.is_unknown() && !resolution.is_dynamic())
+        {
+            return true;
+        }
+
         if is_global_collection(name).is_some() {
             return true;
         }
@@ -1155,7 +1163,6 @@ impl<'a> TypeInferencer<'a> {
             return true;
         }
 
-        let name_lower = name.to_lowercase();
         match env.module_type {
             Some(ModuleType::FormModule { .. }) => {
                 FORM_CONTEXT_BOUND_SYMBOL_KEYS.contains(&name_lower.as_str())

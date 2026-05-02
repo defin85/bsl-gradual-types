@@ -42,7 +42,11 @@ The member query should then enumerate children for that owner type from the can
 Existing or future tests that assert a non-member completion item labeled `ТаблЗнач` prove only that the local symbol exists. This change requires an after-dot member-access assertion that children such as `Колонки` and `ВыгрузитьКолонку` are returned for the owner expression.
 
 ### 3. Readiness failures must stay explicit
-When current-revision completion artifacts are unavailable, completion may fail closed. That path must remain distinguishable in traces from a successful empty children response.
+When current-revision completion artifacts are unavailable, completion must follow the existing
+bounded fail-closed/degraded policy for the active completion profile. If that policy returns a
+degraded `isIncomplete=true` response for a recognized member-access context, it still must not
+synthesize `ТаблицаЗначений` children without canonical owner hints, and it must remain
+distinguishable in traces from a successful empty children response.
 
 After `update-snapshot-status-terminal-liveness`, a test can assert:
 
@@ -54,13 +58,20 @@ After `update-snapshot-status-terminal-liveness`, a test can assert:
 ### 4. Owner hints are the shared contract, not an adapter repair
 The default LSP completion surface intentionally fails closed when a member-access request reaches response construction without shared owner hints. This change must not reverse that boundary by teaching the adapter to infer local owner types from `parse_result`, raw text, or adapter-local IR traversal.
 
-The correct fix is to make the canonical current-revision artifacts expose the owner type for `ТаблЗнач`:
+The correct fix is to make the canonical current-revision artifacts expose the owner type for
+`ТаблЗнач`. This can be a general type entry at the receiver span or a dedicated owner-hint
+projection keyed by the member-access receiver span; it must still be produced by the shared
+canonical artifact pipeline, not by adapter-local request handling:
 
-- `CompletionHeadArtifact` should contain a `ТаблицаЗначений` type entry at the owner expression span when the head is ready;
-- `ExactSemanticArtifact` / serve-only type index should return the same owner type when exact is ready;
+- `CompletionHeadArtifact` should expose `ТаблицаЗначений` through the shared head owner-hint query when the head is ready;
+- `ExactSemanticArtifact` / serve-only type index should expose the same owner type through the exact owner-hint query when exact is ready;
 - LSP should pass those hints through to the shared completion runtime.
 
 If head/exact artifacts are terminal and current but the owner still cannot be resolved, the trace must classify the result as owner-unresolved (or an equivalent bounded low-cardinality reason) rather than artifact-unavailable, exact-deadline, or successful-empty.
+
+Existing static receiver fallback may remain only for syntactically self-contained receivers that
+do not require local lexical scope truth, such as supported type-name/static receivers. It is not an
+acceptance path for `Лок.` or `ТаблЗнач.` and must not be used to infer local variable owner types.
 
 ### 5. Owner hints are a likely narrow fault line
 The incident showed `current_revision_head_owner_hints_ready=false` for fast fail-closed invoked probes even when exact/head readiness looked ready before wait. The implementation should inspect:

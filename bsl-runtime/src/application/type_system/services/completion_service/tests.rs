@@ -1896,6 +1896,376 @@ async fn completion_resolves_variable_type_for_member_access() {
     );
 }
 
+#[test]
+fn local_constructor_member_access_owner_hints_resolve_from_exact_and_head_artifacts() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![RawTypeData {
+            name: "ТаблицаЗначений".to_string(),
+            source: RawDataSource::Platform,
+            methods: vec![RawMethodData {
+                name: "ВыгрузитьКолонку".to_string(),
+                return_type: "Массив".to_string(),
+                ..Default::default()
+            }],
+            properties: vec![RawPropertyData {
+                name: "Колонки".to_string(),
+                prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                is_readonly: true,
+                collection_item_type: None,
+            }],
+            ..Default::default()
+        }])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    Лок = Новый ТаблицаЗначений;\n",
+        "    Лок.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 2;
+    let line_text = "    Лок.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver),
+        repository: repo,
+        platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
+        global_context_index: Default::default(),
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("local-constructor-owner-hints"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("local-constructor-owner-hints"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("local_constructor_owner_hints.bsl"),
+    });
+
+    let analysis = host.analysis();
+    let _ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
+
+    let exact_owner_hints = completion_member_access_owner_type_hints_from_analysis(
+        &analysis,
+        V2FileId(1),
+        content,
+        line,
+        column,
+    );
+    assert_eq!(
+        exact_owner_hints
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["ТаблицаЗначений"],
+        "exact current-revision artifact must expose local owner hint"
+    );
+
+    let head_owner_hints = completion_member_access_owner_type_hints_from_completion_head(
+        &analysis,
+        V2FileId(1),
+        content,
+        line,
+        column,
+    );
+    assert_eq!(
+        head_owner_hints
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["ТаблицаЗначений"],
+        "completion head artifact must expose local owner hint"
+    );
+}
+
+#[tokio::test]
+async fn completion_returns_value_table_children_for_local_constructor_owner_hint() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![RawMethodData {
+                    name: "ВыгрузитьКолонку".to_string(),
+                    return_type: "Массив".to_string(),
+                    ..Default::default()
+                }],
+                properties: vec![RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let content = concat!(
+        "Процедура Тест()\n",
+        "    Лок = Новый ТаблицаЗначений;\n",
+        "    Лок.\n",
+        "КонецПроцедуры\n"
+    );
+    let line = 2;
+    let line_text = "    Лок.";
+    let column = line_text.chars().map(|ch| ch.len_utf16()).sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
+        global_context_index: Default::default(),
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("local-constructor-completion"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("local-constructor-completion"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.to_string()),
+        version: 0,
+        path: Arc::from("local_constructor_completion.bsl"),
+    });
+    let analysis = host.analysis();
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
+    let owner_hints = completion_member_access_owner_type_hints_from_analysis(
+        &analysis,
+        V2FileId(1),
+        content,
+        line,
+        column,
+    );
+    assert!(
+        !owner_hints.is_empty(),
+        "canonical exact artifact must provide owner hints for member completion"
+    );
+    let ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: Some(ir_program),
+        resolver: resolver.as_ref(),
+        file_path: "local_constructor_completion.bsl",
+        member_access_owner_type_hints: owner_hints,
+        include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
+        global_context_index: None,
+    };
+
+    let result = get_completion_with_analysis(
+        content,
+        line,
+        column,
+        Some("local_constructor_completion.bsl"),
+        &index,
+        &metadata_lookup,
+        &ctx,
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        labels.contains(&"Колонки".to_string()),
+        "labels: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"ВыгрузитьКолонку".to_string()),
+        "labels: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn completion_returns_value_table_children_for_tablznach_in_real_advance_report_fixture() {
+    let repository = Arc::new(InMemoryTypeRepository::new());
+    repository
+        .load_types(vec![
+            RawTypeData {
+                name: "ТаблицаЗначений".to_string(),
+                source: RawDataSource::Platform,
+                methods: vec![RawMethodData {
+                    name: "ВыгрузитьКолонку".to_string(),
+                    return_type: "Массив".to_string(),
+                    ..Default::default()
+                }],
+                properties: vec![RawPropertyData {
+                    name: "Колонки".to_string(),
+                    prop_type: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                    is_readonly: true,
+                    collection_item_type: None,
+                }],
+                ..Default::default()
+            },
+            RawTypeData {
+                name: "КоллекцияКолонокТаблицыЗначений".to_string(),
+                source: RawDataSource::Platform,
+                ..Default::default()
+            },
+        ])
+        .expect("load types");
+
+    let repo: Arc<dyn bsl_shared::domain::repository::TypeRepository> = repository.clone();
+    let resolver = Arc::new(TypeResolver::new(repo.clone()));
+    let metadata_lookup = TypeMetadataLookup::new(repo.clone());
+    let index = IntellisenseIndexStore::new("cfg", "platform");
+    let fixture_path = "examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl";
+    let fixture = include_str!(
+        "../../../../../../examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl"
+    )
+    .replace("\r\n", "\n");
+    let assignment = "\tТаблЗнач = Новый ТаблицаЗначений;\n";
+    let insertion = "\tТаблЗнач.\n";
+    let insert_at = fixture
+        .find(assignment)
+        .map(|idx| idx + assignment.len())
+        .expect("ТаблЗнач constructor assignment in fixture");
+    let mut content = String::with_capacity(fixture.len() + insertion.len());
+    content.push_str(&fixture[..insert_at]);
+    content.push_str(insertion);
+    content.push_str(&fixture[insert_at..]);
+    let completion_offset = content
+        .find(insertion)
+        .expect("inserted ТаблЗнач completion line");
+    let line = content[..completion_offset]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count() as u32;
+    let column = "\tТаблЗнач."
+        .chars()
+        .map(|ch| ch.len_utf16())
+        .sum::<usize>() as u32;
+
+    let deps = Arc::new(bsl_analysis_v2::SemanticDeps {
+        signature_index: repo.get_signature_index_clone(),
+        resolver: Some(resolver.clone()),
+        repository: repo.clone(),
+        platform_signatures_loaded: false,
+        common_module_factory_registry: Default::default(),
+        global_context_index: Default::default(),
+    });
+    let mut host = AnalysisHostV2::default();
+    host.apply_change(ChangeV2::SetDepsSnapshot {
+        deps_id: DepsSnapshotId::from_hash("real-advance-report-tablznach-completion"),
+        deps,
+    });
+    host.apply_change(ChangeV2::SetSettingsSnapshot {
+        settings_id: SettingsId::from_hash("real-advance-report-tablznach-completion"),
+        diagnostics_detail_level: DetailLevel::Full,
+    });
+    host.apply_change(ChangeV2::SetFile {
+        file_id: V2FileId(1),
+        text: Arc::from(content.clone()),
+        version: 0,
+        path: Arc::from(fixture_path),
+    });
+
+    let analysis = host.analysis();
+    let _ir_program = analysis.ir(V2FileId(1)).ok().flatten().expect("ir");
+    analysis
+        .precompute_type_index_for_file(V2FileId(1), Some(0), 0)
+        .expect("precompute exact type index");
+    let exact_owner_hints = completion_member_access_owner_type_hints_from_analysis(
+        &analysis,
+        V2FileId(1),
+        &content,
+        line,
+        column,
+    );
+    assert_eq!(
+        exact_owner_hints
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["ТаблицаЗначений"],
+        "real fixture exact artifact must resolve ТаблЗнач owner"
+    );
+    let head_owner_hints = completion_member_access_owner_type_hints_from_completion_head(
+        &analysis,
+        V2FileId(1),
+        &content,
+        line,
+        column,
+    );
+    assert_eq!(
+        head_owner_hints
+            .iter()
+            .map(TypeResolution::type_name)
+            .collect::<Vec<_>>(),
+        vec!["ТаблицаЗначений"],
+        "real fixture completion head must resolve ТаблЗнач owner"
+    );
+
+    let ctx = CompletionAnalysisContext {
+        ir_program: None,
+        resolver: resolver.as_ref(),
+        file_path: fixture_path,
+        member_access_owner_type_hints: exact_owner_hints,
+        include_flow_sensitive: false,
+        deps_id: None,
+        settings_id: None,
+        global_context_index: None,
+    };
+    let result = get_completion_with_analysis(
+        &content,
+        line,
+        column,
+        Some(fixture_path),
+        &index,
+        &metadata_lookup,
+        &ctx,
+        None,
+    )
+    .await
+    .expect("completion ok");
+
+    let labels: Vec<String> = result.items.into_iter().map(|c| c.item.label).collect();
+    assert!(
+        labels.contains(&"Колонки".to_string()),
+        "labels: {labels:?}"
+    );
+    assert!(
+        labels.contains(&"ВыгрузитьКолонку".to_string()),
+        "labels: {labels:?}"
+    );
+}
+
 #[tokio::test]
 async fn completion_fails_closed_without_owner_hint_even_when_ir_has_owner_fact() {
     let repository = Arc::new(InMemoryTypeRepository::new());

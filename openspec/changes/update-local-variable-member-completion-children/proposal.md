@@ -12,7 +12,7 @@ This is a user-visible completion correctness failure. It should be fixed after 
   - artifact unavailable: explicit bounded fail-closed/unavailable;
   - owner type unresolved with ready artifacts: bounded `owner_unresolved`-class correctness failure, not a successful empty result and not an artifact-unavailable result;
   - owner type resolved: children returned from the canonical current-revision artifact.
-- Require local-variable owner type hints to be produced by the shared canonical owner-resolution path used by completion head and exact artifacts; LSP adapter code must only pass those hints through and must not reconstruct local owner truth from parse text or adapter-local IR logic.
+- Require local-variable owner type hints to be produced by the shared canonical owner-resolution path used by completion head and exact artifacts; LSP adapter code must only pass those hints through and must not reconstruct local owner truth from parse text, static receiver fallback, or adapter-local IR logic.
 - Add focused regression tests using the real `examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl` fixture and a minimal snippet.
 - Keep variable-name completion and member-child completion separate so assertions for the local variable item do not substitute for children under `ТаблЗнач.`.
 

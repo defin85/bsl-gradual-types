@@ -190,11 +190,13 @@ pub(super) const COMPLETION_ROUTE_REGISTRY: &[(&str, &str)] =
 pub(super) const COMPLETION_FAIL_CLOSED_CAUSE_REGISTRY: &[(&str, &str)] = &[
     ("prepare_timeout", "prepare_timeout"),
     ("exact_deadline", "exact_deadline"),
+    ("owner_unresolved", "owner_unresolved"),
 ];
 
 pub(super) const SHARED_FAIL_CLOSED_REASON_REGISTRY: &[(&str, &str)] = &[
     ("missing_canonical_ir", "missing_canonical_ir"),
     ("missing_semantic_index", "missing_semantic_index"),
+    ("owner_unresolved", "owner_unresolved"),
     ("superseded_revision", "superseded_revision"),
     ("cancelled", "cancelled"),
     ("unavailable_by_contract", "unavailable_by_contract"),
@@ -636,6 +638,7 @@ pub(super) fn normalize_public_completion_outcome_label(outcome: &str) -> &'stat
         | "missing_file_path"
         | "missing_deps"
         | "missing_ir"
+        | "owner_unresolved"
         | "fallback_unavailable"
         | "queue_rejected" => "fail_closed",
         _ => "other",

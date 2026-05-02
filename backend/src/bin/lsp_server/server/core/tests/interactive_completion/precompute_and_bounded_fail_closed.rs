@@ -649,8 +649,10 @@ async fn p7_large_churn_budget_timeout_returns_fail_closed_empty_response() {
 }
 
 #[tokio::test]
-async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot() {
-    const FAIL_CLOSED_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
+async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapshot_when_owner_unresolved(
+) {
+    const OWNER_UNRESOLVED_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_owner_unresolved";
+    const MISSING_INDEX_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
 
     fn make_index_snapshot(id: &str, type_name: &str) -> IndexSnapshot {
         let mut snapshot = IndexSnapshot::empty(IndexSnapshotId::from_hash(id.to_string()));
@@ -684,8 +686,7 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     initialize_lsp_service(&mut service).await;
 
     let fixture = "Процедура Тест()\n\
-ЛокМассив = Новый Массив;\n\
-ЛокМассив.\n\
+НеизвестныйЛокал.\n\
 КонецПроцедуры\n";
     let uri = Url::parse("file:///test_p7_completion_no_search_rescue.bsl").expect("uri");
     let did_open = DidOpenTextDocumentParams {
@@ -740,11 +741,11 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
     let file_id = server.get_or_create_file_id_v2(&uri).await;
     force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
 
-    let completion_position = find_utf16_position_after_marker(fixture, "ЛокМассив.");
+    let completion_position = find_utf16_position_after_marker(fixture, "НеизвестныйЛокал.");
     let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
     assert!(
         completion_labels.is_empty(),
-        "member-access cache miss must stay fail-closed when only runtime discovery/search index is populated, labels={completion_labels:?}"
+        "member-access unresolved owner must stay fail-closed when only runtime discovery/search index is populated, labels={completion_labels:?}"
     );
     assert!(
         completion_labels
@@ -752,7 +753,7 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
             .all(|label| label != "SearchOnlyType"
                 && label != "SearchOnlySymbol"
                 && label != "SearchOnlyModule"),
-        "member-access completion must not backfill from runtime discovery/search index, labels={completion_labels:?}"
+        "member-access unresolved owner must not backfill from runtime discovery/search index, labels={completion_labels:?}"
     );
     let metrics = coordinator.observability_metrics();
     let counters = metrics
@@ -763,23 +764,15 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .get("histograms")
         .and_then(|value| value.as_object())
         .expect("metrics.histograms object");
-    let fallback_unavailable_total =
-        read_u64_metric(counters.get("intellisense_v2_completion_fallback_unavailable_total"));
-    assert!(
-        fallback_unavailable_total > 0,
-        "member-access cache miss must record fallback_unavailable before public reason emission, counters={counters:?}"
-    );
-    let exact_wait_no_matching_task_total = read_u64_metric(counters.get(
-        "intellisense_v2_completion_exact_type_index_wait_outcome_total_reason_no_matching_task",
-    ));
-    assert!(
-        exact_wait_no_matching_task_total > 0,
-        "member-access exact wait must expose no_matching_task outcome, counters={counters:?}"
-    );
-    let fail_closed_reason_total = read_u64_metric(counters.get(FAIL_CLOSED_REASON_KEY));
+    let fail_closed_reason_total = read_u64_metric(counters.get(OWNER_UNRESOLVED_REASON_KEY));
     assert!(
         fail_closed_reason_total > 0,
-        "member-access cache miss must emit missing_semantic_index bounded public reason metrics, counters={counters:?}"
+        "member-access unresolved owner must emit owner_unresolved bounded public reason metrics, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(MISSING_INDEX_REASON_KEY)),
+        0,
+        "member-access unresolved owner must not be counted as missing_semantic_index, counters={counters:?}"
     );
     let ir_query_count = histograms
         .get("intellisense_v2_ir_query_completion_ms")
@@ -795,23 +788,9 @@ async fn p7_member_access_completion_does_not_backfill_from_runtime_index_snapsh
         .and_then(|value| value.as_object())
         .map(|histogram| read_u64_metric(histogram.get("count")))
         .unwrap_or(0);
-    let exact_wait_apply_age_start_count = histograms
-        .get("completion_stage_exact_wait_apply_age_at_start_ms")
-        .and_then(|value| value.as_object())
-        .map(|histogram| read_u64_metric(histogram.get("count")))
-        .unwrap_or(0);
-    let exact_wait_apply_age_terminal_count = histograms
-        .get("completion_stage_exact_wait_apply_age_at_terminal_ms")
-        .and_then(|value| value.as_object())
-        .map(|histogram| read_u64_metric(histogram.get("count")))
-        .unwrap_or(0);
     assert_eq!(
         query_bundle_count, 0,
         "member-access fail-closed path must short-circuit before query_bundle, histograms={histograms:?}"
-    );
-    assert!(
-        exact_wait_apply_age_start_count > 0 && exact_wait_apply_age_terminal_count > 0,
-        "member-access exact wait must expose apply-age histograms before fail-closed return, histograms={histograms:?}"
     );
 
     drain_task.abort();
@@ -1004,6 +983,257 @@ async fn p7_non_member_completion_keeps_local_variables_when_exact_index_not_rea
             item.label == "ТаблЗнач" && item.kind == Some(CompletionItemKind::VARIABLE)
         }),
         "non-member completion must keep local variable candidates when exact index is not ready, items={completion_items:?}, timeline={timeline:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_local_constructor_member_completion_returns_children_from_current_revision_head() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = "Процедура Тест()\n\
+    Лок = Новый ТаблицаЗначений;\n\
+    Лок.\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_local_constructor_member_children.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "Лок.");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Колонки"),
+        "member completion must return ТаблицаЗначений property children for local constructor owner, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels.iter().any(|label| label == "ВыгрузитьКолонку"),
+        "member completion must return ТаблицаЗначений method children for local constructor owner, labels={completion_labels:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_real_advance_report_tablznach_member_completion_returns_children_from_current_revision_head(
+) {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    prime_server_with_syntax_helper_deps(&server).await;
+
+    let fixture = include_str!(
+        "../../../../../../../../examples/conf_big/CommonModules/АвансовыйОтчетФормы/Ext/Module.bsl"
+    )
+    .replace("\r\n", "\n");
+    let assignment = "\tТаблЗнач = Новый ТаблицаЗначений;\n";
+    let insertion = "\tТаблЗнач.\n";
+    let insert_at = fixture
+        .find(assignment)
+        .map(|idx| idx + assignment.len())
+        .expect("ТаблЗнач constructor assignment in fixture");
+    let mut content = String::with_capacity(fixture.len() + insertion.len());
+    content.push_str(&fixture[..insert_at]);
+    content.push_str(insertion);
+    content.push_str(&fixture[insert_at..]);
+
+    let uri =
+        Url::parse("file:///test_p7_real_advance_report_tablznach_member_children.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: content.clone(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, &content, 2).await;
+
+    let completion_position = find_utf16_position_after_marker(&content, insertion);
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.iter().any(|label| label == "Колонки"),
+        "real fixture member completion must return ТаблицаЗначений property children for ТаблЗнач, labels={completion_labels:?}"
+    );
+    assert!(
+        completion_labels.iter().any(|label| label == "ВыгрузитьКолонку"),
+        "real fixture member completion must return ТаблицаЗначений method children for ТаблЗнач, labels={completion_labels:?}"
+    );
+
+    drain_task.abort();
+}
+
+#[tokio::test]
+async fn p7_member_access_owner_miss_with_ready_head_reports_owner_unresolved() {
+    const OWNER_UNRESOLVED_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_owner_unresolved";
+    const MISSING_INDEX_REASON_KEY: &str = "intellisense_v2_fail_closed_reason_total_origin_lsp_operation_completion_reason_missing_semantic_index";
+
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let server_holder: Arc<std::sync::Mutex<Option<BslLanguageServer>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
+    let (mut service, mut socket) = LspService::build({
+        let coordinator = coordinator.clone();
+        let server_holder = server_holder.clone();
+        move |client| {
+            let server = BslLanguageServer::new(client, coordinator.clone());
+            *server_holder.lock().expect("server holder lock") = Some(server.clone());
+            server
+        }
+    })
+    .finish();
+    let drain_task = tokio::spawn(async move { while let Some(_req) = socket.next().await {} });
+
+    initialize_lsp_service(&mut service).await;
+
+    let fixture = "Процедура Тест()\n\
+    НеизвестныйЛокал.\n\
+КонецПроцедуры\n";
+    let uri = Url::parse("file:///test_p7_owner_unresolved_member_access.bsl").expect("uri");
+    let did_open = DidOpenTextDocumentParams {
+        text_document: TextDocumentItem {
+            uri: uri.clone(),
+            language_id: "bsl".to_string(),
+            version: 1,
+            text: fixture.to_string(),
+        },
+    };
+    let did_open_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(
+            Request::build("textDocument/didOpen")
+                .params(serde_json::to_value(did_open).expect("DidOpenTextDocumentParams"))
+                .finish(),
+        )
+        .await
+        .expect("didOpen notification");
+    assert!(did_open_response.is_none(), "didOpen is a notification");
+
+    let server = server_holder
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("server must be captured");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    force_current_revision_without_exact_type_index(&server, file_id, &uri, fixture, 2).await;
+
+    let completion_position = find_utf16_position_after_marker(fixture, "НеизвестныйЛокал.");
+    let completion_labels = lsp_completion_labels_at(&mut service, &uri, completion_position).await;
+    assert!(
+        completion_labels.is_empty(),
+        "unresolved owner must fail closed without synthetic member children, labels={completion_labels:?}"
+    );
+
+    let timeline = lsp_get_completion_timeline(&mut service, 12004, 10).await;
+    let traces = timeline
+        .get("traces")
+        .and_then(|value| value.as_array())
+        .expect("completion timeline traces array");
+    let trace = traces.last().expect("owner-unresolved completion trace");
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "outcome"),
+        Some("owner_unresolved"),
+        "owner-hint miss with ready head must not be reported as wait_not_ready, trace={trace:?}"
+    );
+    assert_eq!(
+        completion_timeline_prepare_detail_str(trace, "fail_closed_cause"),
+        Some("owner_unresolved"),
+        "owner-hint miss with ready head must expose bounded owner_unresolved cause, trace={trace:?}"
+    );
+
+    let metrics = coordinator.observability_metrics();
+    let counters = metrics
+        .get("counters")
+        .and_then(|value| value.as_object())
+        .expect("metrics.counters object");
+    assert!(
+        read_u64_metric(counters.get(OWNER_UNRESOLVED_REASON_KEY)) > 0,
+        "owner-unresolved completion must emit a distinct public fail-closed reason, counters={counters:?}"
+    );
+    assert_eq!(
+        read_u64_metric(counters.get(MISSING_INDEX_REASON_KEY)),
+        0,
+        "owner-unresolved completion must not be counted as missing_semantic_index"
     );
 
     drain_task.abort();

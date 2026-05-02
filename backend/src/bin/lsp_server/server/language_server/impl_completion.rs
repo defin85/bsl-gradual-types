@@ -1246,6 +1246,7 @@ fn completion_public_timeline_outcome(outcome: &str) -> &'static str {
         "cancelled" => "cancelled",
         "superseded" => "superseded",
         "handler_error" => "handler_error",
+        "owner_unresolved" => "fail_closed",
         "wait_not_ready"
         | "missing_file_content"
         | "missing_file_path"
@@ -1260,6 +1261,7 @@ fn completion_public_timeline_outcome(outcome: &str) -> &'static str {
 fn completion_public_fail_closed_reason(outcome: &str) -> Option<&'static str> {
     match outcome {
         "missing_ir" => Some("missing_canonical_ir"),
+        "owner_unresolved" => Some("owner_unresolved"),
         "fallback_unavailable" | "wait_not_ready" => Some("missing_semantic_index"),
         "superseded" => Some("superseded_revision"),
         "cancelled" => Some("cancelled"),
@@ -3055,6 +3057,20 @@ impl BslLanguageServer {
                         if exact_wait.outcome
                             != super::super::core::ExactTypeIndexWaitOutcomeV2::Ready
                         {
+                            if head_ready
+                                && current_revision_head_owner_type_hints.is_empty()
+                                && exact_wait.outcome
+                                    == super::super::core::ExactTypeIndexWaitOutcomeV2::NoMatchingTask
+                            {
+                                timeline_capture.set_prepare_outcome("owner_unresolved");
+                                timeline_capture.set_prepare_fail_closed_cause("owner_unresolved");
+                                self.coordinator
+                                    .record_intellisense_v2_completion_fail_closed_cause(
+                                        "owner_unresolved",
+                                    );
+                                completion_outcome.get_or_insert("owner_unresolved");
+                                break 'completion_flow Some(completion_empty_response(false));
+                            }
                             if let Some(apply_age) =
                                 completion_apply_age_for_file(self, file_id).await
                             {
@@ -3828,9 +3844,21 @@ impl BslLanguageServer {
                         }
                     }
                     if member_access_context && member_access_owner_type_hints.is_empty() {
-                        self.coordinator
-                            .record_intellisense_v2_completion_fallback_unavailable();
-                        completion_outcome.get_or_insert("wait_not_ready");
+                        let owner_unresolved_with_ready_artifacts =
+                            exact_hit_candidate || exact_ready_before_wait || head_ready;
+                        if owner_unresolved_with_ready_artifacts {
+                            timeline_capture.set_prepare_outcome("owner_unresolved");
+                            timeline_capture.set_prepare_fail_closed_cause("owner_unresolved");
+                            self.coordinator
+                                .record_intellisense_v2_completion_fail_closed_cause(
+                                    "owner_unresolved",
+                                );
+                            completion_outcome.get_or_insert("owner_unresolved");
+                        } else {
+                            self.coordinator
+                                .record_intellisense_v2_completion_fallback_unavailable();
+                            completion_outcome.get_or_insert("wait_not_ready");
+                        }
                         break 'completion_flow Some(completion_empty_response(false));
                     }
                     let (outcome, checkpoint_elapsed) =

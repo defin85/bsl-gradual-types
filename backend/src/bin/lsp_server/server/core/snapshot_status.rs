@@ -319,16 +319,26 @@ impl BslLanguageServer {
                     .as_ref()
                     .map(|value| snapshot_trigger_from_source(value.source)),
             )
+        } else if let Some(task) =
+            task_observation.filter(|task| task.state == SnapshotTaskStateDto::InFlightSameRevision)
+        {
+            (
+                SnapshotReadinessStateDto::Building,
+                false,
+                task.state,
+                task.phase,
+                task.trigger,
+            )
+        } else if failed_state.is_some() {
+            (
+                SnapshotReadinessStateDto::Failed,
+                false,
+                SnapshotTaskStateDto::Absent,
+                None,
+                None,
+            )
         } else if let Some(task) = task_observation {
-            if task.state == SnapshotTaskStateDto::InFlightSameRevision {
-                (
-                    SnapshotReadinessStateDto::Building,
-                    false,
-                    task.state,
-                    task.phase,
-                    task.trigger,
-                )
-            } else if shadow_state
+            if shadow_state
                 .as_ref()
                 .is_some_and(|shadow| Some(shadow.version) == requested_version)
             {
@@ -384,14 +394,6 @@ impl BslLanguageServer {
                 ready_state
                     .as_ref()
                     .map(|value| snapshot_trigger_from_source(value.source)),
-            )
-        } else if failed_state.is_some() {
-            (
-                SnapshotReadinessStateDto::Failed,
-                false,
-                SnapshotTaskStateDto::Absent,
-                None,
-                None,
             )
         } else {
             (

@@ -3563,7 +3563,10 @@ impl BslLanguageServer {
         }
     }
 
-    async fn cancel_background_parse_snapshot_apply_v2(&self, file_id: bsl_analysis_v2::FileId) {
+    pub(crate) async fn cancel_background_parse_snapshot_apply_v2(
+        &self,
+        file_id: bsl_analysis_v2::FileId,
+    ) {
         let task = self
             .background_parse_snapshot_apply_tasks_v2
             .lock()
@@ -3573,6 +3576,7 @@ impl BslLanguageServer {
             task.control.cancel_requested.store(true, Ordering::SeqCst);
             task.control.control_notify.notify_waiters();
             task.handle.abort();
+            self.refresh_snapshot_status_v2(file_id).await;
         }
     }
 

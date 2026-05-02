@@ -399,6 +399,298 @@ async fn snapshot_status_request_reports_building_for_matching_inflight_worker()
     harness.shutdown().await;
 }
 
+async fn insert_snapshot_status_test_worker(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    uri: &Url,
+    requested_version: i32,
+    text: Arc<str>,
+    source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2,
+    phase: crate::server::BackgroundParseSnapshotApplyTaskPhaseV2,
+) -> Arc<crate::server::BackgroundParseSnapshotApplyTaskControlV2> {
+    let control = Arc::new(crate::server::BackgroundParseSnapshotApplyTaskControlV2::new());
+    control.phase.store(phase as u8, Ordering::SeqCst);
+    server
+        .latest_apply_enqueued_at_v2
+        .write()
+        .await
+        .insert(file_id, std::time::Instant::now());
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .insert(
+            file_id,
+            crate::server::BackgroundParseSnapshotApplyTaskV2 {
+                target_epoch: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                target: Arc::new(std::sync::Mutex::new(
+                    crate::server::BackgroundParseSnapshotApplyTargetV2 {
+                        requested_version,
+                        text_hash: *blake3::hash(text.as_bytes()).as_bytes(),
+                        save_cycle_sequence: None,
+                        source,
+                        path: Arc::from(uri.path().to_string()),
+                        text,
+                        parser_base_recovery_text: None,
+                        parser_base_recovery_reuse_parse_result: None,
+                        parser_edits: Vec::new(),
+                        forced_full_parse_reason: None,
+                        async_delay_mode: crate::server::ParseSnapshotAsyncDelayMode::None,
+                        blocking_delay_env_key: None,
+                        did_change_attribution: None,
+                        epoch: 1,
+                    },
+                )),
+                control: control.clone(),
+                handle: tokio::spawn(async {
+                    std::future::pending::<()>().await;
+                }),
+            },
+        );
+    control
+}
+
+async fn seed_snapshot_status_shadow(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    requested_version: i32,
+    text: Arc<str>,
+) {
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, requested_version);
+    server.latest_document_shadow_state_v2.write().await.insert(
+        file_id,
+        DocumentShadowStateV2 {
+            version: requested_version,
+            text,
+        },
+    );
+}
+
+async fn seed_ready_parse_snapshot_for_status_test(
+    server: &BslLanguageServer,
+    file_id: bsl_analysis_v2::FileId,
+    version: i32,
+    text: Arc<str>,
+    source: crate::server::BackgroundParseSnapshotApplyTaskSourceV2,
+) {
+    server.latest_ready_parse_snapshots_v2.write().await.insert(
+        file_id,
+        ReadyParseSnapshotStateV2 {
+            text: text.clone(),
+            parse_snapshot: parse_snapshot_for_test(file_id, version, text.as_ref(), vec![], true, None),
+            source,
+            syntax_errors_complete: true,
+            phase_attribution: crate::server::ReadyParseSnapshotPhaseAttributionV2::default(),
+            program_lowering_summary: None,
+        },
+    );
+}
+
+#[tokio::test]
+async fn snapshot_status_live_notification_emits_ready_after_worker_cleanup() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-terminal-ready.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+    seed_snapshot_status_shadow(&server, file_id, 31, text.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        31,
+        text.clone(),
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting,
+    )
+    .await;
+
+    server.refresh_snapshot_status_v2(file_id).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    seed_ready_parse_snapshot_for_status_test(
+        &server,
+        file_id,
+        31,
+        text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+    )
+    .await;
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let ready = wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(ready.state, SnapshotReadinessStateDto::Ready);
+    assert_eq!(ready.requested_version, Some(31));
+    assert_eq!(ready.ready_version, Some(31));
+    assert!(ready.exact);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_live_notification_emits_shadow_only_after_worker_cleanup_without_artifacts()
+{
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-terminal-shadow-only.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n");
+    seed_snapshot_status_shadow(&server, file_id, 32, text.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        32,
+        text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing,
+    )
+    .await;
+
+    server.refresh_snapshot_status_v2(file_id).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let shadow_only =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(shadow_only.state, SnapshotReadinessStateDto::ShadowOnly);
+    assert_eq!(shadow_only.task_state, SnapshotTaskStateDto::Absent);
+    assert_eq!(shadow_only.requested_version, Some(32));
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_live_notification_emits_superseding_revision_for_old_building_worker() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-superseded-worker.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text_v38: Arc<str> = Arc::from("Procedure Test()\n    x = 38;\nEndProcedure\n");
+    let text_v39: Arc<str> = Arc::from("Procedure Test()\n    x = 39;\nEndProcedure\n");
+    seed_snapshot_status_shadow(&server, file_id, 38, text_v38.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        38,
+        text_v38,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing,
+    )
+    .await;
+
+    server.refresh_snapshot_status_v2(file_id).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+    assert_eq!(building.requested_version, Some(38));
+
+    seed_snapshot_status_shadow(&server, file_id, 39, text_v39).await;
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let superseded =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_ne!(superseded.state, SnapshotReadinessStateDto::Building);
+    assert_eq!(superseded.requested_version, Some(39));
+    assert_eq!(
+        superseded.task_state,
+        SnapshotTaskStateDto::InFlightOtherRevision
+    );
+    assert_eq!(
+        superseded
+            .worker
+            .as_ref()
+            .and_then(|worker| worker.superseded_by_version),
+        Some(39)
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_get_request_repairs_stale_building_cache_after_worker_removed() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+
+    let uri = Url::parse("file:///snapshot-status-read-through-repair.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\nEndProcedure\n");
+    seed_snapshot_status_shadow(&server, file_id, 33, text.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        33,
+        text.clone(),
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing,
+    )
+    .await;
+
+    let building = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    seed_ready_parse_snapshot_for_status_test(
+        &server,
+        file_id,
+        33,
+        text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+    )
+    .await;
+
+    let repaired = server
+        .handle_get_snapshot_status(crate::types::GetSnapshotStatusRequest {
+            uri: uri.to_string(),
+        })
+        .await
+        .expect("snapshot status request");
+    assert_eq!(repaired.state, SnapshotReadinessStateDto::Ready);
+
+    let cached = server
+        .latest_snapshot_status_v2
+        .read()
+        .await
+        .get(&file_id)
+        .cloned()
+        .expect("read-through status should update cache");
+    assert_eq!(cached.state, SnapshotReadinessStateDto::Ready);
+    assert_eq!(cached.updated_at_ms, repaired.updated_at_ms);
+
+    harness.shutdown().await;
+}
+
 #[tokio::test]
 async fn prime_exact_type_index_request_schedules_same_revision_exact_warmup_without_completion() {
     const FIXTURE: &str = "Процедура Тест()\n\
@@ -815,6 +1107,177 @@ async fn snapshot_status_request_reports_failed_when_last_build_aborted() {
         status.recommendation,
         Some(SnapshotRecommendationDto::ExportIncidentBundle)
     );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_failed_before_shadow_only_for_same_revision_failure() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-failed-beats-shadow.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n");
+
+    seed_snapshot_status_shadow(&server, file_id, 18, text).await;
+    server.latest_snapshot_failures_v2.write().await.insert(
+        file_id,
+        SnapshotBuildFailureStateV2 {
+            requested_version: 18,
+            reason: Arc::from("exact_type_index_deadline_before_ready_install"),
+        },
+    );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::Failed);
+    assert_eq!(status.task_state, SnapshotTaskStateDto::Absent);
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code.as_str()),
+        Some("snapshot_build_failed")
+    );
+    assert_eq!(
+        status.fallback_reason.as_deref(),
+        Some("exact_type_index_deadline_before_ready_install")
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_request_reports_failed_before_stale_for_same_revision_failure() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    let uri = Url::parse("file:///snapshot-status-failed-beats-stale.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let stale_text: Arc<str> = Arc::from("Procedure Test()\n    x = 36;\nEndProcedure\n");
+
+    server
+        .latest_received_file_versions_v2
+        .write()
+        .await
+        .insert(file_id, 38);
+    seed_ready_parse_snapshot_for_status_test(
+        &server,
+        file_id,
+        36,
+        stale_text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+    )
+    .await;
+    server.latest_snapshot_failures_v2.write().await.insert(
+        file_id,
+        SnapshotBuildFailureStateV2 {
+            requested_version: 38,
+            reason: Arc::from("exact_type_index_deadline_before_ready_install"),
+        },
+    );
+
+    let status = server.snapshot_status_for_uri_v2(&uri).await;
+    assert_eq!(status.state, SnapshotReadinessStateDto::Failed);
+    assert_eq!(status.requested_version, Some(38));
+    assert_eq!(status.ready_version, Some(36));
+    assert_eq!(
+        status.reason.as_ref().map(|reason| reason.code),
+        Some(SnapshotStatusReasonCodeDto::SnapshotBuildFailed)
+    );
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_incident_shape_does_not_keep_stale_building_after_failure_terminal() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-incident-v38-ready-v36.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let stale_text: Arc<str> = Arc::from("Procedure Test()\n    x = 36;\nEndProcedure\n");
+    let current_text: Arc<str> = Arc::from("Procedure Test()\n    x = 38;\nEndProcedure\n");
+    seed_ready_parse_snapshot_for_status_test(
+        &server,
+        file_id,
+        36,
+        stale_text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+    )
+    .await;
+    seed_snapshot_status_shadow(&server, file_id, 38, current_text.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        38,
+        current_text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Parsing,
+    )
+    .await;
+
+    server.refresh_snapshot_status_v2(file_id).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+    assert_eq!(building.requested_version, Some(38));
+    assert_eq!(building.ready_version, Some(36));
+
+    server
+        .background_parse_snapshot_apply_tasks_v2
+        .lock()
+        .await
+        .remove(&file_id);
+    server.latest_snapshot_failures_v2.write().await.insert(
+        file_id,
+        SnapshotBuildFailureStateV2 {
+            requested_version: 38,
+            reason: Arc::from("exact_type_index_deadline_before_ready_install"),
+        },
+    );
+    server.refresh_snapshot_status_v2(file_id).await;
+
+    let terminal =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(terminal.state, SnapshotReadinessStateDto::Failed);
+    assert_eq!(terminal.requested_version, Some(38));
+    assert_eq!(terminal.ready_version, Some(36));
+    assert_ne!(terminal.state, SnapshotReadinessStateDto::Building);
+
+    harness.shutdown().await;
+}
+
+#[tokio::test]
+async fn snapshot_status_external_cancel_refreshes_after_task_removal() {
+    let coordinator = Arc::new(SystemCoordinator::new());
+    let (mut harness, server) = spawn_live_lsp_transport_harness(coordinator).await;
+    initialize_live_lsp_transport(&mut harness).await;
+
+    let uri = Url::parse("file:///snapshot-status-external-cancel.bsl").expect("uri");
+    let file_id = server.get_or_create_file_id_v2(&uri).await;
+    let text: Arc<str> = Arc::from("Procedure Test()\n    x = 1;\nEndProcedure\n");
+    seed_snapshot_status_shadow(&server, file_id, 41, text.clone()).await;
+    insert_snapshot_status_test_worker(
+        &server,
+        file_id,
+        &uri,
+        41,
+        text,
+        crate::server::BackgroundParseSnapshotApplyTaskSourceV2::DidChange,
+        crate::server::BackgroundParseSnapshotApplyTaskPhaseV2::Waiting,
+    )
+    .await;
+
+    server.refresh_snapshot_status_v2(file_id).await;
+    let building =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(building.state, SnapshotReadinessStateDto::Building);
+
+    server.cancel_background_parse_snapshot_apply_v2(file_id).await;
+
+    let terminal =
+        wait_for_snapshot_status_notification(&mut harness, Duration::from_secs(1)).await;
+    assert_eq!(terminal.state, SnapshotReadinessStateDto::ShadowOnly);
+    assert_eq!(terminal.task_state, SnapshotTaskStateDto::Absent);
+    assert_eq!(terminal.requested_version, Some(41));
 
     harness.shutdown().await;
 }

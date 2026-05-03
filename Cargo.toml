@@ -29,7 +29,7 @@ members = [
 ]
 
 # Zed extension builds independently for wasm32-wasip1 target
-exclude = ["zed-extension", "zed-test-extension"]
+exclude = ["zed-extension"]
 
 resolver = "2"
 

@@ -1,8 +1,13 @@
 id = "bsl-gradual-types"
 name = "BSL (gradual types)"
-version = "0.1.1"
+version = "0.1.2"
 schema_version = 1
 authors = ["BSL Type System Team"]
 description = "BSL support"
 repository = "https://github.com/defin85/bsl-gradual-types"
 languages = ["languages/bsl"]
+
+[grammars.bsl]
+repository = "https://github.com/defin85/bsl-gradual-types"
+rev = "3a546c2e63d49a397c0ba740fbe1a2a0757c46a7"
+path = "third_party/tree-sitter-bsl"

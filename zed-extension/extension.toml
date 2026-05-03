@@ -1,5 +1,5 @@
-id = "bsl"
-name = "BSL"
+id = "bsl-gradual-types"
+name = "BSL (gradual types)"
 version = "0.1.0"
 schema_version = 1
 authors = ["BSL Type System Team"]

@@ -537,6 +537,103 @@ copy_binaries() {
 }
 
 # ============================================================================
+# ЭТАП 2.5: Сборка Zed Extension (LSP + grammar + Wasm)
+# ============================================================================
+
+build_zed_extension() {
+    log_section "ЭТАП 2.5: Копирование и сборка Zed Extension"
+
+    local zed_dir="zed-extension"
+    if [ ! -d "$zed_dir" ]; then
+        log_warning "⏭️  Директория zed-extension не найдена, пропускаем"
+        return 0
+    fi
+
+    local lsp_src="target/$BUILD_MODE/bsl-lsp-server${BINARY_EXT}"
+    local lsp_dst="$zed_dir/bsl-lsp-server${BINARY_EXT}"
+
+    log_info "\n📋 Копирование bsl-lsp-server в zed-extension/:"
+    log_info "  Источник: $lsp_src"
+    log_info "  Назначение: $lsp_dst"
+
+    if [ -f "$lsp_src" ]; then
+        cp "$lsp_src" "$lsp_dst"
+        chmod +x "$lsp_dst" 2>/dev/null || true
+        log_success "  ✅ Скопирован ($(du -h "$lsp_dst" | cut -f1))"
+    else
+        log_error "  ❌ Файл не найден: $lsp_src"
+        return 1
+    fi
+
+    local grammar_dir="third_party/tree-sitter-bsl"
+    local grammar_wasm_dst="$zed_dir/grammars/bsl.wasm"
+
+    if [ "$FAST_MODE" != true ] || [ ! -f "$grammar_wasm_dst" ]; then
+        if ! command -v tree-sitter >/dev/null 2>&1; then
+            log_info "\n🔧 Установка tree-sitter-cli..."
+            measure_time cargo install tree-sitter-cli || {
+                log_error "❌ Не удалось установить tree-sitter-cli"
+                return 1
+            }
+        fi
+
+        log_info "\n🌳 Компиляция Tree-sitter грамматики BSL → Wasm..."
+        (
+            cd "$grammar_dir" || exit 1
+            measure_time tree-sitter generate 2>/dev/null
+            measure_time tree-sitter build --wasm
+        ) || {
+            log_error "❌ Компиляция грамматики провалилась"
+            return 1
+        }
+
+        mkdir -p "$zed_dir/grammars"
+        local grammar_wasm_src="$grammar_dir/tree-sitter-bsl.wasm"
+        if [ -f "$grammar_wasm_src" ]; then
+            cp "$grammar_wasm_src" "$grammar_wasm_dst"
+            log_success "  ✅ grammars/bsl.wasm ($(du -h "$grammar_wasm_dst" | cut -f1))"
+        else
+            log_error "  ❌ Грамматика не собрана: $grammar_wasm_src"
+            return 1
+        fi
+    else
+        log_info "\n⏭️  Грамматика уже собрана ($(du -h "$grammar_wasm_dst" | cut -f1)), пропускаем"
+    fi
+
+    if [ "$FAST_MODE" = true ]; then
+        log_warning "⏭️  Wasm-загрузчик пропущен (--fast)"
+        return 0
+    fi
+
+    if ! rustup target list --installed 2>/dev/null | grep -q wasm32-wasip2; then
+        log_info "\n🎯 Установка wasm32-wasip2 target..."
+        measure_time rustup target add wasm32-wasip2 || {
+            log_error "❌ Не удалось установить wasm32-wasip2 target"
+            return 1
+        }
+    fi
+
+    log_info "\n🦀 Компиляция Wasm-загрузчика (wasm32-wasip2, release)..."
+    measure_time cargo build --manifest-path "$zed_dir/Cargo.toml" --target wasm32-wasip2 --release || {
+        log_error "❌ Сборка Wasm-загрузчика провалилась"
+        return 1
+    }
+
+    local wasm_src="$zed_dir/target/wasm32-wasip2/release/zed_bsl.wasm"
+    local wasm_dst="$zed_dir/extension.wasm"
+    if [ -f "$wasm_src" ]; then
+        cp "$wasm_src" "$wasm_dst"
+        log_success "  ✅ extension.wasm ($(du -h "$wasm_dst" | cut -f1))"
+    else
+        log_error "  ❌ Wasm-артефакт не найден: $wasm_src"
+        return 1
+    fi
+
+    log_success "\n✅ Zed Extension готов (dev-extension: zed-extension/)"
+    return 0
+}
+
+# ============================================================================
 # ЭТАП 3: Сборка VSCode Extension
 # ============================================================================
 
@@ -757,6 +854,14 @@ print_summary() {
         echo "  ✅ WASM bundles ($wasm_count files)"
     fi
 
+    # Zed Extension
+    echo ""
+    echo -e "${CYAN}🦎 Zed Extension:${NC}"
+    [ -f "zed-extension/bsl-lsp-server${BINARY_EXT}" ] && echo "  ✅ LSP Server ($(du -h "zed-extension/bsl-lsp-server${BINARY_EXT}" | cut -f1))"
+    [ -f "zed-extension/extension.wasm" ] && echo "  ✅ Wasm loader ($(du -h zed-extension/extension.wasm | cut -f1))"
+    [ -d "zed-extension/languages/bsl" ] && echo "  ✅ Tree-sitter queries (highlights, brackets, indents, outline)"
+    [ -f "zed-extension/grammars/bsl.wasm" ] && echo "  ✅ Pre-compiled grammar ($(du -h zed-extension/grammars/bsl.wasm | cut -f1))"
+
     echo ""
     log_success "✅ Все компоненты собраны успешно!"
     echo ""
@@ -825,6 +930,12 @@ main() {
     # Этап 2: Копирование
     if ! copy_binaries; then
         log_error "\n❌ Копирование бинарников провалилось!"
+        exit 1
+    fi
+
+    # Этап 2.5: Zed Extension
+    if ! build_zed_extension; then
+        log_error "\n❌ Сборка Zed Extension провалилась!"
         exit 1
     fi
 

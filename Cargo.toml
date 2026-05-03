@@ -1,6 +1,6 @@
 [package]
 name = "bsl-gradual-types"
-version = "0.4.166"
+version = "0.4.170"
 edition = "2021"
 authors = ["BSL Type System Team"]
 description = "Gradual type system for 1C:Enterprise BSL with evolutionary architecture"
@@ -27,10 +27,14 @@ members = [
     "mcp-debug-server",    # Milestone 4.4: MCP Debug Server
     "bsl-agent"            # MCP server for IDE/LLM agents
 ]
+
+# Zed extension builds independently for wasm32-wasip1 target
+exclude = ["zed-extension", "zed-test-extension"]
+
 resolver = "2"
 
 [workspace.package]
-version = "0.4.166"
+version = "0.4.170"
 edition = "2021"
 authors = ["BSL Type System Team"]
 license = "MIT"
@@ -38,7 +42,7 @@ license = "MIT"
 [workspace.dependencies]
 # Core dependencies - shared across all crates
 anyhow = "1.0"
-thiserror = "1.0" 
+thiserror = "1.0"
 serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 bincode = "1.3"

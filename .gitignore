@@ -121,5 +121,10 @@ examples/syntax_helper/**/__categories__
 examples/syntax_helper/*_recovered.zip
 examples/conf_big
 
+# Zed Extension
+zed-extension/target/
+zed-extension/bsl-lsp-server
+zed-extension/extension.wasm
+
 # Tools (downloadable utilities)
 tools/EmptyStandbyList.exe

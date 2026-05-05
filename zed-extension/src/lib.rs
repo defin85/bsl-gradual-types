@@ -2,9 +2,42 @@ use zed::settings::LspSettings;
 use zed_extension_api::{self as zed, LanguageServerId, Result};
 
 struct BslExtension;
+
+/// Convert snake_case JSON keys to camelCase for LspConfig compatibility.
+fn to_camel_case_keys(value: zed::serde_json::Value) -> zed::serde_json::Value {
+    match value {
+        zed::serde_json::Value::Object(map) => {
+            let converted: zed::serde_json::Map<String, zed::serde_json::Value> = map
+                .into_iter()
+                .map(|(k, v)| {
+                    let camel = to_camel_case(&k);
+                    (camel, to_camel_case_keys(v))
+                })
+                .collect();
+            zed::serde_json::Value::Object(converted)
+        }
+        other => other,
+    }
+}
+
+fn to_camel_case(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '_' {
+            if let Some(&next) = chars.peek() {
+                result.push(next.to_ascii_uppercase());
+                chars.next();
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 impl zed::Extension for BslExtension {
     fn new() -> Self {
-        eprintln!("[bsl-gradual-types] Extension::new() called");
         Self
     }
 
@@ -16,9 +49,6 @@ impl zed::Extension for BslExtension {
         let path = worktree
             .which("bsl-lsp-server")
             .ok_or_else(|| "bsl-lsp-server not found in PATH".to_string())?;
-
-        eprintln!("[bsl-gradual-types] LSP binary: {}", path);
-
         Ok(zed::Command {
             command: path,
             args: vec![],
@@ -31,16 +61,11 @@ impl zed::Extension for BslExtension {
         server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<Option<zed::serde_json::Value>> {
-        let key = server_id.as_ref();
-        eprintln!("[bsl-gradual-types] initialization_options: looking for key '{}'", key);
-
-        let settings = LspSettings::for_worktree(key, worktree)
+        let settings = LspSettings::for_worktree(server_id.as_ref(), worktree)
             .ok()
             .and_then(|lsp_settings| lsp_settings.settings.clone())
             .unwrap_or_default();
-
-        eprintln!("[bsl-gradual-types] initialization_options: {:?}", settings);
-        Ok(Some(settings))
+        Ok(Some(to_camel_case_keys(settings)))
     }
 
     fn language_server_workspace_configuration(
@@ -52,7 +77,6 @@ impl zed::Extension for BslExtension {
             .ok()
             .and_then(|lsp_settings| lsp_settings.settings.clone())
             .unwrap_or_default();
-
         Ok(Some(settings))
     }
 }

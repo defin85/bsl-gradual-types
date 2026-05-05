@@ -2,9 +2,9 @@ use zed::settings::LspSettings;
 use zed_extension_api::{self as zed, LanguageServerId, Result};
 
 struct BslExtension;
-
 impl zed::Extension for BslExtension {
     fn new() -> Self {
+        eprintln!("[bsl-gradual-types] Extension::new() called");
         Self
     }
 
@@ -17,6 +17,8 @@ impl zed::Extension for BslExtension {
             .which("bsl-lsp-server")
             .ok_or_else(|| "bsl-lsp-server not found in PATH".to_string())?;
 
+        eprintln!("[bsl-gradual-types] LSP binary: {}", path);
+
         Ok(zed::Command {
             command: path,
             args: vec![],
@@ -26,23 +28,27 @@ impl zed::Extension for BslExtension {
 
     fn language_server_initialization_options(
         &mut self,
-        _language_server_id: &LanguageServerId,
+        server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<Option<zed::serde_json::Value>> {
-        let settings = LspSettings::for_worktree("bsl", worktree)
+        let key = server_id.as_ref();
+        eprintln!("[bsl-gradual-types] initialization_options: looking for key '{}'", key);
+
+        let settings = LspSettings::for_worktree(key, worktree)
             .ok()
             .and_then(|lsp_settings| lsp_settings.settings.clone())
             .unwrap_or_default();
 
+        eprintln!("[bsl-gradual-types] initialization_options: {:?}", settings);
         Ok(Some(settings))
     }
 
     fn language_server_workspace_configuration(
         &mut self,
-        _language_server_id: &LanguageServerId,
+        server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<Option<zed::serde_json::Value>> {
-        let settings = LspSettings::for_worktree("bsl", worktree)
+        let settings = LspSettings::for_worktree(server_id.as_ref(), worktree)
             .ok()
             .and_then(|lsp_settings| lsp_settings.settings.clone())
             .unwrap_or_default();

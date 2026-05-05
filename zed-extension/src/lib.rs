@@ -24,6 +24,19 @@ impl zed::Extension for BslExtension {
         })
     }
 
+    fn language_server_initialization_options(
+        &mut self,
+        _language_server_id: &LanguageServerId,
+        worktree: &zed::Worktree,
+    ) -> Result<Option<zed::serde_json::Value>> {
+        let settings = LspSettings::for_worktree("bsl", worktree)
+            .ok()
+            .and_then(|lsp_settings| lsp_settings.settings.clone())
+            .unwrap_or_default();
+
+        Ok(Some(settings))
+    }
+
     fn language_server_workspace_configuration(
         &mut self,
         _language_server_id: &LanguageServerId,

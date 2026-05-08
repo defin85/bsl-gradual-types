@@ -10,10 +10,13 @@ Zed поддерживает расширения на Rust/WebAssembly + воз
 ## What Changes
 - **Новый capability** `bsl-zed-extension`:
   - Расширение Zed, регистрирующее язык BSL с поддержкой Tree-sitter грамматики
-  - Wasm-загрузчик, запускающий `bsl-lsp-server` как Language Server
-  - Бандлинг бинарников `bsl-lsp-server` для linux-x86_64 (первичная цель — WSL)
+  - Wasm-загрузчик, embed-ящий `bsl-lsp-server`, разворачивающий его в Zed extension work dir и запускающий как Language Server
+  - Build-процесс, материализующий generated artifacts `bsl-lsp-server` и `extension.wasm` для dev-extension bundle (первичная цель — WSL/Linux)
   - Tree-sitter queries для подсветки синтаксиса (адаптированы из существующей грамматики)
-- **Не затрагивает**: ядро анализа, LSP-сервер, VS Code extension, CLI, веб-сервер
+- **Backend hardening для smoke-gate**:
+  - `bsl-lsp-server` didSave save-fastlane предпочитает same-version ready parse snapshot перед applied-analysis fallback
+  - Если ready snapshot ещё содержит deferred syntax-error assembly, save-fastlane достраивает syntax errors из `backend_tree` перед первой публикацией диагностик
+- **Не затрагивает**: ядро анализа, VS Code extension, CLI, веб-сервер
 
 ## Impact
 - Affected specs (новый): `bsl-zed-extension`
@@ -23,10 +26,12 @@ Zed поддерживает расширения на Rust/WebAssembly + воз
   - `zed-extension/Cargo.toml` — Rust crate для Wasm-загрузчика
   - `zed-extension/src/lib.rs` — Wasm-загрузчик LSP
   - `zed-extension/languages/bsl/` — Tree-sitter queries и конфигурация языка
+  - `backend/src/bin/lsp_server/server/core/diagnostics_runtime.rs` — didSave save-fastlane ready-snapshot fallback
+  - `backend/src/bin/lsp_server/server/language_server/impl_document_sync.rs` — shared ready-snapshot deferred syntax assembly updater
 
 ## Non-Goals
 - Поддержка macOS и Windows native (только WSL/Linux на первом этапе)
 - Портирование VS Code webview-панелей в Zed
 - Регистрация DAP/MCP серверов в расширении
 - Публикация в официальный extensions registry Zed (dev-extension достаточно)
-- Изменения в `bsl-lsp-server` или `analysis-v2`
+- Широкие изменения в `analysis-v2` или публичном LSP-контракте

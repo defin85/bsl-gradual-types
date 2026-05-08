@@ -28,7 +28,7 @@ members = [
     "bsl-agent"            # MCP server for IDE/LLM agents
 ]
 
-# Zed extension builds independently for wasm32-wasip1 target
+# Zed extension builds independently for the Zed extension API wasm32-wasip2 target
 exclude = ["zed-extension"]
 
 resolver = "2"

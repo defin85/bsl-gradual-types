@@ -2527,19 +2527,35 @@ impl BslLanguageServer {
         Duration,
     )> {
         let started = Instant::now();
-        let ready_state = self
+        let mut ready_state = self
             .latest_ready_parse_snapshots_v2
             .read()
             .await
             .get(&file_id)
             .cloned()?;
-        if !ready_state.syntax_errors_complete {
+        if ready_state.parse_snapshot.file_version != requested_version {
             return None;
+        }
+        if !ready_state.syntax_errors_complete {
+            let parser = self.coordinator.parser_coordinator()?;
+            let parse_result = Arc::new(
+                parser.complete_deferred_parse_snapshot_syntax_error_assembly(
+                    ready_state.parse_snapshot.backend_tree.as_ref(),
+                    ready_state.text.as_ref(),
+                    ready_state.parse_snapshot.parse_result.as_ref(),
+                ),
+            );
+            self.update_ready_parse_snapshot_after_deferred_syntax_error_assembly_v2(
+                file_id,
+                requested_version,
+                &ready_state.text,
+                Arc::clone(&parse_result),
+            )
+            .await;
+            ready_state.parse_snapshot.parse_result = parse_result;
+            ready_state.syntax_errors_complete = true;
         }
         let parse_snapshot = ready_state.parse_snapshot;
-        if parse_snapshot.file_version != requested_version {
-            return None;
-        }
         Some((
             syntax_errors_to_diagnostics(
                 &parse_snapshot.parse_result.syntax_errors,
@@ -5003,7 +5019,7 @@ impl BslLanguageServer {
             syntax_elapsed,
             syntax_runtime_queue_wait_elapsed,
         ) = if let Some(result) = self
-            .try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
+            .try_collect_save_fastlane_diagnostics_from_ready_parse_snapshot_v2(
                 uri,
                 file_id,
                 requested_version,
@@ -5012,7 +5028,7 @@ impl BslLanguageServer {
         {
             (result.0, result.1, result.2, result.3, None)
         } else if let Some(result) = self
-            .try_collect_save_fastlane_diagnostics_from_ready_parse_snapshot_v2(
+            .try_collect_save_fastlane_diagnostics_from_applied_analysis_v2(
                 uri,
                 file_id,
                 requested_version,

@@ -9,8 +9,10 @@ use bsl_shared::domain::types::{
     RawAttributeData, RawDataSource, RawPropertyData, RawTabularSectionData, RawTypeData,
     FORM_DATA_CANONICAL_TYPE_NAME,
 };
+use bsl_shared::domain::FACETED_TYPES;
 
 const PREDEFINED_MANAGER_PROP_TYPE_PREFIX: &str = "__predefined_manager__:";
+const DYNAMIC_FORM_ATTRIBUTE_TYPE_NAME: &str = "Dynamic";
 
 impl UniversalMetadataObject {
     /// Конвертирует UniversalMetadataObject в набор RawTypeData, включая синтетические типы форм
@@ -175,11 +177,70 @@ impl UniversalMetadataObject {
             .iter()
             .map(|attr| bsl_shared::domain::types::RawPropertyData {
                 name: attr.name.clone(),
-                prop_type: attr.type_name.clone(),
+                prop_type: Self::normalize_metadata_type_name(&attr.type_name),
                 is_readonly: false,
                 collection_item_type: None, // TODO: определить из метаданных
             })
             .collect()
+    }
+
+    fn normalize_metadata_type_name(raw: &str) -> String {
+        let trimmed = raw.trim();
+        if let Some(normalized) = Self::normalize_cfg_metadata_type_name(trimmed) {
+            return normalized;
+        }
+        match trimmed {
+            "xs:string" | "String" => "Строка".to_string(),
+            "xs:boolean" | "Boolean" => "Булево".to_string(),
+            "xs:dateTime" | "Date" => "Дата".to_string(),
+            "xs:decimal" | "xs:int" | "xs:integer" | "xs:long" | "Number" => "Число".to_string(),
+            "v8:ValueListType" | "ValueListType" => "СписокЗначений".to_string(),
+            "v8:ValueTable" | "ValueTable" => "ТаблицаЗначений".to_string(),
+            "v8:ValueTree" | "ValueTree" => "ДеревоЗначений".to_string(),
+            "v8:ValueStorage" | "ValueStorage" => "ХранилищеЗначения".to_string(),
+            "v8:UUID" | "UUID" => "УникальныйИдентификатор".to_string(),
+            "v8:TypeDescription" | "TypeDescription" => "ОписаниеТипов".to_string(),
+            "v8:FixedStructure" | "FixedStructure" => "ФиксированнаяСтруктура".to_string(),
+            "v8:FixedMap" | "FixedMap" => "ФиксированноеСоответствие".to_string(),
+            "v8:FixedArray" | "FixedArray" => "ФиксированныйМассив".to_string(),
+            "v8:StandardPeriod" | "StandardPeriod" => "СтандартныйПериод".to_string(),
+            "v8:Type" | "Type" => "Тип".to_string(),
+            "v8:Null" | "Null" => "Null".to_string(),
+            other => other.to_string(),
+        }
+    }
+
+    fn normalize_cfg_metadata_type_name(raw: &str) -> Option<String> {
+        let rest = raw.strip_prefix("cfg:")?;
+        let (prefix, name) = rest.split_once('.').unwrap_or((rest, ""));
+        let (russian_prefix, _, _, _) = FACETED_TYPES
+            .iter()
+            .find(|(_, english_prefix, _, _)| english_prefix.eq_ignore_ascii_case(prefix))?;
+        if name.is_empty() {
+            Some((*russian_prefix).to_string())
+        } else {
+            Some(format!("{russian_prefix}.{name}"))
+        }
+    }
+
+    fn normalize_form_attr_types(attr: &super::form_types::FormAttribute) -> String {
+        if attr.type_description.types.is_empty() {
+            return DYNAMIC_FORM_ATTRIBUTE_TYPE_NAME.to_string();
+        }
+        let parts: Vec<String> = attr
+            .type_description
+            .types
+            .iter()
+            .map(|t| Self::normalize_metadata_type_name(t))
+            .filter(|t| !t.is_empty())
+            .collect();
+        if parts.is_empty() {
+            return DYNAMIC_FORM_ATTRIBUTE_TYPE_NAME.to_string();
+        }
+        if parts.len() == 1 {
+            return parts[0].clone();
+        }
+        parts.join(" | ")
     }
 
     fn dedup_properties_case_insensitive(properties: Vec<RawPropertyData>) -> Vec<RawPropertyData> {
@@ -343,7 +404,7 @@ impl UniversalMetadataObject {
             .iter()
             .map(|attr| RawAttributeData {
                 name: attr.name.clone(),
-                attr_type: attr.type_name.clone(),
+                attr_type: Self::normalize_metadata_type_name(&attr.type_name),
             })
             .collect()
     }
@@ -359,7 +420,7 @@ impl UniversalMetadataObject {
                     .iter()
                     .map(|attr| RawAttributeData {
                         name: attr.name.clone(),
-                        attr_type: attr.type_name.clone(),
+                        attr_type: Self::normalize_metadata_type_name(&attr.type_name),
                     })
                     .collect(),
             })
@@ -383,39 +444,6 @@ impl UniversalMetadataObject {
             collection_item_type: None,
         });
 
-        fn normalize_form_attr_type(raw: &str) -> String {
-            let trimmed = raw.trim();
-            match trimmed {
-                "xs:string" | "String" => "Строка".to_string(),
-                "xs:boolean" | "Boolean" => "Булево".to_string(),
-                "xs:dateTime" | "Date" => "Дата".to_string(),
-                "xs:decimal" | "xs:int" | "xs:integer" | "xs:long" | "Number" => {
-                    "Число".to_string()
-                }
-                other => other.to_string(),
-            }
-        }
-
-        fn normalize_form_attr_types(attr: &super::form_types::FormAttribute) -> Option<String> {
-            if attr.type_description.types.is_empty() {
-                return None;
-            }
-            let parts: Vec<String> = attr
-                .type_description
-                .types
-                .iter()
-                .map(|t| normalize_form_attr_type(t))
-                .filter(|t| !t.is_empty())
-                .collect();
-            if parts.is_empty() {
-                return None;
-            }
-            if parts.len() == 1 {
-                return Some(parts[0].clone());
-            }
-            Some(parts.join(" | "))
-        }
-
         // Form attributes from Form.xml: available as identifiers in the form module.
         for attr in &form.attributes {
             if attr.name == "Объект" {
@@ -424,9 +452,7 @@ impl UniversalMetadataObject {
             if properties.iter().any(|p| p.name == attr.name) {
                 continue;
             }
-            let Some(prop_type) = normalize_form_attr_types(attr) else {
-                continue;
-            };
+            let prop_type = Self::normalize_form_attr_types(attr);
             properties.push(bsl_shared::domain::types::RawPropertyData {
                 name: attr.name.clone(),
                 prop_type,
@@ -498,7 +524,7 @@ impl UniversalMetadataObject {
             .iter()
             .map(|a| RawAttributeData {
                 name: a.name.clone(),
-                attr_type: a.type_name.clone(),
+                attr_type: Self::normalize_metadata_type_name(&a.type_name),
             })
             .collect();
 

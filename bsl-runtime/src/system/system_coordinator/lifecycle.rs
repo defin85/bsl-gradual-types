@@ -11,7 +11,7 @@ use tracing::{info, warn};
 use anyhow::anyhow;
 use bsl_shared::domain::repository::{InMemoryTypeRepository, TypeRepository};
 use bsl_shared::domain::resolver::TypeResolver;
-use bsl_shared::domain::types::{RawDataSource, RawTypeData};
+use bsl_shared::domain::types::{RawDataSource, RawMethodData, RawParamData, RawTypeData};
 use bsl_shared::domain::GlobalContextIndex;
 use serde::{Deserialize, Serialize};
 

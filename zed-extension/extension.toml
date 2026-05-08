@@ -7,6 +7,10 @@ description = "BSL support"
 repository = "https://github.com/defin85/bsl-gradual-types"
 languages = ["languages/bsl"]
 
+[lib]
+kind = "Rust"
+version = "0.7.0"
+
 [grammars.bsl]
 repository = "https://github.com/defin85/bsl-gradual-types"
 rev = "3a546c2e63d49a397c0ba740fbe1a2a0757c46a7"

@@ -125,6 +125,20 @@ fn test_union_with_dynamic_returns_dynamic() {
 }
 
 #[test]
+fn test_union_with_platform_dynamic_returns_dynamic() {
+    let types = vec![
+        WeightedType::new(ConcreteType::string()),
+        WeightedType::new(ConcreteType::Platform(PlatformType {
+            name: "Dynamic".to_string(),
+        })),
+    ];
+
+    let result = ResolutionResult::normalize_union(types);
+
+    assert!(matches!(result, ResolutionResult::Dynamic));
+}
+
+#[test]
 fn test_union_merge_weights() {
     // String(0.3) | Number(0.4) | String(0.3) -> String(0.6) | Number(0.4)
     let types = vec![

@@ -1,4 +1,4 @@
-use super::super::types::AttributeInfo;
+use super::super::types::{AttributeInfo, TabularSectionInfo};
 use super::*;
 use bsl_shared::domain::types::MetadataKind;
 
@@ -132,6 +132,126 @@ fn test_convert_document_standard_attributes_to_properties() {
         .find(|prop| prop.name == "Проведен")
         .expect("missing Проведен");
     assert_eq!(posted.prop_type, "Булево");
+}
+
+#[test]
+fn test_convert_metadata_attributes_normalize_cfg_and_xs_types() {
+    use super::super::form_types::FormMetadata;
+
+    let mut obj = UniversalMetadataObject::new(
+        "Document".to_string(),
+        "Док1".to_string(),
+        "12345678-1234-1234-1234-123456789012".to_string(),
+    );
+    obj.attributes = vec![
+        AttributeInfo {
+            name: "Контрагент".to_string(),
+            type_name: "cfg:CatalogRef.Контрагенты".to_string(),
+            synonym: None,
+        },
+        AttributeInfo {
+            name: "Основание".to_string(),
+            type_name: "cfg:DocumentRef.ЗаказПокупателя".to_string(),
+            synonym: None,
+        },
+        AttributeInfo {
+            name: "ВидОперации".to_string(),
+            type_name: "cfg:EnumRef.ВидыОпераций".to_string(),
+            synonym: None,
+        },
+        AttributeInfo {
+            name: "Комментарий".to_string(),
+            type_name: "xs:string".to_string(),
+            synonym: None,
+        },
+    ];
+    obj.tabular_sections.push(TabularSectionInfo {
+        name: "Товары".to_string(),
+        synonym: None,
+        attributes: vec![
+            AttributeInfo {
+                name: "Номенклатура".to_string(),
+                type_name: "cfg:CatalogRef.Номенклатура".to_string(),
+                synonym: None,
+            },
+            AttributeInfo {
+                name: "Количество".to_string(),
+                type_name: "xs:decimal".to_string(),
+                synonym: None,
+            },
+        ],
+    });
+    obj.forms.push(FormMetadata {
+        name: "Форма1".to_string(),
+        owner_type: "Document.Док1".to_string(),
+        attributes: Vec::new(),
+        events: Vec::new(),
+        module_path: None,
+        execution_contexts: Vec::new(),
+        elements: Vec::new(),
+    });
+
+    let raw_type = obj.to_raw_type_data(None);
+    let prop_type = |name: &str| {
+        raw_type
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.prop_type.as_str())
+            .expect("expected metadata attribute as property")
+    };
+    assert_eq!(prop_type("Контрагент"), "СправочникСсылка.Контрагенты");
+    assert_eq!(prop_type("Основание"), "ДокументСсылка.ЗаказПокупателя");
+    assert_eq!(prop_type("ВидОперации"), "ПеречислениеСсылка.ВидыОпераций");
+    assert_eq!(prop_type("Комментарий"), "Строка");
+
+    let attr_type = |name: &str| {
+        raw_type
+            .attributes
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.attr_type.as_str())
+            .expect("expected raw attribute")
+    };
+    assert_eq!(attr_type("Контрагент"), "СправочникСсылка.Контрагенты");
+    assert_eq!(attr_type("Основание"), "ДокументСсылка.ЗаказПокупателя");
+
+    let ts = raw_type
+        .tabular_sections
+        .iter()
+        .find(|ts| ts.name == "Товары")
+        .expect("expected tabular section");
+    let ts_attr_type = |name: &str| {
+        ts.attributes
+            .iter()
+            .find(|a| a.name == name)
+            .map(|a| a.attr_type.as_str())
+            .expect("expected tabular section attribute")
+    };
+    assert_eq!(
+        ts_attr_type("Номенклатура"),
+        "СправочникСсылка.Номенклатура"
+    );
+    assert_eq!(ts_attr_type("Количество"), "Число");
+
+    let raw_types = obj.to_raw_type_data_with_forms(None);
+    let row_type = raw_types
+        .iter()
+        .find(|t| t.name == "СтрокаТовары")
+        .expect("expected tabular row type");
+    let row_prop_type = |name: &str| {
+        row_type
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.prop_type.as_str())
+            .expect("expected row property")
+    };
+    assert_eq!(
+        row_prop_type("Номенклатура"),
+        "СправочникСсылка.Номенклатура"
+    );
+    assert_eq!(row_prop_type("Количество"), "Число");
 }
 
 #[test]
@@ -335,15 +455,35 @@ fn test_form_type_includes_form_xml_attributes() {
     obj.forms.push(FormMetadata {
         name: "Форма1".to_string(),
         owner_type: "Document.Док1".to_string(),
-        attributes: vec![FormAttribute {
-            name: "СчетФактура".to_string(),
-            id: 1,
-            type_description: TypeDescription {
-                types: vec!["cfg:DocumentRef.СчетФактураВыданный".to_string()],
+        attributes: vec![
+            FormAttribute {
+                name: "СчетФактура".to_string(),
+                id: 1,
+                type_description: TypeDescription {
+                    types: vec!["cfg:DocumentRef.СчетФактураВыданный".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
             },
-            is_main_attribute: false,
-            saved_data: false,
-        }],
+            FormAttribute {
+                name: "Контрагент".to_string(),
+                id: 2,
+                type_description: TypeDescription {
+                    types: vec!["cfg:CatalogRef.Контрагенты".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+            FormAttribute {
+                name: "ВидОперации".to_string(),
+                id: 3,
+                type_description: TypeDescription {
+                    types: vec!["cfg:EnumRef.ВидыОпераций".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+        ],
         events: Vec::new(),
         module_path: None,
         execution_contexts: Vec::new(),
@@ -356,13 +496,145 @@ fn test_form_type_includes_form_xml_attributes() {
         .find(|t| t.name == "Формы.Документы.Док1.Форма1")
         .expect("expected form type");
 
-    let attr = form_type
-        .properties
-        .iter()
-        .find(|p| p.name == "СчетФактура")
-        .expect("expected form attribute as property");
+    let prop_type = |name: &str| {
+        form_type
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.prop_type.as_str())
+            .expect("expected form attribute as property")
+    };
 
-    assert_eq!(attr.prop_type, "cfg:DocumentRef.СчетФактураВыданный");
+    assert_eq!(
+        prop_type("СчетФактура"),
+        "ДокументСсылка.СчетФактураВыданный"
+    );
+    assert_eq!(prop_type("Контрагент"), "СправочникСсылка.Контрагенты");
+    assert_eq!(prop_type("ВидОперации"), "ПеречислениеСсылка.ВидыОпераций");
+}
+
+#[test]
+fn test_form_type_normalizes_v8_form_attribute_types() {
+    use super::super::form_types::{FormAttribute, FormMetadata, TypeDescription};
+
+    let mut obj = UniversalMetadataObject::new(
+        "Document".to_string(),
+        "Док1".to_string(),
+        "12345678-1234-1234-1234-123456789012".to_string(),
+    );
+
+    obj.forms.push(FormMetadata {
+        name: "Форма1".to_string(),
+        owner_type: "Document.Док1".to_string(),
+        attributes: vec![
+            FormAttribute {
+                name: "СписокВидовОпераций".to_string(),
+                id: 1,
+                type_description: TypeDescription {
+                    types: vec!["v8:ValueListType".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+            FormAttribute {
+                name: "ТаблицаПодбора".to_string(),
+                id: 2,
+                type_description: TypeDescription {
+                    types: vec!["v8:ValueTable".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+            FormAttribute {
+                name: "ДеревоСтраниц".to_string(),
+                id: 3,
+                type_description: TypeDescription {
+                    types: vec!["v8:ValueTree".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+        ],
+        events: Vec::new(),
+        module_path: None,
+        execution_contexts: Vec::new(),
+        elements: Vec::new(),
+    });
+
+    let raw_types = obj.to_raw_type_data_with_forms(None);
+    let form_type = raw_types
+        .iter()
+        .find(|t| t.name == "Формы.Документы.Док1.Форма1")
+        .expect("expected form type");
+
+    let prop_type = |name: &str| {
+        form_type
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.prop_type.as_str())
+            .expect("expected form attribute as property")
+    };
+
+    assert_eq!(prop_type("СписокВидовОпераций"), "СписокЗначений");
+    assert_eq!(prop_type("ТаблицаПодбора"), "ТаблицаЗначений");
+    assert_eq!(prop_type("ДеревоСтраниц"), "ДеревоЗначений");
+}
+
+#[test]
+fn test_form_type_keeps_empty_type_form_attributes_as_dynamic() {
+    use super::super::form_types::{FormAttribute, FormMetadata, TypeDescription};
+
+    let mut obj = UniversalMetadataObject::new(
+        "Document".to_string(),
+        "Док1".to_string(),
+        "12345678-1234-1234-1234-123456789012".to_string(),
+    );
+
+    obj.forms.push(FormMetadata {
+        name: "Форма1".to_string(),
+        owner_type: "Document.Док1".to_string(),
+        attributes: vec![
+            FormAttribute {
+                name: "ЗначенияЗаполнения".to_string(),
+                id: 1,
+                type_description: TypeDescription { types: Vec::new() },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+            FormAttribute {
+                name: "ЗначениеКопирования".to_string(),
+                id: 2,
+                type_description: TypeDescription {
+                    types: vec![" ".to_string()],
+                },
+                is_main_attribute: false,
+                saved_data: false,
+            },
+        ],
+        events: Vec::new(),
+        module_path: None,
+        execution_contexts: Vec::new(),
+        elements: Vec::new(),
+    });
+
+    let raw_types = obj.to_raw_type_data_with_forms(None);
+    let form_type = raw_types
+        .iter()
+        .find(|t| t.name == "Формы.Документы.Док1.Форма1")
+        .expect("expected form type");
+
+    let prop_type = |name: &str| {
+        form_type
+            .properties
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.prop_type.as_str())
+            .expect("expected form attribute as property")
+    };
+
+    assert_eq!(prop_type("ЗначенияЗаполнения"), "Dynamic");
+    assert_eq!(prop_type("ЗначениеКопирования"), "Dynamic");
 }
 
 #[test]

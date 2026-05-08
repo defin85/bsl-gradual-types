@@ -112,9 +112,9 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         .iter()
         .find(|p| p.name == "СчетФактура")
         .expect("expected form attribute СчетФактура to be present");
-    assert!(
-        sf_prop.prop_type.contains("cfg:DocumentRef."),
-        "expected СчетФактура prop type to be cfg:DocumentRef.*, got {:?}",
+    assert_eq!(
+        sf_prop.prop_type, "ДокументСсылка.СчетФактураВыданный",
+        "expected СчетФактура prop type to be normalized to ДокументСсылка.*, got {:?}",
         sf_prop.prop_type
     );
     let elements_type_name = "ЭлементыФормы.Документы.РеализацияТоваровУслуг.ФормаДокументаОбщая";
@@ -261,12 +261,10 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         Some("ГруппаФормы"),
         "Expected `Элементы.СчетФактураПросмотр` to resolve as `ГруппаФормы`"
     );
-    assert!(
-        got_y
-            .as_deref()
-            .unwrap_or_default()
-            .contains("cfg:DocumentRef."),
-        "Expected `СчетФактура` to resolve as cfg:DocumentRef.*, got {:?}",
+    assert_eq!(
+        got_y.as_deref(),
+        Some("ДокументСсылка.СчетФактураВыданный"),
+        "Expected `СчетФактура` to resolve as normalized document reference, got {:?}",
         got_y
     );
     assert_eq!(
@@ -278,6 +276,137 @@ fn conf_big_form_module_attributes_and_elements_are_typed() {
         got_z.as_deref(),
         Some("ДокументСсылка.РеализацияТоваровУслуг"),
         "Expected `Объект.Ссылка` to resolve as typed document reference"
+    );
+}
+
+#[test]
+fn conf_big_value_list_form_attribute_supports_member_access() {
+    let Some(root) = conf_big_root() else {
+        return;
+    };
+
+    let deps_bundle = support::deps_bundle_v2_for_paths(None, Some(root.as_path()), Some("8.3.25"));
+    let file_path = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокумента/Ext/Form/Module.bsl";
+    let code = concat!(
+        "Процедура Тест(ВыбраннаяСтрока)\n",
+        "    СтрокаТаблицы = СписокВидовОпераций.НайтиПоИдентификатору(ВыбраннаяСтрока);\n",
+        "КонецПроцедуры\n",
+    );
+
+    let diagnostics = support::semantic_diagnostics_for_code(deps_bundle.as_ref(), file_path, code);
+    let diagnostic_messages = diagnostics
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        diagnostics.iter().all(|diag| {
+            !(diag.message.contains("СписокВидовОпераций")
+                || diag.message.contains("НайтиПоИдентификатору"))
+        }),
+        "unexpected diagnostics for ValueList form attribute member access: {:?}",
+        diagnostic_messages
+    );
+
+    let receiver_offset = code
+        .find("СписокВидовОпераций")
+        .expect("probe value-list form attribute receiver");
+    let (line, column) = byte_offset_to_utf16_position(code, receiver_offset);
+    let hover = support::hover_for_code(deps_bundle.as_ref(), file_path, code, line, column)
+        .expect("hover for value-list form attribute");
+
+    assert!(
+        hover.contains("СписокЗначений"),
+        "expected СписокВидовОпераций hover to expose СписокЗначений, got:\n{}",
+        hover
+    );
+}
+
+#[test]
+fn conf_big_empty_type_form_attribute_is_bound_in_context() {
+    let Some(root) = conf_big_root() else {
+        return;
+    };
+
+    let deps_bundle = support::deps_bundle_v2_for_paths(None, Some(root.as_path()), Some("8.3.25"));
+    let file_path = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокумента/Ext/Form/Module.bsl";
+    let code = concat!(
+        "Процедура Тест(ВыбранныйВидОперации)\n",
+        "    Если ТипЗнч(ЗначенияЗаполнения) <> Тип(\"Структура\") Тогда\n",
+        "        ЗначенияЗаполнения = Новый Структура();\n",
+        "    КонецЕсли;\n",
+        "    ЗначенияЗаполнения.Вставить(\"ВидОперации\", ВыбранныйВидОперации);\n",
+        "КонецПроцедуры\n",
+    );
+
+    let diagnostics = support::semantic_diagnostics_for_code(deps_bundle.as_ref(), file_path, code);
+    let diagnostic_messages = diagnostics
+        .iter()
+        .map(|diag| diag.message.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        diagnostics.iter().all(|diag| {
+            !(diag.message.contains("ЗначенияЗаполнения")
+                || diag.message.contains("ТипЗнч")
+                || diag.message.contains("Вставить"))
+        }),
+        "unexpected diagnostics for empty-type form attribute: {:?}",
+        diagnostic_messages
+    );
+}
+
+#[test]
+fn conf_big_cfg_document_ref_form_attribute_hover_uses_document_ref_type() {
+    let Some(root) = conf_big_root() else {
+        return;
+    };
+
+    let deps_bundle = support::deps_bundle_v2_for_paths(None, Some(root.as_path()), Some("8.3.25"));
+    let file_path = "Documents/РеализацияТоваровУслуг/Forms/ФормаДокумента/Ext/Form/Module.bsl";
+    let code = concat!(
+        "Процедура Тест()\n",
+        "    СтруктураПараметров = Новый Структура;\n",
+        "    СтруктураПараметров.Вставить(\"Ключ\", Ключ);\n",
+        "КонецПроцедуры\n",
+    );
+
+    let key_offset = code.rfind("Ключ").expect("probe Ключ form attribute");
+    let (line, column) = byte_offset_to_utf16_position(code, key_offset);
+    let hover = support::hover_for_code(deps_bundle.as_ref(), file_path, code, line, column)
+        .expect("hover for Ключ form attribute");
+
+    assert!(
+        hover.contains("ДокументСсылка.РеализацияТоваровУслуг"),
+        "expected Ключ hover to expose ДокументСсылка.РеализацияТоваровУслуг, got:\n{}",
+        hover
+    );
+    assert!(
+        !hover.contains("**Тип:** cfg:DocumentRef"),
+        "raw cfg type leaked into Ключ hover:\n{}",
+        hover
+    );
+    assert!(
+        hover.contains("**Контрагент**: СправочникСсылка.Контрагенты"),
+        "expected document property Контрагент to be normalized inside Ключ hover, got:\n{}",
+        hover
+    );
+    assert!(
+        hover.contains("**ВидОперации**: ПеречислениеСсылка.ВидыОперацийРеализацияТоваров"),
+        "expected document property ВидОперации to be normalized inside Ключ hover, got:\n{}",
+        hover
+    );
+    assert!(
+        hover.contains("**ОтчетМаркетплейса**: ДокументСсылка.ОтчетМаркетплейса"),
+        "expected document property ОтчетМаркетплейса to be normalized inside Ключ hover, got:\n{}",
+        hover
+    );
+    assert!(
+        !hover.contains("**Контрагент**: cfg:CatalogRef.Контрагенты")
+            && !hover.contains("**ВидОперации**: cfg:EnumRef.ВидыОперацийРеализацияТоваров")
+            && !hover.contains("**ОтчетМаркетплейса**: cfg:DocumentRef.ОтчетМаркетплейса"),
+        "raw cfg metadata property type leaked into Ключ hover:\n{}",
+        hover
     );
 }
 

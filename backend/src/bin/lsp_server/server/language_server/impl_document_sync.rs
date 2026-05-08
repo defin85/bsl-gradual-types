@@ -1190,7 +1190,7 @@ impl BslLanguageServer {
         );
     }
 
-    async fn update_ready_parse_snapshot_after_deferred_syntax_error_assembly_v2(
+    pub(crate) async fn update_ready_parse_snapshot_after_deferred_syntax_error_assembly_v2(
         &self,
         file_id: bsl_analysis_v2::FileId,
         requested_version: i32,

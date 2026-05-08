@@ -1311,6 +1311,11 @@ impl<'a> TypeInferencer<'a> {
             if prop.prop_type.is_empty() {
                 continue;
             }
+            if prop.prop_type == "Dynamic" {
+                env.variables
+                    .insert(key, TypeResolution::inferred_weak(&prop.prop_type));
+                continue;
+            }
             if prop.prop_type.contains("cfg:") {
                 env.variables
                     .insert(key, TypeResolution::inferred(&prop.prop_type));

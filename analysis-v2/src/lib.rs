@@ -45,7 +45,7 @@ use crate::semantic_rules::CommonModuleFactoryRegistry;
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct FileId(pub u32);
 
-pub const DEPS_SCHEMA_VERSION: &str = "deps-snapshot-v1";
+pub const DEPS_SCHEMA_VERSION: &str = "deps-snapshot-v5";
 pub const SETTINGS_SCHEMA_VERSION: &str = "settings-v1";
 
 #[derive(Clone)]

@@ -291,7 +291,7 @@ pub(super) fn config_layer_b_fingerprint(
 
 pub(super) fn config_layer_b_settings_fingerprint(strict: bool) -> String {
     format!(
-        "config_layer_b_v3;modules_indexing_v1;strict_fingerprint={}",
+        "config_layer_b_v7;modules_indexing_v1;strict_fingerprint={}",
         strict
     )
 }

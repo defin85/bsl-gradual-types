@@ -10,7 +10,7 @@
 - **AND** применяет queries из `highlights.scm`, `brackets.scm`, `indents.scm`, `outline.scm`
 
 ### Requirement: Wasm-загрузчик запускает bsl-lsp-server как Language Server
-Расширение MUST содержать Wasm-модуль (`extension.wasm`), реализующий трейт `zed::Extension` и метод `language_server_command()`, который возвращает команду запуска `bsl-lsp-server` с аргументами для работы в режиме STDIO.
+Расширение MUST содержать Wasm-модуль (`extension.wasm`), реализующий трейт `zed::Extension` и метод `language_server_command()`, который материализует extension-owned `bsl-lsp-server` в Zed extension work dir и возвращает команду запуска с аргументами для работы в режиме STDIO.
 
 #### Scenario: Zed запускает LSP при открытии BSL-файла
 - **WHEN** пользователь открывает `.bsl` файл в Zed
@@ -51,11 +51,12 @@
 - **THEN** `textDocument/definition` возвращает местоположение определения
 
 ### Requirement: Расширение бандлит bsl-lsp-server для linux-x86_64
-Расширение MUST включать скомпилированный `bsl-lsp-server` (release) для платформы linux-x86_64 как часть директории расширения. Бинарник MUST быть доступен для `language_server_command()` через относительный путь от директории расширения.
+Расширение MUST предоставлять воспроизводимый build-процесс, который материализует скомпилированный `bsl-lsp-server` (release) для платформы linux-x86_64 как generated artifact в директории расширения перед сборкой `extension.wasm`. Wasm-загрузчик MUST embed-ить этот бинарник, при вызове `language_server_command()` записывать его в Zed extension work dir, делать исполняемым и возвращать относительный путь `./bsl-lsp-server`. Checked-in source MAY ignore generated `bsl-lsp-server` и `extension.wasm`, если build/smoke path явно пересобирает их перед установкой.
 
 #### Scenario: LSP-сервер запускается из bundled бинарника
 - **WHEN** Zed вызывает `language_server_command()`
-- **THEN** возвращённый путь указывает на `bsl-lsp-server` внутри директории расширения
+- **THEN** Wasm-загрузчик материализует `bsl-lsp-server` внутри Zed extension work dir
+- **AND** возвращённый путь указывает на extension-owned `./bsl-lsp-server`
 - **AND** бинарник является исполняемым на linux-x86_64
 
 ### Requirement: Расширение устанавливается как dev-extension без публикации в registry

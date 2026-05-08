@@ -159,13 +159,46 @@ impl SystemCoordinator {
     /// Загрузка базовых типов как fallback.
     ///
     /// Используется когда syntax_helper не доступен.
-    /// Загружает только примитивные типы и типы-коллекции без методов.
-    /// Методы будут недоступны, но GenericInfo для inference будет работать.
+    /// Загружает примитивные типы и минимальные коллекции. Для `СписокЗначений`
+    /// держим компактный набор методов, потому что реквизиты форм из `Form.xml`
+    /// часто приходят как `v8:ValueListType` даже без полного Syntax Helper.
     pub(crate) fn load_fallback_types(
         repository: &Arc<InMemoryTypeRepository>,
     ) -> Result<Vec<RawTypeData>, StartupError> {
         info!("Загружаем базовые типы платформы 1С (fallback mode)...");
         repository.set_platform_docs_loaded(false);
+
+        fn method(name: &str, english_name: &str, return_type: &str) -> RawMethodData {
+            RawMethodData {
+                name: name.to_string(),
+                english_name: english_name.to_string(),
+                return_type: return_type.to_string(),
+                ..Default::default()
+            }
+        }
+
+        fn method_with_params(
+            name: &str,
+            english_name: &str,
+            return_type: &str,
+            params: &[(&str, &str, bool)],
+        ) -> RawMethodData {
+            RawMethodData {
+                name: name.to_string(),
+                english_name: english_name.to_string(),
+                return_type: return_type.to_string(),
+                params: params
+                    .iter()
+                    .map(|(name, param_type, is_optional)| RawParamData {
+                        name: (*name).to_string(),
+                        param_type: (*param_type).to_string(),
+                        is_optional: *is_optional,
+                        default_value: None,
+                    })
+                    .collect(),
+                ..Default::default()
+            }
+        }
 
         // Примитивные типы.
         let platform_types = vec![
@@ -201,7 +234,7 @@ impl SystemCoordinator {
                 source: RawDataSource::Platform,
                 ..Default::default()
             },
-            // Типы-коллекции (без методов, только для GenericInfo).
+            // Типы-коллекции: большинство нужны только для GenericInfo.
             RawTypeData {
                 name: "Массив".to_string(),
                 english_name: "Array".to_string(),
@@ -224,6 +257,59 @@ impl SystemCoordinator {
                 description: "Список значений с представлениями".to_string(),
                 category: "Универсальные коллекции значений".to_string(),
                 source: RawDataSource::Platform,
+                methods: vec![
+                    method_with_params(
+                        "Добавить",
+                        "Add",
+                        "СписокЗначений",
+                        &[
+                            ("Значение", "Произвольный", false),
+                            ("Представление", "Строка", true),
+                        ],
+                    ),
+                    method_with_params(
+                        "Вставить",
+                        "Insert",
+                        "СписокЗначений",
+                        &[
+                            ("Индекс", "Число", false),
+                            ("Значение", "Произвольный", false),
+                            ("Представление", "Строка", true),
+                        ],
+                    ),
+                    method_with_params(
+                        "Индекс",
+                        "IndexOf",
+                        "Число",
+                        &[("Элемент", "Произвольный", false)],
+                    ),
+                    method("Количество", "Count", "Число"),
+                    method_with_params(
+                        "НайтиПоЗначению",
+                        "FindByValue",
+                        "СписокЗначений",
+                        &[("Значение", "Произвольный", false)],
+                    ),
+                    method_with_params(
+                        "НайтиПоИдентификатору",
+                        "FindByID",
+                        "СписокЗначений",
+                        &[("Идентификатор", "Число", false)],
+                    ),
+                    method_with_params(
+                        "Получить",
+                        "Get",
+                        "СписокЗначений",
+                        &[("Индекс", "Число", false)],
+                    ),
+                    method_with_params(
+                        "Удалить",
+                        "Delete",
+                        "",
+                        &[("Элемент", "Произвольный", false)],
+                    ),
+                    method("Очистить", "Clear", ""),
+                ],
                 ..Default::default()
             },
             RawTypeData {

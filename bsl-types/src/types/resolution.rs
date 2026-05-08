@@ -42,10 +42,7 @@ impl ResolutionResult {
         }
 
         // 1. Check for Dynamic - if present, return Dynamic
-        if types
-            .iter()
-            .any(|wt| matches!(wt.type_, ConcreteType::Special(SpecialType::Undefined)))
-        {
+        if types.iter().any(|wt| is_dynamic_concrete(&wt.type_)) {
             return ResolutionResult::Dynamic;
         }
 
@@ -140,6 +137,17 @@ impl ResolutionResult {
             ResolutionResult::Nullable(t) => Some(t),
             _ => None,
         }
+    }
+}
+
+fn is_dynamic_concrete(type_: &ConcreteType) -> bool {
+    match type_ {
+        ConcreteType::Special(SpecialType::Undefined) => true,
+        ConcreteType::Platform(platform) => {
+            let name = platform.name.to_ascii_lowercase();
+            name == "dynamic" || name.starts_with("dynamic.")
+        }
+        _ => false,
     }
 }
 

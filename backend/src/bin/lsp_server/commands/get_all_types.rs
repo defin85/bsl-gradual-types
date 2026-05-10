@@ -249,3 +249,130 @@ fn raw_type_to_dto(raw: &RawTypeData) -> TypeDto {
         recommendation: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bsl_backend::system::DomainBundle;
+    use bsl_shared::domain::{
+        repository::InMemoryTypeRepository,
+        types::{MetadataKind, RawDataSource, RawTypeData},
+        GlobalContextIndex, TypeRepository, TypeResolver,
+    };
+
+    fn domain_bundle_with_types(types: Vec<RawTypeData>) -> Arc<DomainBundle> {
+        let repository = Arc::new(InMemoryTypeRepository::new());
+        repository.load_types(types).expect("load test types");
+
+        Arc::new(DomainBundle {
+            repository: repository.clone(),
+            resolver: Arc::new(TypeResolver::new(repository)),
+            global_context_index: Arc::new(GlobalContextIndex::unavailable()),
+        })
+    }
+
+    fn platform_type(name: &str, category: &str) -> RawTypeData {
+        RawTypeData {
+            name: name.to_string(),
+            category: category.to_string(),
+            source: RawDataSource::Platform,
+            description: format!("{name} description"),
+            ..RawTypeData::default()
+        }
+    }
+
+    fn configuration_type(name: &str, kind: MetadataKind) -> RawTypeData {
+        RawTypeData {
+            name: name.to_string(),
+            category: "IgnoredFallback".to_string(),
+            source: RawDataSource::Configuration,
+            kind: Some(kind),
+            description: format!("{name} description"),
+            ..RawTypeData::default()
+        }
+    }
+
+    #[test]
+    fn get_all_types_returns_paged_item_level_group_fields() {
+        let domain = domain_bundle_with_types(vec![
+            platform_type("PlatformOne", "Collections"),
+            platform_type("PlatformTwo", "Collections"),
+            configuration_type("Catalog.Products", MetadataKind::Catalog),
+        ]);
+
+        let result = handle_get_all_types(
+            GetAllTypesRequest {
+                limit: 2,
+                offset: 0,
+                category: None,
+            },
+            Some(domain),
+        );
+
+        assert_eq!(result.types.len(), 2);
+        assert_eq!(result.metrics.total_types, 3);
+
+        let first = &result.types[0];
+        assert_eq!(first.name, "PlatformOne");
+        assert_eq!(first.source, "Platform");
+        assert_eq!(first.category, "Collections");
+
+        let pagination = result.pagination.expect("paged response metadata");
+        assert_eq!(pagination.page_size, 2);
+        assert_eq!(pagination.total_items, 3);
+        assert_eq!(pagination.total_pages, 2);
+        assert!(pagination.has_next);
+    }
+
+    #[test]
+    fn get_all_types_category_filter_uses_item_category_and_totals() {
+        let domain = domain_bundle_with_types(vec![
+            platform_type("Array", "Collections"),
+            platform_type("ValueTable", "Collections"),
+            platform_type("String", "Primitives"),
+        ]);
+
+        let result = handle_get_all_types(
+            GetAllTypesRequest {
+                limit: 100,
+                offset: 0,
+                category: Some("Collections".to_string()),
+            },
+            Some(domain),
+        );
+
+        assert_eq!(result.metrics.total_types, 2);
+        assert_eq!(
+            result
+                .types
+                .iter()
+                .map(|ty| (ty.name.as_str(), ty.source.as_str(), ty.category.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Array", "Platform", "Collections"),
+                ("ValueTable", "Platform", "Collections"),
+            ]
+        );
+        assert_eq!(
+            result.pagination.expect("filtered pagination").total_items,
+            2
+        );
+    }
+
+    #[test]
+    fn get_all_types_empty_domain_is_well_formed_empty_result() {
+        let result = handle_get_all_types(
+            GetAllTypesRequest {
+                limit: 100,
+                offset: 0,
+                category: None,
+            },
+            None,
+        );
+
+        assert!(result.types.is_empty());
+        assert!(result.categories.is_empty());
+        assert_eq!(result.metrics.total_types, 0);
+        assert!(result.pagination.is_none());
+    }
+}

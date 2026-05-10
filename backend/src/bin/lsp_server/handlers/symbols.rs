@@ -56,15 +56,13 @@ pub fn build_workspace_symbols(
     source: &str,
     parse_result: &ParseResult,
 ) -> Vec<SymbolInformation> {
-    if query.trim().is_empty() {
-        return Vec::new();
-    }
-
-    let query_lower = query.to_lowercase();
+    let query_lower = query.trim().to_lowercase();
     let line_index = LineIndex::new(source);
     collect_routines(parse_result, source, &line_index)
         .into_iter()
-        .filter(|routine| routine.name.to_lowercase().contains(&query_lower))
+        .filter(|routine| {
+            query_lower.is_empty() || routine.name.to_lowercase().contains(&query_lower)
+        })
         .map(|routine| {
             #[allow(deprecated)]
             let info = SymbolInformation {

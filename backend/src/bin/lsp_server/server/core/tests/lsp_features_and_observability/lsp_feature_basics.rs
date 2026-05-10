@@ -33,6 +33,18 @@ async fn p9a_formatting_disabled_does_not_advertise_capability_and_returns_null(
         .and_then(|v| v.get("capabilities"))
         .expect("initialize capabilities");
 
+    let execute_commands = capabilities
+        .get("executeCommandProvider")
+        .and_then(|v| v.get("commands"))
+        .and_then(|v| v.as_array())
+        .expect("executeCommandProvider.commands");
+    assert!(
+        execute_commands
+            .iter()
+            .any(|command| command.as_str() == Some("bsl.getAllTypes")),
+        "initialize must advertise bsl.getAllTypes execute command, got {execute_commands:?}"
+    );
+
     match capabilities.get("documentFormattingProvider") {
         None => {}
         Some(v) => assert!(
@@ -813,6 +825,53 @@ async fn p12_workspace_symbol_searches_open_documents() {
             .any(|sym| sym.name == "FooTwo" && sym.location.uri == uri_b),
         "expected FooTwo in uri_b, got {:?}",
         parsed
+            .iter()
+            .map(|s| (s.name.clone(), s.location.uri.clone()))
+            .collect::<Vec<_>>()
+    );
+
+    let empty_query_params = WorkspaceSymbolParams {
+        query: String::new(),
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let empty_query_req = Request::build("workspace/symbol")
+        .id(3)
+        .params(serde_json::to_value(empty_query_params).expect("WorkspaceSymbolParams"))
+        .finish();
+
+    let empty_query_response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(empty_query_req)
+        .await
+        .expect("workspace/symbol empty-query request");
+    let empty_query_response =
+        empty_query_response.expect("workspace/symbol empty-query should return a response");
+
+    let empty_query_value = serde_json::to_value(&empty_query_response).expect("serialize response");
+    let empty_query_result_value = empty_query_value.get("result").cloned().expect("result field");
+    let empty_query_symbols: Option<Vec<SymbolInformation>> =
+        serde_json::from_value(empty_query_result_value).expect("parse empty-query result");
+    let empty_query_symbols = empty_query_symbols.expect("empty-query result present");
+
+    assert!(
+        empty_query_symbols
+            .iter()
+            .any(|sym| sym.name == "FooOne" && sym.location.uri == uri_a),
+        "expected FooOne for empty query, got {:?}",
+        empty_query_symbols
+            .iter()
+            .map(|s| (s.name.clone(), s.location.uri.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        empty_query_symbols
+            .iter()
+            .any(|sym| sym.name == "FooTwo" && sym.location.uri == uri_b),
+        "expected FooTwo for empty query, got {:?}",
+        empty_query_symbols
             .iter()
             .map(|s| (s.name.clone(), s.location.uri.clone()))
             .collect::<Vec<_>>()

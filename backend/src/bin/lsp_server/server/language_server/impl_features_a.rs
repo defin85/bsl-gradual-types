@@ -303,9 +303,6 @@ impl BslLanguageServer {
         params: WorkspaceSymbolParams,
     ) -> JsonRpcResult<Option<Vec<SymbolInformation>>> {
         let query = params.query;
-        if query.trim().is_empty() {
-            return Ok(Some(Vec::new()));
-        }
 
         self.sync_v2_globals().await;
 

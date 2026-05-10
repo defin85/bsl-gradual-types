@@ -22,6 +22,11 @@
 - **WHEN** языковой сервер не поддерживает `workspace/symbol`
 - **THEN** панель показывает сообщение "No symbols available"
 
+#### Scenario: Ошибка workspace/symbol
+- **WHEN** запрос `workspace/symbol` завершается ошибкой
+- **THEN** панель показывает сообщение "Symbols unavailable"
+- **AND** причина ошибки логируется
+
 ### Requirement: Символы группируются по SymbolKind
 Панель MUST группировать символы по категориям (Functions, Classes, Structs, Interfaces, Enums, Constants, Variables, Modules, Namespaces, Properties, Constructors, Type Parameters, Other).
 
